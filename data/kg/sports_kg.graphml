@@ -1,0 +1,517 @@
+<?xml version='1.0' encoding='utf-8'?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="d1" for="edge" attr.name="type" attr.type="string" />
+  <key id="d0" for="node" attr.name="label" attr.type="string" />
+  <graph edgedefault="directed">
+    <node id="Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Barbell back squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Bodyweight squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Deep squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="High bar squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="High Bar Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Low Bar Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Direct Spinal Pressure">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Insufficient Muscle Mass">
+      <data key="d0">Anatomy/Cause</data>
+    </node>
+    <node id="Pain">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Injury">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Torso Bracing Techniques">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Knees slide forward">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Knees cave in">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Front Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Spine">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Wrist">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Hack squat (Hackenschmidt's book)">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Machine hack squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Sumo squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Box squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Front squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Hack squat (barbell behind legs)">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Rear deadlift">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Overhead squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Zercher squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Steinborn squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Deep knee bend on toes">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Loaded squat jump">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Variable resistance squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Variable Resistance Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Partial Rep Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Full Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Partial squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Full squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Split squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Bulgarian split squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Lunge">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Hindu squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Belt squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Goblet squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Smith squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Trap bar squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Monolift squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Safety squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Anderson squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Body-weight squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Baithak">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Jump squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Basic single leg squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Two legged squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Excessive strength variation between the legs">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Switching between using the right leg and left leg in one legged squats">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="One Legged Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Pistol squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Shrimp squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Jockey squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Sissy squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Sumo Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="injuries to the lumbar spine">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="injuries to the knees">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Incomplete Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Full Squat">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Shallower Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Degeneration in Lumbar Spine">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Degeneration in Knees">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Deeper Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Higher Compressive Loads on Patellofemoral Joint">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Decline Squats at Angles Higher than 16 degrees">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Not Beneficial for Knee">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Failure to Decrease Calf Tension">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Inflaming Patellofemoral Joint">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Squat between 0 and 50 degrees">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Torso rounding or flexing forward">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Weak Core muscles">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Keep chest out and core tight">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Glutes">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Quadriceps">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Hamstrings">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Adductors">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Hip Flexors">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Calves">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Tendons">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Ligaments">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Bones">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Jump Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Basic Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Squat Variations">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Back Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Hips">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Quads">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Overhead Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Core">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Lower Back">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Upper Back">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Shoulders">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Arms">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Medicine Ball Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Jump Squats">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Knees">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Ankles">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Wrong Form">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Joint Stress">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Land with soft, bent knees">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Narrow Stance">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Extra pressure on knees">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Wider Stance">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Looking Down">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Keep Eyes Forward">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Rounded Shoulders">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Rounded Back">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Upright Posture">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Lifting Too Much Weight">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Strain on Lower Back">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Strain on Hips">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Strain on Knees">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Injuries">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Lift Appropriate Weight">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Inactive Core">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Activate Core">
+      <data key="d0">Correction</data>
+    </node>
+    <edge source="Squat" target="Knees slide forward">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Knees cave in">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="injuries to the lumbar spine">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Squat" target="injuries to the knees">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Squat" target="Torso rounding or flexing forward">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Wrong Form">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Narrow Stance">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Looking Down">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Rounded Shoulders">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Rounded Back">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Lifting Too Much Weight">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Squat" target="Inactive Core">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="High Bar Squat" target="Direct Spinal Pressure">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Low Bar Squat" target="Direct Spinal Pressure">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Direct Spinal Pressure" target="Insufficient Muscle Mass">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+    </edge>
+    <edge source="Direct Spinal Pressure" target="Pain">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Direct Spinal Pressure" target="Injury">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Direct Spinal Pressure" target="Torso Bracing Techniques">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Injury" target="Full Squat">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Two legged squat" target="Excessive strength variation between the legs">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+    </edge>
+    <edge source="Excessive strength variation between the legs" target="Switching between using the right leg and left leg in one legged squats">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Incomplete Squat" target="Injury">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Shallower Squats" target="Degeneration in Lumbar Spine">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Shallower Squats" target="Degeneration in Knees">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Deeper Squats" target="Higher Compressive Loads on Patellofemoral Joint">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Higher Compressive Loads on Patellofemoral Joint" target="Inflaming Patellofemoral Joint">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Higher Compressive Loads on Patellofemoral Joint" target="Squat between 0 and 50 degrees">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Decline Squats at Angles Higher than 16 degrees" target="Not Beneficial for Knee">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Decline Squats at Angles Higher than 16 degrees" target="Failure to Decrease Calf Tension">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Inflaming Patellofemoral Joint" target="Squat between 0 and 50 degrees">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Torso rounding or flexing forward" target="Weak Core muscles">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+    </edge>
+    <edge source="Torso rounding or flexing forward" target="Keep chest out and core tight">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Weak Core muscles" target="Injury">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Wrong Form" target="Joint Stress">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Wrong Form" target="Land with soft, bent knees">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Joint Stress" target="Knees">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Joint Stress" target="Hips">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Joint Stress" target="Ankles">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Narrow Stance" target="Extra pressure on knees">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Narrow Stance" target="Wider Stance">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Looking Down" target="Keep Eyes Forward">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Rounded Shoulders" target="Upright Posture">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Rounded Back" target="Upright Posture">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Strain on Lower Back">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Strain on Hips">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Strain on Knees">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Injuries">
+      <data key="d1">INCREASES_RISK_OF</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Lift Appropriate Weight">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+    <edge source="Inactive Core" target="Activate Core">
+      <data key="d1">CORRECTED_BY</data>
+    </edge>
+  </graph>
+</graphml>
