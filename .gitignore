@@ -409,3 +409,4 @@ CLAUDE_CONTEXT/
 data/Squat/*
 .shared
 .agent
+/demo
