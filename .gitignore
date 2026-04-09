@@ -407,6 +407,7 @@ CLAUDE_CONTEXT/
 /.claude/settings.local.json
 
 data/Squat/*
+data/rag/*
 .shared
 .agent
 /demo
