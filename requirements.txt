@@ -1,0 +1,18 @@
+# x-coach Python dependencies for the current .venv
+# Generated from the repo's direct imports and active environment packages.
+
+numpy==2.4.3
+opencv-python==4.13.0.92
+mediapipe==0.10.14
+tqdm==4.67.3
+networkx==3.6.1
+pydantic==2.12.5
+langchain==1.2.10
+langchain-core==1.2.18
+langchain-community==0.4.1
+langchain-google-genai==4.2.1
+langchain-text-splitters==1.1.1
+pypdf==6.8.0
+beautifulsoup4==4.14.3
+torch==2.11.0
+transformers==5.5.0
