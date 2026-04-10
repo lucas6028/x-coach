@@ -8,9 +8,11 @@ tqdm==4.67.3
 networkx==3.6.1
 pydantic==2.12.5
 langchain==1.2.10
-langchain-core==1.2.18
+langchain-core==1.2.28
 langchain-community==0.4.1
 langchain-google-genai==4.2.1
+langchain-openrouter-0.2.1 
+openrouter-0.8.1
 langchain-text-splitters==1.1.1
 pypdf==6.8.0
 beautifulsoup4==4.14.3
