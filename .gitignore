@@ -408,6 +408,7 @@ CLAUDE_CONTEXT/
 
 data/Squat/*
 data/rag/*
+data/reference/*
 .shared
 .agent
 /demo
