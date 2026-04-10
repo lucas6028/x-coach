@@ -17,29 +17,18 @@ from pypdf import PdfReader
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DB_DIR = PROJECT_ROOT / "data" / "rag" / "vector_db"
-TEXT_SUFFIXES = {".txt", ".md", ".html", ".htm", ".json", ".graphml"}
+DEFAULT_RAG_DOCS_DIR = PROJECT_ROOT / "data" / "rag" / "docs"
+DEFAULT_KG_DOCS_DIR = PROJECT_ROOT / "data" / "kg" / "docs"
+TEXT_SUFFIXES = {".txt", ".md", ".html", ".htm", ".json"}
 ENCODING_CANDIDATES = ("utf-8", "utf-8-sig", "cp950", "big5", "gb18030")
 
 
 def get_default_sources() -> list[Path]:
     sources: list[Path] = []
-
-    preferred_text_files = sorted(PROJECT_ROOT.glob("*.txt"))
-    if preferred_text_files:
-        sources.append(preferred_text_files[0])
-
-    overview_file = PROJECT_ROOT / "project-overview.md"
-    if overview_file.exists():
-        sources.append(overview_file)
-
-    notes_dir = PROJECT_ROOT / "notes"
-    if notes_dir.exists():
-        sources.append(notes_dir)
-
-    # graph_file = PROJECT_ROOT / "data" / "kg" / "sports_kg.graphml"
-    # if graph_file.exists():
-    #     sources.append(graph_file)
-
+    if DEFAULT_RAG_DOCS_DIR.exists():
+        sources.append(DEFAULT_RAG_DOCS_DIR)
+    if DEFAULT_KG_DOCS_DIR.exists():
+        sources.append(DEFAULT_KG_DOCS_DIR)
     return sources
 
 
