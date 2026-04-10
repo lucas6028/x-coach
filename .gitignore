@@ -408,7 +408,7 @@ CLAUDE_CONTEXT/
 
 data/Squat/*
 data/rag/*
-data/kg/docs/*
+data/kg/*
 .shared
 .agent
 /demo

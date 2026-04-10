@@ -1,5 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="d2" for="edge" attr.name="id" attr.type="string" />
   <key id="d1" for="edge" attr.name="type" attr.type="string" />
   <key id="d0" for="node" attr.name="label" attr.type="string" />
   <graph edgedefault="directed">
@@ -366,152 +367,589 @@
     <node id="Activate Core">
       <data key="d0">Correction</data>
     </node>
-    <edge source="Squat" target="Knees slide forward">
+    <node id="Valgus Collapse">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Walking">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Running">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Squatting">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Hip Adduction">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Hip Internal Rotation">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Foot Pronation">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Knee and Ankle Pain">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="ACL Tears">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Lack of Ankle Dorsiflexion">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Foot Medial Arch Weakness">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Hip Instability">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Weak Hip External Rotators">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Weak Hip Abductors">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Improve Ankle Dorsiflexion ROM">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Ankle Dorsiflexion ROM">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Medial Arch Strength">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Hip External Rotators and Abductors Strength">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Knee Pain">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Improve Medial Arch Strength">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Improve Hip External Rotators and Abductors Strength">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Knee Valgus Collapse">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Valgus Knee Position">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Anterior Cruciate Ligament">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="ACL Injury">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Valgus collapse position">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Knee Valgus">
+      <data key="d0">Error</data>
+    </node>
+    <node id="ACL">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="ACL injury">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Change_of_Direction">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Cutting_Maneuver">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Landing_from_Jump">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Pivoting_on_Planted_Foot">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Valgus_Collapse">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Excessive_Medial_Collapse">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Valgus_Knee_Orientation">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Knee_Flexion_30_or_less">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="ACL_Injury">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="ACL_Rupture">
+      <data key="d0">Risk</data>
+    </node>
+    <node id="Jumping">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Landing from jumps">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Clam Shells">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Hips rolling backward">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Gluteus Medius">
+      <data key="d0">Anatomy</data>
+    </node>
+    <node id="Side Plank Hold with Leg Lift">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Trunk, hips, or legs not in a straight line">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Step-ups">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Reverse Monster Walks">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Side planks">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Hips stacked directly on top of each other">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Trunk not in straight line">
+      <data key="d0">Error</data>
+    </node>
+    <node id="Push through the knee to pop up">
+      <data key="d0">Correction</data>
+    </node>
+    <node id="Banded Jump Squat">
+      <data key="d0">Action</data>
+    </node>
+    <node id="Push knees outward">
+      <data key="d0">Correction</data>
+    </node>
+    <edge source="Squat" target="Knees slide forward" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Knees cave in">
+    <edge source="Squat" target="Knees cave in" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="injuries to the lumbar spine">
+    <edge source="Squat" target="injuries to the lumbar spine" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="injuries to the knees">
+    <edge source="Squat" target="injuries to the knees" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Torso rounding or flexing forward">
+    <edge source="Squat" target="Torso rounding or flexing forward" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Wrong Form">
+    <edge source="Squat" target="Wrong Form" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Narrow Stance">
+    <edge source="Squat" target="Narrow Stance" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Looking Down">
+    <edge source="Squat" target="Looking Down" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Rounded Shoulders">
+    <edge source="Squat" target="Rounded Shoulders" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Rounded Back">
+    <edge source="Squat" target="Rounded Back" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Lifting Too Much Weight">
+    <edge source="Squat" target="Lifting Too Much Weight" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Squat" target="Inactive Core">
+    <edge source="Squat" target="Inactive Core" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="High Bar Squat" target="Direct Spinal Pressure">
+    <edge source="Squat" target="Knee Valgus" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Low Bar Squat" target="Direct Spinal Pressure">
+    <edge source="High Bar Squat" target="Direct Spinal Pressure" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Direct Spinal Pressure" target="Insufficient Muscle Mass">
+    <edge source="Low Bar Squat" target="Direct Spinal Pressure" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Direct Spinal Pressure" target="Insufficient Muscle Mass" id="0">
       <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Direct Spinal Pressure" target="Pain">
+    <edge source="Direct Spinal Pressure" target="Pain" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Direct Spinal Pressure" target="Injury">
+    <edge source="Direct Spinal Pressure" target="Injury" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Direct Spinal Pressure" target="Torso Bracing Techniques">
+    <edge source="Direct Spinal Pressure" target="Torso Bracing Techniques" id="0">
       <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Injury" target="Full Squat">
+    <edge source="Injury" target="Full Squat" id="0">
       <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Two legged squat" target="Excessive strength variation between the legs">
+    <edge source="Two legged squat" target="Excessive strength variation between the legs" id="0">
       <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Excessive strength variation between the legs" target="Switching between using the right leg and left leg in one legged squats">
+    <edge source="Excessive strength variation between the legs" target="Switching between using the right leg and left leg in one legged squats" id="0">
       <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Incomplete Squat" target="Injury">
+    <edge source="Incomplete Squat" target="Injury" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Shallower Squats" target="Degeneration in Lumbar Spine">
+    <edge source="Shallower Squats" target="Degeneration in Lumbar Spine" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Shallower Squats" target="Degeneration in Knees">
+    <edge source="Shallower Squats" target="Degeneration in Knees" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Deeper Squats" target="Higher Compressive Loads on Patellofemoral Joint">
+    <edge source="Deeper Squats" target="Higher Compressive Loads on Patellofemoral Joint" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Higher Compressive Loads on Patellofemoral Joint" target="Inflaming Patellofemoral Joint">
+    <edge source="Higher Compressive Loads on Patellofemoral Joint" target="Inflaming Patellofemoral Joint" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Higher Compressive Loads on Patellofemoral Joint" target="Squat between 0 and 50 degrees">
+    <edge source="Higher Compressive Loads on Patellofemoral Joint" target="Squat between 0 and 50 degrees" id="0">
       <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Decline Squats at Angles Higher than 16 degrees" target="Not Beneficial for Knee">
+    <edge source="Decline Squats at Angles Higher than 16 degrees" target="Not Beneficial for Knee" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Decline Squats at Angles Higher than 16 degrees" target="Failure to Decrease Calf Tension">
+    <edge source="Decline Squats at Angles Higher than 16 degrees" target="Failure to Decrease Calf Tension" id="0">
       <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Inflaming Patellofemoral Joint" target="Squat between 0 and 50 degrees">
+    <edge source="Inflaming Patellofemoral Joint" target="Squat between 0 and 50 degrees" id="0">
       <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Torso rounding or flexing forward" target="Weak Core muscles">
+    <edge source="Torso rounding or flexing forward" target="Weak Core muscles" id="0">
       <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Torso rounding or flexing forward" target="Keep chest out and core tight">
+    <edge source="Torso rounding or flexing forward" target="Keep chest out and core tight" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Weak Core muscles" target="Injury" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Wrong Form" target="Joint Stress" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Wrong Form" target="Land with soft, bent knees" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Joint Stress" target="Knees" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Joint Stress" target="Hips" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Joint Stress" target="Ankles" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Narrow Stance" target="Extra pressure on knees" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Narrow Stance" target="Wider Stance" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Looking Down" target="Keep Eyes Forward" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Rounded Shoulders" target="Upright Posture" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Rounded Back" target="Upright Posture" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Strain on Lower Back" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Strain on Hips" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Strain on Knees" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Injuries" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Lifting Too Much Weight" target="Lift Appropriate Weight" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Inactive Core" target="Activate Core" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Hip Adduction" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Hip Internal Rotation" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Foot Pronation" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Knee and Ankle Pain" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="ACL Tears" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Lack of Ankle Dorsiflexion" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Foot Medial Arch Weakness" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Hip Instability" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Collapse" target="Improve Ankle Dorsiflexion ROM" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Walking" target="Valgus Collapse" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Running" target="Valgus Collapse" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Squatting" target="Valgus Collapse" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Hip Instability" target="Weak Hip External Rotators" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Hip Instability" target="Weak Hip Abductors" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Improve Ankle Dorsiflexion ROM" target="Knee Pain" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Pain" target="Ankle Dorsiflexion ROM" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Pain" target="Medial Arch Strength" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Pain" target="Hip External Rotators and Abductors Strength" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Pain" target="Improve Ankle Dorsiflexion ROM" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Pain" target="Improve Medial Arch Strength" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Pain" target="Improve Hip External Rotators and Abductors Strength" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Improve Medial Arch Strength" target="Knee Pain" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Improve Hip External Rotators and Abductors Strength" target="Knee Pain" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Valgus Collapse" target="Valgus Knee Position" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus Knee Position" target="ACL Injury" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus collapse position" target="Knee Valgus" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Valgus" target="ACL injury" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Valgus" target="Gluteus Medius" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Valgus" target="Reverse Monster Walks" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Valgus" target="Clam Shells" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Valgus" target="Side planks" id="0">
+      <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Knee Valgus" target="Push knees outward" id="0">
       <data key="d1">CORRECTED_BY</data>
     </edge>
-    <edge source="Weak Core muscles" target="Injury">
-      <data key="d1">INCREASES_RISK_OF</data>
+    <edge source="Change_of_Direction" target="Valgus_Collapse" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Wrong Form" target="Joint Stress">
-      <data key="d1">INCREASES_RISK_OF</data>
+    <edge source="Cutting_Maneuver" target="Valgus_Collapse" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Wrong Form" target="Land with soft, bent knees">
+    <edge source="Landing_from_Jump" target="Valgus_Collapse" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Pivoting_on_Planted_Foot" target="Valgus_Collapse" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus_Collapse" target="Knee_Flexion_30_or_less" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus_Collapse" target="ACL_Injury" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus_Collapse" target="ACL_Rupture" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Excessive_Medial_Collapse" target="Knee_Flexion_30_or_less" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Excessive_Medial_Collapse" target="ACL_Injury" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Excessive_Medial_Collapse" target="ACL_Rupture" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus_Knee_Orientation" target="Knee_Flexion_30_or_less" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus_Knee_Orientation" target="ACL_Injury" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Valgus_Knee_Orientation" target="ACL_Rupture" id="0">
+      <data key="d1">INCREASES_RISK_OF</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Jumping" target="Knee Valgus" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Landing from jumps" target="Knee Valgus" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Clam Shells" target="Hips rolling backward" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Hips rolling backward" target="Gluteus Medius" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
+    </edge>
+    <edge source="Hips rolling backward" target="Hips stacked directly on top of each other" id="0">
       <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Joint Stress" target="Knees">
-      <data key="d1">INCREASES_RISK_OF</data>
+    <edge source="Side Plank Hold with Leg Lift" target="Trunk, hips, or legs not in a straight line" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Joint Stress" target="Hips">
-      <data key="d1">INCREASES_RISK_OF</data>
+    <edge source="Side Plank Hold with Leg Lift" target="Trunk not in straight line" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Joint Stress" target="Ankles">
-      <data key="d1">INCREASES_RISK_OF</data>
+    <edge source="Step-ups" target="Knee Valgus" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Narrow Stance" target="Extra pressure on knees">
-      <data key="d1">INCREASES_RISK_OF</data>
+    <edge source="Trunk not in straight line" target="Gluteus Medius" id="0">
+      <data key="d1">CAUSED_BY_WEAKNESS_IN</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Narrow Stance" target="Wider Stance">
+    <edge source="Trunk not in straight line" target="Push through the knee to pop up" id="0">
       <data key="d1">CORRECTED_BY</data>
+      <data key="d2">0</data>
     </edge>
-    <edge source="Looking Down" target="Keep Eyes Forward">
-      <data key="d1">CORRECTED_BY</data>
-    </edge>
-    <edge source="Rounded Shoulders" target="Upright Posture">
-      <data key="d1">CORRECTED_BY</data>
-    </edge>
-    <edge source="Rounded Back" target="Upright Posture">
-      <data key="d1">CORRECTED_BY</data>
-    </edge>
-    <edge source="Lifting Too Much Weight" target="Strain on Lower Back">
-      <data key="d1">INCREASES_RISK_OF</data>
-    </edge>
-    <edge source="Lifting Too Much Weight" target="Strain on Hips">
-      <data key="d1">INCREASES_RISK_OF</data>
-    </edge>
-    <edge source="Lifting Too Much Weight" target="Strain on Knees">
-      <data key="d1">INCREASES_RISK_OF</data>
-    </edge>
-    <edge source="Lifting Too Much Weight" target="Injuries">
-      <data key="d1">INCREASES_RISK_OF</data>
-    </edge>
-    <edge source="Lifting Too Much Weight" target="Lift Appropriate Weight">
-      <data key="d1">CORRECTED_BY</data>
-    </edge>
-    <edge source="Inactive Core" target="Activate Core">
-      <data key="d1">CORRECTED_BY</data>
+    <edge source="Banded Jump Squat" target="Knee Valgus" id="0">
+      <data key="d1">HAS_POTENTIAL_ERROR</data>
     </edge>
   </graph>
 </graphml>
