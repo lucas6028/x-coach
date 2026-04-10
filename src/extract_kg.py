@@ -7,6 +7,7 @@ from typing import List
 
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_openrouter import ChatOpenRouter
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_community.document_loaders import PyPDFLoader, TextLoader, BSHTMLLoader
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -19,6 +20,7 @@ except ImportError:
         "langchain-community", "pydantic", "networkx", "pypdf", "beautifulsoup4"
     ])
     from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_openrouter import ChatOpenRouter
     from langchain_core.prompts import ChatPromptTemplate
     from langchain_community.document_loaders import PyPDFLoader, TextLoader, BSHTMLLoader
     from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -42,6 +44,10 @@ def update_property_graph(kg: KnowledgeGraph, graph_file="data/kg/sports_kg.grap
     """Adds the extracted Knowledge Graph data into a persistent NetworkX GraphML file."""
     if os.path.exists(graph_file):
         G = nx.read_graphml(graph_file)
+        # GraphML may deserialize to DiGraph if no parallel edges exist.
+        # Convert to MultiDiGraph so relationship deduplication by `type` is consistent.
+        if not G.is_multigraph():
+            G = nx.MultiDiGraph(G)
         print(f"Loaded existing graph from {graph_file} with {G.number_of_nodes()} nodes.")
     else:
         G = nx.MultiDiGraph()
@@ -57,11 +63,16 @@ def update_property_graph(kg: KnowledgeGraph, graph_file="data/kg/sports_kg.grap
     # Add Edges
     for edge in kg.edges:
         edge_exists = False
-        if G.has_edge(edge.source, edge.target):
-            for key, edge_data in G[edge.source][edge.target].items():
-                if edge_data.get('type') == edge.type:
+        existing_edge_data = G.get_edge_data(edge.source, edge.target)
+        if existing_edge_data:
+            if G.is_multigraph():
+                for _, edge_data in existing_edge_data.items():
+                    if isinstance(edge_data, dict) and edge_data.get('type') == edge.type:
+                        edge_exists = True
+                        break
+            else:
+                if isinstance(existing_edge_data, dict) and existing_edge_data.get('type') == edge.type:
                     edge_exists = True
-                    break
         
         if not edge_exists:
             G.add_edge(edge.source, edge.target, type=edge.type)
@@ -91,14 +102,20 @@ def main():
     parser.add_argument("filepath", type=str, nargs='?', help="Path to the document (PDF, HTML, TXT)")
     args = parser.parse_args()
 
-    api_key = os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    # api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        print("WARNING: GOOGLE_API_KEY environment variable is not set.")
+        print("WARNING: OPENROUTER_API_KEY environment variable is not set.")
         print("Please set it before running.")
         return
 
-    print("Initializing LLM pipeline (Gemini)...")
-    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    print("Initializing LLM pipeline (OpenRouter)...")
+    llm = ChatOpenRouter(
+        model="openrouter/auto",
+        api_key=api_key,
+        temperature=0
+    )
+    # llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     structured_llm = llm.with_structured_output(KnowledgeGraph)
 
     prompt = ChatPromptTemplate.from_messages([
