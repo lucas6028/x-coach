@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import argparse
+import re
 from pydantic import BaseModel, Field
 from typing import List
 
@@ -26,22 +27,169 @@ except ImportError:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     import networkx as nx
 
+DEFAULT_GRAPH_FILE = "data/kg/squat_kg_v2.graphml"
+
+CANONICAL_NODE_LABELS = {
+    "action": "Action",
+    "phase": "Phase",
+    "fault": "Fault",
+    "error": "Fault",
+    "commonfault": "Fault",
+    "evidence": "EvidenceSignal",
+    "evidencesignal": "EvidenceSignal",
+    "signal": "EvidenceSignal",
+    "cause": "Cause",
+    "anatomy": "Cause",
+    "anatomycause": "Cause",
+    "risk": "Risk",
+    "correction": "Cue",
+    "cue": "Cue",
+    "coachingcue": "Cue",
+    "qualitydimension": "QualityDimension",
+}
+
+CANONICAL_EDGE_TYPES = {
+    "hasphase": "HAS_PHASE",
+    "hasfault": "HAS_FAULT",
+    "haspotentialerror": "HAS_FAULT",
+    "occursinphase": "OCCURS_IN_PHASE",
+    "indicatedby": "INDICATED_BY",
+    "causedby": "CAUSED_BY",
+    "causedbyweaknessin": "CAUSED_BY",
+    "increasesriskof": "INCREASES_RISK_OF",
+    "correctedby": "CORRECTED_BY",
+    "affectsquality": "AFFECTS_QUALITY",
+}
+
+PHASE_ALIASES = {
+    "setup": "Setup",
+    "walkout": "Setup",
+    "descent": "Descent",
+    "eccentric": "Descent",
+    "bottom": "Bottom",
+    "hole": "Bottom",
+    "ascent": "Ascent",
+    "concentric": "Ascent",
+    "lockout": "Lockout",
+}
+
+NODE_ALIASES = {
+    "front squat": "Front Squat",
+    "high bar squat": "High Bar Squat",
+    "high-bar squat": "High Bar Squat",
+    "low bar squat": "Low Bar Squat",
+    "low-bar squat": "Low Bar Squat",
+    "bodyweight squat": "Bodyweight Squat",
+    "body-weight squat": "Bodyweight Squat",
+    "knees cave in": "Knee Valgus",
+    "knee cave in": "Knee Valgus",
+    "knees collapse inward": "Knee Valgus",
+    "knees collapse in": "Knee Valgus",
+    "torso rounding or flexing forward": "Lumbar Flexion",
+    "rounded back": "Lumbar Flexion",
+    "incomplete squat": "Shallow Depth",
+    "shallow squat": "Shallow Depth",
+    "heels rise": "Heel Rise",
+    "heel rise": "Heel Rise",
+    "heels lifting": "Heel Rise",
+    "looking down": "Head Down",
+}
+
+
+def canonicalize_whitespace(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "")).strip()
+
+
+def compact_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", canonicalize_whitespace(text).lower())
+
+
+def title_case_phrase(text: str) -> str:
+    words = canonicalize_whitespace(text).split(" ")
+    return " ".join(word if word.isupper() else word.capitalize() for word in words if word)
+
+
+def normalize_node_label(label: str) -> str:
+    normalized = canonicalize_whitespace(label)
+    return CANONICAL_NODE_LABELS.get(compact_key(normalized), title_case_phrase(normalized))
+
+
+def normalize_edge_type(edge_type: str) -> str:
+    normalized = canonicalize_whitespace(edge_type)
+    return CANONICAL_EDGE_TYPES.get(compact_key(normalized), normalized.replace("-", "_").replace(" ", "_").upper())
+
+
+def normalize_node_id(node_id: str, label: str) -> str:
+    normalized = canonicalize_whitespace(node_id)
+    alias_key = normalized.lower()
+    if label == "Phase":
+        return PHASE_ALIASES.get(alias_key, title_case_phrase(normalized))
+    return NODE_ALIASES.get(alias_key, title_case_phrase(normalized))
+
+
 class Node(BaseModel):
-    id: str = Field(description="Unique identifier for the node (e.g., 'Squat', 'Knee Valgus')")
-    label: str = Field(description="The type of the entity (Action, Error, Anatomy, Risk, Correction)")
+    id: str = Field(description="Canonical identifier for the node (e.g., 'Squat', 'Knee Valgus').")
+    label: str = Field(
+        description=(
+            "The node type. Must be one of: Action, Phase, Fault, EvidenceSignal, "
+            "Cause, Risk, Cue, QualityDimension."
+        )
+    )
 
 class Edge(BaseModel):
     source: str = Field(description="The id of the source node")
     target: str = Field(description="The id of the target node")
-    type: str = Field(description="The relationship type: HAS_POTENTIAL_ERROR, CAUSED_BY_WEAKNESS_IN, INCREASES_RISK_OF, CORRECTED_BY")
+    type: str = Field(
+        description=(
+            "The relationship type. Must be one of: HAS_PHASE, HAS_FAULT, OCCURS_IN_PHASE, "
+            "INDICATED_BY, CAUSED_BY, INCREASES_RISK_OF, CORRECTED_BY, AFFECTS_QUALITY."
+        )
+    )
 
 class KnowledgeGraph(BaseModel):
-    """A knowledge graph consisting of nodes and edges representing sports biomechanics."""
+    """A knowledge graph consisting of nodes and edges representing AQA-oriented sports biomechanics."""
     nodes: List[Node] = Field(description="List of entities (nodes) in the knowledge graph")
     edges: List[Edge] = Field(description="List of relationships (edges) in the knowledge graph")
 
-def update_property_graph(kg: KnowledgeGraph, graph_file="data/kg/sports_kg.graphml"):
+def normalize_kg(kg: KnowledgeGraph) -> KnowledgeGraph:
+    canonical_nodes: dict[str, Node] = {}
+    original_to_canonical: dict[str, str] = {}
+    original_labels: dict[str, str] = {}
+
+    for node in kg.nodes:
+        normalized_label = normalize_node_label(node.label)
+        normalized_id = normalize_node_id(node.id, normalized_label)
+        canonical_nodes[normalized_id] = Node(id=normalized_id, label=normalized_label)
+        original_to_canonical[node.id] = normalized_id
+        original_labels[node.id] = normalized_label
+
+    canonical_edges: list[Edge] = []
+    seen_edges: set[tuple[str, str, str]] = set()
+
+    for edge in kg.edges:
+        source_label = original_labels.get(edge.source, "Action")
+        target_label = original_labels.get(edge.target, "Fault")
+        normalized_source = original_to_canonical.get(edge.source, normalize_node_id(edge.source, source_label))
+        normalized_target = original_to_canonical.get(edge.target, normalize_node_id(edge.target, target_label))
+        normalized_type = normalize_edge_type(edge.type)
+        edge_key = (normalized_source, normalized_target, normalized_type)
+        if edge_key in seen_edges:
+            continue
+        seen_edges.add(edge_key)
+        canonical_edges.append(
+            Edge(
+                source=normalized_source,
+                target=normalized_target,
+                type=normalized_type,
+            )
+        )
+
+    return KnowledgeGraph(nodes=list(canonical_nodes.values()), edges=canonical_edges)
+
+
+def update_property_graph(kg: KnowledgeGraph, graph_file=DEFAULT_GRAPH_FILE):
     """Adds the extracted Knowledge Graph data into a persistent NetworkX GraphML file."""
+    kg = normalize_kg(kg)
     if os.path.exists(graph_file):
         G = nx.read_graphml(graph_file)
         # GraphML may deserialize to DiGraph if no parallel edges exist.
@@ -100,6 +248,7 @@ def load_document(file_path):
 def main():
     parser = argparse.ArgumentParser(description="Extract Knowledge Graph from Documents.")
     parser.add_argument("filepath", type=str, nargs='?', help="Path to the document (PDF, HTML, TXT)")
+    parser.add_argument("--graph-file", type=str, default=DEFAULT_GRAPH_FILE, help="Path to the output GraphML file")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -119,10 +268,14 @@ def main():
     structured_llm = llm.with_structured_output(KnowledgeGraph)
 
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert sports biomechanics researcher. Extract a knowledge graph from the given text.\n"
-                   "Focus on the structured relationship chain: Action -> Error -> Anatomy/Cause -> Risk -> Correction.\n"
-                   "Entities should be exactly one of: Action (e.g., Squat), Error (e.g., Knee Valgus), Anatomy (e.g., Gluteus Medius), Risk (e.g., ACL injury), Correction (e.g., Push knees outward).\n"
-                   "Relationships should be one of: HAS_POTENTIAL_ERROR, CAUSED_BY_WEAKNESS_IN, INCREASES_RISK_OF, CORRECTED_BY."),
+        ("system", "You are an expert sports biomechanics researcher building an AQA-ready knowledge graph.\n"
+                   "Extract only structured, high-value biomechanics knowledge that supports Action Quality Assessment.\n"
+                   "Prioritize squat-related fault analysis over broad exercise encyclopedia content.\n"
+                   "Focus on the chain: Action -> Fault -> Phase -> EvidenceSignal -> Cause -> Risk -> Cue / QualityDimension.\n"
+                   "Entities must be exactly one of: Action, Phase, Fault, EvidenceSignal, Cause, Risk, Cue, QualityDimension.\n"
+                   "Relationships must be one of: HAS_PHASE, HAS_FAULT, OCCURS_IN_PHASE, INDICATED_BY, CAUSED_BY, INCREASES_RISK_OF, CORRECTED_BY, AFFECTS_QUALITY.\n"
+                   "Use concise canonical names, prefer singular concepts, and avoid duplicate casing variants.\n"
+                   "If the text is weakly structured, historical, promotional, or not actionable for AQA, extract only the strongest supported relationships."),
         ("human", "Extract the knowledge graph from the following text:\n\n{text}")
     ])
 
@@ -144,7 +297,7 @@ def main():
             try:
                 result = chain.invoke({"text": split.page_content})
                 if result and result.nodes:
-                    update_property_graph(result)
+                    update_property_graph(result, graph_file=args.graph_file)
                     print(f"Successfully extracted {len(result.nodes)} nodes and {len(result.edges)} edges from chunk {i+1}.")
                 else:
                     print(f"No relationships found in chunk {i+1}.")
@@ -152,25 +305,7 @@ def main():
                 print(f"An error occurred extracting from chunk {i+1}: {e}")
                 
     else:
-        print("No file provided. Running on sample text...")
-        # sample_text = """
-        # 在深蹲(Squat)過程中，常見的錯誤是膝蓋內扣(Knee Valgus)。這通常是因為臀中肌無力(Gluteus Medius weakness)所導致。
-        # 如果不加以修正，膝蓋內扣會增加前十字韌帶(ACL)受傷的風險。
-        # 為了修正這個錯誤，教練可以建議學員在膝蓋套上彈力帶，並在下蹲時想像將彈力帶撐開(Push knees outward with resistance band)。
-        # """
-        # try:
-        #     result = chain.invoke({"text": sample_text})
-        #     output_file = "kg_extracted.json"
-        #     with open(output_file, "w", encoding="utf-8") as f:
-        #         json.dump(result.model_dump(), f, indent=2, ensure_ascii=False)
-            
-        #     print(f"Extracted KG saved to {output_file}")
-        #     # Use model_dump instead of dict for Pydantic V2
-        #     print(json.dumps(result.model_dump(), indent=2, ensure_ascii=False))
-            
-        #     update_property_graph(result)
-        # except Exception as e:
-        #     print(f"An error occurred during extraction: {e}")
+        print("No file provided.")
 
 if __name__ == "__main__":
     main()
