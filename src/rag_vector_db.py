@@ -211,31 +211,107 @@ def write_json(path: Path, payload: Any) -> None:
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
+def get_file_hash(path: Path) -> str:
+    """Get a hash of file content for change detection."""
+    return hashlib.md5(path.read_bytes()).hexdigest()
+
+
+def load_existing_db_state(db_dir: Path) -> dict[str, str]:
+    """Load the file state tracking from manifest."""
+    manifest_path = db_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return manifest.get("file_hashes", {})
+    except (json.JSONDecodeError, FileNotFoundError):
+        return {}
+
+
+def identify_new_or_modified_files(
+    files: list[Path],
+    file_states: dict[str, str],
+) -> list[Path]:
+    """Identify files that are new or have been modified."""
+    new_files = []
+    for file_path in files:
+        relative_path = str(file_path.relative_to(PROJECT_ROOT))
+        current_hash = get_file_hash(file_path)
+
+        if relative_path not in file_states or file_states[relative_path] != current_hash:
+            new_files.append(file_path)
+
+    return new_files
+
+
 def build_vector_db(
     *,
     source_paths: list[Path] | None = None,
     db_dir: Path = DEFAULT_DB_DIR,
     chunk_size: int = 900,
     chunk_overlap: int = 180,
+    incremental: bool = True,
 ) -> dict[str, Any]:
     source_paths = source_paths or get_default_sources()
     files = expand_sources(source_paths)
-    documents: list[tuple[str, dict[str, Any]]] = []
-    for path in files:
-        documents.extend(load_source_documents(path))
 
-    chunks = chunk_documents(
-        documents,
+    # Load existing state if incremental mode is enabled
+    existing_chunks: list[ChunkRecord] = []
+    existing_vectors: np.ndarray | None = None
+    existing_file_hashes: dict[str, str] = {}
+
+    if incremental and (db_dir / "chunks.json").exists():
+        try:
+            existing_chunks, existing_vectors, manifest = load_vector_db(db_dir)
+            existing_file_hashes = manifest.get("file_hashes", {})
+        except (FileNotFoundError, json.JSONDecodeError, ValueError):
+            pass
+
+    # Identify files that are new or modified
+    files_to_process = identify_new_or_modified_files(files, existing_file_hashes)
+
+    if not files_to_process:
+        # No new files, return existing stats
+        return {
+            "db_dir": str(db_dir),
+            "source_count": len(files),
+            "chunk_count": len(existing_chunks),
+            "embedding_backend": "hash-384",
+            "status": "up_to_date",
+        }
+
+    # Process only new/modified files
+    new_documents: list[tuple[str, dict[str, Any]]] = []
+    for path in files_to_process:
+        new_documents.extend(load_source_documents(path))
+
+    new_chunks = chunk_documents(
+        new_documents,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
 
+    # Embed new chunks
     backend = HashEmbeddingBackend()
-    vectors = backend.embed_documents([chunk.text for chunk in chunks])
+    new_vectors = backend.embed_documents([chunk.text for chunk in new_chunks])
 
+    # Merge with existing chunks and vectors
+    all_chunks = existing_chunks + new_chunks
+    if existing_vectors is not None:
+        all_vectors = np.vstack([existing_vectors, new_vectors])
+    else:
+        all_vectors = new_vectors
+
+    # Update file hashes
+    updated_file_hashes = dict(existing_file_hashes)
+    for path in files_to_process:
+        relative_path = str(path.relative_to(PROJECT_ROOT))
+        updated_file_hashes[relative_path] = get_file_hash(path)
+
+    # Write the merged database
     db_dir.mkdir(parents=True, exist_ok=True)
-    np.save(db_dir / "embeddings.npy", vectors)
-    write_json(db_dir / "chunks.json", [chunk.to_json() for chunk in chunks])
+    np.save(db_dir / "embeddings.npy", all_vectors)
+    write_json(db_dir / "chunks.json", [chunk.to_json() for chunk in all_chunks])
     write_json(
         db_dir / "manifest.json",
         {
@@ -244,16 +320,19 @@ def build_vector_db(
             "chunk_size": chunk_size,
             "chunk_overlap": chunk_overlap,
             "source_count": len(files),
-            "chunk_count": len(chunks),
+            "chunk_count": len(all_chunks),
             "sources": [str(path.relative_to(PROJECT_ROOT)) for path in files],
+            "file_hashes": updated_file_hashes,
         },
     )
 
     return {
         "db_dir": str(db_dir),
         "source_count": len(files),
-        "chunk_count": len(chunks),
+        "chunk_count": len(all_chunks),
+        "new_chunks_added": len(new_chunks),
         "embedding_backend": backend.name,
+        "status": "updated",
     }
 
 
@@ -309,6 +388,11 @@ def parse_args() -> argparse.Namespace:
         action="append",
         help="Override default source paths. Can be passed multiple times.",
     )
+    build_parser.add_argument(
+        "--full-rebuild",
+        action="store_true",
+        help="Force a full rebuild instead of incremental update.",
+    )
 
     query_parser = subparsers.add_parser("query", help="Query the local vector DB.")
     query_parser.add_argument("query", type=str)
@@ -327,6 +411,7 @@ def main() -> None:
             db_dir=args.db_dir,
             chunk_size=args.chunk_size,
             chunk_overlap=args.chunk_overlap,
+            incremental=not args.full_rebuild,
         )
         print(json.dumps(result, indent=2, ensure_ascii=False))
         return
