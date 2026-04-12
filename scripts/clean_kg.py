@@ -31,6 +31,13 @@ def canonical_node_id(node_id: str, label: str, mapping: dict) -> tuple[str, str
             return mapping["fault_rules"]["merge"][node_id], "merge"
         if node_id in mapping["fault_rules"]["review"]:
             return node_id, "review"
+    if label == "Risk":
+        if node_id in mapping["risk_rules"]["keep"]:
+            return mapping["risk_rules"]["keep"][node_id], "keep"
+        if node_id in mapping["risk_rules"]["merge"]:
+            return mapping["risk_rules"]["merge"][node_id], "merge"
+        if node_id in mapping["risk_rules"]["review"]:
+            return node_id, "review"
     return node_id, "keep"
 
 
