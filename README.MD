@@ -91,6 +91,18 @@ Extract a knowledge graph from a document:
 python src/extract_kg.py path/to/document.pdf
 ```
 
+Query from Knowledge Graph
+ ```bash
+python.exe scripts/query_graph.py "knee valgus" --hops 1
+python.exe scripts/query_graph.py "foot pronation" --hops 1
+python.exe scripts/query_graph.py "anterior knee pain" --hops 1
+```
+
+Clean Knowledge Graph
+```bash
+python scripts/clean_kg.py --graph-file data\kg\squat_kg_v2.graphml --mapping-file data\kg\docs\squat_canonical_mapping_v1.json --output-file data\kg\squat_kg_v2_cleaned.graphml
+```
+
 ## Notes on the Current Implementation
 
 - The RAG builder is fully local and uses a hash-based embedding backend, so it does not require an external embedding API.
