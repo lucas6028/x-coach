@@ -8,7 +8,7 @@ import networkx as nx
 
 
 DEFAULT_GRAPH = Path("data/kg/squat_kg_v2.graphml")
-DEFAULT_MAPPING = Path("data/kg/docs/squat_canonical_mapping_v1.json")
+DEFAULT_MAPPING = Path("data/kg/squat_canonical_mapping_v1.json")
 DEFAULT_OUTPUT = Path("data/kg/squat_kg_v2.graphml")
 
 
