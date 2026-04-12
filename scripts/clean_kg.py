@@ -16,27 +16,25 @@ def load_mapping(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+RULE_KEY_BY_LABEL = {
+    "Phase": "phase_rules",
+    "Fault": "fault_rules",
+    "Risk": "risk_rules",
+    "Action": "action_rules",
+    "EvidenceSignal": "evidence_rules",
+    "Cause": "cause_rules",
+}
+
+
 def canonical_node_id(node_id: str, label: str, mapping: dict) -> tuple[str, str]:
-    if label == "Phase":
-        if node_id in mapping["phase_rules"]["keep"]:
-            return mapping["phase_rules"]["keep"][node_id], "keep"
-        if node_id in mapping["phase_rules"]["merge"]:
-            return mapping["phase_rules"]["merge"][node_id], "merge"
-        if node_id in mapping["phase_rules"]["review"]:
-            return node_id, "review"
-    if label == "Fault":
-        if node_id in mapping["fault_rules"]["keep"]:
-            return mapping["fault_rules"]["keep"][node_id], "keep"
-        if node_id in mapping["fault_rules"]["merge"]:
-            return mapping["fault_rules"]["merge"][node_id], "merge"
-        if node_id in mapping["fault_rules"]["review"]:
-            return node_id, "review"
-    if label == "Risk":
-        if node_id in mapping["risk_rules"]["keep"]:
-            return mapping["risk_rules"]["keep"][node_id], "keep"
-        if node_id in mapping["risk_rules"]["merge"]:
-            return mapping["risk_rules"]["merge"][node_id], "merge"
-        if node_id in mapping["risk_rules"]["review"]:
+    rule_key = RULE_KEY_BY_LABEL.get(label)
+    if rule_key:
+        rules = mapping.get(rule_key, {})
+        if node_id in rules.get("keep", {}):
+            return rules["keep"][node_id], "keep"
+        if node_id in rules.get("merge", {}):
+            return rules["merge"][node_id], "merge"
+        if node_id in rules.get("review", {}):
             return node_id, "review"
     return node_id, "keep"
 

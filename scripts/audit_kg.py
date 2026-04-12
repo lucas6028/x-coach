@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import xml.etree.ElementTree as ET
 from collections import Counter, defaultdict
 from pathlib import Path
 
-
-GRAPHML_NS = {"g": "http://graphml.graphdrawing.org/xmlns"}
+import networkx as nx
 
 
 def compact_key(text: str) -> str:
@@ -14,17 +12,8 @@ def compact_key(text: str) -> str:
 
 
 def load_nodes(graph_path: Path) -> list[tuple[str, str]]:
-    root = ET.parse(graph_path).getroot()
-    nodes: list[tuple[str, str]] = []
-    for node in root.findall(".//g:node", GRAPHML_NS):
-        node_id = node.attrib["id"]
-        label = "Unknown"
-        for data in node.findall("g:data", GRAPHML_NS):
-            if data.attrib.get("key") == "d0":
-                label = data.text or "Unknown"
-                break
-        nodes.append((node_id, label))
-    return nodes
+    graph = nx.read_graphml(graph_path)
+    return [(str(node_id), str(attrs.get("label", "Unknown"))) for node_id, attrs in graph.nodes(data=True)]
 
 
 def print_grouped_duplicates(nodes: list[tuple[str, str]]) -> None:
