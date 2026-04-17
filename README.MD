@@ -96,6 +96,7 @@ Query from Knowledge Graph
 python.exe scripts/query_graph.py "knee valgus" --hops 1
 python.exe scripts/query_graph.py "foot pronation" --hops 1
 python.exe scripts/query_graph.py "anterior knee pain" --hops 1
+python.exe scripts/query_graph.py --pose-json data\Squat\Unlabeled_Dataset\processed_poses\25195_3.json --hops 1
 ```
 
 Clean Knowledge Graph
