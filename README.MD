@@ -33,23 +33,9 @@ The current project is organized around the squat task.
 
 This project is Python-based. Create and activate a virtual environment, then install the packages required by the scripts you want to run.
 
-Typical dependencies used across the repo include:
-
-- `opencv-python`
-- `mediapipe`
-- `numpy`
-- `tqdm`
-- `networkx`
-- `pydantic`
-- `langchain`
-- `langchain-core`
-- `langchain-community`
-- `langchain-google-genai`
-- `langchain-text-splitters`
-- `pypdf`
-- `beautifulsoup4`
-- `torch`
-- `transformers`
+```bash
+pip install -r requirements.txt
+```
 
 If you want to run knowledge-graph extraction with Gemini, set `GOOGLE_API_KEY` first.
 
