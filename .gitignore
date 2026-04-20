@@ -406,9 +406,10 @@ CLAUDE.local.md
 CLAUDE_CONTEXT/
 /.claude/settings.local.json
 
-data/Squat/*
-data/rag/*
-data/kg/*
+# data/Squat/*
+# data/rag/*
+# data/kg/*
+data/*
 .shared
 .agent
 /demo

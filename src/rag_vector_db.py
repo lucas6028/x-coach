@@ -160,13 +160,28 @@ def load_source_documents(path: Path) -> list[tuple[str, dict[str, Any]]]:
     suffix = path.suffix.lower()
     relative = str(path.relative_to(PROJECT_ROOT))
 
-    if suffix == ".pdf":
-        return [(load_pdf_text(path), {"source": relative, "kind": "pdf"})]
-    if suffix == ".graphml":
-        return graph_to_documents(path)
+    # Load shared metadata mapping
+    import json
+    metadata_map_path = PROJECT_ROOT / "data" / "paper_metadata.json"
+    paper_metadata = {}
+    if metadata_map_path.exists():
+        with open(metadata_map_path, "r", encoding="utf-8") as f:
+            paper_metadata = json.load(f)
 
-    text = read_text_file(path)
-    return [(text, {"source": relative, "kind": "text"})]
+    if suffix == ".pdf":
+        text = load_pdf_text(path)
+        base_meta = {"source": relative, "kind": "pdf"}
+    elif suffix == ".graphml":
+        return graph_to_documents(path)
+    else:
+        text = read_text_file(path)
+        base_meta = {"source": relative, "kind": "text"}
+
+    doc_meta = paper_metadata.get(path.name, {})
+    if doc_meta:
+        base_meta.update(doc_meta)
+
+    return [(text, base_meta)]
 
 
 def chunk_documents(
@@ -188,6 +203,11 @@ def chunk_documents(
             cleaned = piece.strip()
             if not cleaned:
                 continue
+            
+            # Inject citation prefix
+            if "reference" in metadata:
+                cleaned = f"[Source Citation: {metadata['reference']}]\n\n{cleaned}"
+                
             chunk_id = hashlib.md5(
                 f"{metadata['source']}::{metadata.get('kind', 'text')}::{index}::{cleaned}".encode(
                     "utf-8"

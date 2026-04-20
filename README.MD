@@ -41,7 +41,29 @@ If you want to run knowledge-graph extraction with Gemini, set `GOOGLE_API_KEY` 
 
 ## Common Commands
 
-Build the local RAG index:
+### Adding New Documents to RAG
+
+You can easily add new documents (e.g., text files, PDFs) to the RAG database while automatically generating the required metadata and citation references:
+
+```bash
+# Add a generic blog article
+python scripts/add_document.py path/to/article.txt --type health_blog --ref "Blog: Top 10 Squat Tips"
+
+# Add an academic paper with detailed metadata
+python scripts/add_document.py path/to/paper.pdf \
+    --type academic_paper \
+    --title "Knee Joint Forces During Squat" \
+    --author "John Doe" \
+    --year 2024 \
+    --ref "Doe, J. (2024). Knee Joint Forces During Squat. Journal of Sports Biomechanics."
+```
+Once added, simply rebuild the vector DB to index the new files:
+
+```bash
+python scripts/build_rag_vector_db.py build
+```
+
+### Build the local RAG index
 
 ```bash
 python scripts/build_rag_vector_db.py build
