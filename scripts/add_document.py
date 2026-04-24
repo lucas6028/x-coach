@@ -28,9 +28,12 @@ def main():
     dest_path = DEFAULT_RAG_DOCS / args.filepath.name
     if dest_path.exists():
         print(f"Warning: {args.filepath.name} already exists in {DEFAULT_RAG_DOCS}. Overwriting...")
-    
-    shutil.copy2(args.filepath, dest_path)
-    print(f"✅ Copied {args.filepath.name} to {DEFAULT_RAG_DOCS}")
+
+    if args.filepath.resolve() != dest_path.resolve():
+        shutil.copy2(args.filepath, dest_path)
+        print(f"✅ Copied {args.filepath.name} to {DEFAULT_RAG_DOCS}")
+    else:
+        print(f"✅ {args.filepath.name} is already in {DEFAULT_RAG_DOCS}; skipping copy")
 
     # 2. Update metadata JSON
     metadata = {}
