@@ -164,7 +164,7 @@ def extract_video_features(
         raise RuntimeError(f"No features could be extracted from {video_path}.")
 
     stacked = np.stack(clip_features, axis=0)
-    video_feature = stacked.mean(axis=0)
+    video_feature = stacked.max(axis=0)
 
     return {
         "video_feature": video_feature.astype(np.float32, copy=False),
