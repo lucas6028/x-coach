@@ -117,7 +117,7 @@ def make_loader(samples: list[Sample], batch_size: int, shuffle: bool) -> DataLo
 
 def compute_metrics(logits: np.ndarray, labels: np.ndarray) -> dict[str, float]:
     probs = 1 / (1 + np.exp(-logits))
-    preds = (probs >= 0.5).astype(np.int32)
+    preds = (probs >= 0.6).astype(np.int32)
     labels = labels.astype(np.int32)
     accuracy = float((preds == labels).mean()) if len(labels) else 0.0
 
