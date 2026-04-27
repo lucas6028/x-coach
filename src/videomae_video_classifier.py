@@ -231,7 +231,7 @@ def main() -> None:
 
     positives = sum(sample.label for sample in train_samples)
     negatives = len(train_samples) - positives
-    pos_weight = torch.tensor([negatives / max(positives, 1)], dtype=torch.float32, device=device)
+    pos_weight = torch.tensor([negatives / max(positives, 1) * 0.5], dtype=torch.float32, device=device)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
