@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import csv
 import json
 import random
 from dataclasses import dataclass
@@ -10,6 +11,14 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+LABEL_MODES = ("combined", "knees_forward", "knees_inward")
+THRESHOLD_KINDS = (
+    "always_positive",
+    "always_negative",
+    "fixed_0_5",
+    "f1_selected_threshold",
+    "selected_threshold",
+)
 
 try:
     import torch
@@ -50,13 +59,20 @@ def build_labels(
     video_ids: list[str],
     forward_errors: dict[str, object],
     inward_errors: dict[str, object],
+    label_mode: str = "combined",
 ) -> dict[str, int]:
     labels: dict[str, int] = {}
     for video_id in video_ids:
-        labels[video_id] = int(
-            label_from_error_intervals(forward_errors.get(video_id))
-            or label_from_error_intervals(inward_errors.get(video_id))
-        )
+        forward_label = label_from_error_intervals(forward_errors.get(video_id))
+        inward_label = label_from_error_intervals(inward_errors.get(video_id))
+        if label_mode == "combined":
+            labels[video_id] = int(forward_label or inward_label)
+        elif label_mode == "knees_forward":
+            labels[video_id] = int(forward_label)
+        elif label_mode == "knees_inward":
+            labels[video_id] = int(inward_label)
+        else:
+            raise ValueError(f"Unsupported label mode: {label_mode}")
     return labels
 
 
@@ -82,12 +98,12 @@ class FeatureDataset(Dataset):
 
 
 class VideoFeatureClassifier(nn.Module):
-    def __init__(self, feature_dim: int, hidden_dim: int = 256):
+    def __init__(self, feature_dim: int, hidden_dim: int = 256, dropout: float = 0.2):
         super().__init__()
         self.network = nn.Sequential(
             nn.Linear(feature_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(dropout),
             nn.Linear(hidden_dim, 1),
         )
 
@@ -222,6 +238,18 @@ def collect_predictions(model: nn.Module, loader: DataLoader, device: torch.devi
     return sigmoid(np.concatenate(logits_list)), np.concatenate(labels_list)
 
 
+def collect_sample_predictions(
+    model: nn.Module,
+    samples: list[Sample],
+    batch_size: int,
+    device: torch.device,
+) -> tuple[list[str], np.ndarray, np.ndarray]:
+    loader = make_loader(samples, batch_size=batch_size, shuffle=False)
+    probabilities, labels = collect_predictions(model, loader, device)
+    video_ids = [sample.video_id for sample in samples]
+    return video_ids, probabilities, labels
+
+
 def find_best_threshold(
     probabilities: np.ndarray,
     labels: np.ndarray,
@@ -282,17 +310,99 @@ def print_threshold_report(
     selected_threshold: float,
     f1_threshold: float,
 ) -> None:
-    print(format_metrics(f"{split_name} always-positive baseline", baseline_metrics(labels, positive=True)))
-    print(format_metrics(f"{split_name} always-negative baseline", baseline_metrics(labels, positive=False)))
-    print(format_metrics(f"{split_name} fixed-0.5", compute_metrics(probabilities, labels, threshold=0.5)))
-    print(format_metrics(f"{split_name} f1-selected-threshold", compute_metrics(probabilities, labels, threshold=f1_threshold)))
-    selected_metrics = compute_metrics(probabilities, labels, threshold=selected_threshold)
+    metrics_by_kind = build_threshold_metrics(
+        probabilities,
+        labels,
+        selected_threshold=selected_threshold,
+        f1_threshold=f1_threshold,
+    )
+    print(format_metrics(f"{split_name} always-positive baseline", metrics_by_kind["always_positive"]))
+    print(format_metrics(f"{split_name} always-negative baseline", metrics_by_kind["always_negative"]))
+    print(format_metrics(f"{split_name} fixed-0.5", metrics_by_kind["fixed_0_5"]))
+    print(format_metrics(f"{split_name} f1-selected-threshold", metrics_by_kind["f1_selected_threshold"]))
+    selected_metrics = metrics_by_kind["selected_threshold"]
     print(format_metrics(f"{split_name} selected-threshold", selected_metrics))
     if selected_metrics["specificity"] < 0.20:
         print(
             f"Warning: {split_name} selected-threshold specificity is "
             f"{selected_metrics['specificity']:.3f}; the classifier is still mostly predicting positive."
         )
+
+
+def build_threshold_metrics(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    selected_threshold: float,
+    f1_threshold: float,
+) -> dict[str, dict[str, float]]:
+    return {
+        "always_positive": baseline_metrics(labels, positive=True),
+        "always_negative": baseline_metrics(labels, positive=False),
+        "fixed_0_5": compute_metrics(probabilities, labels, threshold=0.5),
+        "f1_selected_threshold": compute_metrics(probabilities, labels, threshold=f1_threshold),
+        "selected_threshold": compute_metrics(probabilities, labels, threshold=selected_threshold),
+    }
+
+
+def write_predictions_csv(
+    path: Path,
+    rows: list[tuple[str, list[str], np.ndarray, np.ndarray]],
+    selected_threshold: float,
+    label_mode: str,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "label_mode",
+                "split",
+                "video_id",
+                "label",
+                "probability",
+                "fixed_0_5_prediction",
+                "selected_threshold_prediction",
+                "selected_threshold",
+            ],
+        )
+        writer.writeheader()
+        for split_name, video_ids, probabilities, labels in rows:
+            for video_id, probability, label in zip(video_ids, probabilities, labels):
+                writer.writerow(
+                    {
+                        "label_mode": label_mode,
+                        "split": split_name,
+                        "video_id": video_id,
+                        "label": int(label),
+                        "probability": f"{float(probability):.8f}",
+                        "fixed_0_5_prediction": int(float(probability) >= 0.5),
+                        "selected_threshold_prediction": int(float(probability) >= selected_threshold),
+                        "selected_threshold": f"{selected_threshold:.8f}",
+                    }
+                )
+
+
+def write_summary_json(
+    path: Path,
+    config: dict[str, object],
+    class_balance: dict[str, dict[str, int]],
+    best_state: dict[str, object],
+    split_metrics: dict[str, dict[str, dict[str, float]]],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "config": config,
+        "class_balance": class_balance,
+        "best_checkpoint": {
+            "epoch": best_state["epoch"],
+            "threshold": best_state["threshold"],
+            "threshold_objective": best_state["threshold_objective"],
+            "best_val_metrics": best_state["best_val_metrics"],
+        },
+        "metrics": split_metrics,
+    }
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
 
 
 def label_counts(samples: list[Sample]) -> tuple[int, int]:
@@ -344,6 +454,12 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--hidden-dim", type=int, default=256)
+    parser.add_argument("--dropout", type=float, default=0.2)
+    parser.add_argument("--weight-decay", type=float, default=0.0)
+    parser.add_argument("--early-stopping-patience", type=int, default=0)
+    parser.add_argument("--predictions-output", type=Path, default=None)
+    parser.add_argument("--summary-output", type=Path, default=None)
+    parser.add_argument("--label-mode", choices=LABEL_MODES, default="combined")
     parser.add_argument("--output-path", type=Path, default=REPO_ROOT / "data" / "Squat" / "videomae_classifier.pt")
     parser.add_argument("--device", type=str, default=None, help="cpu, cuda, or auto.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible training.")
@@ -367,7 +483,12 @@ def main() -> None:
     train_ids = load_json_list(args.train_keys)
     val_ids = load_json_list(args.val_keys)
     test_ids = load_json_list(args.test_keys)
-    labels = build_labels(train_ids + val_ids + test_ids, load_json_mapping(args.forward_labels), load_json_mapping(args.inward_labels))
+    labels = build_labels(
+        train_ids + val_ids + test_ids,
+        load_json_mapping(args.forward_labels),
+        load_json_mapping(args.inward_labels),
+        label_mode=args.label_mode,
+    )
 
     train_samples = build_samples(args.feature_dir, train_ids, labels)
     val_samples = build_samples(args.feature_dir, val_ids, labels)
@@ -379,7 +500,11 @@ def main() -> None:
     with np.load(train_samples[0].feature_path, allow_pickle=False) as data:
         feature_dim = int(data["video_feature"].shape[0])
 
-    model = VideoFeatureClassifier(feature_dim=feature_dim, hidden_dim=args.hidden_dim).to(device)
+    model = VideoFeatureClassifier(
+        feature_dim=feature_dim,
+        hidden_dim=args.hidden_dim,
+        dropout=args.dropout,
+    ).to(device)
 
     train_generator = torch.Generator()
     train_generator.manual_seed(args.seed)
@@ -393,10 +518,11 @@ def main() -> None:
     test_positives, test_negatives = label_counts(test_samples)
     pos_weight = torch.tensor([train_negatives / max(train_positives, 1)], dtype=torch.float32, device=device)
     criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
     best_state = None
     best_val_score = -1.0
+    epochs_without_improvement = 0
 
     print(f"Training on {len(train_samples)} train / {len(val_samples)} val / {len(test_samples)} test samples.")
     print(f"Feature dim: {feature_dim}, seed: {args.seed}")
@@ -435,24 +561,39 @@ def main() -> None:
             f"Epoch {epoch:02d} | loss={avg_loss:.4f} "
             f"| train_f1={train_metrics['f1']:.3f} "
             f"val_bal_acc={val_metrics['balanced_accuracy']:.3f} val_f1={val_metrics['f1']:.3f} "
-            f"val_specificity={val_metrics['specificity']:.3f} val_threshold={val_threshold:.3f}"
+            f"val_specificity={val_metrics['specificity']:.3f} val_threshold={val_threshold:.3f} "
+            f"early_stop_wait={epochs_without_improvement}"
         )
 
-        if val_metrics[args.threshold_objective] >= best_val_score:
+        if val_metrics[args.threshold_objective] > best_val_score:
             best_val_score = val_metrics[args.threshold_objective]
+            epochs_without_improvement = 0
             best_state = {
                 "model_state_dict": copy.deepcopy(model.state_dict()),
                 "feature_dim": feature_dim,
                 "hidden_dim": args.hidden_dim,
+                "dropout": args.dropout,
+                "weight_decay": args.weight_decay,
                 "threshold": float(val_threshold),
                 "threshold_objective": args.threshold_objective,
+                "label_mode": args.label_mode,
                 "seed": args.seed,
+                "epoch": epoch,
                 "best_val_metrics": val_metrics,
                 "labels_source": {
                     "forward_labels": str(args.forward_labels),
                     "inward_labels": str(args.inward_labels),
                 },
             }
+        else:
+            epochs_without_improvement += 1
+            if args.early_stopping_patience > 0 and epochs_without_improvement >= args.early_stopping_patience:
+                print(
+                    f"Early stopping at epoch {epoch:02d}; "
+                    f"best_{args.threshold_objective}={best_val_score:.3f} "
+                    f"at epoch {best_state['epoch'] if best_state else 'unknown'}."
+                )
+                break
 
     if best_state is None:
         raise SystemExit("No best checkpoint was selected. Use --epochs greater than 0.")
@@ -464,9 +605,34 @@ def main() -> None:
     model.load_state_dict(best_state["model_state_dict"])
     best_threshold = float(best_state["threshold"])
 
-    train_probabilities, train_labels = collect_predictions(model, train_eval_loader, device)
-    val_probabilities, val_labels = collect_predictions(model, val_loader, device)
+    train_video_ids, train_probabilities, train_labels = collect_sample_predictions(
+        model,
+        train_samples,
+        args.batch_size,
+        device,
+    )
+    val_video_ids, val_probabilities, val_labels = collect_sample_predictions(
+        model,
+        val_samples,
+        args.batch_size,
+        device,
+    )
     f1_threshold, _ = find_best_threshold(val_probabilities, val_labels, objective="f1")
+
+    split_metrics: dict[str, dict[str, dict[str, float]]] = {
+        "train": build_threshold_metrics(
+            train_probabilities,
+            train_labels,
+            selected_threshold=best_threshold,
+            f1_threshold=f1_threshold,
+        ),
+        "val": build_threshold_metrics(
+            val_probabilities,
+            val_labels,
+            selected_threshold=best_threshold,
+            f1_threshold=f1_threshold,
+        ),
+    }
 
     print(f"Selected threshold objective: {args.threshold_objective}")
     print(f"Validation F1 comparison threshold: {f1_threshold:.3f}")
@@ -486,7 +652,12 @@ def main() -> None:
     )
 
     if test_samples:
-        test_probabilities, test_labels = collect_predictions(model, test_loader, device)
+        test_video_ids, test_probabilities, test_labels = collect_sample_predictions(
+            model,
+            test_samples,
+            args.batch_size,
+            device,
+        )
         print_threshold_report(
             "Test",
             test_probabilities,
@@ -494,8 +665,69 @@ def main() -> None:
             selected_threshold=best_threshold,
             f1_threshold=f1_threshold,
         )
+        split_metrics["test"] = build_threshold_metrics(
+            test_probabilities,
+            test_labels,
+            selected_threshold=best_threshold,
+            f1_threshold=f1_threshold,
+        )
     else:
+        test_video_ids = []
+        test_probabilities = np.asarray([], dtype=np.float32)
+        test_labels = np.asarray([], dtype=np.float32)
         print("No test samples were available for evaluation.")
+        split_metrics["test"] = build_threshold_metrics(
+            test_probabilities,
+            test_labels,
+            selected_threshold=best_threshold,
+            f1_threshold=f1_threshold,
+        )
+
+    if args.predictions_output is not None:
+        write_predictions_csv(
+            args.predictions_output,
+            rows=[
+                ("train", train_video_ids, train_probabilities, train_labels),
+                ("val", val_video_ids, val_probabilities, val_labels),
+                ("test", test_video_ids, test_probabilities, test_labels),
+            ],
+            selected_threshold=best_threshold,
+            label_mode=args.label_mode,
+        )
+        print(f"Saved predictions CSV to {args.predictions_output}")
+
+    if args.summary_output is not None:
+        write_summary_json(
+            args.summary_output,
+            config={
+                "label_mode": args.label_mode,
+                "seed": args.seed,
+                "epochs": args.epochs,
+                "batch_size": args.batch_size,
+                "learning_rate": args.lr,
+                "hidden_dim": args.hidden_dim,
+                "dropout": args.dropout,
+                "weight_decay": args.weight_decay,
+                "early_stopping_patience": args.early_stopping_patience,
+                "threshold_objective": args.threshold_objective,
+                "feature_dir": str(args.feature_dir),
+                "train_keys": str(args.train_keys),
+                "val_keys": str(args.val_keys),
+                "test_keys": str(args.test_keys),
+                "forward_labels": str(args.forward_labels),
+                "inward_labels": str(args.inward_labels),
+                "output_path": str(args.output_path),
+                "predictions_output": str(args.predictions_output) if args.predictions_output else None,
+            },
+            class_balance={
+                "train": {"positives": train_positives, "negatives": train_negatives},
+                "val": {"positives": val_positives, "negatives": val_negatives},
+                "test": {"positives": test_positives, "negatives": test_negatives},
+            },
+            best_state=best_state,
+            split_metrics=split_metrics,
+        )
+        print(f"Saved summary JSON to {args.summary_output}")
 
 
 if __name__ == "__main__":
