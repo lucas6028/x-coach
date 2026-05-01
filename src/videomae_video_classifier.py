@@ -149,6 +149,14 @@ def compute_metrics(probabilities: np.ndarray, labels: np.ndarray, threshold: fl
             "fp": 0.0,
             "tn": 0.0,
             "fn": 0.0,
+            "specificity": 0.0,
+            "false_positive_rate": 0.0,
+            "balanced_accuracy": 0.0,
+            "negative_precision": 0.0,
+            "negative_recall": 0.0,
+            "negative_f1": 0.0,
+            "macro_f1": 0.0,
+            "youden_j": 0.0,
         }
 
     preds = (probabilities >= threshold).astype(np.int32)
@@ -163,6 +171,18 @@ def compute_metrics(probabilities: np.ndarray, labels: np.ndarray, threshold: fl
     precision = tp / (tp + fp) if tp + fp else 0.0
     recall = tp / (tp + fn) if tp + fn else 0.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+    specificity = tn / (tn + fp) if tn + fp else 0.0
+    false_positive_rate = fp / (fp + tn) if fp + tn else 0.0
+    balanced_accuracy = (recall + specificity) / 2
+    negative_precision = tn / (tn + fn) if tn + fn else 0.0
+    negative_recall = specificity
+    negative_f1 = (
+        2 * negative_precision * negative_recall / (negative_precision + negative_recall)
+        if negative_precision + negative_recall
+        else 0.0
+    )
+    macro_f1 = (f1 + negative_f1) / 2
+    youden_j = recall + specificity - 1
 
     return {
         "threshold": float(threshold),
@@ -174,6 +194,14 @@ def compute_metrics(probabilities: np.ndarray, labels: np.ndarray, threshold: fl
         "fp": float(fp),
         "tn": float(tn),
         "fn": float(fn),
+        "specificity": float(specificity),
+        "false_positive_rate": float(false_positive_rate),
+        "balanced_accuracy": float(balanced_accuracy),
+        "negative_precision": float(negative_precision),
+        "negative_recall": float(negative_recall),
+        "negative_f1": float(negative_f1),
+        "macro_f1": float(macro_f1),
+        "youden_j": float(youden_j),
     }
 
 
@@ -194,7 +222,11 @@ def collect_predictions(model: nn.Module, loader: DataLoader, device: torch.devi
     return sigmoid(np.concatenate(logits_list)), np.concatenate(labels_list)
 
 
-def find_best_threshold(probabilities: np.ndarray, labels: np.ndarray) -> tuple[float, dict[str, float]]:
+def find_best_threshold(
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    objective: str,
+) -> tuple[float, dict[str, float]]:
     if probabilities.size == 0:
         return 0.5, compute_metrics(probabilities, labels, threshold=0.5)
 
@@ -211,11 +243,18 @@ def find_best_threshold(probabilities: np.ndarray, labels: np.ndarray) -> tuple[
     best_metrics = compute_metrics(probabilities, labels, threshold=0.5)
     for threshold in candidate_thresholds.tolist():
         metrics = compute_metrics(probabilities, labels, threshold=float(threshold))
-        if metrics["f1"] > best_metrics["f1"]:
+        if metrics[objective] > best_metrics[objective]:
             best_threshold = float(threshold)
             best_metrics = metrics
 
     return best_threshold, best_metrics
+
+
+def baseline_metrics(labels: np.ndarray, positive: bool) -> dict[str, float]:
+    probability = 1.0 if positive else 0.0
+    probabilities = np.full(labels.shape, probability, dtype=np.float32)
+    threshold = 0.5
+    return compute_metrics(probabilities, labels, threshold=threshold)
 
 
 def evaluate(model: nn.Module, loader: DataLoader, device: torch.device, threshold: float = 0.5) -> dict[str, float]:
@@ -227,10 +266,33 @@ def format_metrics(name: str, metrics: dict[str, float]) -> str:
     return (
         f"{name} metrics | threshold={metrics['threshold']:.3f} "
         f"accuracy={metrics['accuracy']:.3f} precision={metrics['precision']:.3f} "
-        f"recall={metrics['recall']:.3f} f1={metrics['f1']:.3f} "
+        f"recall={metrics['recall']:.3f} specificity={metrics['specificity']:.3f} "
+        f"false_positive_rate={metrics['false_positive_rate']:.3f} "
+        f"balanced_accuracy={metrics['balanced_accuracy']:.3f} macro_f1={metrics['macro_f1']:.3f} "
+        f"f1={metrics['f1']:.3f} "
         f"tp={metrics['tp']:.0f} fp={metrics['fp']:.0f} "
         f"tn={metrics['tn']:.0f} fn={metrics['fn']:.0f}"
     )
+
+
+def print_threshold_report(
+    split_name: str,
+    probabilities: np.ndarray,
+    labels: np.ndarray,
+    selected_threshold: float,
+    f1_threshold: float,
+) -> None:
+    print(format_metrics(f"{split_name} always-positive baseline", baseline_metrics(labels, positive=True)))
+    print(format_metrics(f"{split_name} always-negative baseline", baseline_metrics(labels, positive=False)))
+    print(format_metrics(f"{split_name} fixed-0.5", compute_metrics(probabilities, labels, threshold=0.5)))
+    print(format_metrics(f"{split_name} f1-selected-threshold", compute_metrics(probabilities, labels, threshold=f1_threshold)))
+    selected_metrics = compute_metrics(probabilities, labels, threshold=selected_threshold)
+    print(format_metrics(f"{split_name} selected-threshold", selected_metrics))
+    if selected_metrics["specificity"] < 0.20:
+        print(
+            f"Warning: {split_name} selected-threshold specificity is "
+            f"{selected_metrics['specificity']:.3f}; the classifier is still mostly predicting positive."
+        )
 
 
 def label_counts(samples: list[Sample]) -> tuple[int, int]:
@@ -285,6 +347,12 @@ def main() -> None:
     parser.add_argument("--output-path", type=Path, default=REPO_ROOT / "data" / "Squat" / "videomae_classifier.pt")
     parser.add_argument("--device", type=str, default=None, help="cpu, cuda, or auto.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible training.")
+    parser.add_argument(
+        "--threshold-objective",
+        choices=("f1", "balanced_accuracy", "macro_f1", "youden_j"),
+        default="balanced_accuracy",
+        help="Validation metric used to select the decision threshold and best checkpoint.",
+    )
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -328,7 +396,7 @@ def main() -> None:
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     best_state = None
-    best_val_f1 = -1.0
+    best_val_score = -1.0
 
     print(f"Training on {len(train_samples)} train / {len(val_samples)} val / {len(test_samples)} test samples.")
     print(f"Feature dim: {feature_dim}, seed: {args.seed}")
@@ -357,21 +425,27 @@ def main() -> None:
 
         train_metrics = evaluate(model, train_eval_loader, device, threshold=0.5)
         val_probabilities, val_labels = collect_predictions(model, val_loader, device)
-        val_threshold, val_metrics = find_best_threshold(val_probabilities, val_labels)
+        val_threshold, val_metrics = find_best_threshold(
+            val_probabilities,
+            val_labels,
+            objective=args.threshold_objective,
+        )
         avg_loss = running_loss / max(len(train_samples), 1)
         print(
             f"Epoch {epoch:02d} | loss={avg_loss:.4f} "
-            f"| train_f1={train_metrics['f1']:.3f} val_f1={val_metrics['f1']:.3f} "
-            f"val_acc={val_metrics['accuracy']:.3f} val_threshold={val_threshold:.3f}"
+            f"| train_f1={train_metrics['f1']:.3f} "
+            f"val_bal_acc={val_metrics['balanced_accuracy']:.3f} val_f1={val_metrics['f1']:.3f} "
+            f"val_specificity={val_metrics['specificity']:.3f} val_threshold={val_threshold:.3f}"
         )
 
-        if val_metrics["f1"] >= best_val_f1:
-            best_val_f1 = val_metrics["f1"]
+        if val_metrics[args.threshold_objective] >= best_val_score:
+            best_val_score = val_metrics[args.threshold_objective]
             best_state = {
                 "model_state_dict": copy.deepcopy(model.state_dict()),
                 "feature_dim": feature_dim,
                 "hidden_dim": args.hidden_dim,
                 "threshold": float(val_threshold),
+                "threshold_objective": args.threshold_objective,
                 "seed": args.seed,
                 "best_val_metrics": val_metrics,
                 "labels_source": {
@@ -390,12 +464,36 @@ def main() -> None:
     model.load_state_dict(best_state["model_state_dict"])
     best_threshold = float(best_state["threshold"])
 
-    print(format_metrics("Train", evaluate(model, train_eval_loader, device, threshold=best_threshold)))
-    print(format_metrics("Val", evaluate(model, val_loader, device, threshold=best_threshold)))
+    train_probabilities, train_labels = collect_predictions(model, train_eval_loader, device)
+    val_probabilities, val_labels = collect_predictions(model, val_loader, device)
+    f1_threshold, _ = find_best_threshold(val_probabilities, val_labels, objective="f1")
+
+    print(f"Selected threshold objective: {args.threshold_objective}")
+    print(f"Validation F1 comparison threshold: {f1_threshold:.3f}")
+    print_threshold_report(
+        "Train",
+        train_probabilities,
+        train_labels,
+        selected_threshold=best_threshold,
+        f1_threshold=f1_threshold,
+    )
+    print_threshold_report(
+        "Val",
+        val_probabilities,
+        val_labels,
+        selected_threshold=best_threshold,
+        f1_threshold=f1_threshold,
+    )
 
     if test_samples:
-        test_metrics = evaluate(model, test_loader, device, threshold=best_threshold)
-        print(format_metrics("Test", test_metrics))
+        test_probabilities, test_labels = collect_predictions(model, test_loader, device)
+        print_threshold_report(
+            "Test",
+            test_probabilities,
+            test_labels,
+            selected_threshold=best_threshold,
+            f1_threshold=f1_threshold,
+        )
     else:
         print("No test samples were available for evaluation.")
 
