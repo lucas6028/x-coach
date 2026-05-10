@@ -132,6 +132,8 @@ Colab 實驗會產生的主要輸出：
 
 用數字描述時，可以說目前多數設定的 test balanced accuracy 約在 0.53 到 0.59，僅略高於隨機基準 0.50；因此目前模型較適合作為研究 baseline，還不適合作為可靠的最終深蹲錯誤判斷器。
 
+後續已完成 pose-only baseline，結果整理在 `notes/pose_only_classifier_experiment_summary.md`。pose-only 的 combined test balanced accuracy 平均約 0.581、最高約 0.618，略優於 VideoMAE-only，但仍不足以作為可靠的最終模型。下一階段建議比較 VideoMAE-only、pose-only、VideoMAE-plus-pose，並優先做 feature normalization、錯誤案例分析與 temporal modeling。
+
 ## 重要指標變化總結
 
 以下整理實驗過程中幾個重要階段的指標變化，作為後續報告與比較依據。
