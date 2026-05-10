@@ -204,8 +204,81 @@ data/Squat/Labeled_Dataset/view_metadata.csv
 
 這個 view metadata 目前建議只作為 analysis metadata，不先加入 classifier。下一步可將 prediction CSV 與 `view_metadata.csv` 依 `video_id` join，分別計算不同 `view_type` 下的 balanced accuracy、recall、specificity、false positive rate 和 false negative rate。
 
+### Combined pose-only by-view analysis
+
+已使用 `data/Squat/pose_only/combined_pose_only_predictions.csv` 與 `data/Squat/Labeled_Dataset/view_metadata.csv` 做 view-aware prediction analysis。分析腳本為：
+
+- `scripts/analyze_predictions_by_view.py`
+
+輸出檔案：
+
+```text
+data/Squat/pose_only/combined_pose_only_by_view.csv
+```
+
+以下為 test split 的 selected-threshold metrics：
+
+| View type | N | Positives | Negatives | Balanced accuracy | Recall | Specificity | Macro F1 | FP | FN | 解讀 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| ALL | 244 | 172 | 72 | 0.618 | 0.820 | 0.417 | 0.623 | 42 | 31 | 整體仍偏向抓錯誤，正常影片辨識有限。 |
+| rear | 98 | 60 | 38 | 0.649 | 0.850 | 0.447 | 0.652 | 21 | 9 | 三種 view 中表現最好，recall 與 specificity 較平衡。 |
+| rear_oblique | 132 | 104 | 28 | 0.595 | 0.798 | 0.393 | 0.590 | 17 | 21 | 斜後方視角下 balanced accuracy 下降，漏判增加且 specificity 偏低。 |
+| side | 14 | 8 | 6 | 0.604 | 0.875 | 0.333 | 0.591 | 4 | 1 | 樣本太少，只能作為初步觀察。 |
+
+固定 threshold 0.5 的 test balanced accuracy：
+
+| View type | Balanced accuracy | Recall | Specificity |
+| --- | ---: | ---: | ---: |
+| ALL | 0.612 | 0.919 | 0.306 |
+| rear | 0.621 | 0.900 | 0.342 |
+| rear_oblique | 0.587 | 0.923 | 0.250 |
+| side | 0.667 | 1.000 | 0.333 |
+
+這個分析支持目前的視角假設：rear_oblique 佔 test split 多數，且其 selected-threshold balanced accuracy 比 rear 低約 0.054。rear_oblique 的 false negative 數量也較高，表示斜後方不只造成 false positive，也可能讓錯誤動作的幾何訊號變弱或更不穩定。
+
+需要注意的是，side view 在 test split 只有 14 支影片，不能單獨得出穩定結論。後續若要判斷 knees_forward 是否真的需要側面視角，應增加人工視角標註或擴大 side-view 樣本。
+
 目前建議保留的 baseline：
 
 - VideoMAE-only：研究 baseline，代表泛用 RGB video embedding。
 - Pose-only：目前較有 biomechanical 意義的 baseline。
 - 後續 fusion：最值得作為下一階段主線。
+
+### Multi-seed knees_forward / knees_inward by-view analysis
+
+已將多 seed pose-only predictions 依 `view_metadata.csv` 分組分析。分析命令：
+
+```bash
+python scripts/analyze_predictions_by_view.py \
+  --predictions-dir data/Squat/pose_only/predictions-20260510T034739Z-3-001/predictions \
+  --view-metadata data/Squat/Labeled_Dataset/view_metadata.csv \
+  --output data/Squat/pose_only/multiseed_pose_only_by_view.csv \
+  --summary-output data/Squat/pose_only/multiseed_pose_only_by_view_summary.csv
+```
+
+輸出檔案：
+
+```text
+data/Squat/pose_only/multiseed_pose_only_by_view.csv
+data/Squat/pose_only/multiseed_pose_only_by_view_summary.csv
+```
+
+以下為 test split、selected-threshold、5 seeds mean +/- std。
+
+| Label mode | View type | N | Pos / Neg | Balanced accuracy | Recall | Specificity | Macro F1 | 解讀 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| knees_forward | ALL | 244 | 169 / 75 | 0.573 +/- 0.010 | 0.824 +/- 0.027 | 0.323 +/- 0.026 | 0.575 +/- 0.011 | 整體 recall 高，但正常影片辨識弱。 |
+| knees_forward | rear | 98 | 58 / 40 | 0.571 +/- 0.022 | 0.783 +/- 0.037 | 0.360 +/- 0.046 | 0.566 +/- 0.024 | specificity 比 rear_oblique 稍好。 |
+| knees_forward | rear_oblique | 132 | 103 / 29 | 0.571 +/- 0.027 | 0.839 +/- 0.035 | 0.303 +/- 0.026 | 0.575 +/- 0.031 | recall 較高，但 false positives 較多。 |
+| knees_forward | side | 14 | 8 / 6 | 0.546 +/- 0.097 | 0.925 +/- 0.100 | 0.167 +/- 0.105 | 0.495 +/- 0.113 | 樣本太少且 specificity 很差，暫不下結論。 |
+| knees_inward | ALL | 244 | 36 / 208 | 0.570 +/- 0.021 | 0.478 +/- 0.054 | 0.662 +/- 0.080 | 0.516 +/- 0.035 | 整體受 positive 少影響，漏判仍明顯。 |
+| knees_inward | rear | 98 | 15 / 83 | 0.618 +/- 0.059 | 0.573 +/- 0.053 | 0.663 +/- 0.078 | 0.549 +/- 0.059 | rear 明顯優於 rear_oblique。 |
+| knees_inward | rear_oblique | 132 | 20 / 112 | 0.539 +/- 0.029 | 0.420 +/- 0.087 | 0.657 +/- 0.091 | 0.497 +/- 0.037 | 斜後方下 inward recall 下降，較容易漏判。 |
+| knees_inward | side | 14 | 1 / 13 | 0.446 +/- 0.183 | 0.200 +/- 0.400 | 0.692 +/- 0.069 | 0.422 +/- 0.054 | positive 只有 1 支，不能作為視角結論。 |
+
+結論：
+
+- `knees_inward` 有較明顯的 view effect。rear 的 test balanced accuracy 約 `0.618`，rear_oblique 約 `0.539`，差距約 `0.079`。主要差異來自 recall：rear 約 `0.573`，rear_oblique 約 `0.420`，表示斜後方視角較容易漏掉 inward 錯誤。
+- `knees_forward` 沒有看到穩定的 view-type 幫助。rear 與 rear_oblique 的 balanced accuracy 幾乎相同，都是約 `0.571`；rear_oblique recall 較高，但 specificity 較低，代表它更偏向預測為錯誤，不一定是真正看得更準。
+- side view 目前不能用來回答 knees_forward 是否會更好，因為 test split 只有 14 支 side 影片，且 knees_forward side 的 negatives 只有 6 支，knees_inward side 的 positives 甚至只有 1 支。
+- 以目前資料來看，view metadata 最有價值的用途是做分層分析與錯誤診斷；還不建議直接把 `view_type` 加進 classifier 當 feature，因為 side/front 樣本不足，容易讓模型學到資料分布偏差。
