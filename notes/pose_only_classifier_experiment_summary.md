@@ -174,6 +174,18 @@ python scripts/run_view_estimation.py
 data/Squat/Labeled_Dataset/view_metadata.csv
 ```
 
+目前 estimator 預設不輸出 `front` 與 `front_oblique`。人工檢查後發現原本被判為 front/front_oblique 的影片幾乎都是 rear-oblique，主要原因是影片中背景臉部或 MediaPipe pose face landmarks 的 visibility 會造成誤判。因此目前 face visibility 只保留為診斷欄位，不再參與 front/rear score；若未來資料中確實有正面視角，可用 `--allow-front` 重新開啟 front/front_oblique 分類。
+
+更新後的 view metadata 分布：
+
+| View type | Count |
+| --- | ---: |
+| rear_oblique | 1075 |
+| rear | 410 |
+| side | 138 |
+| front_oblique | 0 |
+| front | 0 |
+
 輸出欄位包含：
 
 - `video_id`

@@ -100,6 +100,10 @@ Estimate coarse camera/view metadata from labeled pose JSON:
 python scripts/run_view_estimation.py
 ```
 
+By default, this squat-dataset estimator suppresses `front` and `front_oblique`
+outputs because face landmark visibility is noisy in rear-view videos. Use
+`--allow-front` only when the dataset contains verified front-view clips.
+
 Train the existing classifier on pose-only features:
 
 ```bash

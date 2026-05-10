@@ -13,6 +13,8 @@ import numpy as np
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPLIT_NAMES = ("train", "val", "test")
 VIEW_TYPES = ("front", "front_oblique", "side", "rear_oblique", "rear", "unknown")
+OBLIQUE_THRESHOLD = 0.4
+SIDE_THRESHOLD = 0.36
 
 NOSE = 0
 LEFT_EYE_INNER = 1
@@ -237,13 +239,11 @@ def score_view(
     torso_width_ratio: float,
     z_asymmetry_value: float,
     valid_frame_ratio: float,
+    allow_front: bool = False,
 ) -> tuple[str, float, float, float, float, float]:
     orientation_strength = abs(orientation_score) if np.isfinite(orientation_score) else 0.0
     front_direction = max(orientation_score, 0.0) if np.isfinite(orientation_score) else 0.0
     rear_direction = max(-orientation_score, 0.0) if np.isfinite(orientation_score) else 0.0
-
-    front_face_signal = clip01((face_visibility - 0.35) / 0.45)
-    rear_face_signal = clip01((0.65 - face_visibility) / 0.45)
 
     narrow_body_signal = clip01((0.24 - torso_width_ratio) / 0.16) if np.isfinite(torso_width_ratio) else 0.0
     broad_body_signal = clip01((torso_width_ratio - 0.18) / 0.18) if np.isfinite(torso_width_ratio) else 0.0
@@ -251,8 +251,11 @@ def score_view(
 
     side_score = clip01(0.65 * narrow_body_signal + 0.25 * (1.0 - orientation_strength) + 0.10 * depth_signal)
     oblique_score = clip01(0.45 * side_score + 0.35 * depth_signal + 0.20 * (1.0 - broad_body_signal))
-    front_score = clip01((0.62 * front_direction + 0.38 * front_face_signal) * (0.72 + 0.28 * broad_body_signal))
-    rear_score = clip01((0.72 * rear_direction + 0.28 * rear_face_signal) * (0.72 + 0.28 * broad_body_signal))
+    # MediaPipe pose face landmarks can remain highly visible for rear-view squat videos,
+    # especially when background faces or pose hallucinations are present. Keep face
+    # visibility as diagnostic metadata, but do not use it as front/rear evidence.
+    front_score = clip01(front_direction * (0.72 + 0.28 * broad_body_signal))
+    rear_score = clip01(rear_direction * (0.72 + 0.28 * broad_body_signal))
 
     if valid_frame_ratio < 0.15 or max(front_score, rear_score, side_score) < 0.20:
         return "unknown", 0.0, front_score, rear_score, side_score, oblique_score
@@ -260,18 +263,26 @@ def score_view(
     if side_score >= 0.62 and side_score >= max(front_score, rear_score) * 0.90:
         view_type = "side"
         confidence = side_score
-    elif front_score >= rear_score:
-        view_type = "front_oblique" if oblique_score >= 0.33 or side_score >= 0.36 else "front"
+    elif front_score >= rear_score and allow_front:
+        view_type = "front_oblique" if oblique_score >= OBLIQUE_THRESHOLD or side_score >= SIDE_THRESHOLD else "front"
         confidence = front_score * (0.82 if view_type == "front_oblique" else 1.0)
+    elif front_score >= rear_score:
+        view_type = "rear_oblique"
+        confidence = max(front_score, side_score, oblique_score) * 0.70
     else:
-        view_type = "rear_oblique" if oblique_score >= 0.33 or side_score >= 0.36 else "rear"
+        view_type = "rear_oblique" if oblique_score >= OBLIQUE_THRESHOLD or side_score >= SIDE_THRESHOLD else "rear"
         confidence = rear_score * (0.82 if view_type == "rear_oblique" else 1.0)
 
     confidence = clip01(confidence * (0.55 + 0.45 * clip01(valid_frame_ratio)))
     return view_type, confidence, front_score, rear_score, side_score, oblique_score
 
 
-def estimate_view_for_pose(pose_json_path: Path, split_name: str = "", video_id: str | None = None) -> ViewEstimate:
+def estimate_view_for_pose(
+    pose_json_path: Path,
+    split_name: str = "",
+    video_id: str | None = None,
+    allow_front: bool = False,
+) -> ViewEstimate:
     payload = load_pose_json(pose_json_path)
     frames = payload.get("frames", [])
     if not isinstance(frames, list):
@@ -294,6 +305,7 @@ def estimate_view_for_pose(pose_json_path: Path, split_name: str = "", video_id:
         torso_width_ratio=torso_width_ratio,
         z_asymmetry_value=z_asymmetry_value,
         valid_frame_ratio=valid_frame_ratio,
+        allow_front=allow_front,
     )
 
     return ViewEstimate(
@@ -416,6 +428,15 @@ def main() -> None:
     )
     parser.add_argument("--splits", type=parse_split_names, default=list(SPLIT_NAMES))
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument(
+        "--allow-front",
+        action="store_true",
+        help=(
+            "Allow front/front_oblique outputs. By default, front-like signals are treated "
+            "as rear_oblique because this squat dataset is dominated by rear-view videos "
+            "and face landmark visibility is noisy."
+        ),
+    )
     args = parser.parse_args()
 
     requests = build_requests(args.pose_json_dir, args.split_dir, args.splits)
@@ -430,6 +451,7 @@ def main() -> None:
                 request.pose_json_path,
                 split_name=request.split_name,
                 video_id=request.video_id,
+                allow_front=args.allow_front,
             )
         )
 
