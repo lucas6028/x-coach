@@ -78,13 +78,39 @@ python scripts/query_rag.py query "knees inward correction"
 Extract MediaPipe pose landmarks from unlabeled videos:
 
 ```bash
-python scripts/run_pose_extraction.py --limit 5
+python scripts/run_pose_extraction.py --dataset unlabeled --limit 5
 ```
 
 Extract VideoMAE features for labeled squat clips:
 
 ```bash
 python scripts/run_videomae_feature_extraction.py
+```
+
+Extract pose-only features for labeled squat clips:
+
+```bash
+python scripts/run_pose_extraction.py --dataset labeled --no-video
+python scripts/run_pose_feature_extraction.py
+```
+
+Estimate coarse camera/view metadata from labeled pose JSON:
+
+```bash
+python scripts/run_view_estimation.py
+```
+
+Train the existing classifier on pose-only features:
+
+```bash
+python scripts/run_videomae_experiment_grid.py \
+  --feature-dir data/Squat/Labeled_Dataset/pose_features \
+  --train-keys data/Squat/Labeled_Dataset/Splits/train_keys.json \
+  --val-keys data/Squat/Labeled_Dataset/Splits/val_keys.json \
+  --test-keys data/Squat/Labeled_Dataset/Splits/test_keys.json \
+  --forward-labels data/Squat/Labeled_Dataset/Labels/error_knees_forward.json \
+  --inward-labels data/Squat/Labeled_Dataset/Labels/error_knees_inward.json \
+  --output-root data/Squat/pose_classifier_experiments
 ```
 
 Train the lightweight classifier on cached features:
