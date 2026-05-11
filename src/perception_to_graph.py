@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from src.graph_retrieval import DEFAULT_GRAPH_FILE, retrieve_graph_context
+from src.pose_rule_detector import detect_pose_rules_from_json
+from src.rag_vector_db import DEFAULT_DB_DIR, query_vector_db
 
 
 VISIBILITY_THRESHOLD = 0.5
@@ -134,6 +136,27 @@ def detect_faults_from_pose_json(
     *,
     action: str = "Squat",
 ) -> dict[str, Any]:
+    rule_result = detect_pose_rules_from_json(pose_json_path)
+    return {
+        "action": action,
+        "pose_json_path": rule_result["pose_json_path"],
+        "metadata": rule_result["metadata"],
+        "view": rule_result["view"],
+        "quality": rule_result["quality"],
+        "detections": rule_result["detections"],
+        "summary": {
+            "valid_frames": rule_result["quality"]["valid_frames"],
+            "total_frames": rule_result["quality"]["total_frames"],
+            "valid_frame_ratio": rule_result["quality"]["valid_frame_ratio"],
+        },
+    }
+
+
+def detect_faults_from_pose_json_legacy(
+    pose_json_path: str | Path,
+    *,
+    action: str = "Squat",
+) -> dict[str, Any]:
     pose_json_path = Path(pose_json_path)
     payload = json.loads(pose_json_path.read_text(encoding="utf-8"))
     frame_metrics = [metric for frame in payload.get("frames", []) if (metric := _frame_metrics(frame)) is not None]
@@ -249,6 +272,7 @@ def retrieve_from_pose_faults(
     pose_json_path: str | Path,
     *,
     graph_file: Path = DEFAULT_GRAPH_FILE,
+    rag_db_dir: Path = DEFAULT_DB_DIR,
     hops: int = 1,
     max_faults: int = 3,
     action: str = "Squat",
@@ -258,23 +282,34 @@ def retrieve_from_pose_faults(
 
     retrievals = []
     for detection in detections:
-        retrieval = retrieve_graph_context(
-            detection["query_text"],
-            graph_file=graph_file,
-            hops=hops,
-            max_seeds=3,
-        )
+        query_text = detection.get("kg_query") or detection.get("query_text") or detection.get("fault_name")
+        retrieval_mode = detection.get("retrieval_mode", "kg")
+        if retrieval_mode == "rag":
+            retrieval = {
+                "query": query_text,
+                "results": query_vector_db(str(query_text), db_dir=rag_db_dir, top_k=5),
+            }
+        else:
+            retrieval = retrieve_graph_context(
+                str(query_text),
+                graph_file=graph_file,
+                hops=hops,
+                max_seeds=3,
+            )
         retrievals.append(
             {
-                "fault": detection["fault"],
-                "query_text": detection["query_text"],
+                "fault": detection.get("fault_name", detection.get("fault", "")),
+                "fault_id": detection.get("fault_id", ""),
+                "query_text": query_text,
+                "retrieval_mode": retrieval_mode,
                 "severity": detection["severity"],
                 "evidence": detection["evidence"],
-                "graph_context": retrieval,
+                "context": retrieval,
             }
         )
 
     return {
         "perception": perception_result,
+        "retrievals": retrievals,
         "graph_retrievals": retrievals,
     }
