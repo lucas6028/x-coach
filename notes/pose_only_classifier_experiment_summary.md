@@ -282,3 +282,30 @@ data/Squat/pose_only/multiseed_pose_only_by_view_summary.csv
 - `knees_forward` 沒有看到穩定的 view-type 幫助。rear 與 rear_oblique 的 balanced accuracy 幾乎相同，都是約 `0.571`；rear_oblique recall 較高，但 specificity 較低，代表它更偏向預測為錯誤，不一定是真正看得更準。
 - side view 目前不能用來回答 knees_forward 是否會更好，因為 test split 只有 14 支 side 影片，且 knees_forward side 的 negatives 只有 6 支，knees_inward side 的 positives 甚至只有 1 支。
 - 以目前資料來看，view metadata 最有價值的用途是做分層分析與錯誤診斷；還不建議直接把 `view_type` 加進 classifier 當 feature，因為 side/front 樣本不足，容易讓模型學到資料分布偏差。
+
+### Pose-only train-set normalization experiment
+
+已完成 pose-only feature normalization 實驗。這次在 classifier pipeline 使用 `--normalize-features`，每個 seed 都只用 train split 的 pose-only `video_feature` 計算 mean/std，並將同一組統計套用到 train/val/test。訓練紀錄在：
+
+```text
+notebooks/run_videomae_video_classifier.ipynb
+data/Squat/pose_only_normalization_metrics/metrics/experiment_summary.csv
+```
+
+以下比較未 normalization baseline 與 train-set normalization。數字為 test split、selected-threshold、5 seeds mean +/- std。
+
+| Label mode | Setting | Balanced accuracy | Recall | Specificity | Macro F1 | F1 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| combined | baseline | 0.581 +/- 0.032 | 0.790 +/- 0.071 | 0.372 +/- 0.068 | 0.582 +/- 0.035 | 0.768 +/- 0.039 |
+| combined | normalized | 0.635 +/- 0.010 | 0.717 +/- 0.101 | 0.553 +/- 0.111 | 0.622 +/- 0.020 | 0.750 +/- 0.053 |
+| knees_forward | baseline | 0.573 +/- 0.011 | 0.824 +/- 0.030 | 0.323 +/- 0.029 | 0.575 +/- 0.012 | 0.775 +/- 0.014 |
+| knees_forward | normalized | 0.615 +/- 0.030 | 0.714 +/- 0.136 | 0.517 +/- 0.190 | 0.599 +/- 0.026 | 0.735 +/- 0.055 |
+| knees_inward | baseline | 0.570 +/- 0.023 | 0.478 +/- 0.060 | 0.662 +/- 0.089 | 0.516 +/- 0.039 | 0.280 +/- 0.020 |
+| knees_inward | normalized | 0.608 +/- 0.054 | 0.578 +/- 0.188 | 0.637 +/- 0.148 | 0.526 +/- 0.064 | 0.315 +/- 0.064 |
+
+整體結論：
+
+- normalization 對三個 label mode 的 selected-threshold test balanced accuracy 都有提升：combined `+0.054`、knees_forward `+0.042`、knees_inward `+0.038`。
+- combined 與 knees_forward 的主要改善來自 specificity 提升，表示原本 pose-only classifier 偏向過度預測 positive；normalization 讓正常影片辨識變好，但 recall 與 F1 有所下降。
+- knees_inward 則同時提升 balanced accuracy、recall 與 F1，specificity 小幅下降。這表示 normalization 對少數 positive 類別的 inward 錯誤較有幫助，但 seed 間變異仍偏大。
+- normalization 應保留為 pose-only baseline 的預設實驗設定；下一步比較 VideoMAE-plus-pose fusion 時，也應明確記錄 pose branch 是否使用 train-set normalization，避免和未 normalization baseline 混在一起比較。
