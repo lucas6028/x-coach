@@ -99,6 +99,8 @@ def run_classifier(args: argparse.Namespace, label_mode: str, seed: int) -> Path
     ]
     if args.device:
         command.extend(["--device", args.device])
+    if args.normalize_features:
+        command.append("--normalize-features")
 
     print(f"Running label_mode={label_mode} seed={seed}")
     subprocess.run(command, check=True)
@@ -164,6 +166,11 @@ def main() -> None:
     parser.add_argument("--early-stopping-patience", type=int, default=5)
     parser.add_argument("--threshold-objective", choices=("f1", "balanced_accuracy", "macro_f1", "youden_j"), default="balanced_accuracy")
     parser.add_argument("--device", type=str, default=None)
+    parser.add_argument(
+        "--normalize-features",
+        action="store_true",
+        help="Pass --normalize-features to each classifier run.",
+    )
     parser.add_argument("--summary-output", type=Path, default=None)
     args = parser.parse_args()
 

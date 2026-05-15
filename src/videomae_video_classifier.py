@@ -83,9 +83,19 @@ class Sample:
     label: int
 
 
+@dataclass(frozen=True)
+class FeatureNormalization:
+    mean: np.ndarray
+    std: np.ndarray
+
+    def apply(self, feature: np.ndarray) -> np.ndarray:
+        return ((feature - self.mean) / self.std).astype(np.float32)
+
+
 class FeatureDataset(Dataset):
-    def __init__(self, samples: list[Sample]):
+    def __init__(self, samples: list[Sample], normalization: FeatureNormalization | None = None):
         self.samples = samples
+        self.normalization = normalization
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -94,6 +104,8 @@ class FeatureDataset(Dataset):
         sample = self.samples[index]
         with np.load(sample.feature_path, allow_pickle=False) as data:
             feature = data["video_feature"].astype(np.float32)
+        if self.normalization is not None:
+            feature = self.normalization.apply(feature)
         return torch.from_numpy(feature), torch.tensor(sample.label, dtype=torch.float32)
 
 
@@ -133,9 +145,41 @@ def make_loader(
     samples: list[Sample],
     batch_size: int,
     shuffle: bool,
+    normalization: FeatureNormalization | None = None,
     generator: torch.Generator | None = None,
 ) -> DataLoader:
-    return DataLoader(FeatureDataset(samples), batch_size=batch_size, shuffle=shuffle, generator=generator)
+    return DataLoader(
+        FeatureDataset(samples, normalization=normalization),
+        batch_size=batch_size,
+        shuffle=shuffle,
+        generator=generator,
+    )
+
+
+def load_video_feature(path: Path) -> np.ndarray:
+    with np.load(path, allow_pickle=False) as data:
+        return data["video_feature"].astype(np.float32)
+
+
+def compute_feature_normalization(samples: list[Sample], epsilon: float = 1e-6) -> FeatureNormalization:
+    if not samples:
+        raise ValueError("Cannot compute feature normalization without training samples.")
+
+    features = np.stack([load_video_feature(sample.feature_path) for sample in samples], axis=0).astype(np.float32)
+    mean = features.mean(axis=0).astype(np.float32)
+    std = features.std(axis=0).astype(np.float32)
+    std = np.where(std < epsilon, 1.0, std).astype(np.float32)
+    return FeatureNormalization(mean=mean, std=std)
+
+
+def feature_normalization_payload(normalization: FeatureNormalization | None) -> dict[str, object]:
+    if normalization is None:
+        return {"kind": "none"}
+    return {
+        "kind": "train_set_zscore",
+        "mean": normalization.mean.tolist(),
+        "std": normalization.std.tolist(),
+    }
 
 
 def set_seed(seed: int) -> None:
@@ -243,8 +287,9 @@ def collect_sample_predictions(
     samples: list[Sample],
     batch_size: int,
     device: torch.device,
+    normalization: FeatureNormalization | None = None,
 ) -> tuple[list[str], np.ndarray, np.ndarray]:
-    loader = make_loader(samples, batch_size=batch_size, shuffle=False)
+    loader = make_loader(samples, batch_size=batch_size, shuffle=False, normalization=normalization)
     probabilities, labels = collect_predictions(model, loader, device)
     video_ids = [sample.video_id for sample in samples]
     return video_ids, probabilities, labels
@@ -464,6 +509,11 @@ def main() -> None:
     parser.add_argument("--device", type=str, default=None, help="cpu, cuda, or auto.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducible training.")
     parser.add_argument(
+        "--normalize-features",
+        action="store_true",
+        help="Apply z-score normalization using mean/std computed from the training feature files.",
+    )
+    parser.add_argument(
         "--threshold-objective",
         choices=("f1", "balanced_accuracy", "macro_f1", "youden_j"),
         default="balanced_accuracy",
@@ -500,6 +550,8 @@ def main() -> None:
     with np.load(train_samples[0].feature_path, allow_pickle=False) as data:
         feature_dim = int(data["video_feature"].shape[0])
 
+    feature_normalization = compute_feature_normalization(train_samples) if args.normalize_features else None
+
     model = VideoFeatureClassifier(
         feature_dim=feature_dim,
         hidden_dim=args.hidden_dim,
@@ -508,10 +560,21 @@ def main() -> None:
 
     train_generator = torch.Generator()
     train_generator.manual_seed(args.seed)
-    train_loader = make_loader(train_samples, batch_size=args.batch_size, shuffle=True, generator=train_generator)
-    train_eval_loader = make_loader(train_samples, batch_size=args.batch_size, shuffle=False)
-    val_loader = make_loader(val_samples, batch_size=args.batch_size, shuffle=False)
-    test_loader = make_loader(test_samples, batch_size=args.batch_size, shuffle=False)
+    train_loader = make_loader(
+        train_samples,
+        batch_size=args.batch_size,
+        shuffle=True,
+        normalization=feature_normalization,
+        generator=train_generator,
+    )
+    train_eval_loader = make_loader(
+        train_samples,
+        batch_size=args.batch_size,
+        shuffle=False,
+        normalization=feature_normalization,
+    )
+    val_loader = make_loader(val_samples, batch_size=args.batch_size, shuffle=False, normalization=feature_normalization)
+    test_loader = make_loader(test_samples, batch_size=args.batch_size, shuffle=False, normalization=feature_normalization)
 
     train_positives, train_negatives = label_counts(train_samples)
     val_positives, val_negatives = label_counts(val_samples)
@@ -526,6 +589,7 @@ def main() -> None:
 
     print(f"Training on {len(train_samples)} train / {len(val_samples)} val / {len(test_samples)} test samples.")
     print(f"Feature dim: {feature_dim}, seed: {args.seed}")
+    print(f"Feature normalization: {'train-set z-score' if feature_normalization is not None else 'disabled'}")
     print(
         "Class balance | "
         f"train positives={train_positives} negatives={train_negatives} | "
@@ -578,6 +642,7 @@ def main() -> None:
                 "threshold_objective": args.threshold_objective,
                 "label_mode": args.label_mode,
                 "seed": args.seed,
+                "feature_normalization": feature_normalization_payload(feature_normalization),
                 "epoch": epoch,
                 "best_val_metrics": val_metrics,
                 "labels_source": {
@@ -610,12 +675,14 @@ def main() -> None:
         train_samples,
         args.batch_size,
         device,
+        normalization=feature_normalization,
     )
     val_video_ids, val_probabilities, val_labels = collect_sample_predictions(
         model,
         val_samples,
         args.batch_size,
         device,
+        normalization=feature_normalization,
     )
     f1_threshold, _ = find_best_threshold(val_probabilities, val_labels, objective="f1")
 
@@ -657,6 +724,7 @@ def main() -> None:
             test_samples,
             args.batch_size,
             device,
+            normalization=feature_normalization,
         )
         print_threshold_report(
             "Test",
@@ -710,6 +778,8 @@ def main() -> None:
                 "weight_decay": args.weight_decay,
                 "early_stopping_patience": args.early_stopping_patience,
                 "threshold_objective": args.threshold_objective,
+                "normalize_features": args.normalize_features,
+                "feature_normalization": "train_set_zscore" if feature_normalization is not None else "none",
                 "feature_dir": str(args.feature_dir),
                 "train_keys": str(args.train_keys),
                 "val_keys": str(args.val_keys),
