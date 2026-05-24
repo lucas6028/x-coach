@@ -92,12 +92,12 @@
 
   Tool Options
 
-| Tool | Hardware | Output | Best For |
-| :--- | :--- | :--- | :--- |
-| MediaPipe Pose | phone/webcam | 33 landmarks, 2D + pseudo/world 3D | easiest project data collection |
-| OpenPose | webcam/video | 2D body keypoints, optional body/hand/face | research-style 2D pose data |
-| MMPose | webcam/video + GPU preferred | 2D/3D pose models | more flexible, more setup |
-| Pose2Sim | 2+ cameras preferred | triangulated 3D + OpenSim-style kinematics | closest to biomechanics/Vicon-like workflow |
+| Tool           | Hardware                     | Output                                     | Best For                                    |
+| :------------- | :--------------------------- | :----------------------------------------- | :------------------------------------------ |
+| MediaPipe Pose | phone/webcam                 | 33 landmarks, 2D + pseudo/world 3D         | easiest project data collection             |
+| OpenPose       | webcam/video                 | 2D body keypoints, optional body/hand/face | research-style 2D pose data                 |
+| MMPose         | webcam/video + GPU preferred | 2D/3D pose models                          | more flexible, more setup                   |
+| Pose2Sim       | 2+ cameras preferred         | triangulated 3D + OpenSim-style kinematics | closest to biomechanics/Vicon-like workflow |
 
 
 If you want data closer to Vicon/Kinect 3D, use multi-camera recording + Pose2Sim. Pose2Sim is designed for markerless 3D kinematics from calibrated cameras and connects pose estimation with OpenSim-style biomechanical modeling. It is more work, but it gives more physically meaningful 3D motion than a single webcam.
