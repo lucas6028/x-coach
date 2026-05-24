@@ -180,6 +180,21 @@ Each row in `Segmentation.csv` is one repetition annotation with `video_id`, `re
 
 ---
 
+## 10. ExeCheck / ExeChecker
+
+| Aspect               | Summary                                                                                                                                                                                                                                                                                                  |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **What it is for**   | ExeCheck is the in-house dataset released with ExeChecker, a contrastive-learning framework for interpretable rehabilitation exercise assessment. The goal is not only to classify wrong execution, but to identify the joints involved in the incorrect movement and provide user-facing feedback. ([BU][21], [arXiv][22]) |
+| **Data type**        | RGB-D videos (`.mkv`) plus skeletal joint information (`.json`) with joint positions and orientations. The skeleton JSON files are generated with the Microsoft Azure Kinect Body Tracking SDK. ([BU][21])                                                                                              |
+| **Data description** | 10 rehabilitation exercises performed by 7 healthy subjects. Each exercise has paired correct and incorrect executions by the same subject, with 5 movement repetitions. The dataset package includes raw data, processing scripts, and a processed segmented / mirrored dataset used in the paper. ([BU][21]) |
+| **Annotation**       | Paired correct/incorrect executions, repetition annotations (`RepSeg.csv`), metadata files, and exercise-specific joints of attention (JoA) describing the body joints relevant to each incorrect movement. ([BU][21])                                                                                   |
+| **Exercises**        | 10 rehabilitation exercises. The project page describes incorrect-exercise procedures and corresponding joints of attention in its table; the downloadable package contains the exercise metadata used by the processing scripts. ([BU][21])                                                               |
+| **How to use it**    | Good for skeleton-based rehab feedback, correct-vs-incorrect comparison, repetition segmentation, contrastive learning, localizing problematic joints, and testing whether a model can explain where a rehab movement went wrong.                                                                         |
+
+**Good for your project if:** you want **paired correct/incorrect rehab executions with joint-level feedback targets**, especially for interpretable AI coaching rather than only binary correctness.
+
+---
+
 # Quick comparison
 
 | Dataset                   | Best use                                                          | Main data type                          | Correct / incorrect label?                | Rehab-focused?      |
@@ -193,6 +208,7 @@ Each row in `Segmentation.csv` is one repetition annotation with `video_id`, `re
 | **Fit3D**                 | 3D fitness pose, mesh, repetition, and coaching feedback           | Multi-view images + 3D skeleton/mesh    | Feedback / deviation-oriented             | No, fitness-focused |
 | **Squat Dataset/Waseda**  | Squat-specific posture classification                             | Side-view images / squat videos         | Yes, posture-error classes                | No, fitness-focused |
 | **KIMORE**                | Clinical rehab movement assessment                                | RGB-D video + skeleton                  | Clinical scores/features                  | Yes                 |
+| **ExeCheck/ExeChecker**   | Interpretable rehab feedback and joint-error localization          | RGB-D video + Azure Kinect skeleton     | Yes, paired correct/incorrect + JoA       | Yes                 |
 
 [1]: https://arxiv.org/html/2406.08877v2 "EgoExo-Fitness: Towards Egocentric and Exocentric Full-Body Action Understanding"
 [2]: https://huggingface.co/datasets/Lymann/EgoExo-Fitness?utm_source=chatgpt.com "Lymann/EgoExo-Fitness · Datasets at Hugging Face"
@@ -214,3 +230,5 @@ Each row in `Segmentation.csv` is one repetition annotation with `video_id`, `re
 [18]: https://openaccess.thecvf.com/content_CVPRW_2019/papers/CVSports/Ogata_Temporal_Distance_Matrices_for_Squat_Classification_CVPRW_2019_paper.pdf "Temporal Distance Matrices for Squat Classification"
 [19]: https://pubmed.ncbi.nlm.nih.gov/31217121/ "The KIMORE Dataset: KInematic Assessment of MOvement and Clinical Scores for Remote Monitoring of Physical REhabilitation"
 [20]: https://github.com/bruceyo/EGCN "EGCN"
+[21]: https://www.cs.bu.edu/faculty/betke/ExeChecker/ "ExeChecker: Where Did I Go Wrong?"
+[22]: https://arxiv.org/abs/2412.10573 "ExeChecker: Where Did I Go Wrong?"
