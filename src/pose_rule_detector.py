@@ -11,11 +11,11 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 from src.graph_retrieval import DEFAULT_GRAPH_FILE, retrieve_graph_context
-from src.rag_vector_db import DEFAULT_DB_DIR, query_vector_db
 from src.view_estimation import estimate_view_for_pose
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_RAG_DB_DIR = REPO_ROOT / "data" / "rag" / "vector_db"
 SPLIT_NAMES = ("train", "val", "test")
 VISIBILITY_THRESHOLD = 0.50
 LANDMARK_COUNT = 33
@@ -648,7 +648,7 @@ def detect_pose_rules_from_payload(
     video_id: str | None = None,
     include_retrieval: bool = False,
     graph_file: Path = DEFAULT_GRAPH_FILE,
-    rag_db_dir: Path = DEFAULT_DB_DIR,
+    rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
 ) -> dict[str, Any]:
     metadata = payload.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -708,7 +708,7 @@ def detect_pose_rules_from_json(
     video_id: str | None = None,
     include_retrieval: bool = False,
     graph_file: Path = DEFAULT_GRAPH_FILE,
-    rag_db_dir: Path = DEFAULT_DB_DIR,
+    rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
 ) -> dict[str, Any]:
     path = Path(pose_json_path)
     return detect_pose_rules_from_payload(
@@ -725,7 +725,7 @@ def retrieve_contexts_for_detections(
     detections: Sequence[dict[str, Any]],
     *,
     graph_file: Path = DEFAULT_GRAPH_FILE,
-    rag_db_dir: Path = DEFAULT_DB_DIR,
+    rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     top_k: int = 5,
 ) -> list[dict[str, Any]]:
     retrievals: list[dict[str, Any]] = []
@@ -735,6 +735,8 @@ def retrieve_contexts_for_detections(
         if not query:
             continue
         if retrieval_mode == "rag":
+            from src.rag_vector_db import query_vector_db
+
             context = {
                 "query": query,
                 "results": query_vector_db(query, db_dir=rag_db_dir, top_k=top_k),
