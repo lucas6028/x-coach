@@ -1,5 +1,78 @@
 ## MMPose 技術細節與實作方式
 
+1. 我們使用的是「全身姿態估計」後端。
+
+	意思是模型不只偵測人體主要關節，例如肩膀、手肘、髖部、膝蓋、腳踝，也會偵測更細的部位，例如腳跟、腳趾、手部、臉部等。
+	
+	在本研究中，選擇 whole-body 很重要，因為深蹲分析不只需要膝蓋、髖部、腳踝，也需要腳跟與腳趾位置來判斷：
+	- 膝蓋是否過度前移
+	- 腳跟是否抬起
+	- 膝蓋與腳尖的相對位置
+
+  2. specifically an RTMPose/RTMW-family whole-body model
+	  更精確地說，我們使用的是 RTMPose / RTMW 系列的全身姿態模型。
+	
+	  RTMPose 和 RTMW 是 MMPose 生態系中的現代姿態估計模型系列。它們比早期的 HRNet、SimpleBaseline 等模型更適合實際應用，通常在速度與準確率之間有較好的平衡。
+	
+	  這裡的重點是：
+	
+	  whole-body = 任務類型
+	  RTMPose / RTMW = 使用的模型系列
+	
+	  也就是說，我們不是只說「用了 wholebody」，而是使用 RTMPose/RTMW 系列來執行 whole-body pose estimation。
+
+  3. via rtmlib
+	  我們是透過 rtmlib 來執行這個模型。
+	
+	  rtmlib 可以理解成一個比較輕量、方便部署的推論工具。它使用 ONNX Runtime 來執行姿態估計模型，通常比直接安裝完整 MMPose 環境更容易，尤其是在 Colab 或 Python 3.12 環境中。
+	
+	  在本專案中，程式預設使用：
+	
+	  --runtime rtmlib --model balanced
+	
+	  代表使用 rtmlib 的 whole-body 模型，並採用平衡速度與準確率的設定。
+
+  4. producing COCO-WholeBody keypoints
+	  模型輸出的關鍵點格式是 COCO-WholeBody。
+	
+	  COCO-WholeBody 是一種人體關鍵點標註格式，包含比一般 COCO body pose 更多的點。一般 COCO 人體姿態通常只有 17 個 body keypoints，例如肩膀、髖部、膝蓋、腳踝等。
+	
+	  COCO-WholeBody 則包含：
+	
+	  - 身體關鍵點
+	  - 足部關鍵點
+	  - 臉部關鍵點
+	  - 手部關鍵點
+	
+	  因此它比較適合用在需要腳部資訊的動作分析任務。
+
+  5. that are mapped into a MediaPipe-compatible 33-landmark format
+	  最後，我們會把 COCO-WholeBody 的關鍵點轉換成與 MediaPipe 相容的 33 個 landmark 格式。
+	
+	  原因是本專案原本的下游分析流程，例如：
+	
+	  - pose feature extraction
+	  - rule-based detection
+	  - view estimation
+	  - classifier training
+	
+	  都是基於 MediaPipe Pose 的 33-landmark 格式設計的。
+
+  所以我們沒有重寫整個分析流程，而是把 MMPose / RTMW 輸出的 COCO-WholeBody 關鍵點轉成類似 MediaPipe 的格式，讓後續程式可以沿用。
+
+  簡化來說：
+
+  影片
+  → rtmlib / RTMPose-RTMW whole-body model
+  → COCO-WholeBody keypoints
+  → 轉成 MediaPipe 33 landmarks
+  → 進入原本的深蹲分析 pipeline
+
+  整句話可以翻成比較自然的中文：
+
+  > 本研究使用全身姿態估計後端，具體而言，是透過 rtmlib 執行 RTMPose/RTMW 系列的全身姿態模型。模型會輸出 COCO-WholeBody 格式的人體關鍵點，接著再將這些關鍵點轉換為與 MediaPipe 相容的 33-
+  > landmark 格式，以便銜接既有的姿態特徵擷取與動作品質分析流程。
+
 ### 為什麼使用 MMPose whole-body
 
 這次選擇 MMPose `wholebody` inferencer，而不是只用 body-only pose model，主要原因是既有 squat 分析邏輯不只需要 hips、knees、ankles，也需要 heel 與 toe/foot landmarks。
