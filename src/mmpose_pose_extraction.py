@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
+import importlib.util
 import json
+import pkgutil
+import sys
+import types
+import zipimport
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Sequence
@@ -275,15 +281,119 @@ def select_primary_instance(instances: Sequence[dict[str, Any]]) -> dict[str, An
     return max(instances, key=instance_score)
 
 
+def install_python312_pkg_resources_shim() -> None:
+    if not hasattr(pkgutil, "ImpImporter"):
+        pkgutil.ImpImporter = zipimport.zipimporter  # type: ignore[attr-defined]
+    if "pkg_resources" in sys.modules:
+        return
+
+    class DistributionNotFound(Exception):
+        pass
+
+    class Distribution:
+        def __init__(self, package: str):
+            spec = importlib.util.find_spec(package)
+            if spec is None:
+                raise DistributionNotFound(package)
+            if spec.submodule_search_locations:
+                package_dir = Path(next(iter(spec.submodule_search_locations)))
+                self.location = str(package_dir.parent)
+            elif spec.origin:
+                self.location = str(Path(spec.origin).parent)
+            else:
+                raise DistributionNotFound(package)
+            try:
+                self.version = importlib.metadata.version(package)
+            except importlib.metadata.PackageNotFoundError:
+                self.version = "0.0.0"
+
+    def get_distribution(package: str) -> Distribution:
+        return Distribution(package)
+
+    pkg_resources = types.ModuleType("pkg_resources")
+    pkg_resources.DistributionNotFound = DistributionNotFound
+    pkg_resources.get_distribution = get_distribution
+    sys.modules["pkg_resources"] = pkg_resources
+
+
+def install_xtcocotools_shim() -> None:
+    if "xtcocotools.coco" in sys.modules:
+        return
+    try:
+        import pycocotools.coco as coco
+        import pycocotools.cocoeval as cocoeval
+        import pycocotools.mask as mask
+    except ImportError:
+        return
+
+    xtcocotools = types.ModuleType("xtcocotools")
+    xtcocotools.coco = coco
+    xtcocotools.cocoeval = cocoeval
+    xtcocotools.mask = mask
+    sys.modules.setdefault("xtcocotools", xtcocotools)
+    sys.modules.setdefault("xtcocotools.coco", coco)
+    sys.modules.setdefault("xtcocotools.cocoeval", cocoeval)
+    sys.modules.setdefault("xtcocotools.mask", mask)
+
+
 def import_mmpose_inferencer():
+    install_python312_pkg_resources_shim()
+    install_xtcocotools_shim()
     try:
         from mmpose.apis import MMPoseInferencer
     except ImportError as exc:  # pragma: no cover - exercised in Colab/runtime only
         raise SystemExit(
-            "MMPose is not installed. In Colab, install it with openmim/mmcv/mmdet/mmpose "
-            "before running MMPose extraction."
+            "Could not import `MMPoseInferencer` from `mmpose.apis`.\n"
+            "In Colab, rerun the notebook install cell, restart the runtime if needed, then verify with:\n"
+            "  from mmpose.apis import MMPoseInferencer\n"
+            f"Original import error: {exc}"
         ) from exc
     return MMPoseInferencer
+
+
+def import_rtmlib_wholebody():
+    try:
+        from rtmlib import Wholebody
+    except ImportError as exc:  # pragma: no cover - exercised in Colab/runtime only
+        raise SystemExit(
+            "Could not import `Wholebody` from `rtmlib`.\n"
+            "In Colab, install it with:\n"
+            "  pip install rtmlib onnxruntime-gpu\n"
+            f"Original import error: {exc}"
+        ) from exc
+    return Wholebody
+
+
+def rtmlib_device(value: str) -> str:
+    if value.startswith("cuda"):
+        return "cuda"
+    return value
+
+
+def rtmlib_mode(value: str) -> str:
+    if value in {"performance", "lightweight", "balanced"}:
+        return value
+    return "balanced"
+
+
+def rtmlib_primary_pose(keypoints: object, scores: object) -> tuple[np.ndarray | None, np.ndarray | None, float]:
+    keypoint_array = np.asarray(keypoints, dtype=np.float32)
+    score_array = np.asarray(scores, dtype=np.float32)
+    if keypoint_array.ndim == 2:
+        keypoint_array = keypoint_array[None, ...]
+    if score_array.ndim == 1:
+        score_array = score_array[None, ...]
+    if keypoint_array.ndim != 3 or keypoint_array.shape[0] == 0:
+        return None, None, 0.0
+
+    pose_scores: list[float] = []
+    for index in range(keypoint_array.shape[0]):
+        current_scores = score_array[index] if index < score_array.shape[0] else np.asarray([], dtype=np.float32)
+        finite_scores = current_scores[np.isfinite(current_scores)]
+        pose_scores.append(float(np.mean(finite_scores)) if finite_scores.size else 0.0)
+    primary_index = int(np.argmax(pose_scores))
+    primary_scores = score_array[primary_index] if primary_index < score_array.shape[0] else None
+    return keypoint_array[primary_index], primary_scores, pose_scores[primary_index]
 
 
 def process_video(
@@ -293,6 +403,7 @@ def process_video(
     model: str = "wholebody",
     device: str = "cuda:0",
     bbox_thr: float = 0.3,
+    runtime: str = "rtmlib",
 ) -> bool:
     if not input_path.exists():
         print(f"Error: File not found at {input_path}")
@@ -308,8 +419,17 @@ def process_video(
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    MMPoseInferencer = import_mmpose_inferencer()
-    inferencer = MMPoseInferencer(pose2d=model, device=device, show_progress=False)
+    if runtime == "mmpose":
+        MMPoseInferencer = import_mmpose_inferencer()
+        inferencer = MMPoseInferencer(pose2d=model, device=device, show_progress=False)
+    else:
+        Wholebody = import_rtmlib_wholebody()
+        inferencer = Wholebody(
+            to_openpose=False,
+            mode=rtmlib_mode(model),
+            backend="onnxruntime",
+            device=rtmlib_device(device),
+        )
 
     pose_data: dict[str, Any] = {
         "metadata": {
@@ -317,7 +437,8 @@ def process_video(
             "width": width,
             "height": height,
             "total_frames": total_frames,
-            "backend": "mmpose",
+            "backend": "mmpose" if runtime == "mmpose" else "rtmlib",
+            "pose_runtime": runtime,
             "mmpose_model": model,
             "keypoint_schema": "coco_wholebody_133_to_mediapipe_33",
             "world_landmarks": False,
@@ -333,18 +454,29 @@ def process_video(
             if not success:
                 break
 
-            try:
-                result = next(inferencer(image, bbox_thr=bbox_thr, return_vis=False))
-            except StopIteration:
-                result = {"predictions": []}
-            instance = select_primary_instance(prediction_instances(result))
             frame_data: dict[str, Any] = {
                 "frame_index": frame_index,
                 "landmarks": None,
                 "world_landmarks": None,
             }
-            if instance is not None:
-                keypoints, scores = instance_keypoints(instance)
+            if runtime == "mmpose":
+                try:
+                    result = next(inferencer(image, bbox_thr=bbox_thr, return_vis=False))
+                except StopIteration:
+                    result = {"predictions": []}
+                instance = select_primary_instance(prediction_instances(result))
+                if instance is not None:
+                    keypoints, scores = instance_keypoints(instance)
+                    if keypoints is not None:
+                        frame_data["landmarks"] = coco_wholebody_to_mediapipe_landmarks(
+                            keypoints,
+                            scores,
+                            width,
+                            height,
+                        )
+                        frame_data["backend_pose_score"] = instance_score(instance)
+            else:
+                keypoints, scores, pose_score = rtmlib_primary_pose(*inferencer(image))
                 if keypoints is not None:
                     frame_data["landmarks"] = coco_wholebody_to_mediapipe_landmarks(
                         keypoints,
@@ -352,7 +484,7 @@ def process_video(
                         width,
                         height,
                     )
-                    frame_data["backend_pose_score"] = instance_score(instance)
+                    frame_data["backend_pose_score"] = pose_score
 
             pose_data["frames"].append(frame_data)
             frame_index += 1
@@ -390,7 +522,17 @@ def main() -> None:
     parser.add_argument("--splits", type=parse_split_names, default=list(SPLIT_NAMES))
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
-    parser.add_argument("--model", default="wholebody", help="MMPose inferencer model alias or config path.")
+    parser.add_argument(
+        "--runtime",
+        choices=("rtmlib", "mmpose"),
+        default="rtmlib",
+        help="Pose runtime. rtmlib is the Colab Python 3.12-friendly default.",
+    )
+    parser.add_argument(
+        "--model",
+        default="balanced",
+        help="For --runtime rtmlib: performance, lightweight, or balanced. For --runtime mmpose: model alias/config.",
+    )
     parser.add_argument("--device", default="cuda:0", help="MMPose device, e.g. cuda:0 or cpu.")
     parser.add_argument("--bbox-thr", type=float, default=0.3)
     args = parser.parse_args()
@@ -423,6 +565,7 @@ def main() -> None:
             model=args.model,
             device=args.device,
             bbox_thr=args.bbox_thr,
+            runtime=args.runtime,
         ):
             processed += 1
         else:
