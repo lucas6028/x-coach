@@ -9,6 +9,7 @@ from typing import Any, Iterable, Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_DATASET_ROOT = REPO_ROOT / "data" / "Fitness-AQA_dataset_release" / "Squat" / "Labeled_Dataset"
 
 
 @dataclass(frozen=True)
@@ -34,13 +35,13 @@ DEFAULT_CLASSES = (
         class_id="knees_forward",
         fault_id="knees_forward",
         label_kind="intervals",
-        label_path=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "Labels" / "error_knees_forward.json",
+        label_path=DEFAULT_DATASET_ROOT / "Labels" / "error_forward.json",
     ),
     ClassSpec(
         class_id="knees_inward",
         fault_id="knees_inward",
         label_kind="intervals",
-        label_path=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "Labels" / "error_knees_inward.json",
+        label_path=DEFAULT_DATASET_ROOT / "Labels" / "error_inward.json",
     ),
     ClassSpec(
         class_id="shallow_depth",
@@ -59,6 +60,13 @@ DEFAULT_CLASSES = (
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def resolve_existing_path(path: Path, candidates: Sequence[Path] = ()) -> Path | None:
+    for candidate in (path, *candidates):
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def load_view_metadata(path: Path) -> dict[tuple[str, str], dict[str, str]]:
@@ -309,18 +317,35 @@ def main() -> None:
         type=Path,
         default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "pose_rule_validation_metrics.csv",
     )
+    parser.add_argument("--forward-labels", type=Path, default=DEFAULT_CLASSES[0].label_path)
+    parser.add_argument("--inward-labels", type=Path, default=DEFAULT_CLASSES[1].label_path)
+    parser.add_argument("--shallow-labels", type=Path, default=DEFAULT_CLASSES[2].label_path)
     args = parser.parse_args()
 
     predictions = load_predictions(args.detections_dir, args.view_metadata)
     if not predictions:
         raise SystemExit(f"No detection JSON files found under {args.detections_dir}")
 
+    class_specs = (
+        ClassSpec("knees_forward", "knees_forward", "intervals", args.forward_labels),
+        ClassSpec("knees_inward", "knees_inward", "intervals", args.inward_labels),
+        ClassSpec("shallow_depth", "shallow_depth", "frame_labels", args.shallow_labels),
+    )
+    label_fallbacks = {
+        "knees_forward": (DEFAULT_DATASET_ROOT / "Labels" / "error_knees_forward.json",),
+        "knees_inward": (DEFAULT_DATASET_ROOT / "Labels" / "error_knees_inward.json",),
+    }
+
     rows: list[dict[str, Any]] = []
-    for spec in DEFAULT_CLASSES:
+    for spec in class_specs:
+        label_path = resolve_existing_path(spec.label_path, label_fallbacks.get(spec.class_id, ()))
+        if label_path is None:
+            print(f"Warning: skipping {spec.class_id}; label file not found: {spec.label_path}")
+            continue
         if spec.label_kind == "intervals":
-            labels = load_interval_labels(spec.label_path)
+            labels = load_interval_labels(label_path)
         else:
-            labels = load_frame_labels(spec.label_path, predictions)
+            labels = load_frame_labels(label_path, predictions)
 
         video_ids = sorted(set(predictions) & set(labels))
         overall = evaluate_group(video_ids, predictions, labels, spec.fault_id)
