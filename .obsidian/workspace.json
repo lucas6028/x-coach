@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "notes/mmpose_pose_comparison_update.md",
+                "file": "notes/videomae_classifier_experiment_summary.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "mmpose_pose_comparison_update"
+              "title": "videomae_classifier_experiment_summary"
             }
           }
         ]
@@ -185,17 +185,20 @@
   },
   "active": "4a84f3defeee6ae7",
   "lastOpenFiles": [
-    "notes/UI-PRMD.md",
+    "notes/pose_only_classifier_experiment_summary.md",
+    "notes/videomae_classifier_experiment_summary.md",
+    "notes/mmpose_result_analysis_and_backend_comparison.md",
+    "data/Fit3D/Unconfirmed 578181.crdownload",
+    "data/Fit3D/fit3d_info.json",
+    "data/Fit3D/fit3d_template.json",
+    "data/Fit3D/Unconfirmed 536274.crdownload",
+    "data/Fit3D/Unconfirmed 687640.crdownload",
+    "data/Fit3D",
     "notes/mmpose_pose_comparison_update.md",
+    "notes/UI-PRMD.md",
     "tests/__pycache__/test_compare_pose_backends.cpython-312.pyc",
     "tests/__pycache__/test_mmpose_pose_extraction.cpython-312.pyc",
     "scripts/__pycache__/compare_pose_backends.cpython-312.pyc",
-    "scripts/__pycache__/run_mmpose_pose_extraction.cpython-312.pyc",
-    "src/__pycache__/mmpose_pose_extraction.cpython-312.pyc",
-    "tests/test_compare_pose_backends.py",
-    "tests/test_mmpose_pose_extraction.py",
-    "notebooks/run_mmpose_pose_comparison.ipynb",
-    "scripts/compare_pose_backends.py",
-    "scripts/run_mmpose_pose_extraction.py"
+    "scripts/__pycache__/run_mmpose_pose_extraction.cpython-312.pyc"
   ]
 }
