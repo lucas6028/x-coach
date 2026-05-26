@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "notes/videomae_classifier_experiment_summary.md",
+                "file": "notes/dataset-summary.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "videomae_classifier_experiment_summary"
+              "title": "dataset-summary"
             }
           }
         ]
@@ -185,20 +185,20 @@
   },
   "active": "4a84f3defeee6ae7",
   "lastOpenFiles": [
-    "notes/pose_only_classifier_experiment_summary.md",
-    "notes/videomae_classifier_experiment_summary.md",
     "notes/mmpose_result_analysis_and_backend_comparison.md",
-    "data/Fit3D/Unconfirmed 578181.crdownload",
-    "data/Fit3D/fit3d_info.json",
-    "data/Fit3D/fit3d_template.json",
-    "data/Fit3D/Unconfirmed 536274.crdownload",
-    "data/Fit3D/Unconfirmed 687640.crdownload",
-    "data/Fit3D",
     "notes/mmpose_pose_comparison_update.md",
-    "notes/UI-PRMD.md",
-    "tests/__pycache__/test_compare_pose_backends.cpython-312.pyc",
-    "tests/__pycache__/test_mmpose_pose_extraction.cpython-312.pyc",
-    "scripts/__pycache__/compare_pose_backends.cpython-312.pyc",
-    "scripts/__pycache__/run_mmpose_pose_extraction.cpython-312.pyc"
+    "notes/videomae_classifier_experiment_summary.md",
+    "videomae_feature_classifier/checkpoints/videomae_classifier_max2.pt",
+    "videomae_feature_classifier/checkpoints/videomae_classifier_max.pt",
+    "videomae_feature_classifier/metrics/knees_inward_seed5_metrics.json",
+    "videomae_feature_classifier/metrics/knees_inward_seed4_metrics.json",
+    "videomae_feature_classifier/metrics/knees_inward_seed3_metrics.json",
+    "videomae_feature_classifier/metrics/knees_inward_seed2_metrics.json",
+    "videomae_feature_classifier/metrics/knees_inward_seed1_metrics.json",
+    "videomae_feature_classifier/metrics/knees_forward_seed5_metrics.json",
+    "videomae_feature_classifier/metrics/knees_forward_seed4_metrics.json",
+    "videomae_feature_classifier/metrics/knees_forward_seed3_metrics.json",
+    "notes/pose_only_classifier_experiment_summary.md",
+    "notes/UI-PRMD.md"
   ]
 }

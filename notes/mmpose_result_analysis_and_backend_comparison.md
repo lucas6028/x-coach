@@ -70,7 +70,7 @@ Classifier interpretation:
 
 | Model / backend | combined bal. acc. | knees_forward bal. acc. | knees_inward bal. acc. | Main read |
 | --- | ---: | ---: | ---: | --- |
-| VideoMAE-only | ~0.53-0.59 | ~0.51-0.56 | ~0.48-0.61 | Weak research baseline; generic RGB embedding is not enough. |
+| VideoMAE-only | 0.555 avg, 0.532-0.584 | 0.524 avg, 0.509-0.541 | 0.539 avg, 0.483-0.608 | Weak research baseline; generic RGB embedding is not enough. |
 | MediaPipe pose-only, no normalization | 0.581 | 0.573 | 0.570 | Biomechanically meaningful, but over-predicts error. |
 | MediaPipe pose-only, normalized | 0.635 | 0.615 | 0.608 | Best current MediaPipe baseline; better specificity. |
 | MMPose pose-only, normalized | 0.628 | 0.627 | 0.702 | Best inward-knee detector; stronger recall but lower specificity. |
@@ -97,4 +97,3 @@ The strongest next experimental direction is not choosing only one backend. A be
 2. Keep normalized MMPose pose-only as the stronger inward-knee baseline.
 3. Add backend-specific rule thresholds before making rule-based claims.
 4. Compare late fusion or ensemble logic: MediaPipe for specificity, MMPose for inward recall, and VideoMAE only as supporting RGB context.
-

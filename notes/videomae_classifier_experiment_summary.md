@@ -81,6 +81,16 @@ always-positive baseline 的 test F1 約 0.83，已經接近某些模型結果�
 
 多 seed grid 中，combined classifier 的 test balanced accuracy 大約在 0.53 到 0.58 左右。knees_forward 多數也落在約 0.51 到 0.56。knees_inward 有單次 selected threshold 約 0.61，但其他 seed 常落在約 0.48 到 0.55，顯示不穩定。
 
+目前 repo 中的 `videomae_feature_classifier/metrics/experiment_summary.csv` 已保留這次 VideoMAE feature classifier 的完整 grid result。以下數字使用 test split 的 `selected_threshold`，也就是 validation balanced accuracy 選出的 threshold：
+
+| Label mode | Test balanced accuracy 平均 | 範圍 | Specificity 平均 | Recall 平均 | 解讀 |
+| --- | ---: | ---: | ---: | ---: | --- |
+| combined | 0.555 | 0.532-0.584 | 0.647 | 0.463 | 目前最合理的 VideoMAE-only baseline，但仍只略高於隨機基準。 |
+| knees_forward | 0.524 | 0.509-0.541 | 0.573 | 0.475 | 分開訓練後沒有優於 combined，整體訊號偏弱。 |
+| knees_inward | 0.539 | 0.483-0.608 | 0.728 | 0.350 | 單一 seed 可到 0.608，但 recall 偏低且跨 seed 不穩。 |
+
+若使用固定 threshold 0.5，F1 常會變高，但 specificity 與 recall 的取捨不穩定。例如 combined seed 2 到 seed 4 的 recall 約 0.78-0.90，但 specificity 只有約 0.15-0.39。這再次確認本實驗不應以 positive-class F1 作為主要結論。
+
 ## 目前建議使用的 Baseline
 
 目前 baseline 建議設定為：
@@ -145,15 +155,15 @@ Colab 實驗會產生的主要輸出：
 | 加入 baseline 與 specificity | 回報 always-positive、always-negative、specificity、balanced accuracy | always-positive baseline test F1 約 0.83；balanced accuracy 為 0.50 | 證明高 F1 可能只是因為資料偏正類，不代表模型真的有效。 |
 | 改用 balanced accuracy 選 threshold | threshold objective 改為 balanced accuracy | 某次 selected threshold test specificity 約 0.63；recall 約 0.42；balanced accuracy 約 0.53 | threshold 可降低 false positive，但 recall 下降，整體泛化仍弱。 |
 | 加入 regularization 與 early stopping | lr 3e-4、hidden dim 128、dropout 0.4、weight decay 0.01、patience 5 | combined 單次 test balanced accuracy 約 0.59；specificity 約 0.65；recall 約 0.54 | 模型不再只是預測正類，正常影片辨識改善，但仍不是強模型。 |
-| 多 seed / 多 label mode grid | combined、knees_forward、knees_inward，各跑 5 個 seed | combined test balanced accuracy 約 0.53 到 0.58；knees_forward 約 0.51 到 0.56；knees_inward 多數約 0.48 到 0.55，單次約 0.61 | 分開訓練錯誤類型尚未穩定優於 combined classifier。 |
+| 多 seed / 多 label mode grid | combined、knees_forward、knees_inward，各跑 5 個 seed | selected threshold test balanced accuracy：combined 平均 0.555、範圍 0.532-0.584；knees_forward 平均 0.524、範圍 0.509-0.541；knees_inward 平均 0.539、範圍 0.483-0.608 | 分開訓練錯誤類型尚未穩定優於 combined classifier。 |
 
 各 label mode 的整體比較如下：
 
 | Label mode | Test balanced accuracy 大致範圍 | 穩定性 | 解讀 |
 | --- | --- | --- | --- |
-| combined | 約 0.53 到 0.58 | 相對穩定 | 目前較合理的 baseline，但只略高於隨機基準 0.50。 |
-| knees_forward | 約 0.51 到 0.56 | 普通 | 沒有穩定優於 combined。 |
-| knees_inward | 多數約 0.48 到 0.55，單次約 0.61 | 不穩定 | 類別非常不平衡，單次好結果不足以代表泛化能力。 |
+| combined | 0.532 到 0.584，平均 0.555 | 相對穩定 | 目前較合理的 baseline，但只略高於隨機基準 0.50。 |
+| knees_forward | 0.509 到 0.541，平均 0.524 | 普通 | 沒有穩定優於 combined。 |
+| knees_inward | 0.483 到 0.608，平均 0.539 | 不穩定 | 類別非常不平衡，單次好結果不足以代表泛化能力。 |
 
 各指標在本實驗中的用途如下：
 

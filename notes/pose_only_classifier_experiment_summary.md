@@ -111,7 +111,7 @@ pose-only 特徵使用 MediaPipe lower-body landmarks，計算每個 frame 的�
 
 ## 與 VideoMAE-only 的比較
 
-VideoMAE-only 多 seed 實驗中，combined classifier 的 test balanced accuracy 大致落在 0.53 到 0.58，knees_forward 大多約 0.51 到 0.56，knees_inward 多數約 0.48 到 0.55。
+VideoMAE-only 多 seed 實驗中，test selected-threshold balanced accuracy 分別為：combined 平均 0.555、範圍 0.532 到 0.584；knees_forward 平均 0.524、範圍 0.509 到 0.541；knees_inward 平均 0.539、範圍 0.483 到 0.608。
 
 pose-only 的結果顯示：
 
