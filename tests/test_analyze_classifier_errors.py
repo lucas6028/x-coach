@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from scripts.analyze_classifier_errors import (
+from scripts.video.analyze_classifier_errors import (
     build_error_rows,
     collect_predictions,
     infer_seed,

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.videomae_video_classifier import (
+from src.video.videomae_video_classifier import (
     FeatureDataset,
     Sample,
     compute_feature_normalization,

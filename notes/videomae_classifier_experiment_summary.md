@@ -112,8 +112,8 @@ always-positive baseline 的 test F1 約 0.83，已經接近某些模型結果�
 
 主要實作檔案：
 
-- `src/videomae_video_classifier.py`
-- `scripts/run_videomae_experiment_grid.py`
+- `src/video/videomae_video_classifier.py`
+- `scripts/video/run_videomae_experiment_grid.py`
 - `notebooks/run_videomae_video_classifier.ipynb`
 
 Colab 實驗會產生的主要輸出：

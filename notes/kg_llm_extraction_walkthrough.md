@@ -17,6 +17,6 @@ Ran the Python script locally to ensure there are no compilation errors or missi
 To run the pipeline and generate `kg_extracted.json` & update the LPG `sports_kg.graphml`, set your API key environment variable and run:
 ```powershell
 $env:GOOGLE_API_KEY="your-gemini-key"
-python src/kg/extract_kg.py [path_to_document]
+python src/knowledge/extract_kg.py [path_to_document]
 ```
 

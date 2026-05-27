@@ -4,14 +4,14 @@
 
 在 VideoMAE feature classifier 的 test balanced accuracy 多數只略高於隨機基準後，新增 pose-only baseline。目標是確認以 MediaPipe landmarks 轉出的幾何特徵，是否比單一 VideoMAE video embedding 更適合判斷深蹲錯誤。
 
-目前 pose-only pipeline 先把 labeled videos 轉成 pose JSON，再把每支影片轉成固定長度的 `.npz` feature bundle。輸出的 `.npz` 保留 `video_feature` 欄位，因此可以直接重用既有的 `src/videomae_video_classifier.py` 和 `scripts/run_videomae_experiment_grid.py`。
+目前 pose-only pipeline 先把 labeled videos 轉成 pose JSON，再把每支影片轉成固定長度的 `.npz` feature bundle。輸出的 `.npz` 保留 `video_feature` 欄位，因此可以直接重用既有的 `src/video/videomae_video_classifier.py` 和 `scripts/video/run_videomae_experiment_grid.py`。
 
 主要新增或使用的檔案：
 
-- `scripts/run_pose_extraction.py`
-- `src/pose_feature_extraction.py`
-- `scripts/run_pose_feature_extraction.py`
-- `scripts/run_videomae_experiment_grid.py`
+- `scripts/pose/run_pose_extraction.py`
+- `src/pose/pose_feature_extraction.py`
+- `scripts/pose/run_pose_feature_extraction.py`
+- `scripts/video/run_videomae_experiment_grid.py`
 
 ## Pose Feature 設計
 
@@ -159,13 +159,13 @@ pose-only 的結果顯示：
 
 已新增 rule-based view estimation pipeline：
 
-- `src/view_estimation.py`
-- `scripts/run_view_estimation.py`
+- `src/pose/view_estimation.py`
+- `scripts/pose/run_view_estimation.py`
 
 使用方式：
 
 ```bash
-python scripts/run_view_estimation.py
+python scripts/pose/run_view_estimation.py
 ```
 
 預設輸出：
@@ -208,7 +208,7 @@ data/Squat/Labeled_Dataset/view_metadata.csv
 
 已使用 `data/Squat/pose_only/combined_pose_only_predictions.csv` 與 `data/Squat/Labeled_Dataset/view_metadata.csv` 做 view-aware prediction analysis。分析腳本為：
 
-- `scripts/analyze_predictions_by_view.py`
+- `scripts/pose/analyze_predictions_by_view.py`
 
 輸出檔案：
 
@@ -249,7 +249,7 @@ data/Squat/pose_only/combined_pose_only_by_view.csv
 已將多 seed pose-only predictions 依 `view_metadata.csv` 分組分析。分析命令：
 
 ```bash
-python scripts/analyze_predictions_by_view.py \
+python scripts/pose/analyze_predictions_by_view.py \
   --predictions-dir data/Squat/pose_only/predictions-20260510T034739Z-3-001/predictions \
   --view-metadata data/Squat/Labeled_Dataset/view_metadata.csv \
   --output data/Squat/pose_only/multiseed_pose_only_by_view.csv \

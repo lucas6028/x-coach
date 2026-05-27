@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from src.mmpose_pose_extraction import (
+from src.pose.mmpose_pose_extraction import (
     LANDMARK_COUNT,
     coco_wholebody_to_mediapipe_landmarks,
     prediction_instances,

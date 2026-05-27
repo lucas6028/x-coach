@@ -1,0 +1,889 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import math
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Iterable, Sequence
+
+import numpy as np
+
+from src.knowledge.graph_retrieval import DEFAULT_GRAPH_FILE, retrieve_graph_context
+from src.pose.view_estimation import estimate_view_for_pose
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_RAG_DB_DIR = REPO_ROOT / "data" / "rag" / "vector_db"
+SPLIT_NAMES = ("train", "val", "test")
+VISIBILITY_THRESHOLD = 0.50
+LANDMARK_COUNT = 33
+
+LEFT_SHOULDER = 11
+RIGHT_SHOULDER = 12
+LEFT_HIP = 23
+RIGHT_HIP = 24
+LEFT_KNEE = 25
+RIGHT_KNEE = 26
+LEFT_ANKLE = 27
+RIGHT_ANKLE = 28
+LEFT_HEEL = 29
+RIGHT_HEEL = 30
+LEFT_FOOT_INDEX = 31
+RIGHT_FOOT_INDEX = 32
+
+LOWER_BODY_LANDMARKS = (
+    LEFT_HIP,
+    RIGHT_HIP,
+    LEFT_KNEE,
+    RIGHT_KNEE,
+    LEFT_ANKLE,
+    RIGHT_ANKLE,
+    LEFT_HEEL,
+    RIGHT_HEEL,
+    LEFT_FOOT_INDEX,
+    RIGHT_FOOT_INDEX,
+)
+
+# Thresholds and tunable constants for rule detection
+KNEE_FORWARD_MILD = 0.10  # ratio above which knee-forward is considered present
+KNEE_FORWARD_SEVERE = 0.30  # ratio at or above which knee-forward is severe
+SIDE_VIEW_CONF_THRESHOLD = 0.20  # min view confidence to treat a 'side' view as reliable
+
+
+
+@dataclass(frozen=True)
+class FrameMetrics:
+    frame_index: int
+    time: float
+    phase: str
+    valid: bool
+    lower_body_visibility: float
+    avg_knee_angle: float
+    left_knee_angle: float
+    right_knee_angle: float
+    left_hip_angle: float
+    right_hip_angle: float
+    left_ankle_angle: float
+    right_ankle_angle: float
+    hip_minus_knee_y: float
+    knee_width_to_ankle_width: float
+    knee_forward_ratio: float
+    torso_lean_deg: float
+    heel_height_delta: float
+
+
+@dataclass(frozen=True)
+class PoseRuleDetection:
+    fault_id: str
+    fault_name: str
+    kg_query: str
+    retrieval_mode: str
+    severity: float
+    confidence: float
+    observability: str
+    start_time: float
+    end_time: float
+    start_frame: int
+    end_frame: int
+    peak_frame: int
+    phase: str
+    evidence: dict[str, float | int | str]
+
+
+@dataclass(frozen=True)
+class PoseRuleRequest:
+    split_name: str
+    video_id: str
+    pose_json_path: Path
+    output_path: Path
+
+
+def load_pose_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a JSON object in {path}, got {type(data).__name__}.")
+    return data
+
+
+def landmarks_to_array(landmarks: object) -> np.ndarray | None:
+    if not isinstance(landmarks, list) or len(landmarks) < LANDMARK_COUNT:
+        return None
+
+    array = np.full((LANDMARK_COUNT, 4), np.nan, dtype=np.float32)
+    for index, landmark in enumerate(landmarks[:LANDMARK_COUNT]):
+        if not isinstance(landmark, dict):
+            continue
+        try:
+            array[index, 0] = float(landmark.get("x", np.nan))
+            array[index, 1] = float(landmark.get("y", np.nan))
+            array[index, 2] = float(landmark.get("z", np.nan))
+            array[index, 3] = float(landmark.get("visibility", np.nan))
+        except (TypeError, ValueError):
+            continue
+    return array
+
+
+def visible_point(points: np.ndarray | None, index: int, dims: int = 3) -> np.ndarray | None:
+    if points is None:
+        return None
+    values = points[index, :dims]
+    visibility = points[index, 3]
+    if not np.all(np.isfinite(values)) or not np.isfinite(visibility) or visibility < VISIBILITY_THRESHOLD:
+        return None
+    return values.astype(np.float32, copy=False)
+
+
+def distance(points: np.ndarray | None, a: int, b: int, dims: int = 2) -> float:
+    pa = visible_point(points, a, dims=dims)
+    pb = visible_point(points, b, dims=dims)
+    if pa is None or pb is None:
+        return np.nan
+    return float(np.linalg.norm(pa - pb))
+
+
+def angle_degrees(points: np.ndarray | None, a: int, b: int, c: int) -> float:
+    pa = visible_point(points, a, dims=3)
+    pb = visible_point(points, b, dims=3)
+    pc = visible_point(points, c, dims=3)
+    if pa is None or pb is None or pc is None:
+        return np.nan
+
+    ba = pa - pb
+    bc = pc - pb
+    denominator = float(np.linalg.norm(ba) * np.linalg.norm(bc))
+    if denominator <= 1e-8:
+        return np.nan
+    cosine = float(np.clip(np.dot(ba, bc) / denominator, -1.0, 1.0))
+    return float(np.degrees(np.arccos(cosine)))
+
+
+def midpoint(points: np.ndarray | None, left_index: int, right_index: int, dims: int = 2) -> np.ndarray | None:
+    left = visible_point(points, left_index, dims=dims)
+    right = visible_point(points, right_index, dims=dims)
+    if left is None or right is None:
+        return None
+    return (left + right) / 2.0
+
+
+def line_angle_from_vertical(top: np.ndarray | None, bottom: np.ndarray | None) -> float:
+    if top is None or bottom is None:
+        return np.nan
+    delta = top[:2] - bottom[:2]
+    return float(np.degrees(np.arctan2(abs(delta[0]), abs(delta[1]) + 1e-8)))
+
+
+def mean_visibility(points: np.ndarray | None, indices: Sequence[int]) -> float:
+    if points is None:
+        return 0.0
+    values = points[list(indices), 3]
+    finite = values[np.isfinite(values)]
+    if finite.size == 0:
+        return 0.0
+    return float(np.mean(finite))
+
+
+def mean_finite(values: Sequence[float]) -> float:
+    finite = [value for value in values if np.isfinite(value)]
+    if not finite:
+        return np.nan
+    return float(np.mean(finite))
+
+
+def centered_median(values: Sequence[float], window: int = 5) -> np.ndarray:
+    array = np.asarray(values, dtype=np.float32)
+    if array.size == 0:
+        return array
+    radius = max(0, window // 2)
+    smoothed = np.full(array.shape, np.nan, dtype=np.float32)
+    for index in range(array.size):
+        start = max(0, index - radius)
+        end = min(array.size, index + radius + 1)
+        finite = array[start:end][np.isfinite(array[start:end])]
+        smoothed[index] = float(np.median(finite)) if finite.size else np.nan
+    return smoothed
+
+
+def knee_forward_ratio(points: np.ndarray | None, knee_index: int, ankle_index: int, toe_index: int) -> float:
+    knee = visible_point(points, knee_index, dims=2)
+    ankle = visible_point(points, ankle_index, dims=2)
+    toe = visible_point(points, toe_index, dims=2)
+    if knee is None or ankle is None or toe is None:
+        return np.nan
+    foot_vector = toe - ankle
+    foot_length = float(np.linalg.norm(foot_vector))
+    if foot_length <= 1e-8:
+        return np.nan
+    projection = float(np.dot(knee - ankle, foot_vector / foot_length))
+    return (projection - foot_length) / foot_length
+
+
+def raw_frame_metrics(frame: object, fps: float) -> dict[str, float | int | bool]:
+    if not isinstance(frame, dict):
+        return {"valid": False}
+
+    points = landmarks_to_array(frame.get("landmarks"))
+    frame_index = int(frame.get("frame_index", 0) or 0)
+    time = frame_index / fps if fps > 0 else 0.0
+    required = (LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE)
+    valid = all(visible_point(points, index, dims=2) is not None for index in required)
+    if not valid:
+        return {
+            "frame_index": frame_index,
+            "time": time,
+            "valid": False,
+            "lower_body_visibility": mean_visibility(points, LOWER_BODY_LANDMARKS),
+        }
+
+    left_knee_angle = angle_degrees(points, LEFT_HIP, LEFT_KNEE, LEFT_ANKLE)
+    right_knee_angle = angle_degrees(points, RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE)
+    left_hip_angle = angle_degrees(points, LEFT_SHOULDER, LEFT_HIP, LEFT_KNEE)
+    right_hip_angle = angle_degrees(points, RIGHT_SHOULDER, RIGHT_HIP, RIGHT_KNEE)
+    left_ankle_angle = angle_degrees(points, LEFT_KNEE, LEFT_ANKLE, LEFT_FOOT_INDEX)
+    right_ankle_angle = angle_degrees(points, RIGHT_KNEE, RIGHT_ANKLE, RIGHT_FOOT_INDEX)
+
+    hip_mid = midpoint(points, LEFT_HIP, RIGHT_HIP)
+    knee_mid = midpoint(points, LEFT_KNEE, RIGHT_KNEE)
+    shoulder_mid = midpoint(points, LEFT_SHOULDER, RIGHT_SHOULDER)
+    ankle_width = distance(points, LEFT_ANKLE, RIGHT_ANKLE, dims=2)
+    knee_width = distance(points, LEFT_KNEE, RIGHT_KNEE, dims=2)
+    knee_width_to_ankle_width = knee_width / ankle_width if np.isfinite(ankle_width) and ankle_width > 1e-8 else np.nan
+
+    left_forward = knee_forward_ratio(points, LEFT_KNEE, LEFT_ANKLE, LEFT_FOOT_INDEX)
+    right_forward = knee_forward_ratio(points, RIGHT_KNEE, RIGHT_ANKLE, RIGHT_FOOT_INDEX)
+    heel_delta_left = heel_height_delta(points, LEFT_HEEL, LEFT_FOOT_INDEX)
+    heel_delta_right = heel_height_delta(points, RIGHT_HEEL, RIGHT_FOOT_INDEX)
+
+    return {
+        "frame_index": frame_index,
+        "time": time,
+        "valid": True,
+        "lower_body_visibility": mean_visibility(points, LOWER_BODY_LANDMARKS),
+        "avg_knee_angle": mean_finite([left_knee_angle, right_knee_angle]),
+        "left_knee_angle": left_knee_angle,
+        "right_knee_angle": right_knee_angle,
+        "left_hip_angle": left_hip_angle,
+        "right_hip_angle": right_hip_angle,
+        "left_ankle_angle": left_ankle_angle,
+        "right_ankle_angle": right_ankle_angle,
+        "hip_minus_knee_y": float(hip_mid[1] - knee_mid[1]) if hip_mid is not None and knee_mid is not None else np.nan,
+        "knee_width_to_ankle_width": knee_width_to_ankle_width,
+        "knee_forward_ratio": mean_finite([left_forward, right_forward]),
+        "torso_lean_deg": line_angle_from_vertical(shoulder_mid, hip_mid),
+        "heel_height_delta": mean_finite([heel_delta_left, heel_delta_right]),
+    }
+
+
+def heel_height_delta(points: np.ndarray | None, heel_index: int, toe_index: int) -> float:
+    heel = visible_point(points, heel_index, dims=2)
+    toe = visible_point(points, toe_index, dims=2)
+    if heel is None or toe is None:
+        return np.nan
+    return float(heel[1] - toe[1])
+
+
+def assign_phases(raw_metrics: list[dict[str, float | int | bool]]) -> list[str]:
+    if not raw_metrics:
+        return []
+    hip_values = np.asarray([float(item.get("hip_minus_knee_y", np.nan)) for item in raw_metrics], dtype=np.float32)
+    knee_angles = np.asarray([float(item.get("avg_knee_angle", np.nan)) for item in raw_metrics], dtype=np.float32)
+    frame_count = len(raw_metrics)
+    valid_hips = hip_values[np.isfinite(hip_values)]
+    valid_knees = knee_angles[np.isfinite(knee_angles)]
+    if valid_hips.size == 0 and valid_knees.size == 0:
+        return ["unknown" for _ in raw_metrics]
+
+    bottom_index = int(np.nanargmin(np.where(np.isfinite(knee_angles), knee_angles, np.inf)))
+    hip_bottom_threshold = float(np.percentile(valid_hips, 70)) if valid_hips.size else np.inf
+    knee_bottom_threshold = float(np.percentile(valid_knees, 30)) if valid_knees.size else -np.inf
+    setup_cutoff = max(1, int(frame_count * 0.15))
+    lockout_cutoff = max(setup_cutoff + 1, int(frame_count * 0.85))
+
+    phases: list[str] = []
+    for index, item in enumerate(raw_metrics):
+        if not item.get("valid"):
+            phases.append("unknown")
+        elif index < setup_cutoff:
+            phases.append("setup")
+        elif index >= lockout_cutoff:
+            phases.append("lockout")
+        elif hip_values[index] >= hip_bottom_threshold or knee_angles[index] <= knee_bottom_threshold:
+            phases.append("bottom")
+        elif index < bottom_index:
+            phases.append("descent")
+        else:
+            phases.append("ascent")
+    return phases
+
+
+def compute_frame_metrics(frames: Sequence[object], fps: float) -> list[FrameMetrics]:
+    raw = [raw_frame_metrics(frame, fps=fps) for frame in frames]
+    phases = assign_phases(raw)
+    smooth_fields = {
+        name: centered_median([float(item.get(name, np.nan)) for item in raw], window=5)
+        for name in (
+            "avg_knee_angle",
+            "left_knee_angle",
+            "right_knee_angle",
+            "left_hip_angle",
+            "right_hip_angle",
+            "left_ankle_angle",
+            "right_ankle_angle",
+            "hip_minus_knee_y",
+            "knee_width_to_ankle_width",
+            "knee_forward_ratio",
+            "torso_lean_deg",
+            "heel_height_delta",
+        )
+    }
+
+    metrics: list[FrameMetrics] = []
+    for index, item in enumerate(raw):
+        metrics.append(
+            FrameMetrics(
+                frame_index=int(item.get("frame_index", index) or index),
+                time=float(item.get("time", 0.0) or 0.0),
+                phase=phases[index],
+                valid=bool(item.get("valid", False)),
+                lower_body_visibility=float(item.get("lower_body_visibility", 0.0) or 0.0),
+                avg_knee_angle=float(smooth_fields["avg_knee_angle"][index]),
+                left_knee_angle=float(smooth_fields["left_knee_angle"][index]),
+                right_knee_angle=float(smooth_fields["right_knee_angle"][index]),
+                left_hip_angle=float(smooth_fields["left_hip_angle"][index]),
+                right_hip_angle=float(smooth_fields["right_hip_angle"][index]),
+                left_ankle_angle=float(smooth_fields["left_ankle_angle"][index]),
+                right_ankle_angle=float(smooth_fields["right_ankle_angle"][index]),
+                hip_minus_knee_y=float(smooth_fields["hip_minus_knee_y"][index]),
+                knee_width_to_ankle_width=float(smooth_fields["knee_width_to_ankle_width"][index]),
+                knee_forward_ratio=float(smooth_fields["knee_forward_ratio"][index]),
+                torso_lean_deg=float(smooth_fields["torso_lean_deg"][index]),
+                heel_height_delta=float(smooth_fields["heel_height_delta"][index]),
+            )
+        )
+    return metrics
+
+
+def clip01(value: float) -> float:
+    if not np.isfinite(value):
+        return 0.0
+    return float(np.clip(value, 0.0, 1.0))
+
+
+def contiguous_true_segments(mask: Sequence[bool], min_frames: int) -> list[tuple[int, int]]:
+    segments: list[tuple[int, int]] = []
+    start: int | None = None
+    for index, value in enumerate(mask):
+        if value and start is None:
+            start = index
+        elif not value and start is not None:
+            if index - start >= min_frames:
+                segments.append((start, index - 1))
+            start = None
+    if start is not None and len(mask) - start >= min_frames:
+        segments.append((start, len(mask) - 1))
+    return segments
+
+
+def dominant_phase(metrics: Sequence[FrameMetrics]) -> str:
+    counts: dict[str, int] = {}
+    for metric in metrics:
+        counts[metric.phase] = counts.get(metric.phase, 0) + 1
+    return max(counts.items(), key=lambda item: item[1])[0] if counts else "unknown"
+
+
+def severity_from_range(value: float, mild: float, severe: float, *, lower_is_worse: bool) -> float:
+    if not np.isfinite(value):
+        return 0.0
+    if lower_is_worse:
+        return clip01((mild - value) / (mild - severe))
+    return clip01((value - mild) / (severe - mild))
+
+
+def build_detection(
+    *,
+    fault_id: str,
+    fault_name: str,
+    kg_query: str,
+    retrieval_mode: str,
+    segment_metrics: Sequence[FrameMetrics],
+    score_values: Sequence[float],
+    severity: float,
+    confidence: float,
+    observability: str,
+    evidence: dict[str, float | int | str],
+) -> PoseRuleDetection:
+    finite_scores = np.asarray(score_values, dtype=np.float32)
+    if finite_scores.size and np.isfinite(finite_scores).any():
+        peak_offset = int(np.nanargmax(np.where(np.isfinite(finite_scores), finite_scores, -np.inf)))
+    else:
+        peak_offset = 0
+    peak = segment_metrics[peak_offset]
+    start = segment_metrics[0]
+    end = segment_metrics[-1]
+    evidence = dict(evidence)
+    evidence["peak_time"] = round(peak.time, 3)
+    return PoseRuleDetection(
+        fault_id=fault_id,
+        fault_name=fault_name,
+        kg_query=kg_query,
+        retrieval_mode=retrieval_mode,
+        severity=round(clip01(severity), 4),
+        confidence=round(clip01(confidence), 4),
+        observability=observability,
+        start_time=round(start.time, 3),
+        end_time=round(end.time, 3),
+        start_frame=start.frame_index,
+        end_frame=end.frame_index,
+        peak_frame=peak.frame_index,
+        phase=dominant_phase(segment_metrics),
+        evidence=evidence,
+    )
+
+
+def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type: str, view_confidence: float) -> list[PoseRuleDetection]:
+    min_frames = max(3, int(math.ceil(max(fps, 1.0) * 0.20)))
+    detections: list[PoseRuleDetection] = []
+    observable_alignment = view_type in {"rear", "rear_oblique", "front", "front_oblique"}
+    observable_side = view_type == "side" and view_confidence >= SIDE_VIEW_CONF_THRESHOLD
+    observable_lean = view_type in {"side", "rear_oblique", "front_oblique"}
+
+    active_phases = {"descent", "bottom", "ascent"}
+    inward_mask = [
+        metric.valid
+        and metric.phase in active_phases
+        and np.isfinite(metric.knee_width_to_ankle_width)
+        and metric.knee_width_to_ankle_width < 0.82
+        for metric in metrics
+    ]
+    for start, end in contiguous_true_segments(inward_mask, min_frames):
+        segment = metrics[start : end + 1]
+        ratios = [metric.knee_width_to_ankle_width for metric in segment]
+        peak_score = [0.82 - value if np.isfinite(value) else np.nan for value in ratios]
+        min_ratio = float(np.nanmin(ratios))
+        severity = severity_from_range(min_ratio, 0.82, 0.70, lower_is_worse=True)
+        detections.append(
+            build_detection(
+                fault_id="knees_inward",
+                fault_name="Knees Inward / Knee Valgus",
+                kg_query="Knee Valgus",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=peak_score,
+                severity=severity,
+                confidence=severity * (1.0 if observable_alignment else 0.65),
+                observability="high" if observable_alignment else "medium",
+                evidence={
+                    "min_knee_width_to_ankle_width": round(min_ratio, 4),
+                    "threshold": 0.82,
+                },
+            )
+        )
+
+    forward_mask = [
+        metric.valid
+        and metric.phase in active_phases
+        and observable_side
+        and np.isfinite(metric.knee_forward_ratio)
+        and metric.knee_forward_ratio > KNEE_FORWARD_MILD
+        for metric in metrics
+    ]
+    for start, end in contiguous_true_segments(forward_mask, min_frames):
+        segment = metrics[start : end + 1]
+        ratios = [metric.knee_forward_ratio for metric in segment]
+        max_ratio = float(np.nanmax(ratios))
+        severity = severity_from_range(max_ratio, KNEE_FORWARD_MILD, KNEE_FORWARD_SEVERE, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="knees_forward",
+                fault_name="Knees Forward / Anterior Knee Translation",
+                kg_query="Anterior Knee Translation",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=ratios,
+                severity=severity,
+                confidence=severity,
+                observability="high",
+                evidence={
+                    "max_knee_forward_ratio": round(max_ratio, 4),
+                    "threshold": KNEE_FORWARD_MILD,
+                    "view_type": view_type,
+                },
+            )
+        )
+    if not observable_side:
+        side_candidates = [metric for metric in metrics if metric.valid and metric.phase in active_phases]
+        if side_candidates:
+            detections.append(
+                build_detection(
+                    fault_id="knees_forward",
+                    fault_name="Knees Forward / Anterior Knee Translation",
+                    kg_query="Anterior Knee Translation",
+                    retrieval_mode="kg",
+                    segment_metrics=side_candidates[:1],
+                    score_values=[0.0],
+                    severity=0.0,
+                    confidence=0.0,
+                    observability="low",
+                    evidence={
+                        "reason": "side view required for reliable knee-to-toe projection",
+                        "view_type": view_type,
+                        "view_confidence": round(view_confidence, 4),
+                    },
+                )
+            )
+
+    depth_mask = [
+        metric.valid
+        and metric.phase == "bottom"
+        and (
+            (np.isfinite(metric.hip_minus_knee_y) and metric.hip_minus_knee_y < -0.02)
+            or (np.isfinite(metric.avg_knee_angle) and metric.avg_knee_angle > 105.0)
+        )
+        for metric in metrics
+    ]
+    for start, end in contiguous_true_segments(depth_mask, min_frames):
+        segment = metrics[start : end + 1]
+        hip_values = [metric.hip_minus_knee_y for metric in segment]
+        knee_values = [metric.avg_knee_angle for metric in segment]
+        min_hip_depth = float(np.nanmin(hip_values))
+        max_knee_angle = float(np.nanmax(knee_values))
+        hip_severity = severity_from_range(min_hip_depth, -0.02, -0.10, lower_is_worse=True)
+        knee_severity = severity_from_range(max_knee_angle, 105.0, 125.0, lower_is_worse=False)
+        severity = max(hip_severity, knee_severity)
+        detections.append(
+            build_detection(
+                fault_id="shallow_depth",
+                fault_name="Shallow Depth",
+                kg_query="Shallow Depth",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=[max(hip_severity, knee_severity) for _ in segment],
+                severity=severity,
+                confidence=severity,
+                observability="medium" if view_type in {"rear", "rear_oblique"} else "high",
+                evidence={
+                    "min_hip_minus_knee_y": round(min_hip_depth, 4),
+                    "max_avg_knee_angle": round(max_knee_angle, 2),
+                    "hip_threshold": -0.02,
+                    "knee_angle_threshold": 105.0,
+                },
+            )
+        )
+
+    lean_mask = [
+        metric.valid and np.isfinite(metric.torso_lean_deg) and metric.torso_lean_deg > 35.0
+        for metric in metrics
+    ]
+    for start, end in contiguous_true_segments(lean_mask, min_frames):
+        segment = metrics[start : end + 1]
+        values = [metric.torso_lean_deg for metric in segment]
+        max_lean = float(np.nanmax(values))
+        severity = severity_from_range(max_lean, 35.0, 55.0, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="excessive_forward_lean",
+                fault_name="Excessive Forward Lean",
+                kg_query="Excessive Forward Lean",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=values,
+                severity=severity,
+                confidence=severity * (1.0 if observable_lean else 0.65),
+                observability="high" if observable_lean else "medium",
+                evidence={
+                    "max_torso_lean_deg": round(max_lean, 2),
+                    "threshold": 35.0,
+                },
+            )
+        )
+
+    setup_heel = [
+        metric.heel_height_delta
+        for metric in metrics
+        if metric.valid and metric.phase == "setup" and np.isfinite(metric.heel_height_delta)
+    ]
+    baseline = float(np.mean(setup_heel)) if setup_heel else np.nan
+    heel_mask = [
+        metric.valid
+        and metric.phase == "bottom"
+        and np.isfinite(metric.heel_height_delta)
+        and np.isfinite(baseline)
+        and metric.heel_height_delta - baseline > 0.015
+        for metric in metrics
+    ]
+    for start, end in contiguous_true_segments(heel_mask, min_frames):
+        segment = metrics[start : end + 1]
+        values = [metric.heel_height_delta - baseline for metric in segment]
+        max_lift = float(np.nanmax(values))
+        severity = severity_from_range(max_lift, 0.015, 0.055, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="heel_rise",
+                fault_name="Heel Rise",
+                kg_query="heel rise squat ankle dorsiflexion",
+                retrieval_mode="rag",
+                segment_metrics=segment,
+                score_values=values,
+                severity=severity,
+                confidence=severity,
+                observability="medium",
+                evidence={
+                    "max_heel_lift_delta": round(max_lift, 4),
+                    "setup_baseline": round(baseline, 4),
+                    "threshold": 0.015,
+                },
+            )
+        )
+
+    detections.sort(key=lambda item: (item.observability == "low", -item.severity, item.start_frame))
+    return detections
+
+
+def detect_pose_rules_from_payload(
+    payload: dict[str, Any],
+    *,
+    pose_json_path: Path | None = None,
+    video_id: str | None = None,
+    include_retrieval: bool = False,
+    graph_file: Path = DEFAULT_GRAPH_FILE,
+    rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
+) -> dict[str, Any]:
+    metadata = payload.get("metadata", {})
+    if not isinstance(metadata, dict):
+        metadata = {}
+    frames = payload.get("frames", [])
+    if not isinstance(frames, list):
+        frames = []
+
+    fps = float(metadata.get("fps", 0.0) or 0.0)
+    metrics = compute_frame_metrics(frames, fps=fps if fps > 0 else 30.0)
+    if pose_json_path is not None:
+        view = estimate_view_for_pose(pose_json_path)
+        view_payload = asdict(view)
+        view_type = view.view_type
+        view_confidence = view.view_confidence
+    else:
+        view_payload = {"view_type": "unknown", "view_confidence": 0.0}
+        view_type = "unknown"
+        view_confidence = 0.0
+
+    valid_frames = [metric for metric in metrics if metric.valid]
+    detections = detect_rule_segments(
+        metrics,
+        fps=fps if fps > 0 else 30.0,
+        view_type=view_type,
+        view_confidence=view_confidence,
+    )
+    result = {
+        "video_id": video_id or (pose_json_path.stem if pose_json_path else ""),
+        "pose_json_path": str(pose_json_path) if pose_json_path else "",
+        "metadata": metadata,
+        "view": view_payload,
+        "quality": {
+            "total_frames": len(frames),
+            "valid_frames": len(valid_frames),
+            "valid_frame_ratio": round(len(valid_frames) / len(frames), 4) if frames else 0.0,
+            "lower_body_visibility_mean": round(float(np.mean([m.lower_body_visibility for m in metrics])), 4)
+            if metrics
+            else 0.0,
+        },
+        "detections": [asdict(detection) for detection in detections],
+        "retrievals": [],
+        "frame_metrics": [asdict(metric) for metric in metrics],
+    }
+    if include_retrieval:
+        result["retrievals"] = retrieve_contexts_for_detections(
+            result["detections"],
+            graph_file=graph_file,
+            rag_db_dir=rag_db_dir,
+        )
+    return result
+
+
+def detect_pose_rules_from_json(
+    pose_json_path: str | Path,
+    *,
+    video_id: str | None = None,
+    include_retrieval: bool = False,
+    graph_file: Path = DEFAULT_GRAPH_FILE,
+    rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
+) -> dict[str, Any]:
+    path = Path(pose_json_path)
+    return detect_pose_rules_from_payload(
+        load_pose_json(path),
+        pose_json_path=path,
+        video_id=video_id,
+        include_retrieval=include_retrieval,
+        graph_file=graph_file,
+        rag_db_dir=rag_db_dir,
+    )
+
+
+def retrieve_contexts_for_detections(
+    detections: Sequence[dict[str, Any]],
+    *,
+    graph_file: Path = DEFAULT_GRAPH_FILE,
+    rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
+    retrievals: list[dict[str, Any]] = []
+    for detection in detections:
+        query = str(detection.get("kg_query") or detection.get("fault_name") or "")
+        retrieval_mode = str(detection.get("retrieval_mode") or "kg")
+        if not query:
+            continue
+        if retrieval_mode == "rag":
+            from src.knowledge.rag_vector_db import query_vector_db
+
+            context = {
+                "query": query,
+                "results": query_vector_db(query, db_dir=rag_db_dir, top_k=top_k),
+            }
+        else:
+            context = retrieve_graph_context(query, graph_file=graph_file, hops=1, max_seeds=3)
+        retrievals.append(
+            {
+                "fault_id": detection.get("fault_id", ""),
+                "fault_name": detection.get("fault_name", ""),
+                "query_text": query,
+                "retrieval_mode": retrieval_mode,
+                "context": context,
+            }
+        )
+    return retrievals
+
+
+def load_json_list(path: Path) -> list[str]:
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, list):
+        raise ValueError(f"Expected a JSON list in {path}, got {type(data).__name__}.")
+    return [str(item) for item in data]
+
+
+def parse_split_names(value: str) -> list[str]:
+    split_names = [item.strip() for item in value.split(",") if item.strip()]
+    invalid = sorted(set(split_names) - set(SPLIT_NAMES))
+    if invalid:
+        raise argparse.ArgumentTypeError(f"Unsupported splits: {', '.join(invalid)}")
+    return split_names
+
+
+def build_requests(
+    pose_json_dir: Path,
+    split_dir: Path,
+    output_dir: Path,
+    split_names: Sequence[str],
+) -> list[PoseRuleRequest]:
+    requests: list[PoseRuleRequest] = []
+    for split_name in split_names:
+        for video_id in load_json_list(split_dir / f"{split_name}_keys.json"):
+            pose_json_path = pose_json_dir / split_name / f"{video_id}.json"
+            if not pose_json_path.exists():
+                continue
+            requests.append(
+                PoseRuleRequest(
+                    split_name=split_name,
+                    video_id=video_id,
+                    pose_json_path=pose_json_path,
+                    output_path=output_dir / split_name / f"{video_id}.json",
+                )
+            )
+    return requests
+
+
+def iter_limited(items: Sequence[PoseRuleRequest], limit: int | None) -> Iterable[PoseRuleRequest]:
+    yield from items if limit is None else items[:limit]
+
+
+def write_detection_json(path: Path, result: dict[str, Any], *, include_frames: bool) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(result)
+    if not include_frames:
+        payload.pop("frame_metrics", None)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def write_summary_csv(path: Path, rows: Sequence[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "split",
+        "video_id",
+        "fault_id",
+        "fault_name",
+        "severity",
+        "confidence",
+        "observability",
+        "start_time",
+        "end_time",
+        "peak_frame",
+        "phase",
+        "kg_query",
+        "retrieval_mode",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Run rule-based MediaPipe squat form detection.")
+    parser.add_argument("--pose-json", type=Path, default=None, help="Single pose JSON to process.")
+    parser.add_argument(
+        "--pose-json-dir",
+        type=Path,
+        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "pose_json",
+    )
+    parser.add_argument(
+        "--split-dir",
+        type=Path,
+        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "Splits",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "pose_rule_detections",
+    )
+    parser.add_argument("--output-json", type=Path, default=None, help="Output path for single-file mode.")
+    parser.add_argument("--summary-output", type=Path, default=None)
+    parser.add_argument("--splits", type=parse_split_names, default=list(SPLIT_NAMES))
+    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--include-frames", action="store_true")
+    parser.add_argument("--no-retrieval", action="store_true", help="Skip KG/RAG retrieval context.")
+    args = parser.parse_args()
+
+    summary_rows: list[dict[str, Any]] = []
+    if args.pose_json is not None:
+        result = detect_pose_rules_from_json(args.pose_json, include_retrieval=not args.no_retrieval)
+        output_path = args.output_json or args.output_dir / f"{args.pose_json.stem}.json"
+        write_detection_json(output_path, result, include_frames=args.include_frames)
+        for detection in result["detections"]:
+            summary_rows.append({"split": "", "video_id": result["video_id"], **detection})
+        print(f"Saved rule detections to {output_path}")
+    else:
+        requests = build_requests(args.pose_json_dir, args.split_dir, args.output_dir, args.splits)
+        if not requests:
+            raise SystemExit("No pose JSON files were found to process.")
+        for index, request in enumerate(iter_limited(requests, args.limit), start=1):
+            print(f"[{index}] Detecting squat rules for {request.split_name}/{request.video_id}...")
+            result = detect_pose_rules_from_json(
+                request.pose_json_path,
+                video_id=request.video_id,
+                include_retrieval=not args.no_retrieval,
+            )
+            write_detection_json(request.output_path, result, include_frames=args.include_frames)
+            for detection in result["detections"]:
+                summary_rows.append({"split": request.split_name, "video_id": request.video_id, **detection})
+        print(f"Saved rule detections under {args.output_dir}")
+
+    if args.summary_output is not None:
+        write_summary_csv(args.summary_output, summary_rows)
+        print(f"Saved summary CSV to {args.summary_output}")
+
+
+if __name__ == "__main__":
+    main()

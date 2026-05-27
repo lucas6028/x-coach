@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.compare_pose_backends import classifier_metric_rows, markdown_table, rule_metric_rows
+from scripts.pose.compare_pose_backends import classifier_metric_rows, markdown_table, rule_metric_rows
 
 
 def write_csv(path: Path, fieldnames: list[str], rows: list[dict[str, object]]) -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from dataclasses import replace
 
-from src.pose_rule_detector import (
+from src.pose.pose_rule_detector import (
     LANDMARK_COUNT,
     FrameMetrics,
     compute_frame_metrics,

@@ -93,13 +93,13 @@
 實作檔案是：
 
 ```text
-src/mmpose_pose_extraction.py
+src/pose/mmpose_pose_extraction.py
 ```
 
 主要執行方式：
 
 ```bash
-python scripts/run_mmpose_pose_extraction.py \
+python scripts/pose/run_mmpose_pose_extraction.py \
   --video-dir data/Squat/Labeled_Dataset/videos \
   --split-dir data/Squat/Labeled_Dataset/Splits \
   --output-dir data/Squat/Labeled_Dataset/mmpose_pose_json \
@@ -148,7 +148,7 @@ MMPoseInferencer(pose2d="wholebody", device="cuda:0", show_progress=False)
 - `metadata.height`
 - `metadata.total_frames`
 
-因此 `src/pose_feature_extraction.py`、`src/pose_rule_detector.py`、`src/view_estimation.py` 都可以直接讀取 MMPose JSON，不需要另外寫一套下游 feature/rule/classifier。
+因此 `src/pose/pose_feature_extraction.py`、`src/pose/pose_rule_detector.py`、`src/pose/view_estimation.py` 都可以直接讀取 MMPose JSON，不需要另外寫一套下游 feature/rule/classifier。
 
 ### COCO-WholeBody 到 MediaPipe 33 landmarks 的轉換
 
@@ -263,7 +263,7 @@ MMPose MediaPipe-compatible JSON
 比較腳本：
 
 ```text
-scripts/compare_pose_backends.py
+scripts/pose/compare_pose_backends.py
 ```
 
 會彙整三類資料：
@@ -300,7 +300,7 @@ mmpose_minus_mediapipe
 
 ### 為什麼不直接改 feature extractor
 
-這次沒有把 `src/pose_feature_extraction.py` 改成 backend-specific 設計，原因是目前比較目標是「替換 pose estimator，其他條件固定」。如果在 feature extractor 中為 MMPose 加入太多特殊邏輯，會讓比較結果混入 feature engineering 差異。
+這次沒有把 `src/pose/pose_feature_extraction.py` 改成 backend-specific 設計，原因是目前比較目標是「替換 pose estimator，其他條件固定」。如果在 feature extractor 中為 MMPose 加入太多特殊邏輯，會讓比較結果混入 feature engineering 差異。
 
 目前採用 adapter 的方式有三個優點：
 
@@ -319,17 +319,17 @@ mmpose_minus_mediapipe
 
 ## 新增檔案
 
-- `src/mmpose_pose_extraction.py`
+- `src/pose/mmpose_pose_extraction.py`
   - 使用 MMPose `wholebody` inferencer 逐幀抽取 pose。
   - 將 COCO-WholeBody keypoints 轉成 MediaPipe 33 landmark schema。
   - 保留 shoulders、hips、knees、ankles、heels、toe/foot points，讓現有深蹲幾何特徵可以繼續使用。
   - 因 RTMW whole-body 輸出為 2D keypoints，`world_landmarks` 會寫成 `None`。
 
-- `scripts/run_mmpose_pose_extraction.py`
+- `scripts/pose/run_mmpose_pose_extraction.py`
   - MMPose pose extraction 的批次執行入口。
   - 支援 train/val/test split、`--limit`、`--overwrite`、`--device` 與 `--model`。
 
-- `scripts/compare_pose_backends.py`
+- `scripts/pose/compare_pose_backends.py`
   - 彙整 MediaPipe 與 MMPose 的比較結果。
   - 比較項目包含 pose extraction quality、rule-based metrics、classifier metrics。
   - 輸出 long-format CSV 與 Markdown comparison table。
@@ -371,7 +371,7 @@ data/Squat/mmpose_mediapipe_comparison/backend_comparison.md
 若只想先 smoke test 少量影片，可先在 Colab 或本機已安裝 MMPose 的環境執行：
 
 ```bash
-python scripts/run_mmpose_pose_extraction.py \
+python scripts/pose/run_mmpose_pose_extraction.py \
   --video-dir data/Squat/Labeled_Dataset/videos \
   --output-dir data/Squat/Labeled_Dataset/mmpose_pose_json \
   --splits test \
@@ -384,7 +384,7 @@ python scripts/run_mmpose_pose_extraction.py \
 MMPose pose JSON 會先轉成與 MediaPipe 相同的 feature bundle：
 
 ```bash
-python scripts/run_pose_feature_extraction.py \
+python scripts/pose/run_pose_feature_extraction.py \
   --pose-json-dir data/Squat/Labeled_Dataset/mmpose_pose_json \
   --output-dir data/Squat/Labeled_Dataset/mmpose_pose_features \
   --overwrite
@@ -399,7 +399,7 @@ python scripts/run_pose_feature_extraction.py \
 最終彙整命令：
 
 ```bash
-python scripts/compare_pose_backends.py
+python scripts/pose/compare_pose_backends.py
 ```
 
 ## 已完成驗證
@@ -407,7 +407,7 @@ python scripts/compare_pose_backends.py
 已在本機完成不依賴 MMPose GPU runtime 的測試：
 
 ```bash
-python3 -m py_compile src/mmpose_pose_extraction.py scripts/run_mmpose_pose_extraction.py scripts/compare_pose_backends.py
+python3 -m py_compile src/pose/mmpose_pose_extraction.py scripts/pose/run_mmpose_pose_extraction.py scripts/pose/compare_pose_backends.py
 .venv/bin/python -m unittest tests.test_mmpose_pose_extraction tests.test_compare_pose_backends tests.test_pose_rule_detector tests.test_videomae_video_classifier
 python3 -m json.tool notebooks/run_mmpose_pose_comparison.ipynb
 ```
