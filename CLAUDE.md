@@ -10,10 +10,11 @@ x-coach is a research prototype for **explainable squat-coaching feedback**. It 
 
 - The virtualenv is checked out at `.venv/`. Activate it first: `source .venv/bin/activate`. There is no `python` on PATH otherwise.
 - Install deps: `pip install -r requirements.txt`.
-- **Tests use `unittest`, not pytest** (pytest is not installed):
-  - All tests: `python -m unittest discover -s tests -v`
-  - Single test: `python -m unittest tests.test_pose_rule_detector -v`
-  - Single case: `python -m unittest tests.test_pose_rule_detector.PoseRuleDetectorTests.test_depth_rule_distinguishes_above_and_below_parallel`
+- Tests are `unittest.TestCase` classes; run them with **pytest scoped to `tests/`** (a bare `pytest` collects the stale root-level `test_metadata.py` and errors out — see Notes):
+  - All tests: `python -m pytest tests/`
+  - Single file: `python -m pytest tests/test_pose_rule_detector.py`
+  - Single case: `python -m pytest tests/test_pose_rule_detector.py::PoseRuleDetectorTests::test_depth_rule_distinguishes_above_and_below_parallel`
+  - `unittest` also works: `python -m unittest discover -s tests -v`
 - `GOOGLE_API_KEY` is only needed for Gemini-backed knowledge-graph extraction (`src/knowledge/extract_kg.py`). Everything else, including RAG, runs fully offline.
 
 ## Architecture: scripts vs src
@@ -43,5 +44,5 @@ Pipelines read/write under `data/` and paths are resolved relative to the repo r
 ## Notes for working here
 
 - Modules favor a local-first, dependency-light style (stdlib + numpy/networkx; pure-function helpers that are unit-tested in isolation — e.g. `compute_frame_metrics`, feature-vector builders, normalization payloads).
-- `test_metadata.py` at the repo root is a stale ad-hoc script (imports the old `src.rag_vector_db` path); prefer the modules under `src/knowledge/`. Don't model new code on it.
+- `test_metadata.py` at the repo root is a stale ad-hoc script (imports the old `src.rag_vector_db` path, which no longer exists). It is not a real test and breaks bare `pytest` collection — scope test runs to `tests/`. Prefer the modules under `src/knowledge/`; don't model new code on it.
 - `notes/` holds experiment summaries and results; `docs/` has longer walkthroughs (KG LLM extraction, MediaPipe processing).
