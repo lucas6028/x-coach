@@ -7,6 +7,7 @@ x-coach is an AI coaching research prototype for squat analysis. It connects vid
 - Extracts pose landmarks from squat videos with MediaPipe or MMPose-compatible outputs.
 - Builds pose-only and VideoMAE feature representations for labeled squat clips.
 - Trains lightweight video-level classifiers for squat error labels.
+- Builds REHAB24-6 repetition-level skeleton features and correctness classifiers.
 - Detects common squat technique faults with interpretable pose rules.
 - Builds and queries a local RAG index from project notes, documents, and knowledge-graph content.
 - Provides knowledge-graph utilities for extracting, cleaning, auditing, and querying squat-domain concepts.
@@ -16,9 +17,11 @@ x-coach is an AI coaching research prototype for squat analysis. It connects vid
 - `src/pose/` - pose extraction, pose features, view estimation, and rule detection.
 - `src/video/` - VideoMAE feature extraction and video-level classifiers.
 - `src/knowledge/` - knowledge graph, retrieval, and local RAG utilities.
+- `src/rehab24/` - REHAB24-6 manifest, feature extraction, fusion, and correctness classification.
 - `scripts/pose/` - pose pipeline and pose-analysis entry points.
 - `scripts/video/` - VideoMAE and classifier experiment entry points.
 - `scripts/knowledge/` - knowledge graph and RAG entry points.
+- `scripts/rehab24/` - REHAB24-6 experiment entry points.
 - `data/` - datasets, labels, processed poses, features, and cached RAG assets.
 - `demo/` - browser demo assets and pose-estimation prototype code.
 - `docs/` - longer walkthroughs.
@@ -48,6 +51,7 @@ Command details live with the script directories:
 
 - [Pose scripts](scripts/pose/README.md)
 - [Video scripts](scripts/video/README.md)
+- [REHAB24-6 scripts](scripts/rehab24/README.md)
 - [Knowledge and RAG scripts](scripts/knowledge/README.md)
 
 ## Documentation
