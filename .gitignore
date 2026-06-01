@@ -413,3 +413,4 @@ data/*
 .shared
 .agent
 /demo
+.antigravitycli/*
