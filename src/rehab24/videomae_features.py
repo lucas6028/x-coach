@@ -36,11 +36,17 @@ def read_clip_frames(
     frame_stride: int,
     total_frames: int,
 ) -> list[np.ndarray]:
+    # Seek once, then decode forward. A per-frame cap.set(POS_FRAMES) forces the
+    # decoder back to the nearest keyframe on every call, which dominates runtime
+    # on long H.264 clips (~64 keyframe re-seeks per rep). Reading sequentially and
+    # grab()-ing the strided frames we skip keeps the decode linear.
+    cap.set(cv2.CAP_PROP_POS_FRAMES, min(start_frame, max(total_frames - 1, 0)))
     frames: list[np.ndarray] = []
     last_frame: np.ndarray | None = None
     for offset in range(clip_length):
-        frame_index = min(start_frame + offset * frame_stride, max(total_frames - 1, 0))
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        if offset > 0:
+            for _ in range(frame_stride - 1):
+                cap.grab()
         ok, frame = cap.read()
         if not ok:
             if last_frame is None:
