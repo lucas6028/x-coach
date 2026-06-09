@@ -22,7 +22,29 @@ REHAB24-6 pipeline 以 repetition 為單位，訓練一個輕量分類器判斷�
 | VideoMAE only | 0.600 | 0.544 | 0.530 | 0.517 | 0.342 | 0.746 | 0.607 |
 | Skeleton + VideoMAE fuse | 0.188 | 0.683 | 0.695 | 0.679 | 0.861 | 0.504 | 0.666 |
 
-## 過擬合程度（train@0.5 → test selected）
+## LOSO 交叉驗證（10 受試者輪流當 test，較可信的標尺）
+
+固定切分只測 2 位受試者（P8、P9），單一數字高變異。改用 Leave-One-Subject-Out：每位受試者各當一次 test，其餘 9 人中取 1 人當 val（早停＋選閾值，保持 subject-disjoint），其餘 8 人訓練；每折重訓一個分類器。
+
+| 特徵來源 | 固定切分 test bal_acc | **LOSO 9 折 mean±std** | LOSO pooled | 每折範圍 |
+|---|---|---|---|---|
+| **Vicon 動捕骨架** | 0.723 | **0.702 ± 0.078** | 0.722 | 0.569–0.816 |
+| **MediaPipe 估計骨架** | 0.665 | **0.633 ± 0.055** | 0.642 | 0.527–0.724 |
+| VideoMAE | 0.544 | **0.536 ± 0.044** | 0.563 | 0.504–0.653 |
+
+（9 折＝排除只有 16 個 sample 的 P10；含 P10 的 10 折相近：Vicon 0.712±0.080、MediaPipe 0.645±0.063、VideoMAE 0.550±0.061。pooled＝把 10 折每位受試者各被 held-out 一次的預測串起來算單一數字。）
+
+**LOSO 帶來的修正：**
+
+1. **排序穩固**：Vicon > MediaPipe > VideoMAE 在每位受試者上都成立，不是固定切分剛好抽到 P8/P9 的假象。
+2. **固定切分偏樂觀約 0.03–0.06**：Vicon 0.723→0.702、MediaPipe 0.665→0.633、VideoMAE 0.544→0.536，但都在 1 個 std 內。
+3. **±0.08 的折間 std ＞ 想衝的進步幅度**：單一 2-受試者 test 的雜訊比「0.72→0.78」還大，單一切分量不出真假；**後續任何改動都應以 LOSO mean±std 判定**。
+4. **P5 對所有特徵都接近隨機**（Vicon 0.569 / MediaPipe 0.527 / VideoMAE 0.507），連高保真 Vicon 都救不了 → 指向該受試者 label 模糊或動作非典型，是資料天花板而非模型容量問題，值得單獨檢視。
+5. **Vicon→MediaPipe 差距穩定在 ~0.07**，與固定切分的 ~0.06 一致：單目估計取回約九成判別力的結論可信。
+
+產物：`data/REHAB24-6/processed/correctness_loso_{vicon,mediapipe,videomae}.json`（含每折明細）。執行：`python scripts/rehab24/loso_cross_validation.py --feature-dir <feature_dir>`。
+
+## 過擬合程度（train@0.5 → test selected，固定切分）
 
 | 設定 | Train bal_acc (0.5) | Test bal_acc (selected) | 落差 |
 |---|---|---|---|
