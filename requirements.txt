@@ -1,6 +1,11 @@
 # x-coach Python dependencies for the current .venv
 # Generated from the repo's direct imports and active environment packages.
 
+# Web backend (FastAPI service under backend/)
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.18
+
 numpy==2.4.3
 opencv-python==4.13.0.92
 mediapipe==0.10.14
