@@ -11,10 +11,18 @@ langchain==1.2.10
 langchain-core==1.2.28
 langchain-community==0.4.1
 langchain-google-genai==4.2.1
-langchain-openrouter==0.2.1 
+langchain-openrouter==0.2.1
 openrouter==0.8.1
 langchain-text-splitters==1.1.1
 pypdf==6.8.0
 beautifulsoup4==4.14.3
 torch==2.11.0
 transformers==5.5.0
+
+# Optional: MMPose-based pose extraction (src/pose/mmpose_pose_extraction.py).
+# Lazily imported and not installed in the base .venv; install only if you
+# need the COCO-WholeBody / RTMPose path. Versions left unpinned because the
+# mmcv/mmpose stack is environment- and CUDA-specific.
+# mmpose
+# rtmlib
+# pycocotools
