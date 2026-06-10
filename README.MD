@@ -22,6 +22,8 @@ x-coach is an AI coaching research prototype for squat analysis. It connects vid
 - `scripts/video/` - VideoMAE and classifier experiment entry points.
 - `scripts/knowledge/` - knowledge graph and RAG entry points.
 - `scripts/rehab24/` - REHAB24-6 experiment entry points.
+- `backend/` - FastAPI web service wrapping the pose/rules/retrieval pipeline (see `backend/README.md`).
+- `frontend/` - React + Vite (yarn) dashboard: skeleton overlay, fault timeline, GraphRAG feedback (see `frontend/README.md`).
 - `data/` - datasets, labels, processed poses, features, and cached RAG assets.
 - `demo/` - browser demo assets and pose-estimation prototype code.
 - `docs/` - longer walkthroughs.
