@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Analysis } from "../api";
 import { fmtTime } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 import SkeletonOverlay from "./SkeletonOverlay";
 import Timeline from "./Timeline";
 
@@ -19,6 +20,7 @@ export default function VideoPanel({
   onActiveFault,
   onSeek,
 }: Props) {
+  const { t } = useI18n();
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -107,14 +109,16 @@ export default function VideoPanel({
               {faultCount > 0 ? "warning" : "check_circle"}
             </span>
             {faultCount > 0
-              ? `${faultCount} fault${faultCount === 1 ? "" : "s"} detected`
-              : "No faults detected"}
+              ? faultCount === 1
+                ? t("video.faultOne")
+                : t("video.faultMany", { count: faultCount })
+              : t("video.noFaults")}
           </div>
 
           {/* center play / pause overlay */}
           <button
             onClick={togglePlay}
-            aria-label={playing ? "Pause" : "Play"}
+            aria-label={playing ? t("a11y.pause") : t("a11y.play")}
             className={`absolute inset-0 z-10 flex items-center justify-center transition-opacity duration-200 ${
               playing ? "opacity-0 group-hover:opacity-100" : "opacity-100"
             }`}
@@ -135,7 +139,7 @@ export default function VideoPanel({
             <div className="flex items-center gap-3">
               <button
                 onClick={togglePlay}
-                aria-label={playing ? "Pause" : "Play"}
+                aria-label={playing ? t("a11y.pause") : t("a11y.play")}
                 className="text-white hover:text-primary transition-colors"
               >
                 <span className="material-symbols-outlined">
@@ -148,7 +152,7 @@ export default function VideoPanel({
               <div className="flex-1" />
               <button
                 onClick={toggleFullscreen}
-                aria-label="Toggle fullscreen"
+                aria-label={t("a11y.fullscreen")}
                 className="text-white/80 hover:text-primary transition-colors"
               >
                 <span className="material-symbols-outlined text-xl">fullscreen</span>

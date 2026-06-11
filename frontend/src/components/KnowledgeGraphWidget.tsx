@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import type { Analysis, Retrieval } from "../api";
+import { useI18n, faultLabel } from "../lib/i18n";
 
 interface Props {
   analysis: Analysis;
@@ -40,6 +41,7 @@ function collect(retrieval: Retrieval | undefined): { center: string; neighbors:
 }
 
 export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props) {
+  const { t } = useI18n();
   const retrieval = useMemo(() => {
     const list = analysis.retrievals;
     return list.find((r) => r.fault_id === activeFaultId) || list[0];
@@ -57,7 +59,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
     <div className="h-60 border-b border-border-dark relative overflow-hidden bg-[#16181b]">
       <div className="absolute top-3 left-3 z-10">
         <h2 className="text-[11px] font-bold text-primary uppercase tracking-widest flex items-center gap-2">
-          <span className="material-symbols-outlined text-sm">hub</span> Knowledge Graph
+          <span className="material-symbols-outlined text-sm">hub</span> {t("kg.title")}
         </h2>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full">
@@ -87,12 +89,12 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
         <circle cx={cx} cy={cy} r={7} fill="#ef4444" />
         <circle cx={cx} cy={cy} r={12} fill="none" stroke="#ef4444" strokeOpacity={0.4} />
         <text x={cx} y={cy} dy="-1.3em" textAnchor="middle" fontSize={9} fill="#ef4444" className="font-mono font-bold">
-          {center}
+          {center === "—" ? center : faultLabel(t, center)}
         </text>
       </svg>
       {neighbors.length === 0 && (
         <p className="absolute inset-0 flex items-center justify-center text-xs text-faint">
-          No graph context for this clip.
+          {t("kg.empty")}
         </p>
       )}
     </div>

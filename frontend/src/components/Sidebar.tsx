@@ -1,4 +1,6 @@
 import ThemeToggle from "./ThemeToggle";
+import LanguageToggle from "./LanguageToggle";
+import { useI18n } from "../lib/i18n";
 
 interface Props {
   open: boolean;
@@ -13,6 +15,7 @@ interface Props {
 // The menu toggle lives in the top row so it stays reachable in either state.
 // Width is driven from the parent so it can be dragged to resize.
 export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary }: Props) {
+  const { t } = useI18n();
   return (
     <aside
       style={{ width }}
@@ -24,8 +27,8 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
         <div className="h-16 flex items-center gap-2 px-3 border-b border-border-dark">
           <button
             onClick={onToggle}
-            aria-label={open ? "Hide navigation" : "Show navigation"}
-            title={open ? "Hide navigation" : "Show navigation"}
+            aria-label={open ? t("nav.hide") : t("nav.show")}
+            title={open ? t("nav.hide") : t("nav.show")}
             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
           >
             <span className="material-symbols-outlined">{open ? "menu_open" : "menu"}</span>
@@ -47,7 +50,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
             href="#"
           >
             <span className="material-symbols-outlined">video_camera_front</span>
-            {open && <span className="text-sm font-medium">Analyse</span>}
+            {open && <span className="text-sm font-medium">{t("nav.analyse")}</span>}
           </a>
           <button
             onClick={onOpenLibrary}
@@ -56,16 +59,17 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
             }`}
           >
             <span className="material-symbols-outlined">folder_data</span>
-            {open && <span className="text-sm font-medium">Library</span>}
+            {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
           </button>
         </nav>
       </div>
       <div className="p-2 border-t border-border-dark flex flex-col gap-2">
+        <LanguageToggle expanded={open} />
         <ThemeToggle expanded={open} />
         {open && (
           <div className="px-1 flex flex-col gap-0.5">
-            <p className="text-[10px] text-faint uppercase tracking-wider">Prototype v0.1</p>
-            <p className="text-[10px] text-faint">Pose · Rules · GraphRAG</p>
+            <p className="text-[10px] text-faint uppercase tracking-wider">{t("sidebar.version")}</p>
+            <p className="text-[10px] text-faint">{t("sidebar.tagline")}</p>
           </div>
         )}
       </div>

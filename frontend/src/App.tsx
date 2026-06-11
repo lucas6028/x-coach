@@ -10,6 +10,7 @@ import LibraryPicker from "./components/LibraryPicker";
 import UploadDropzone from "./components/UploadDropzone";
 import ChatInput from "./components/ChatInput";
 import ResizeHandle from "./components/ResizeHandle";
+import { useI18n } from "./lib/i18n";
 
 type MobileTab = "feedback" | "graph";
 
@@ -21,6 +22,7 @@ const FEEDBACK_MIN = 280;
 const FEEDBACK_MAX = 640;
 
 export default function App() {
+  const { t } = useI18n();
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
@@ -47,7 +49,7 @@ export default function App() {
   const loadLibrary = useCallback(async (videoId: string) => {
     setLoading(true);
     setError("");
-    setStatusMsg(`Loading ${videoId}…`);
+    setStatusMsg(t("app.loading", { id: videoId }));
     setAnalysis(null);
     try {
       const data = await api.getAnalysis(videoId);
@@ -58,13 +60,13 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, []);
+  }, [t]);
 
   const runUpload = useCallback(async (file: File) => {
     setLoading(true);
     setError("");
     setAnalysis(null);
-    setStatusMsg("Extracting pose & analysing… (this can take ~20s)");
+    setStatusMsg(t("app.analysing"));
     try {
       const data = await api.analyzeUpload(file);
       setAnalysis(data);
@@ -74,7 +76,7 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, []);
+  }, [t]);
 
   // Reset playback state whenever a new analysis arrives.
   useEffect(() => {
@@ -111,7 +113,7 @@ export default function App() {
               onClick={() => setPickerOpen(true)}
               className="text-sm text-primary hover:underline"
             >
-              …or pick a clip from the sample library
+              {t("app.pickSample")}
             </button>
             {error && <p className="text-danger text-sm max-w-md text-center">{error}</p>}
           </div>
@@ -143,15 +145,15 @@ export default function App() {
               className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
             >
               <div className="flex lg:hidden border-b border-border-dark">
-                {(["feedback", "graph"] as MobileTab[]).map((t) => (
+                {(["feedback", "graph"] as MobileTab[]).map((tab) => (
                   <button
-                    key={t}
-                    onClick={() => setMobileTab(t)}
+                    key={tab}
+                    onClick={() => setMobileTab(tab)}
                     className={`flex-1 py-2 text-xs uppercase tracking-wide ${
-                      mobileTab === t ? "text-primary border-b-2 border-primary" : "text-muted"
+                      mobileTab === tab ? "text-primary border-b-2 border-primary" : "text-muted"
                     }`}
                   >
-                    {t === "feedback" ? "Coaching" : "Knowledge Graph"}
+                    {t(tab === "feedback" ? "tab.coaching" : "tab.graph")}
                   </button>
                 ))}
               </div>

@@ -1,5 +1,5 @@
 import type { Analysis } from "../api";
-import { titleCase } from "../lib/format";
+import { useI18n, viewLabel } from "../lib/i18n";
 
 interface Props {
   analysis: Analysis;
@@ -34,6 +34,7 @@ function Card({
 }
 
 export default function MetricsCards({ analysis }: Props) {
+  const { t } = useI18n();
   const q = analysis.quality;
   const faults = analysis.detections;
   const topSeverity = faults.reduce((m, d) => Math.max(m, d.severity), 0);
@@ -43,25 +44,29 @@ export default function MetricsCards({ analysis }: Props) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       <Card
-        label="Camera View"
-        value={titleCase(analysis.view.view_type)}
-        sub={`conf ${(analysis.view.view_confidence ?? 0).toFixed(2)}`}
+        label={t("metric.cameraView")}
+        value={viewLabel(t, analysis.view.view_type)}
+        sub={t("metric.conf", { v: (analysis.view.view_confidence ?? 0).toFixed(2) })}
       />
       <Card
-        label="Faults"
+        label={t("metric.faults")}
         value={String(faults.length)}
-        sub={faults.length ? `peak severity ${topSeverity.toFixed(2)}` : "clean rep"}
+        sub={
+          faults.length
+            ? t("metric.peakSeverity", { v: topSeverity.toFixed(2) })
+            : t("metric.cleanRep")
+        }
         danger={faults.length > 0}
       />
       <Card
-        label="Lower-body Vis."
+        label={t("metric.lowerBodyVis")}
         value={`${visibility.toFixed(0)}%`}
-        sub="landmark confidence"
+        sub={t("metric.landmarkConf")}
       />
       <Card
-        label="Valid Frames"
+        label={t("metric.validFrames")}
         value={`${validRatio.toFixed(0)}%`}
-        sub={`${q.valid_frames ?? 0}/${q.total_frames ?? 0} frames`}
+        sub={t("metric.framesRatio", { valid: q.valid_frames ?? 0, total: q.total_frames ?? 0 })}
       />
     </div>
   );

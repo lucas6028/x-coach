@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Analysis, Detection, Retrieval, RagResult } from "../api";
-import { fmtTime, severityLabel } from "../lib/format";
+import { fmtTime } from "../lib/format";
+import { useI18n, faultLabel, phaseLabel, severityText } from "../lib/i18n";
 
 interface Props {
   analysis: Analysis;
@@ -49,6 +50,7 @@ function FaultCard({
   active: boolean;
   onSeek: (t: number) => void;
 }) {
+  const { t } = useI18n();
   const causes = summaryCategory(retrieval, "causes");
   const risks = summaryCategory(retrieval, "risks");
   const corrections = summaryCategory(retrieval, "corrections");
@@ -63,9 +65,9 @@ function FaultCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline justify-between mb-1">
           <span className="text-[11px] font-bold text-danger font-mono">
-            [{fmtTime(d.start_time)}] {d.fault_name.toUpperCase()}
+            [{fmtTime(d.start_time)}] {faultLabel(t, d.fault_name).toUpperCase()}
           </span>
-          <span className="text-[10px] text-muted">{severityLabel(d.severity)}</span>
+          <span className="text-[10px] text-muted">{severityText(t, d.severity)}</span>
         </div>
         <button
           onClick={() => onSeek(d.start_time)}
@@ -74,7 +76,8 @@ function FaultCard({
           }`}
         >
           <p className="text-sm text-content mb-2 font-medium">
-            {d.fault_name} during <span className="text-muted">{d.phase}</span> phase.
+            {faultLabel(t, d.fault_name)}{" "}
+            <span className="text-muted">{t("feedback.phaseTag", { phase: phaseLabel(t, d.phase) })}</span>
           </p>
           {keyEvidence(d) && (
             <p className="text-[11px] text-muted font-mono mb-2">{keyEvidence(d)}</p>
@@ -84,17 +87,17 @@ function FaultCard({
             <div className="bg-black/40 rounded p-2 mb-2 border border-white/5">
               <div className="flex items-center gap-1.5 mb-1">
                 <span className="material-symbols-outlined text-[12px] text-primary">lightbulb</span>
-                <span className="text-[10px] text-primary font-bold uppercase">GraphRAG Context</span>
+                <span className="text-[10px] text-primary font-bold uppercase">{t("feedback.graphragContext")}</span>
               </div>
               {causes.length > 0 && (
                 <p className="text-[11px] text-muted leading-relaxed">
-                  Likely cause:{" "}
+                  {t("feedback.likelyCause")}{" "}
                   <span className="text-primary">{causes.join(", ")}</span>
                 </p>
               )}
               {risks.length > 0 && (
                 <p className="text-[11px] text-muted leading-relaxed">
-                  Injury risk: <span className="text-danger/90">{risks.join(", ")}</span>
+                  {t("feedback.injuryRisk")} <span className="text-danger/90">{risks.join(", ")}</span>
                 </p>
               )}
             </div>
@@ -106,7 +109,7 @@ function FaultCard({
                 check_circle
               </span>
               <div className="flex flex-col">
-                <span className="text-[10px] text-muted uppercase font-bold">Cue</span>
+                <span className="text-[10px] text-muted uppercase font-bold">{t("feedback.cue")}</span>
                 <p className="text-xs text-white">{corrections.join(" · ")}</p>
               </div>
             </div>
@@ -120,6 +123,7 @@ function FaultCard({
 }
 
 export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
+  const { t } = useI18n();
   const retrievalByFault = useMemo(() => {
     const m = new Map<string, Retrieval>();
     for (const r of analysis.retrievals) if (!m.has(r.fault_id)) m.set(r.fault_id, r);
@@ -133,17 +137,17 @@ export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
       <div className="p-3 border-b border-border-dark bg-surface-dark flex justify-between items-center">
         <h2 className="text-xs font-bold text-content uppercase tracking-widest flex items-center gap-2">
           <span className="material-symbols-outlined text-sm text-primary">psychology</span>
-          Coaching Feedback
+          {t("feedback.title")}
         </h2>
         <span className="text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded border border-primary/20 font-mono">
-          rule + GraphRAG
+          {t("feedback.badge")}
         </span>
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
         {detections.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center gap-2 text-muted">
             <span className="material-symbols-outlined text-3xl text-secondary">check_circle</span>
-            <p className="text-sm">No biomechanical faults detected — clean rep.</p>
+            <p className="text-sm">{t("feedback.noFaults")}</p>
           </div>
         ) : (
           detections.map((d, i) => (

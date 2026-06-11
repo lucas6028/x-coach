@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type LibraryItem } from "../api";
-import { titleCase } from "../lib/format";
+import { useI18n, viewLabel } from "../lib/i18n";
 
 interface Props {
   onClose: () => void;
@@ -8,14 +8,15 @@ interface Props {
 }
 
 const FAULT_FILTERS = [
-  { id: "", label: "All" },
-  { id: "knees_inward", label: "Knee Valgus" },
-  { id: "knees_forward", label: "Knees Forward" },
-  { id: "shallow_depth", label: "Shallow" },
-  { id: "excessive_forward_lean", label: "Forward Lean" },
+  { id: "", labelKey: "library.filter.all" },
+  { id: "knees_inward", labelKey: "library.filter.knees_inward" },
+  { id: "knees_forward", labelKey: "library.filter.knees_forward" },
+  { id: "shallow_depth", labelKey: "library.filter.shallow_depth" },
+  { id: "excessive_forward_lean", labelKey: "library.filter.excessive_forward_lean" },
 ];
 
 export default function LibraryPicker({ onClose, onPick }: Props) {
+  const { t } = useI18n();
   const [items, setItems] = useState<LibraryItem[]>([]);
   const [total, setTotal] = useState(0);
   const [fault, setFault] = useState("");
@@ -40,8 +41,10 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-4 border-b border-border-dark flex items-center justify-between">
-          <h2 className="text-sm font-bold text-content">Sample Library {total ? `(${total})` : ""}</h2>
-          <button onClick={onClose} className="text-muted hover:text-content">
+          <h2 className="text-sm font-bold text-content">
+            {t("library.title")} {total ? `(${total})` : ""}
+          </h2>
+          <button onClick={onClose} aria-label={t("a11y.close")} className="text-muted hover:text-content">
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
@@ -56,13 +59,13 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
                   : "text-muted border-border-dark hover:text-content"
               }`}
             >
-              {f.label}
+              {t(f.labelKey)}
             </button>
           ))}
         </div>
         <div className="overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 gap-2 scrollbar-thin">
           {loading ? (
-            <p className="col-span-full text-center text-muted text-sm py-8">Loading…</p>
+            <p className="col-span-full text-center text-muted text-sm py-8">{t("library.loading")}</p>
           ) : (
             items.map((it) => (
               <button
@@ -72,11 +75,11 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
               >
                 <div className="font-mono text-xs text-content truncate">{it.video_id}</div>
                 <div className="text-[10px] text-muted mb-1">
-                  {titleCase(it.view_type)} · {it.split}
+                  {viewLabel(t, it.view_type)} · {it.split}
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {it.faults.length === 0 ? (
-                    <span className="text-[9px] text-secondary">clean</span>
+                    <span className="text-[9px] text-secondary">{t("library.clean")}</span>
                   ) : (
                     it.faults.map((f) => (
                       <span

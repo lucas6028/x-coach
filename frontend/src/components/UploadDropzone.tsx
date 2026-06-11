@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useI18n } from "../lib/i18n";
 
 interface Props {
   onFile: (file: File) => void;
@@ -7,6 +8,7 @@ interface Props {
 }
 
 export default function UploadDropzone({ onFile, loading, statusMsg }: Props) {
+  const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -36,10 +38,10 @@ export default function UploadDropzone({ onFile, loading, statusMsg }: Props) {
           {loading ? "hourglass_top" : "upload"}
         </span>
         <p className="text-sm text-content font-medium">
-          {loading ? "Analysing…" : "Drop a squat video or tap to upload"}
+          {loading ? t("upload.analysing") : t("upload.prompt")}
         </p>
         <p className="text-[11px] text-muted mt-1">
-          {loading ? statusMsg : "MP4 / MOV · single athlete · side or rear view"}
+          {loading ? statusMsg : t("upload.hint")}
         </p>
         <input
           ref={inputRef}
