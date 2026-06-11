@@ -20,15 +20,16 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
   };
 
   return (
-    <div className="px-1">
+    <div className="px-1 select-none">
       <div
         className="relative h-6 w-full flex items-center cursor-pointer group"
         onClick={handleClick}
       >
-        <div className="absolute inset-x-0 h-1.5 bg-gray-700 rounded-full overflow-hidden" />
+        {/* track */}
+        <div className="absolute inset-x-0 h-2 bg-gray-700/50 rounded-full ring-1 ring-inset ring-white/5" />
         {/* progress */}
         <div
-          className="absolute h-1.5 bg-primary/70 rounded-full"
+          className="absolute h-2 rounded-full bg-gradient-to-r from-primary to-cyan-400 shadow-[0_0_8px_theme(colors.primary)]"
           style={{ width: pct(currentTime) }}
         />
         {/* fault segments */}
@@ -40,28 +41,32 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
               e.stopPropagation();
               onSeek(d.start_time);
             }}
-            className="absolute h-1.5 bg-danger rounded-sm z-10 hover:h-2.5 transition-all"
+            className="absolute h-2 bg-danger rounded-full z-10 hover:h-3 transition-all"
             style={{
               left: pct(d.start_time),
               width: `${Math.max(1.5, ((d.end_time - d.start_time) / dur) * 100)}%`,
-              opacity: 0.45 + 0.55 * Math.min(1, d.severity),
-              boxShadow: "0 0 6px #ef4444",
+              opacity: 0.5 + 0.5 * Math.min(1, d.severity),
+              boxShadow: "0 0 8px rgba(239,68,68,0.8)",
             }}
           />
         ))}
         {/* playhead */}
         <div
-          className="absolute h-4 w-0.5 bg-white rounded-full z-20"
+          className="absolute z-20 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-white ring-2 ring-primary shadow-[0_0_8px_rgba(255,255,255,0.7)] transition-transform group-hover:scale-110"
           style={{ left: pct(currentTime) }}
         />
       </div>
-      <div className="flex items-center gap-4 mt-1 text-[10px] text-gray-500">
-        <span className="font-mono">{fmtTime(currentTime)} / {fmtTime(dur)}</span>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-sm bg-danger inline-block" /> Fault
+      <div className="flex items-center gap-4 mt-1.5 text-[10px] text-gray-400">
+        <span className="font-mono tabular-nums text-gray-300">
+          {fmtTime(currentTime)} <span className="text-gray-600">/</span> {fmtTime(dur)}
         </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2.5 h-2.5 rounded-sm bg-gray-600 inline-block" /> Neutral
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-danger inline-block shadow-[0_0_5px_rgba(239,68,68,0.7)]" />
+          Fault
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-gray-600 inline-block" />
+          Neutral
         </span>
       </div>
     </div>
