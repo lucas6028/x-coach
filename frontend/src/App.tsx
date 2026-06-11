@@ -21,6 +21,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("feedback");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -74,7 +75,11 @@ export default function App() {
 
   return (
     <div className="h-screen w-screen flex bg-background-dark text-gray-100 overflow-hidden">
-      <Sidebar onOpenLibrary={() => setPickerOpen(true)} />
+      <Sidebar
+        open={sidebarOpen}
+        onToggle={() => setSidebarOpen((v) => !v)}
+        onOpenLibrary={() => setPickerOpen(true)}
+      />
 
       <main className="flex-1 flex flex-col min-w-0">
         <Header analysis={analysis} loading={loading} />
