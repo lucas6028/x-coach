@@ -65,19 +65,19 @@ function FaultCard({
           <span className="text-[11px] font-bold text-danger font-mono">
             [{fmtTime(d.start_time)}] {d.fault_name.toUpperCase()}
           </span>
-          <span className="text-[10px] text-gray-500">{severityLabel(d.severity)}</span>
+          <span className="text-[10px] text-muted">{severityLabel(d.severity)}</span>
         </div>
         <button
           onClick={() => onSeek(d.start_time)}
-          className={`w-full text-left bg-[#1c1f24] rounded border-l-2 p-3 transition-colors hover:bg-[#252930] ${
+          className={`w-full text-left bg-surface rounded border-l-2 p-3 transition-colors hover:bg-content/5 ${
             active ? "border-danger ring-1 ring-danger/40" : "border-danger/50"
           }`}
         >
-          <p className="text-sm text-gray-200 mb-2 font-medium">
-            {d.fault_name} during <span className="text-gray-400">{d.phase}</span> phase.
+          <p className="text-sm text-content mb-2 font-medium">
+            {d.fault_name} during <span className="text-muted">{d.phase}</span> phase.
           </p>
           {keyEvidence(d) && (
-            <p className="text-[11px] text-gray-500 font-mono mb-2">{keyEvidence(d)}</p>
+            <p className="text-[11px] text-muted font-mono mb-2">{keyEvidence(d)}</p>
           )}
 
           {(causes.length > 0 || risks.length > 0) && (
@@ -87,13 +87,13 @@ function FaultCard({
                 <span className="text-[10px] text-primary font-bold uppercase">GraphRAG Context</span>
               </div>
               {causes.length > 0 && (
-                <p className="text-[11px] text-gray-400 leading-relaxed">
+                <p className="text-[11px] text-muted leading-relaxed">
                   Likely cause:{" "}
                   <span className="text-primary">{causes.join(", ")}</span>
                 </p>
               )}
               {risks.length > 0 && (
-                <p className="text-[11px] text-gray-400 leading-relaxed">
+                <p className="text-[11px] text-muted leading-relaxed">
                   Injury risk: <span className="text-danger/90">{risks.join(", ")}</span>
                 </p>
               )}
@@ -106,13 +106,13 @@ function FaultCard({
                 check_circle
               </span>
               <div className="flex flex-col">
-                <span className="text-[10px] text-gray-500 uppercase font-bold">Cue</span>
+                <span className="text-[10px] text-muted uppercase font-bold">Cue</span>
                 <p className="text-xs text-white">{corrections.join(" · ")}</p>
               </div>
             </div>
           )}
 
-          {snippet && <p className="text-[11px] text-gray-500 mt-2 italic">“{snippet}”</p>}
+          {snippet && <p className="text-[11px] text-muted mt-2 italic">“{snippet}”</p>}
         </button>
       </div>
     </div>
@@ -129,9 +129,9 @@ export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
   const detections = analysis.detections;
 
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-[#111214]">
+    <div className="flex-1 flex flex-col min-h-0 bg-background">
       <div className="p-3 border-b border-border-dark bg-surface-dark flex justify-between items-center">
-        <h2 className="text-xs font-bold text-white uppercase tracking-widest flex items-center gap-2">
+        <h2 className="text-xs font-bold text-content uppercase tracking-widest flex items-center gap-2">
           <span className="material-symbols-outlined text-sm text-primary">psychology</span>
           Coaching Feedback
         </h2>
@@ -141,7 +141,7 @@ export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
         {detections.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center gap-2 text-gray-500">
+          <div className="flex flex-col items-center justify-center h-full text-center gap-2 text-muted">
             <span className="material-symbols-outlined text-3xl text-secondary">check_circle</span>
             <p className="text-sm">No biomechanical faults detected — clean rep.</p>
           </div>

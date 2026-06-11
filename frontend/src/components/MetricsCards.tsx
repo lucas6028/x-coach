@@ -22,13 +22,13 @@ function Card({
         danger ? "border-danger/40" : "border-border-dark"
       }`}
     >
-      <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">
+      <span className="text-[10px] text-muted uppercase tracking-wider font-semibold">
         {label}
       </span>
-      <span className={`text-xl font-bold font-mono ${danger ? "text-danger" : "text-white"}`}>
+      <span className={`text-xl font-bold font-mono ${danger ? "text-danger" : "text-content"}`}>
         {value}
       </span>
-      {sub && <p className="text-[10px] text-gray-400">{sub}</p>}
+      {sub && <p className="text-[10px] text-muted">{sub}</p>}
     </div>
   );
 }

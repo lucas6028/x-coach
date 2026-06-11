@@ -85,7 +85,7 @@ export default function App() {
   const hasResult = !!analysis;
 
   return (
-    <div className="h-screen w-screen flex bg-background-dark text-gray-100 overflow-hidden">
+    <div className="h-screen w-screen flex bg-background-dark text-content overflow-hidden">
       <Sidebar
         open={sidebarOpen}
         width={sidebarOpen ? sidebarWidth : 64}
@@ -118,7 +118,7 @@ export default function App() {
         ) : (
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
             {/* Left: video + timeline + metrics */}
-            <div className="flex-1 lg:flex-1 min-w-0 flex flex-col gap-4 p-4 overflow-y-auto scrollbar-thin bg-black/20">
+            <div className="flex-1 lg:flex-1 min-w-0 flex flex-col gap-4 p-4 overflow-y-auto scrollbar-thin bg-content/[0.03]">
               <VideoPanel
                 analysis={analysis!}
                 videoRef={videoRef}
@@ -148,7 +148,7 @@ export default function App() {
                     key={t}
                     onClick={() => setMobileTab(t)}
                     className={`flex-1 py-2 text-xs uppercase tracking-wide ${
-                      mobileTab === t ? "text-primary border-b-2 border-primary" : "text-gray-500"
+                      mobileTab === t ? "text-primary border-b-2 border-primary" : "text-muted"
                     }`}
                   >
                     {t === "feedback" ? "Coaching" : "Knowledge Graph"}

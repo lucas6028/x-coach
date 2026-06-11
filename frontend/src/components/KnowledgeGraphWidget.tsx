@@ -91,7 +91,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
         </text>
       </svg>
       {neighbors.length === 0 && (
-        <p className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
+        <p className="absolute inset-0 flex items-center justify-center text-xs text-faint">
           No graph context for this clip.
         </p>
       )}

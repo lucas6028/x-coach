@@ -40,8 +40,8 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-4 border-b border-border-dark flex items-center justify-between">
-          <h2 className="text-sm font-bold text-white">Sample Library {total ? `(${total})` : ""}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">
+          <h2 className="text-sm font-bold text-content">Sample Library {total ? `(${total})` : ""}</h2>
+          <button onClick={onClose} className="text-muted hover:text-content">
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
@@ -53,7 +53,7 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
               className={`px-2.5 py-1 rounded-full text-[11px] border ${
                 fault === f.id
                   ? "bg-primary/20 text-primary border-primary/40"
-                  : "text-gray-400 border-border-dark hover:text-white"
+                  : "text-muted border-border-dark hover:text-content"
               }`}
             >
               {f.label}
@@ -62,16 +62,16 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
         </div>
         <div className="overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 gap-2 scrollbar-thin">
           {loading ? (
-            <p className="col-span-full text-center text-gray-500 text-sm py-8">Loading…</p>
+            <p className="col-span-full text-center text-muted text-sm py-8">Loading…</p>
           ) : (
             items.map((it) => (
               <button
                 key={it.video_id}
                 onClick={() => onPick(it.video_id)}
-                className="text-left bg-[#1c1f24] rounded border border-border-dark p-3 hover:border-primary transition-colors"
+                className="text-left bg-background rounded border border-border-dark p-3 hover:border-primary transition-colors"
               >
-                <div className="font-mono text-xs text-white truncate">{it.video_id}</div>
-                <div className="text-[10px] text-gray-500 mb-1">
+                <div className="font-mono text-xs text-content truncate">{it.video_id}</div>
+                <div className="text-[10px] text-muted mb-1">
                   {titleCase(it.view_type)} · {it.split}
                 </div>
                 <div className="flex flex-wrap gap-1">

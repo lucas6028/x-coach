@@ -26,7 +26,7 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
         onClick={handleClick}
       >
         {/* track */}
-        <div className="absolute inset-x-0 h-2 bg-gray-700/50 rounded-full ring-1 ring-inset ring-white/5" />
+        <div className="absolute inset-x-0 h-2 bg-track/50 rounded-full ring-1 ring-inset ring-white/5" />
         {/* progress */}
         <div
           className="absolute h-2 rounded-full bg-gradient-to-r from-primary to-cyan-400 shadow-[0_0_8px_theme(colors.primary)]"
@@ -56,16 +56,16 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
           style={{ left: pct(currentTime) }}
         />
       </div>
-      <div className="flex items-center gap-4 mt-1.5 text-[10px] text-gray-400">
-        <span className="font-mono tabular-nums text-gray-300">
-          {fmtTime(currentTime)} <span className="text-gray-600">/</span> {fmtTime(dur)}
+      <div className="flex items-center gap-4 mt-1.5 text-[10px] text-muted">
+        <span className="font-mono tabular-nums text-content">
+          {fmtTime(currentTime)} <span className="text-faint">/</span> {fmtTime(dur)}
         </span>
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-danger inline-block shadow-[0_0_5px_rgba(239,68,68,0.7)]" />
           Fault
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-gray-600 inline-block" />
+          <span className="w-2.5 h-2.5 rounded-full bg-track inline-block" />
           Neutral
         </span>
       </div>

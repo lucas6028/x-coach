@@ -1,3 +1,5 @@
+import ThemeToggle from "./ThemeToggle";
+
 interface Props {
   open: boolean;
   width: number;
@@ -24,7 +26,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
             onClick={onToggle}
             aria-label={open ? "Hide navigation" : "Show navigation"}
             title={open ? "Hide navigation" : "Show navigation"}
-            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-gray-400 hover:bg-white/5 hover:text-white transition-colors"
+            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
           >
             <span className="material-symbols-outlined">{open ? "menu_open" : "menu"}</span>
           </button>
@@ -49,7 +51,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
           </a>
           <button
             onClick={onOpenLibrary}
-            className={`flex items-center gap-3 px-3 py-3 rounded-lg text-gray-400 hover:bg-white/5 hover:text-white transition-colors ${
+            className={`flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors ${
               open ? "" : "justify-center"
             }`}
           >
@@ -58,12 +60,15 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
           </button>
         </nav>
       </div>
-      {open && (
-        <div className="p-3 border-t border-border-dark flex flex-col gap-1">
-          <p className="text-[10px] text-gray-600 uppercase tracking-wider">Prototype v0.1</p>
-          <p className="text-[10px] text-gray-600">Pose · Rules · GraphRAG</p>
-        </div>
-      )}
+      <div className="p-2 border-t border-border-dark flex flex-col gap-2">
+        <ThemeToggle expanded={open} />
+        {open && (
+          <div className="px-1 flex flex-col gap-0.5">
+            <p className="text-[10px] text-faint uppercase tracking-wider">Prototype v0.1</p>
+            <p className="text-[10px] text-faint">Pose · Rules · GraphRAG</p>
+          </div>
+        )}
+      </div>
     </aside>
   );
 }

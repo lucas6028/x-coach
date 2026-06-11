@@ -35,10 +35,10 @@ export default function UploadDropzone({ onFile, loading, statusMsg }: Props) {
         <span className="material-symbols-outlined text-4xl text-primary mb-2 block">
           {loading ? "hourglass_top" : "upload"}
         </span>
-        <p className="text-sm text-white font-medium">
+        <p className="text-sm text-content font-medium">
           {loading ? "Analysing…" : "Drop a squat video or tap to upload"}
         </p>
-        <p className="text-[11px] text-gray-500 mt-1">
+        <p className="text-[11px] text-muted mt-1">
           {loading ? statusMsg : "MP4 / MOV · single athlete · side or rear view"}
         </p>
         <input

@@ -2,15 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Light theme (default). Channels are space-separated RGB for Tailwind's
+   `rgb(var(--x) / <alpha-value>)` opacity support. */
 :root {
+  color-scheme: light;
+  --c-bg: 246 247 249;
+  --c-surface: 255 255 255;
+  --c-border: 226 230 235;
+  --c-content: 21 25 30;
+  --c-muted: 91 100 112;
+  --c-faint: 138 146 156;
+  --c-track: 210 215 221;
+}
+
+.dark {
   color-scheme: dark;
+  --c-bg: 18 20 22;
+  --c-surface: 30 33 36;
+  --c-border: 42 46 51;
+  --c-content: 243 244 246;
+  --c-muted: 156 163 175;
+  --c-faint: 107 114 128;
+  --c-track: 55 65 81;
 }
 
 body {
   margin: 0;
   font-family: "Space Grotesk", sans-serif;
-  background-color: #121416;
-  color: #f3f4f6;
+  background-color: rgb(var(--c-bg));
+  color: rgb(var(--c-content));
 }
 
 .material-symbols-outlined {
@@ -22,6 +42,6 @@ body {
   height: 6px;
 }
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background: #2a2e33;
+  background: rgb(var(--c-border));
   border-radius: 9999px;
 }
