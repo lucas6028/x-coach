@@ -1,17 +1,22 @@
 interface Props {
   open: boolean;
+  width: number;
+  // Animate width changes (toggle) but not while the user is dragging the resize handle.
+  animate: boolean;
   onToggle: () => void;
   onOpenLibrary: () => void;
 }
 
 // Labelled bar when `open`, slim icon rail when collapsed — mirrors demo/index.html.
 // The menu toggle lives in the top row so it stays reachable in either state.
-export default function Sidebar({ open, onToggle, onOpenLibrary }: Props) {
+// Width is driven from the parent so it can be dragged to resize.
+export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary }: Props) {
   return (
     <aside
-      className={`${
-        open ? "w-60" : "w-16"
-      } shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between overflow-hidden transition-[width] duration-200 ease-in-out`}
+      style={{ width }}
+      className={`shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between overflow-hidden ${
+        animate ? "transition-[width] duration-200 ease-in-out" : ""
+      }`}
     >
       <div>
         <div className="h-16 flex items-center gap-2 px-3 border-b border-border-dark">

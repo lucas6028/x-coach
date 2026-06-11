@@ -9,8 +9,16 @@ import KnowledgeGraphWidget from "./components/KnowledgeGraphWidget";
 import LibraryPicker from "./components/LibraryPicker";
 import UploadDropzone from "./components/UploadDropzone";
 import ChatInput from "./components/ChatInput";
+import ResizeHandle from "./components/ResizeHandle";
 
 type MobileTab = "feedback" | "graph";
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+const SIDEBAR_MIN = 160;
+const SIDEBAR_MAX = 480;
+const FEEDBACK_MIN = 280;
+const FEEDBACK_MAX = 640;
 
 export default function App() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
@@ -22,6 +30,9 @@ export default function App() {
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("feedback");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [feedbackWidth, setFeedbackWidth] = useState(384);
+  const [resizing, setResizing] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -77,9 +88,18 @@ export default function App() {
     <div className="h-screen w-screen flex bg-background-dark text-gray-100 overflow-hidden">
       <Sidebar
         open={sidebarOpen}
+        width={sidebarOpen ? sidebarWidth : 64}
+        animate={!resizing}
         onToggle={() => setSidebarOpen((v) => !v)}
         onOpenLibrary={() => setPickerOpen(true)}
       />
+      {sidebarOpen && (
+        <ResizeHandle
+          onResize={(d) => setSidebarWidth((w) => clamp(w + d, SIDEBAR_MIN, SIDEBAR_MAX))}
+          onResizeStart={() => setResizing(true)}
+          onResizeEnd={() => setResizing(false)}
+        />
+      )}
 
       <main className="flex-1 flex flex-col min-w-0">
         <Header analysis={analysis} loading={loading} />
@@ -98,7 +118,7 @@ export default function App() {
         ) : (
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
             {/* Left: video + timeline + metrics */}
-            <div className="flex-[2] min-w-0 flex flex-col gap-4 p-4 overflow-y-auto scrollbar-thin bg-black/20">
+            <div className="flex-1 lg:flex-1 min-w-0 flex flex-col gap-4 p-4 overflow-y-auto scrollbar-thin bg-black/20">
               <VideoPanel
                 analysis={analysis!}
                 videoRef={videoRef}
@@ -109,8 +129,19 @@ export default function App() {
               <MetricsCards analysis={analysis!} />
             </div>
 
+            {/* Drag to resize video vs. feedback (desktop only — panes stack on mobile). */}
+            <ResizeHandle
+              className="hidden lg:block"
+              onResize={(d) => setFeedbackWidth((w) => clamp(w - d, FEEDBACK_MIN, FEEDBACK_MAX))}
+              onResizeStart={() => setResizing(true)}
+              onResizeEnd={() => setResizing(false)}
+            />
+
             {/* Right: knowledge graph + reasoning (desktop). Tabbed on mobile. */}
-            <aside className="w-full lg:max-w-md lg:w-[24rem] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0">
+            <aside
+              style={{ ["--fbw" as string]: `${feedbackWidth}px` }}
+              className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
+            >
               <div className="flex lg:hidden border-b border-border-dark">
                 {(["feedback", "graph"] as MobileTab[]).map((t) => (
                   <button
