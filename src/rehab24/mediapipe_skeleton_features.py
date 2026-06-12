@@ -65,6 +65,49 @@ def interpolate_missing(series: np.ndarray) -> np.ndarray:
     return flat.reshape(coords.shape)
 
 
+def smooth_series(series: np.ndarray, window_length: int, polyorder: int = 2) -> np.ndarray:
+    """Savitzky-Golay smooth each joint/channel along the time axis (axis 0).
+
+    `series` has shape (T, J, C). This is the R1 temporal-smoothing step: it runs
+    after :func:`interpolate_missing` (so gaps are already filled) and before
+    `add_velocity` (so the differentiated velocity channels — most sensitive to
+    per-frame jitter — see the denoised signal). It directly targets the
+    estimation jitter that monocular pose introduces.
+
+    Behaviour:
+    - `window_length <= 1` is a no-op (smoothing disabled).
+    - The window is forced odd (Savitzky-Golay requires it) and clamped to the
+      series length, so short repetitions degrade gracefully instead of erroring.
+    - Channels that are NaN for every frame (joints the summary maps to zero) are
+      passed through untouched.
+
+    Only the monocular path uses this; Vicon mocap is already clean and smoothing
+    would erase the squat-bottom turn that carries the correctness signal.
+    """
+    coords = np.array(series, dtype=np.float32, copy=True)
+    total = coords.shape[0]
+    win = int(window_length)
+    if win <= 1 or total < 3:
+        return coords
+    if win % 2 == 0:
+        win += 1
+    if win > total:
+        win = total if total % 2 == 1 else total - 1
+    if win <= polyorder or win < 3:
+        return coords
+
+    from scipy.signal import savgol_filter  # lazy: keeps feature math importable without scipy
+
+    # interpolate_missing leaves each channel either fully finite or fully NaN
+    # (never-detected joints). Savitzky-Golay rejects NaNs, so smooth only the
+    # finite channels and pass the all-NaN ones through unchanged.
+    flat = coords.reshape(total, -1)
+    finite_cols = np.isfinite(flat).all(axis=0)
+    if finite_cols.any():
+        flat[:, finite_cols] = savgol_filter(flat[:, finite_cols], window_length=win, polyorder=polyorder, axis=0)
+    return flat.reshape(coords.shape).astype(np.float32)
+
+
 def midpoint(points: np.ndarray, a: int, b: int) -> np.ndarray:
     return (points[:, a, :] + points[:, b, :]) * 0.5
 
@@ -183,6 +226,43 @@ def landmarks_from_video(
     return world, image
 
 
+def landmark_cache_path(cache_dir: Path, video_path: str) -> Path:
+    return cache_dir / f"{Path(video_path).stem}.npz"
+
+
+def load_or_extract_landmarks(
+    data_root: Path,
+    video_path: str,
+    model_complexity: int,
+    frame_stride: int,
+    cache_dir: Path | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return interpolated (world, image) landmarks, using a per-video cache.
+
+    MediaPipe inference is the expensive step (~minutes/video on CPU) and is
+    independent of the cheap smoothing/feature math downstream. Caching the raw
+    interpolated landmarks lets us run MediaPipe once and then regenerate many
+    smoothing variants (the R1 cutoff sweep) in seconds. The cache stores the
+    exact output of :func:`landmarks_from_video`, so no-smoothing features built
+    from the cache are bit-for-bit identical to the direct path.
+    """
+    if cache_dir is not None:
+        cache_path = landmark_cache_path(cache_dir, video_path)
+        if cache_path.exists():
+            with np.load(cache_path) as data:
+                return data["world"], data["image"]
+
+    world, image = landmarks_from_video(
+        resolve_data_path(data_root, video_path), model_complexity=model_complexity, frame_stride=frame_stride
+    )
+
+    if cache_dir is not None:
+        cache_path = landmark_cache_path(cache_dir, video_path)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(cache_path, world=world, image=image)
+    return world, image
+
+
 def process_one_video(
     data_root: Path,
     output_dir: Path,
@@ -190,15 +270,22 @@ def process_one_video(
     rows: list[dict[str, str]],
     model_complexity: int,
     frame_stride: int,
+    smooth_window: int = 0,
+    smooth_polyorder: int = 2,
+    cache_dir: Path | None = None,
 ) -> int:
     """Run MediaPipe once on a source video and write a feature bundle per rep.
 
     Top-level (picklable) so it can be dispatched to a process pool. Videos are
-    independent, so workers never contend on the same output file.
+    independent, so workers never contend on the same output file. Smoothing (R1)
+    is applied once at the full-video level — before slicing into repetitions — so
+    the Savitzky-Golay window has full temporal context and edge effects land only
+    at the clip boundaries, not at every rep boundary.
     """
-    world, image = landmarks_from_video(
-        resolve_data_path(data_root, video_path), model_complexity=model_complexity, frame_stride=frame_stride
-    )
+    world, image = load_or_extract_landmarks(data_root, video_path, model_complexity, frame_stride, cache_dir)
+    if smooth_window and smooth_window > 1:
+        world = smooth_series(world, smooth_window, smooth_polyorder)
+        image = smooth_series(image, smooth_window, smooth_polyorder)
     written = 0
     for row in rows:
         feature = extract_feature_vector(
@@ -222,6 +309,9 @@ def extract_features_for_manifest(
     model_complexity: int = 2,
     frame_stride: int = 1,
     num_workers: int = 1,
+    smooth_window: int = 0,
+    smooth_polyorder: int = 2,
+    cache_dir: Path | None = None,
 ) -> int:
     """Extract MediaPipe skeleton features for every manifest row.
 
@@ -263,7 +353,10 @@ def extract_features_for_manifest(
     if num_workers <= 1:
         for index, (video_path, pending) in enumerate(pending_by_video, start=1):
             print(f"[{index}/{total}] MediaPipe on {video_path} ({len(pending)} reps)...", flush=True)
-            written += process_one_video(data_root, output_dir, video_path, pending, model_complexity, frame_stride)
+            written += process_one_video(
+                data_root, output_dir, video_path, pending, model_complexity, frame_stride,
+                smooth_window, smooth_polyorder, cache_dir,
+            )
         return written
 
     from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -271,7 +364,8 @@ def extract_features_for_manifest(
     with ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {
             executor.submit(
-                process_one_video, data_root, output_dir, video_path, pending, model_complexity, frame_stride
+                process_one_video, data_root, output_dir, video_path, pending, model_complexity, frame_stride,
+                smooth_window, smooth_polyorder, cache_dir,
             ): video_path
             for video_path, pending in pending_by_video
         }
@@ -310,6 +404,26 @@ def main() -> None:
         default=1,
         help="Parallel worker processes across videos. Accuracy-neutral; set to CPU core count for ~N x speedup.",
     )
+    parser.add_argument(
+        "--smooth-window",
+        type=int,
+        default=0,
+        help="R1 temporal smoothing: Savitzky-Golay window in frames (odd; <=1 disables). "
+        "Applied per joint/channel after interpolation, before velocity.",
+    )
+    parser.add_argument(
+        "--smooth-polyorder",
+        type=int,
+        default=2,
+        help="Savitzky-Golay polynomial order for --smooth-window (default 2).",
+    )
+    parser.add_argument(
+        "--landmark-cache",
+        type=Path,
+        default=None,
+        help="Directory to cache/reuse raw interpolated per-video landmarks. "
+        "MediaPipe runs once to fill it; later smoothing variants read the cache (no re-inference).",
+    )
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
@@ -323,6 +437,9 @@ def main() -> None:
         model_complexity=args.model_complexity,
         frame_stride=args.frame_stride,
         num_workers=args.num_workers,
+        smooth_window=args.smooth_window,
+        smooth_polyorder=args.smooth_polyorder,
+        cache_dir=args.landmark_cache,
     )
     print(f"Wrote {written} feature files under {args.output_dir}")
 
