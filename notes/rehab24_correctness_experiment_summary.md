@@ -18,7 +18,8 @@ REHAB24-6 pipeline 以 repetition 為單位，訓練一個輕量分類器判斷�
 | 設定 | threshold | balanced_acc | accuracy | macro_f1 | recall | specificity | precision |
 |---|---|---|---|---|---|---|---|
 | **Skeleton only（Vicon mocap）** | 0.354 | **0.723** | **0.729** | **0.724** | 0.808 | 0.638 | 0.719 |
-| MediaPipe skeleton（單目估計） | 0.326 | 0.665 | 0.667 | 0.665 | 0.695 | 0.634 | 0.685 |
+| MediaPipe skeleton（單目估計，pseudo-3D） | 0.326 | 0.665 | 0.667 | 0.665 | 0.695 | 0.634 | 0.685 |
+| MMPose/RTMPose skeleton（單目估計，**2D-only**） | 0.443 | 0.562 | 0.568 | 0.560 | 0.658 | 0.466 | 0.585 |
 | VideoMAE only | 0.600 | 0.544 | 0.530 | 0.517 | 0.342 | 0.746 | 0.607 |
 | Skeleton + VideoMAE fuse | 0.188 | 0.683 | 0.695 | 0.679 | 0.861 | 0.504 | 0.666 |
 
@@ -29,10 +30,11 @@ REHAB24-6 pipeline 以 repetition 為單位，訓練一個輕量分類器判斷�
 | 特徵來源 | 固定切分 test bal_acc | **LOSO 9 折 mean±std** | LOSO pooled | 每折範圍 |
 |---|---|---|---|---|
 | **Vicon 動捕骨架** | 0.723 | **0.702 ± 0.078** | 0.722 | 0.569–0.816 |
-| **MediaPipe 估計骨架** | 0.665 | **0.633 ± 0.055** | 0.642 | 0.527–0.724 |
+| **MediaPipe 估計骨架（pseudo-3D）** | 0.665 | **0.633 ± 0.055** | 0.642 | 0.527–0.724 |
+| **MMPose/RTMPose 估計骨架（2D-only）** | 0.562 | **0.570 ± 0.051** | 0.580 | 0.509–0.667 |
 | VideoMAE | 0.544 | **0.536 ± 0.044** | 0.563 | 0.504–0.653 |
 
-（9 折＝排除只有 16 個 sample 的 P10；含 P10 的 10 折相近：Vicon 0.712±0.080、MediaPipe 0.645±0.063、VideoMAE 0.550±0.061。pooled＝把 10 折每位受試者各被 held-out 一次的預測串起來算單一數字。）
+（9 折＝排除只有 16 個 sample 的 P10；含 P10 的 10 折相近：Vicon 0.712±0.080、MediaPipe 0.645±0.063、MMPose 0.583±0.062、VideoMAE 0.550±0.061。pooled＝把 10 折每位受試者各被 held-out 一次的預測串起來算單一數字。）
 
 **LOSO 帶來的修正：**
 
@@ -41,8 +43,34 @@ REHAB24-6 pipeline 以 repetition 為單位，訓練一個輕量分類器判斷�
 3. **±0.08 的折間 std ＞ 想衝的進步幅度**：單一 2-受試者 test 的雜訊比「0.72→0.78」還大，單一切分量不出真假；**後續任何改動都應以 LOSO mean±std 判定**。
 4. **P5 對所有特徵都接近隨機**（Vicon 0.569 / MediaPipe 0.527 / VideoMAE 0.507），連高保真 Vicon 都救不了 → 指向該受試者 label 模糊或動作非典型，是資料天花板而非模型容量問題，值得單獨檢視。
 5. **Vicon→MediaPipe 差距穩定在 ~0.07**，與固定切分的 ~0.06 一致：單目估計取回約九成判別力的結論可信。
+6. **更強的 2D backbone（RTMPose）但「只保留 2D」反而退步到 0.570 ± 0.051**，落在 MediaPipe（0.633）與 VideoMAE（0.536）之間，比 MediaPipe 低 ~0.06。**這不是 backbone 變差，而是丟掉了深度通道**：repo 的 MMPose 路線是 2D-only（1188-d），MediaPipe 是 pseudo-3D（2970-d，含 BlazePose world depth）。深蹲 correctness 的核心訊號之一是垂直/深度位移（蹲多深），RTMPose 的 2D 精度增益補不回失去的 3D 結構。**推論：MediaPipe 的 world-depth 通道帶真訊號**；要讓更強 backbone 發揮，須搭配 2D→3D lifting 把深度補回（見 brief R5），或做「MediaPipe-2D-only vs MMPose-2D-only」對照以隔離 backbone 與深度兩個因素。每折一致（P3/P7/P8 近隨機，與其他特徵同樣難），結論可信非雜訊。
 
-產物：`data/REHAB24-6/processed/correctness_loso_{vicon,mediapipe,videomae}.json`（含每折明細）。執行：`python scripts/rehab24/loso_cross_validation.py --feature-dir <feature_dir>`。
+產物：`data/REHAB24-6/processed/correctness_loso_{vicon,mediapipe,mmpose,videomae}.json`（含每折明細）、`correctness_mmpose_fixed.json`（固定切分）。執行：`python scripts/rehab24/loso_cross_validation.py --feature-dir <feature_dir>`。
+
+## 各動作（6 exercises）拆解（pooled LOSO，每筆樣本各被 held-out 一次）
+
+把 LOSO pooled 預測按 `exercise_id` 分桶，用每折 val 選出的閾值二值化後算各動作的 balanced_accuracy。`n` 為該動作全部樣本（含 2 機位，故約為 repetition 數 ×2）。
+
+| Ex | 動作 | n | pos% | Vicon | MediaPipe (pseudo-3D) | MMPose (2D-only) | VideoMAE |
+|---|---|---|---|---|---|---|---|
+| Ex1 | arm abduction | 356 | 51% | **0.787** | 0.646 | 0.518 | 0.583 |
+| Ex2 | arm VW | 416 | 45% | **0.703** | 0.557 | 0.548 | 0.534 |
+| Ex3 | table push-ups | 214 | 49% | **0.657** | 0.620 | 0.519 | 0.514 |
+| Ex4 | leg abduction | 420 | 57% | **0.733** | 0.686 | 0.688 | 0.606 |
+| Ex5 | leg lunge | 348 | 45% | 0.498 | 0.510 | 0.473 | 0.445 |
+| Ex6 | squats | 390 | 69% | 0.650 | **0.714** | 0.665 | 0.545 |
+
+**各動作觀察：**
+
+1. **Ex6 squats：MediaPipe（0.714）與 MMPose（0.665）雙雙追平甚至超越 Vicon（0.650）。** 深蹲 correctness 主要由垂直/深度位移（蹲多深）決定，單目正好擅長——這對 x-coach 的「可部署單鏡頭深蹲教練」是最直接的正面證據：在真正的 squat 上，便宜的單目並不輸給昂貴動捕。
+2. **Ex5 leg lunge：所有特徵都近隨機（Vicon 0.498 / MediaPipe 0.510 / MMPose 0.473 / VideoMAE 0.445），連 Vicon 都救不了。** 這是**動作層級的資料天花板**，與「P5 受試者近隨機」是同型問題（label 模糊或動作判準不一致），且 lunge 很可能正是拖累 P5 的動作之一。值得單獨檢視 lunge 的標註。
+3. **MMPose 2D-only 的退步集中在上肢動作**：Ex1 arm abduction（0.518）、Ex3 table push-ups（0.519）、Ex2 arm VW（0.548）幾乎崩到隨機；但**腿部動作 Ex4 leg abduction（0.688）、Ex6 squats（0.665）與 MediaPipe 相當不掉分**。→ 修正前述 R2 結論：丟深度的傷害**高度依動作別**——上肢動作的判別訊號沿視軸（深度方向）走，2D 投影最吃虧；腿部/蹲類動作的訊號在影像平面內就看得到，2D-only 不受影響。
+4. **Ex1 arm abduction：Vicon 一枝獨秀（0.787），單目大幅落後**（MediaPipe −0.14、MMPose −0.27）。手臂外展的正確性靠細緻 3D 臂位，單目（尤其 2D-only）最難捕捉——這條最該靠 R5 lifting 或多視角補深度。
+5. **VideoMAE 每個動作都 ≤ 0.61、多數近隨機**，與整體失敗一致，無單一動作例外可救。
+
+**研究意涵**：correctness 不是單一難度——**動作別決定了單目能逼近 mocap 多少**。x-coach 聚焦的 squat（Ex6）恰是單目最強的一格；若產品擴及上肢動作（arm abduction/VW、push-ups），單目缺口會放大，深度補償（lifting/多視角）才有迫切性。後續所有改進應**同時報整體與分動作**，避免 squat 的好被 lunge 的天花板稀釋。
+
+產物：`data/REHAB24-6/processed/correctness_loso_per_exercise.json`。執行：`python scripts/rehab24/loso_per_exercise.py`（重跑 4 來源的 LOSO 並按動作分桶）。
 
 ## 過擬合程度（train@0.5 → test selected，固定切分）
 
