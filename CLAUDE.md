@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-x-coach is a research prototype for **explainable squat-coaching feedback**. It links four pipelines so visual signals become grounded, interpretable advice: pose perception, video (VideoMAE) perception, rule-based biomechanics, and knowledge retrieval (RAG + knowledge graph). See `project-overview.md` / `研究計畫.md` for the full research framing (perception → GraphRAG → reasoning/generation → frontend); much of the reasoning/generation and frontend layers are still aspirational — the implemented code is the perception, rules, and retrieval foundation.
+x-coach is a research prototype for **explainable exercise coaching feedback**. It links four pipelines so visual signals become grounded, interpretable advice: pose perception, video (VideoMAE) perception, rule-based biomechanics, and knowledge retrieval (RAG + knowledge graph). See `project-overview.md` / `研究計畫.md` for the full research framing (perception → GraphRAG → reasoning/generation → frontend); much of the reasoning/generation and frontend layers are still aspirational — the implemented code is the perception, rules, and retrieval foundation.
 
 ## Environment & commands
 
