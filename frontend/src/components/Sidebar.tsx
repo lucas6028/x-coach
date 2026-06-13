@@ -35,9 +35,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
           </button>
           {open && (
             <div className="flex items-center min-w-0">
-              <div className="w-8 h-8 rounded bg-primary flex items-center justify-center text-white shrink-0">
-                <span className="material-symbols-outlined text-lg">biotech</span>
-              </div>
+              <img src="/icon.svg" alt="" className="w-8 h-8 rounded shrink-0" />
               <span className="ml-2 font-bold tracking-wide truncate">X-Coach</span>
             </div>
           )}
