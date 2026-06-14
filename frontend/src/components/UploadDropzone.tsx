@@ -17,40 +17,44 @@ export default function UploadDropzone({ onFile, loading, statusMsg }: Props) {
   };
 
   return (
-    <div className="w-full max-w-md">
-      <div
-        onDragOver={(e) => {
-          e.preventDefault();
-          setDragOver(true);
-        }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={(e) => {
-          e.preventDefault();
-          setDragOver(false);
-          handleFiles(e.dataTransfer.files);
-        }}
-        onClick={() => !loading && inputRef.current?.click()}
-        className={`cursor-pointer rounded-xl border-2 border-dashed p-10 text-center transition-colors ${
-          dragOver ? "border-primary bg-primary/5" : "border-border-dark hover:border-primary/60"
-        } ${loading ? "opacity-60 pointer-events-none" : ""}`}
+    <div
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        handleFiles(e.dataTransfer.files);
+      }}
+      onClick={() => !loading && inputRef.current?.click()}
+      className={`group relative cursor-pointer rounded-2xl border border-dashed p-8 text-center transition-colors ${
+        dragOver
+          ? "border-primary bg-primary/[0.06]"
+          : "border-border-dark bg-content/[0.02] hover:border-primary/60 hover:bg-content/[0.03]"
+      } ${loading ? "pointer-events-none opacity-70" : ""}`}
+    >
+      <span
+        className={`mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary ${
+          loading ? "animate-pulse" : "transition-transform group-hover:-translate-y-0.5"
+        }`}
       >
-        <span className="material-symbols-outlined text-4xl text-primary mb-2 block">
+        <span className="material-symbols-outlined text-3xl">
           {loading ? "hourglass_top" : "upload"}
         </span>
-        <p className="text-sm text-content font-medium">
-          {loading ? t("upload.analysing") : t("upload.prompt")}
-        </p>
-        <p className="text-[11px] text-muted mt-1">
-          {loading ? statusMsg : t("upload.hint")}
-        </p>
-        <input
-          ref={inputRef}
-          type="file"
-          accept="video/*"
-          className="hidden"
-          onChange={(e) => handleFiles(e.target.files)}
-        />
-      </div>
+      </span>
+      <p className="text-content font-medium">
+        {loading ? t("upload.analysing") : t("upload.prompt")}
+      </p>
+      <p className="mt-1.5 font-mono text-[11px] text-muted">{loading ? statusMsg : t("upload.hint")}</p>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="video/*"
+        className="hidden"
+        onChange={(e) => handleFiles(e.target.files)}
+      />
     </div>
   );
 }

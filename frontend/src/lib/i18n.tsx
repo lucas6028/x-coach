@@ -129,6 +129,20 @@ const en: Dict = {
   "upload.prompt": "Drop a squat video or tap to upload",
   "upload.hint": "MP4 / MOV · single athlete · side or rear view",
 
+  // Demo onboarding (empty state)
+  "demo.heading": "Analyze a squat in about 20 seconds.",
+  "demo.sub": "Upload a clip or open a labeled sample. You get a skeleton overlay, a fault timeline, and coaching feedback x-coach can trace to the cause.",
+  "demo.sampleBtn": "Open a sample clip",
+  "demo.or": "or",
+  "demo.getTitle": "What comes back",
+  "demo.get1.title": "Skeleton and faults",
+  "demo.get1.body": "Pose overlay with every detected fault marked on the timeline.",
+  "demo.get2.title": "Grounded feedback",
+  "demo.get2.body": "An observation, a likely cause, and a corrective cue per fault.",
+  "demo.get3.title": "Knowledge graph",
+  "demo.get3.body": "The retrieval path that links each symptom to its cause.",
+  "demo.errorTitle": "That clip did not go through",
+
   // Theme toggle
   "theme.light": "Light",
   "theme.system": "System",
@@ -256,6 +270,20 @@ const zhHant: Dict = {
   "upload.analysing": "分析中…",
   "upload.prompt": "拖放深蹲影片或點擊上傳",
   "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
+
+  // Demo onboarding (empty state)
+  "demo.heading": "約 20 秒，分析一段深蹲。",
+  "demo.sub": "上傳影片或開啟已標註的範例。你會得到骨架疊圖、錯誤時間軸，以及能追溯成因的教練回饋。",
+  "demo.sampleBtn": "開啟範例片段",
+  "demo.or": "或",
+  "demo.getTitle": "你會得到",
+  "demo.get1.title": "骨架與錯誤",
+  "demo.get1.body": "骨架疊圖，並在時間軸上標出每個偵測到的錯誤。",
+  "demo.get2.title": "有據回饋",
+  "demo.get2.body": "每個錯誤都附上觀察、可能成因與修正提示。",
+  "demo.get3.title": "知識圖譜",
+  "demo.get3.body": "連結每個現象到其成因的檢索路徑。",
+  "demo.errorTitle": "這段片段沒有成功處理",
 
   // Theme toggle
   "theme.light": "淺色",

@@ -7,7 +7,7 @@ import MetricsCards from "./components/MetricsCards";
 import ReasoningLog from "./components/ReasoningLog";
 import KnowledgeGraphWidget from "./components/KnowledgeGraphWidget";
 import LibraryPicker from "./components/LibraryPicker";
-import UploadDropzone from "./components/UploadDropzone";
+import DemoIntro from "./components/DemoIntro";
 import ChatInput from "./components/ChatInput";
 import ResizeHandle from "./components/ResizeHandle";
 import { useI18n } from "./lib/i18n";
@@ -107,16 +107,13 @@ export default function App() {
         <Header analysis={analysis} loading={loading} />
 
         {!hasResult ? (
-          <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center gap-6">
-            <UploadDropzone onFile={runUpload} loading={loading} statusMsg={statusMsg} />
-            <button
-              onClick={() => setPickerOpen(true)}
-              className="text-sm text-primary hover:underline"
-            >
-              {t("app.pickSample")}
-            </button>
-            {error && <p className="text-danger text-sm max-w-md text-center">{error}</p>}
-          </div>
+          <DemoIntro
+            onFile={runUpload}
+            onOpenLibrary={() => setPickerOpen(true)}
+            loading={loading}
+            statusMsg={statusMsg}
+            error={error}
+          />
         ) : (
           <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
             {/* Left: video + timeline + metrics */}
