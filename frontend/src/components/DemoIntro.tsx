@@ -29,7 +29,7 @@ export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, e
         initial={reduce ? false : { opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="mx-auto flex min-h-full max-w-5xl flex-col justify-center gap-12 px-6 py-14 lg:flex-row lg:items-center lg:gap-16"
+        className="mx-auto flex min-h-full max-w-5xl flex-col justify-start gap-8 px-5 py-8 sm:gap-12 sm:px-6 sm:py-14 lg:flex-row lg:items-center lg:justify-center lg:gap-16"
       >
         {/* Left: message + actions */}
         <div className="lg:flex-1">

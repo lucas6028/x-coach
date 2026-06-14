@@ -19,7 +19,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
   return (
     <aside
       style={{ width }}
-      className={`shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between overflow-hidden ${
+      className={`h-full shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between overflow-hidden ${
         animate ? "transition-[width] duration-200 ease-in-out" : ""
       }`}
     >

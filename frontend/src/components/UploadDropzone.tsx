@@ -29,7 +29,7 @@ export default function UploadDropzone({ onFile, loading, statusMsg }: Props) {
         handleFiles(e.dataTransfer.files);
       }}
       onClick={() => !loading && inputRef.current?.click()}
-      className={`group relative cursor-pointer rounded-2xl border border-dashed p-8 text-center transition-colors ${
+      className={`group relative cursor-pointer rounded-2xl border border-dashed p-6 text-center transition-colors sm:p-8 ${
         dragOver
           ? "border-primary bg-primary/[0.06]"
           : "border-border-dark bg-content/[0.02] hover:border-primary/60 hover:bg-content/[0.03]"
