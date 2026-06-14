@@ -116,6 +116,13 @@ const en: Dict = {
   // Knowledge graph
   "kg.title": "Knowledge Graph",
   "kg.empty": "No graph context for this clip.",
+  "kg.focus": "Showing",
+  "kg.expand": "Expand to full screen",
+  "kg.collapse": "Close full screen",
+  "kg.cause": "Cause",
+  "kg.risk": "Risk",
+  "kg.correction": "Fix",
+  "kg.evidence": "Evidence",
 
   // App shell
   "app.pickSample": "…or pick a clip from the sample library",
@@ -258,6 +265,13 @@ const zhHant: Dict = {
   // Knowledge graph
   "kg.title": "知識圖譜",
   "kg.empty": "此片段沒有圖譜脈絡。",
+  "kg.focus": "顯示",
+  "kg.expand": "全螢幕檢視",
+  "kg.collapse": "關閉全螢幕",
+  "kg.cause": "成因",
+  "kg.risk": "風險",
+  "kg.correction": "修正",
+  "kg.evidence": "證據",
 
   // App shell
   "app.pickSample": "…或從範例資料庫挑選片段",

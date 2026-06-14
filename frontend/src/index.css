@@ -13,6 +13,7 @@
   --c-muted: 91 100 112;
   --c-faint: 138 146 156;
   --c-track: 210 215 221;
+  --c-fault: 183 121 31; /* amber, darkened for contrast on light canvas */
 }
 
 .dark {
@@ -24,6 +25,7 @@
   --c-muted: 156 163 175;
   --c-faint: 107 114 128;
   --c-track: 55 65 81;
+  --c-fault: 245 185 69; /* amber #f5b945 for dark canvas */
 }
 
 body {
