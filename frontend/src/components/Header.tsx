@@ -4,13 +4,21 @@ import { useI18n, viewLabel } from "../lib/i18n";
 interface Props {
   analysis: Analysis | null;
   loading: boolean;
+  onMenu?: () => void;
 }
 
-export default function Header({ analysis, loading }: Props) {
+export default function Header({ analysis, loading, onMenu }: Props) {
   const { t } = useI18n();
   return (
-    <header className="h-16 shrink-0 border-b border-border-dark bg-background-dark/95 backdrop-blur flex items-center justify-between px-4 lg:px-6">
-      <div className="flex flex-col min-w-0">
+    <header className="h-16 shrink-0 border-b border-border-dark bg-background-dark/95 backdrop-blur flex items-center gap-2 justify-between px-4 lg:px-6">
+      <button
+        onClick={onMenu}
+        aria-label={t("nav.show")}
+        className="lg:hidden shrink-0 -ml-1 w-10 h-10 flex items-center justify-center rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
+      >
+        <span className="material-symbols-outlined">menu</span>
+      </button>
+      <div className="flex flex-1 flex-col min-w-0">
         <h1 className="text-content text-base lg:text-lg font-bold tracking-tight truncate">
           {analysis ? t("header.session", { id: analysis.video_id }) : t("header.title")}
         </h1>
