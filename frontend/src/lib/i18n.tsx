@@ -80,7 +80,7 @@ const en: Dict = {
   // Reasoning / coaching feedback
   "feedback.title": "Coaching Feedback",
   "feedback.badge": "rule + GraphRAG",
-  "feedback.noFaults": "No biomechanical faults detected — clean rep.",
+  "feedback.noFaults": "No biomechanical faults detected. Clean rep.",
   "feedback.graphragContext": "GraphRAG Context",
   "feedback.likelyCause": "Likely cause:",
   "feedback.injuryRisk": "Injury risk:",
@@ -222,7 +222,7 @@ const zhHant: Dict = {
   // Reasoning / coaching feedback
   "feedback.title": "教練回饋",
   "feedback.badge": "規則 + GraphRAG",
-  "feedback.noFaults": "未偵測到生物力學錯誤 — 標準動作。",
+  "feedback.noFaults": "未偵測到生物力學錯誤，標準動作。",
   "feedback.graphragContext": "GraphRAG 脈絡",
   "feedback.likelyCause": "可能原因：",
   "feedback.injuryRisk": "受傷風險：",
