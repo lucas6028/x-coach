@@ -287,6 +287,16 @@ def install_python312_pkg_resources_shim() -> None:
     if "pkg_resources" in sys.modules:
         return
 
+    # Prefer a real pkg_resources when one is importable (local envs with
+    # setuptools<81). mmengine's `is_installed` does `importlib.reload(pkg_resources)`,
+    # which needs a spec-backed module — the synthetic fallback below has none. Only
+    # build the fake when the real module is genuinely absent (Colab py3.12 w/o it).
+    try:
+        import pkg_resources  # noqa: F401
+        return
+    except Exception:
+        pass
+
     class DistributionNotFound(Exception):
         pass
 
