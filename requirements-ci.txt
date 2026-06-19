@@ -1,0 +1,27 @@
+# Lean dependency set for CI (GitHub Actions).
+#
+# The full requirements.txt pins a heavy, platform-specific ML stack (torch, mediapipe,
+# opencv, transformers) whose wheels are slow/fragile to install on a clean Linux runner.
+# The backend and the dependency-light unit tests don't need that stack: the backend defers
+# its ML imports and the tests mock them. This file installs only what those tests require,
+# with loose, Linux-friendly version ranges.
+#
+# Heavy/data-dependent test modules are skipped in CI (see .github/workflows/ci.yml):
+#   - test_mediapipe_smoothing / test_mmpose_pose_extraction / test_videomae_video_classifier
+#     (need mediapipe / opencv / torch)
+#   - test_backend_analysis (integration test against the real data/ tree, KG and RAG stores)
+
+# Web backend + API test client
+fastapi>=0.110,<1
+python-multipart>=0.0.9
+httpx>=0.27,<1
+
+# Imported at app load (src/knowledge) and by the light unit tests
+numpy>=1.26,<3
+networkx>=3,<4
+langchain-text-splitters>=0.2,<2
+pypdf>=4
+
+# Test + coverage tooling
+pytest>=8,<9
+coverage>=7,<8

@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests & backend coverage
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install lean CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-ci.txt
+
+      # Run the deterministic suite. The heavy (torch / opencv / mediapipe) and the
+      # data-dependent integration modules are skipped - see requirements-ci.txt.
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v \
+            --ignore=tests/test_mediapipe_smoothing.py \
+            --ignore=tests/test_mmpose_pose_extraction.py \
+            --ignore=tests/test_videomae_video_classifier.py \
+            --ignore=tests/test_backend_analysis.py
+
+      # Measure + enforce backend coverage. The self-contained tests/test_backend.py cover
+      # backend/app at 100 percent; fail the build if it regresses below 95%.
+      - name: Backend coverage
+        run: |
+          python scripts/run_backend_coverage.py --html --fail-under 95
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-html-py${{ matrix.python-version }}
+          path: htmlcov/
+          if-no-files-found: ignore
