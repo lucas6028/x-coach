@@ -13,6 +13,7 @@ import {
 } from "@phosphor-icons/react";
 import Reveal from "./Reveal";
 import PosePreview from "./PosePreview";
+import MovementShowcase from "./MovementShowcase";
 import { LANGS, useI18n, type Lang } from "../lib/i18n";
 
 const SECTION = "mx-auto w-full max-w-6xl px-5 sm:px-8";
@@ -315,13 +316,14 @@ function Diagnosis() {
 
 function FrameStrip() {
   const { t } = useI18n();
-  const seeds = ["squat-descent", "barbell-lift", "gym-athlete"];
+  // Real frames sampled from the analyzed demo clips (public/demo), not stock placeholders.
+  const frames = ["squat", "pushups", "highknee"];
   return (
     <div className="flex gap-2">
-      {seeds.map((seed, i) => (
-        <div key={seed} className="relative flex-1 overflow-hidden rounded-lg border border-white/10">
+      {frames.map((name, i) => (
+        <div key={name} className="relative flex-1 overflow-hidden rounded-lg border border-white/10">
           <img
-            src={`https://picsum.photos/seed/${seed}/240/200`}
+            src={`/demo/${name}.jpg`}
             alt={t("landing.frame.alt")}
             loading="lazy"
             className="h-20 w-full object-cover opacity-80 grayscale contrast-[1.05] sm:h-24"
@@ -547,6 +549,7 @@ export default function Landing() {
         <Problem />
         <Pipeline />
         <Diagnosis />
+        <MovementShowcase />
         <Bento />
         <Evaluation />
         <CTA />

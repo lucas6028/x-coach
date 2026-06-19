@@ -261,6 +261,20 @@ const en: Dict = {
   // Landing — footer
   "landing.footer.pipeline": "Pipeline",
   "landing.footer.tagline": "Explainable squat coaching, research prototype.",
+
+  // Landing — movement showcase
+  "landing.showcase.title": "One pipeline, the whole movement library.",
+  "landing.showcase.sub":
+    "The same perceive, retrieve, reason loop that reads a squat reads the rest of the library, on real footage.",
+  "landing.showcase.analyzing": "Analyzing",
+  "landing.showcase.squat.name": "Squat",
+  "landing.showcase.squat.note": "Depth, knee tracking, and torso angle at the bottom of the rep.",
+  "landing.showcase.pushups.name": "Push-ups",
+  "landing.showcase.pushups.note": "Elbow path and hip line, tracked through every press.",
+  "landing.showcase.highknee.name": "High Knees",
+  "landing.showcase.highknee.note": "Knee-drive height and left-right landing symmetry.",
+  "landing.showcase.situps.name": "Sit-ups",
+  "landing.showcase.situps.note": "Trunk flexion and neck compensation, rep by rep.",
 };
 
 const zhHant: Dict = {
@@ -510,6 +524,20 @@ const zhHant: Dict = {
   // Landing — footer
   "landing.footer.pipeline": "處理流程",
   "landing.footer.tagline": "可解釋的深蹲教練，研究原型。",
+
+  // Landing — movement showcase
+  "landing.showcase.title": "同一套流程，涵蓋整個動作庫。",
+  "landing.showcase.sub":
+    "讀懂深蹲的「感知、檢索、推理」流程，同樣能分析動作庫中的其他項目，全部基於真實影片。",
+  "landing.showcase.analyzing": "分析中",
+  "landing.showcase.squat.name": "深蹲",
+  "landing.showcase.squat.note": "檢視最低點的深度、膝蓋軌跡與軀幹角度。",
+  "landing.showcase.pushups.name": "伏地挺身",
+  "landing.showcase.pushups.note": "逐次追蹤手肘軌跡與髖部直線。",
+  "landing.showcase.highknee.name": "高抬腿",
+  "landing.showcase.highknee.note": "抬膝高度與左右落地的對稱性。",
+  "landing.showcase.situps.name": "仰臥起坐",
+  "landing.showcase.situps.note": "逐下檢視軀幹屈曲與頸部代償。",
 };
 
 const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };
