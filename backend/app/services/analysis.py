@@ -15,10 +15,12 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from src.pose.pose_rule_detector import detect_pose_rules_from_json
-from src.pose.process_videos import process_video
-
 from backend.app import config
+
+# NOTE: ``src.pose.process_videos`` / ``src.pose.pose_rule_detector`` are imported lazily inside
+# ``analyze_video_file`` (not at module load) so importing this service does not drag in MediaPipe
+# / OpenCV / torch. That keeps the web process import-light and lets the API layer be tested
+# without the heavy ML stack installed; the upload path imports them on first use.
 
 # Indices to keep from each 33-landmark frame: x, y, visibility (drop z / world landmarks).
 _LANDMARK_COUNT = 33
@@ -67,6 +69,11 @@ def analyze_video_file(source_path: Path, *, video_id: str | None = None) -> dic
     Extracts pose to a runtime JSON path, runs rule detection with retrieval enrichment, and
     returns the detector result with a slimmed ``pose`` block attached.
     """
+    # Deferred imports: pull in MediaPipe/OpenCV (process_videos) and the detector only when an
+    # upload is actually analyzed, keeping module import (and server startup) lightweight.
+    from src.pose.pose_rule_detector import detect_pose_rules_from_json
+    from src.pose.process_videos import process_video
+
     config.ensure_runtime_dirs()
     vid = video_id or source_path.stem
     pose_json_path = config.UPLOAD_POSE_DIR / f"{vid}.json"

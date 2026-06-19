@@ -7,6 +7,7 @@ is meant to be launched from the repo root so that ``from src.pose ... import`` 
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # backend/app/config.py -> parents[2] is the repo root.
@@ -29,6 +30,12 @@ UPLOAD_DIR = RUNTIME_DIR / "uploads"
 UPLOAD_POSE_DIR = RUNTIME_DIR / "pose_json"
 
 SPLIT_NAMES = ("train", "val", "test")
+
+# Cap on concurrent in-process analyses (P0 stop-gap until the Celery/Redis worker queue lands).
+# Each analysis is CPU/RAM-heavy (MediaPipe + rules + RAG), so excess uploads wait for a slot
+# rather than all piling onto worker threads and exhausting the box. This is *per process*: with
+# ``uvicorn --workers N`` the effective ceiling is N * MAX_CONCURRENT_ANALYSES.
+MAX_CONCURRENT_ANALYSES = max(1, int(os.getenv("XCOACH_MAX_CONCURRENT_ANALYSES", "2")))
 
 # Allowed origins for the Vite dev server.
 CORS_ORIGINS = [
