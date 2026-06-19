@@ -422,3 +422,4 @@ frontend/dist/
 frontend/.vite/
 .yarn/
 .venv-mmpose/*
+.kaggle_tmp/*
