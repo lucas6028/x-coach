@@ -213,3 +213,55 @@
 - [ ] 第四步加入 contrastive learning
 - [ ] 第五步加入 pose fusion
 - [ ] 第六步再考慮 RAG 與教練式文字回饋
+
+## 系統與部署：使用者登入 + 歷史紀錄
+
+> 把現有 demo（`backend/` FastAPI + `frontend/` React）做成多使用者、能保存影片與分析歷史的服務。
+> 分階段推進：先止血，再加功能，最後規模化。
+
+### P0：止血（同步阻塞）— ✅ 已完成 2026-06-19
+
+- [x] `/api/analyze` 由同步阻塞改為非阻塞：阻塞 pipeline 丟到 worker thread（`run_in_threadpool`），event loop 不再被單一分析卡死
+- [x] `asyncio.Semaphore` 限制同時分析數，避免併發上傳打爆 CPU/RAM
+- [x] 新增 `MAX_CONCURRENT_ANALYSES` 環境變數（`config.py`，預設 2，per-process）
+- [x] 排隊前 `del data` 釋放影片 buffer，避免 semaphore 變成記憶體放大器
+- [x] `analysis.py` 延後載入 `src.pose`（MediaPipe/torch）→ web 啟動不載 ML、API 層可在無 ML 環境測試
+- [x] 新增 `tests/test_analyze_endpoint.py`（契約不變 / 跑在 worker thread / 併發有上限）；本機 6 passed
+
+### P1：核心功能（登入 + 歷史地基）
+
+- [ ] 認證選型並落地（建議 Supabase Auth；或自管 `fastapi-users` + JWT）
+  - [ ] access JWT + refresh token 放 httpOnly cookie（不要 localStorage）
+- [ ] PostgreSQL schema + Alembic migration：
+  - [ ] `users`
+  - [ ] `videos`（`storage_key`、`status` pending/processing/done/failed、fps/duration…）
+  - [ ] `analyses`（`result JSONB` 存整包；提升 `view_type`/`fault_count` 為欄位 + GIN index）
+- [ ] 分析結果落地：`/api/analyze` 算完寫入 DB（目前算完即丟）
+- [ ] 前端：React Router + Auth context + 受保護路由 + 「我的紀錄」儀表板頁
+- [ ] 前端資料層改用 TanStack Query（快取 + 輪詢）
+- [ ] 設定改用 pydantic-settings + env（金鑰不進 repo）
+
+### P2：非同步化 + 儲存
+
+- [ ] 物件儲存（建議 Cloudflare R2）：原始影片、pose JSON、縮圖
+- [ ] presigned URL 直傳：影片不經過 FastAPI（解掉 `await file.read()` 整支進 RAM）
+- [ ] Celery + Redis 佇列：上傳→回 job id→worker 處理→輪詢/SSE 取結果
+- [ ] job 狀態機：queued/processing/done/failed、重試退避、dead-letter、timeout
+- [ ] 去重：影片 hash，同人同片回快取、不重算
+
+### P3：規模化 + 維運
+
+- [ ] 拆 web / worker 部署（Docker；先 Railway/Render/Fly.io，之後 ECS/GKE）
+- [ ] GPU 用 serverless（Modal/Replicate/RunPod，可縮到 0），VideoMAE 在此跑
+- [ ] worker 依佇列長度自動擴縮（KEDA）；CPU/GPU 分池
+- [ ] CDN + 簽名 URL 提供影片
+- [ ] DB 連線池（PgBouncer）、`(user_id, created_at)` 索引、必要時讀副本
+- [ ] 每人 rate limit + 上傳配額
+- [ ] 可觀測性：結構化 log、Sentry、佇列/延遲/GPU 指標、health/readiness probe
+
+### 橫切議題（越早處理越省事）
+
+- [ ] 隱私 / 個資（PDPA・GDPR）：影片屬敏感個資 — 靜態加密、每筆綁 `user_id`、簽名 URL、刪帳號連物件儲存一起清、log 不記影片內容/URL
+- [ ] 檔案驗證：驗真實 MIME/codec（別只信副檔名）、限大小/長度、ffmpeg 正規化方向與格式
+- [ ] 可重現性：每筆分析存 pipeline 版本 + 當時規則閾值（detector 閾值可調）
+- [ ] 重構 repo-root / `sys.path` 耦合 → 儲存抽象層（dev 用本機、prod 用 R2/S3）
