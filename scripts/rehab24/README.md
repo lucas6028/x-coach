@@ -34,6 +34,46 @@ python scripts/rehab24/extract_mmpose_skeleton_features.py \
 # smoke test on one video: --video-limit 1
 ```
 
+Extract the same 2D features with a **stronger backbone (HRNet whole-body)** instead of
+RTMPose. HRNet isn't in `rtmlib`, so it runs through the `mmpose` runtime (full OpenMMLab
+stack). It runs locally on a modest GPU — measured on a GTX 1660 Ti: ~6.4 fps, **0.42 GB**
+peak VRAM, **~16 h** for the full 130-video set (extraction is resumable). It stays
+2D-only, so compare it against RTMPose-2D, not MediaPipe — see
+`notebooks/rehab24_hrnet_colab.ipynb` for the paired-LOSO rationale.
+
+One-time local GPU env (Windows / PowerShell). The versions are a **locked set** — bumping
+any one forces mmcv to compile from source. The cu118 wheels run on older drivers
+(≥ 452.39) via CUDA minor-version compatibility, so **no NVIDIA driver update is needed**:
+
+```powershell
+py -3.11 -m venv .venv-mmpose          # mmcv/torch wheels need Python 3.11, not 3.12+
+.\.venv-mmpose\Scripts\Activate.ps1
+pip install torch==2.1.0 torchvision==0.16.0 --index-url https://download.pytorch.org/whl/cu118
+pip install -U openmim wheel "setuptools<81" "numpy<2" opencv-python pycocotools
+#   setuptools<81 : >=81 removes pkg_resources, which mmengine reload()s at runtime
+#   numpy<2       : torch 2.1 is built against numpy 1.x
+mim install mmengine
+mim install "mmcv==2.1.0"
+mim install "mmdet==3.2.0"
+pip install --no-build-isolation "chumpy==0.70"   # mmpose dep; setup.py needs wheel + no isolation
+pip install --no-deps "mmpose==1.3.2"             # --no-deps skips xtcocotools (no Windows wheel);
+                                                  #   src/pose aliases pycocotools for it at runtime
+# verify (run from repo root): prints "GPU True"
+python -c "import torch; from src.pose.mmpose_pose_extraction import import_mmpose_inferencer; import_mmpose_inferencer(); print('GPU', torch.cuda.is_available())"
+```
+
+Then extract (resumable — re-run the same line to continue after a stop). 6 GB VRAM is
+plenty; use `w32` here, or `td-hm_hrnet-w48_dark-8xb32-210e_coco-wholebody-384x288` for the
+more accurate (slower) backbone:
+
+```powershell
+$env:PYTHONPATH = (Get-Location)
+python scripts/rehab24/extract_mmpose_skeleton_features.py `
+  --runtime mmpose --model td-hm_hrnet-w32_dark-8xb64-210e_coco-wholebody-256x192 `
+  --device cuda:0 --output-dir data/REHAB24-6/processed/hrnet_skeleton_features
+# smoke test on one video: --video-limit 1
+```
+
 Extract repetition-level VideoMAE features on Colab/GPU:
 
 ```bash
@@ -69,6 +109,12 @@ fixed split only tests 2 subjects):
 python scripts/rehab24/loso_cross_validation.py \
   --feature-dir data/REHAB24-6/processed/mmpose_skeleton_features \
   --summary-output data/REHAB24-6/processed/correctness_loso_mmpose.json
+
+# HRNet 2D features (same command, different feature dir). For the HRNet-vs-RTMPose
+# paired comparison, the RTMPose features above must exist too — see the HRNet notebook.
+python scripts/rehab24/loso_cross_validation.py \
+  --feature-dir data/REHAB24-6/processed/hrnet_skeleton_features \
+  --summary-output data/REHAB24-6/processed/correctness_loso_hrnet.json
 ```
 
 Export metadata for Colab:
