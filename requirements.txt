@@ -24,6 +24,7 @@ beautifulsoup4==4.14.3
 torch==2.11.0
 transformers==5.5.0
 pytest>=8,<9
+coverage>=7,<8
 
 # Optional: MMPose-based pose extraction (src/pose/mmpose_pose_extraction.py).
 # Lazily imported and not installed in the base .venv; install only if you
