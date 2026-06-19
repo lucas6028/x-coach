@@ -9,17 +9,12 @@ import "./index.css";
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route
-          path="/app"
-          element={
-            <I18nProvider>
-              <App />
-            </I18nProvider>
-          }
-        />
-      </Routes>
+      <I18nProvider>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/app" element={<App />} />
+        </Routes>
+      </I18nProvider>
     </BrowserRouter>
   </React.StrictMode>
 );

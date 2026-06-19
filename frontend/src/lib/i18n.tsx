@@ -161,6 +161,106 @@ const en: Dict = {
   "lang.label": "Language",
   "lang.en": "English",
   "lang.zh-Hant": "繁體中文",
+
+  // Landing — nav
+  "landing.nav.how": "How it works",
+  "landing.nav.pipeline": "The pipeline",
+  "landing.nav.eval": "Evaluation",
+  "landing.cta.open": "Open the demo",
+
+  // Landing — hero
+  "landing.hero.titlePre": "Coaching cues you can ",
+  "landing.hero.titleAccent": "trace to the joint",
+  "landing.hero.titlePost": ".",
+  "landing.hero.sub":
+    "x-coach reads a squat video, locates the fault, traces its cause in a biomechanics knowledge graph, and explains the fix.",
+  "landing.hero.readMethod": "Read the method",
+
+  // Landing — problem
+  "landing.problem.title": "Scores don't coach. Generic models guess.",
+  "landing.problem.sub":
+    "Action-quality models hand back a number with no instruction. Ask a general language model and it sounds confident while inventing the biomechanics.",
+  "landing.problem.aqs.label": "Action quality scoring",
+  "landing.problem.aqs.body":
+    "Returns a 0 to 100 rating. The lifter learns they scored a 71, not what to change or why.",
+  "landing.problem.llm.label": "General language models",
+  "landing.problem.llm.body":
+    "Produce fluent advice untethered from the video, and hallucinate causes that the footage never showed.",
+  "landing.problem.xcoach.title": "Grounded by construction",
+  "landing.problem.point1": "Sees the fault in the actual frames",
+  "landing.problem.point2": "Retrieves the cause from a sourced knowledge graph",
+  "landing.problem.point3": "Explains the fix it can point back to",
+
+  // Landing — pipeline
+  "landing.pipeline.kicker": "The system",
+  "landing.pipeline.title": "Four modules, one closed loop from pixels to prescription.",
+  "landing.stage.perceive.title": "Perceive",
+  "landing.stage.perceive.body":
+    "Pose landmarks and VideoMAE motion features extract geometry, then localize the fault in time.",
+  "landing.stage.retrieve.title": "Retrieve",
+  "landing.stage.retrieve.body":
+    "GraphRAG walks the fitness knowledge graph from the visible symptom to its deeper cause.",
+  "landing.stage.reason.title": "Reason",
+  "landing.stage.reason.body":
+    "A chain of thought moves from observation to attribution to prescription, grounded in the retrieved evidence.",
+  "landing.stage.coach.title": "Coach",
+  "landing.stage.coach.body":
+    "A diagnosis report and corrective cues come back, with the exact frames highlighted.",
+
+  // Landing — diagnosis
+  "landing.diagnosis.title": "Every cue carries its reasoning.",
+  "landing.diagnosis.sub":
+    "One detected fault, walked from what the camera saw to the exercise you should do about it.",
+  "landing.step.observation.tag": "Perception",
+  "landing.step.observation.title": "Observation",
+  "landing.step.observation.body":
+    "The left knee crosses inward of the foot through the bottom of the rep, flagged across frames 96 to 118.",
+  "landing.step.attribution.tag": "Knowledge graph",
+  "landing.step.attribution.title": "Attribution",
+  "landing.step.attribution.body":
+    "Multi-hop retrieval links medial knee travel to weak hip abductors, with glute medius as the primary node.",
+  "landing.step.prescription.tag": "Reasoning",
+  "landing.step.prescription.title": "Prescription",
+  "landing.step.prescription.body":
+    "Cue the lifter to drive the knees out over the toes, and program banded goblet squats as the accessory.",
+  "landing.frame.alt": "Sampled video frame under analysis",
+
+  // Landing — bento
+  "landing.bento.kicker": "Under the hood",
+  "landing.bento.title": "Four signals, read locally and fused.",
+  "landing.bento.pose.title": "Pose perception",
+  "landing.bento.pose.body":
+    "MediaPipe and MMPose landmarks on 33 keypoints. Joint geometry like knee valgus maps straight into language the graph understands.",
+  "landing.bento.kg.title": "Knowledge graph",
+  "landing.bento.kg.body":
+    "A fitness knowledge graph links fault to cause to fix, with multi-hop retrieval over sourced biomechanics.",
+  "landing.bento.rules.title": "Interpretable rules",
+  "landing.bento.videomae.title": "VideoMAE motion",
+  "landing.bento.videomae.body":
+    "Spatio-temporal features tell a clean rep from a subtle error.",
+
+  // Landing — evaluation
+  "landing.eval.title": "Held to a measurable bar.",
+  "landing.eval.sub":
+    "Explainability only counts if it is checkable. x-coach is validated on agreement, grounding, and whether lifters actually act on it.",
+  "landing.eval.m1.label": "Score agreement",
+  "landing.eval.m1.body":
+    "Spearman correlation against expert ranking, so the model's ordering tracks a human judge.",
+  "landing.eval.m2.label": "Grounding and hallucination",
+  "landing.eval.m2.body":
+    "RAGAS faithfulness checks that every claim stays anchored to the retrieved evidence.",
+  "landing.eval.m3.label": "Usefulness",
+  "landing.eval.m3.body":
+    "A user study with lifters across experience levels rates the skeleton overlay and the written advice.",
+
+  // Landing — closing CTA
+  "landing.cta.title": "See it analyze a real squat.",
+  "landing.cta.sub":
+    "Upload a clip or open a labeled sample, and watch the skeleton, the faults, and the grounded feedback come back together.",
+
+  // Landing — footer
+  "landing.footer.pipeline": "Pipeline",
+  "landing.footer.tagline": "Explainable squat coaching, research prototype.",
 };
 
 const zhHant: Dict = {
@@ -310,6 +410,106 @@ const zhHant: Dict = {
   "lang.label": "語言",
   "lang.en": "English",
   "lang.zh-Hant": "繁體中文",
+
+  // Landing — nav
+  "landing.nav.how": "運作方式",
+  "landing.nav.pipeline": "處理流程",
+  "landing.nav.eval": "評估",
+  "landing.cta.open": "開啟示範",
+
+  // Landing — hero
+  "landing.hero.titlePre": "每個訓練提示，都能",
+  "landing.hero.titleAccent": "追溯到關節",
+  "landing.hero.titlePost": "。",
+  "landing.hero.sub":
+    "x-coach 讀取深蹲影片，定位動作錯誤，在生物力學知識圖譜中追溯成因，並說明修正方式。",
+  "landing.hero.readMethod": "了解方法",
+
+  // Landing — problem
+  "landing.problem.title": "分數不會教學，通用模型只能猜測。",
+  "landing.problem.sub":
+    "動作品質模型只回傳一個分數，沒有任何指導。問通用語言模型，它聽起來很有把握，卻在杜撰生物力學。",
+  "landing.problem.aqs.label": "動作品質評分",
+  "landing.problem.aqs.body":
+    "回傳 0 到 100 的評分。運動員只知道自己得了 71 分，卻不知道該改什麼、為什麼改。",
+  "landing.problem.llm.label": "通用語言模型",
+  "landing.problem.llm.body":
+    "產生與影片脫節的流暢建議，並憑空捏造影片中根本沒有出現的成因。",
+  "landing.problem.xcoach.title": "從設計上就有依據",
+  "landing.problem.point1": "在實際影格中看見錯誤",
+  "landing.problem.point2": "從具來源的知識圖譜檢索成因",
+  "landing.problem.point3": "說明可回溯依據的修正方式",
+
+  // Landing — pipeline
+  "landing.pipeline.kicker": "系統架構",
+  "landing.pipeline.title": "四個模組，構成從畫面到處方的完整閉環。",
+  "landing.stage.perceive.title": "感知",
+  "landing.stage.perceive.body":
+    "姿態關鍵點與 VideoMAE 動作特徵擷取幾何資訊，再於時間軸上定位錯誤。",
+  "landing.stage.retrieve.title": "檢索",
+  "landing.stage.retrieve.body":
+    "GraphRAG 在健身知識圖譜中，從可見徵狀走向更深層的成因。",
+  "landing.stage.reason.title": "推理",
+  "landing.stage.reason.body":
+    "一條思考鏈從觀察、歸因到處方，全程以檢索到的證據為依據。",
+  "landing.stage.coach.title": "指導",
+  "landing.stage.coach.body":
+    "回傳診斷報告與修正提示，並標出確切的影格。",
+
+  // Landing — diagnosis
+  "landing.diagnosis.title": "每個提示都帶著推理依據。",
+  "landing.diagnosis.sub":
+    "一個偵測到的錯誤，從鏡頭所見一路走到你該採取的訓練動作。",
+  "landing.step.observation.tag": "感知",
+  "landing.step.observation.title": "觀察",
+  "landing.step.observation.body":
+    "在動作最低點，左膝向內越過腳掌，於第 96 到 118 影格被標記。",
+  "landing.step.attribution.tag": "知識圖譜",
+  "landing.step.attribution.title": "歸因",
+  "landing.step.attribution.body":
+    "多跳檢索將膝蓋內移連結到髖外展肌無力，並以臀中肌為主要節點。",
+  "landing.step.prescription.tag": "推理",
+  "landing.step.prescription.title": "處方",
+  "landing.step.prescription.body":
+    "提示運動員將膝蓋向腳尖外推，並安排彈力帶高腳杯深蹲作為輔助訓練。",
+  "landing.frame.alt": "分析中的取樣影格",
+
+  // Landing — bento
+  "landing.bento.kicker": "技術細節",
+  "landing.bento.title": "四種訊號，於本地讀取並融合。",
+  "landing.bento.pose.title": "姿態感知",
+  "landing.bento.pose.body":
+    "MediaPipe 與 MMPose 在 33 個關鍵點上的標記。像膝外翻這類關節幾何，可直接對應成知識圖譜理解的語言。",
+  "landing.bento.kg.title": "知識圖譜",
+  "landing.bento.kg.body":
+    "健身知識圖譜將錯誤、成因與修正串連起來，並在具來源的生物力學上進行多跳檢索。",
+  "landing.bento.rules.title": "可解釋規則",
+  "landing.bento.videomae.title": "VideoMAE 動作",
+  "landing.bento.videomae.body":
+    "時空特徵能分辨標準動作與細微錯誤。",
+
+  // Landing — evaluation
+  "landing.eval.title": "以可衡量的標準檢驗。",
+  "landing.eval.sub":
+    "可解釋性唯有能被驗證才有意義。x-coach 在一致性、依據紮實度，以及運動員是否真的採用建議上接受驗證。",
+  "landing.eval.m1.label": "評分一致性",
+  "landing.eval.m1.body":
+    "與專家排名的 Spearman 相關性，讓模型的排序貼近人類評審。",
+  "landing.eval.m2.label": "依據與幻覺",
+  "landing.eval.m2.body":
+    "以 RAGAS 忠實度檢查，確保每項主張都緊扣檢索到的證據。",
+  "landing.eval.m3.label": "實用性",
+  "landing.eval.m3.body":
+    "由不同經驗程度的運動員參與使用者研究，評比骨架疊圖與文字建議。",
+
+  // Landing — closing CTA
+  "landing.cta.title": "看它分析一段真實深蹲。",
+  "landing.cta.sub":
+    "上傳影片或開啟已標註的範例，看著骨架、錯誤與有據回饋一同呈現。",
+
+  // Landing — footer
+  "landing.footer.pipeline": "處理流程",
+  "landing.footer.tagline": "可解釋的深蹲教練，研究原型。",
 };
 
 const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };

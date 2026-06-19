@@ -13,18 +13,44 @@ import {
 } from "@phosphor-icons/react";
 import Reveal from "./Reveal";
 import PosePreview from "./PosePreview";
+import { LANGS, useI18n, type Lang } from "../lib/i18n";
 
 const SECTION = "mx-auto w-full max-w-6xl px-5 sm:px-8";
 
-function PrimaryCTA({ className = "", label = "Open the demo" }: { className?: string; label?: string }) {
+function PrimaryCTA({ className = "", label }: { className?: string; label?: string }) {
+  const { t } = useI18n();
   return (
     <Link
       to="/app"
       className={`group inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-[#5ffb6f] to-[#19c2b0] px-5 py-3 text-sm font-semibold text-[#06140c] transition-shadow active:scale-[0.98] hover:shadow-[0_0_34px_-6px_rgba(60,224,122,0.55)] ${className}`}
     >
-      {label}
+      {label ?? t("landing.cta.open")}
       <ArrowRight weight="bold" className="transition-transform group-hover:translate-x-0.5" size={16} />
     </Link>
+  );
+}
+
+// Slim segmented language switcher tuned for the landing's dark palette.
+function LangSwitch() {
+  const { lang, setLang } = useI18n();
+  return (
+    <div className="flex items-center gap-0.5 rounded-full border border-white/10 bg-white/5 p-0.5">
+      {LANGS.map((l) => {
+        const active = lang === l.value;
+        return (
+          <button
+            key={l.value}
+            onClick={() => setLang(l.value as Lang)}
+            aria-pressed={active}
+            className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+              active ? "bg-white/15 text-zinc-50" : "text-zinc-400 hover:text-zinc-100"
+            }`}
+          >
+            {l.short}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -49,6 +75,7 @@ function Mark() {
 }
 
 function Nav() {
+  const { t } = useI18n();
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0d0f10]/80 backdrop-blur-md">
       <nav className={`${SECTION} flex h-16 items-center justify-between`}>
@@ -59,17 +86,21 @@ function Nav() {
           </span>
         </a>
         <div className="hidden items-center gap-8 text-sm text-zinc-400 md:flex">
-          <a href="#how" className="transition-colors hover:text-zinc-100">How it works</a>
-          <a href="#pipeline" className="transition-colors hover:text-zinc-100">The pipeline</a>
-          <a href="#eval" className="transition-colors hover:text-zinc-100">Evaluation</a>
+          <a href="#how" className="transition-colors hover:text-zinc-100">{t("landing.nav.how")}</a>
+          <a href="#pipeline" className="transition-colors hover:text-zinc-100">{t("landing.nav.pipeline")}</a>
+          <a href="#eval" className="transition-colors hover:text-zinc-100">{t("landing.nav.eval")}</a>
         </div>
-        <PrimaryCTA className="px-4 py-2" />
+        <div className="flex items-center gap-3">
+          <LangSwitch />
+          <PrimaryCTA className="px-4 py-2" />
+        </div>
       </nav>
     </header>
   );
 }
 
 function Hero() {
+  const { t } = useI18n();
   return (
     <section id="top" className="relative overflow-hidden">
       {/* restrained brand glow, not AI-purple mesh */}
@@ -89,11 +120,11 @@ function Hero() {
             transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
             className="font-display text-4xl font-bold leading-[1.05] tracking-tight text-zinc-50 md:text-5xl lg:text-6xl"
           >
-            Coaching cues you can{" "}
+            {t("landing.hero.titlePre")}
             <span className="bg-gradient-to-r from-[#5ffb6f] to-[#16b8a8] bg-clip-text text-transparent">
-              trace to the joint
+              {t("landing.hero.titleAccent")}
             </span>
-            .
+            {t("landing.hero.titlePost")}
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 18 }}
@@ -101,8 +132,7 @@ function Hero() {
             transition={{ duration: 0.7, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
             className="mt-6 max-w-[34rem] text-lg leading-relaxed text-zinc-400"
           >
-            x-coach reads a squat video, locates the fault, traces its cause in a biomechanics
-            knowledge graph, and explains the fix.
+            {t("landing.hero.sub")}
           </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 18 }}
@@ -115,7 +145,7 @@ function Hero() {
               href="#pipeline"
               className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 py-3 text-sm font-medium text-zinc-200 transition-colors hover:bg-white/10 active:scale-[0.98]"
             >
-              Read the method
+              {t("landing.hero.readMethod")}
             </a>
           </motion.div>
         </div>
@@ -134,15 +164,15 @@ function Hero() {
 }
 
 function Problem() {
+  const { t } = useI18n();
   return (
     <section className={`${SECTION} border-t border-white/10 py-24`}>
       <Reveal>
         <h2 className="max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
-          Scores don't coach. Generic models guess.
+          {t("landing.problem.title")}
         </h2>
         <p className="mt-4 max-w-xl text-zinc-400">
-          Action-quality models hand back a number with no instruction. Ask a general language
-          model and it sounds confident while inventing the biomechanics.
+          {t("landing.problem.sub")}
         </p>
       </Reveal>
 
@@ -150,17 +180,15 @@ function Problem() {
         <Reveal className="md:col-span-3" delay={0.05}>
           <div className="grid h-full gap-0 divide-y divide-white/10 rounded-2xl border border-white/10 bg-white/[0.02]">
             <div className="p-6">
-              <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">Action quality scoring</p>
+              <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">{t("landing.problem.aqs.label")}</p>
               <p className="mt-2 text-zinc-300">
-                Returns a 0 to 100 rating. The lifter learns they scored a 71, not what to change
-                or why.
+                {t("landing.problem.aqs.body")}
               </p>
             </div>
             <div className="p-6">
-              <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">General language models</p>
+              <p className="font-mono text-xs uppercase tracking-wider text-zinc-500">{t("landing.problem.llm.label")}</p>
               <p className="mt-2 text-zinc-300">
-                Produce fluent advice untethered from the video, and hallucinate causes that the
-                footage never showed.
+                {t("landing.problem.llm.body")}
               </p>
             </div>
           </div>
@@ -170,17 +198,17 @@ function Problem() {
           <div className="flex h-full flex-col rounded-2xl border border-[#16b8a8]/30 bg-gradient-to-br from-[#16b8a8]/[0.10] to-transparent p-6">
             <p className="font-mono text-xs uppercase tracking-wider text-[#3ee07a]">x-coach</p>
             <p className="mt-2 font-display text-xl font-semibold text-zinc-50">
-              Grounded by construction
+              {t("landing.problem.xcoach.title")}
             </p>
             <ul className="mt-5 space-y-3 text-sm text-zinc-300">
               {[
-                "Sees the fault in the actual frames",
-                "Retrieves the cause from a sourced knowledge graph",
-                "Explains the fix it can point back to",
-              ].map((t) => (
-                <li key={t} className="flex gap-2.5">
+                t("landing.problem.point1"),
+                t("landing.problem.point2"),
+                t("landing.problem.point3"),
+              ].map((point) => (
+                <li key={point} className="flex gap-2.5">
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[#3ee07a]" />
-                  {t}
+                  {point}
                 </li>
               ))}
             </ul>
@@ -192,21 +220,22 @@ function Problem() {
 }
 
 const STAGES = [
-  { icon: Eye, n: "01", title: "Perceive", body: "Pose landmarks and VideoMAE motion features extract geometry, then localize the fault in time." },
-  { icon: TreeStructure, n: "02", title: "Retrieve", body: "GraphRAG walks the fitness knowledge graph from the visible symptom to its deeper cause." },
-  { icon: Brain, n: "03", title: "Reason", body: "A chain of thought moves from observation to attribution to prescription, grounded in the retrieved evidence." },
-  { icon: ChatCircleText, n: "04", title: "Coach", body: "A diagnosis report and corrective cues come back, with the exact frames highlighted." },
+  { icon: Eye, n: "01", key: "perceive" },
+  { icon: TreeStructure, n: "02", key: "retrieve" },
+  { icon: Brain, n: "03", key: "reason" },
+  { icon: ChatCircleText, n: "04", key: "coach" },
 ];
 
 function Pipeline() {
   const reduce = useReducedMotion();
+  const { t } = useI18n();
   return (
     <section id="pipeline" className="border-t border-white/10 bg-white/[0.015] py-24">
       <div className={SECTION}>
         <Reveal>
-          <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#3ee07a]">The system</p>
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#3ee07a]">{t("landing.pipeline.kicker")}</p>
           <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
-            Four modules, one closed loop from pixels to prescription.
+            {t("landing.pipeline.title")}
           </h2>
         </Reveal>
 
@@ -224,7 +253,7 @@ function Pipeline() {
             {STAGES.map((s, i) => {
               const Icon = s.icon;
               return (
-                <Reveal key={s.title} delay={i * 0.1}>
+                <Reveal key={s.key} delay={i * 0.1}>
                   <div className="relative">
                     <div className="relative z-10 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-[#15191b] text-[#3ee07a]">
                       <Icon size={26} weight="duotone" />
@@ -232,8 +261,8 @@ function Pipeline() {
                     <span className="pointer-events-none absolute -top-3 right-2 font-display text-5xl font-bold text-white/[0.05]">
                       {s.n}
                     </span>
-                    <h3 className="mt-5 font-display text-lg font-semibold text-zinc-50">{s.title}</h3>
-                    <p className="mt-2 text-sm leading-relaxed text-zinc-400">{s.body}</p>
+                    <h3 className="mt-5 font-display text-lg font-semibold text-zinc-50">{t(`landing.stage.${s.key}.title`)}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-zinc-400">{t(`landing.stage.${s.key}.body`)}</p>
                   </div>
                 </Reveal>
               );
@@ -245,39 +274,24 @@ function Pipeline() {
   );
 }
 
-const STEPS = [
-  {
-    tag: "Perception",
-    title: "Observation",
-    body: "The left knee crosses inward of the foot through the bottom of the rep, flagged across frames 96 to 118.",
-  },
-  {
-    tag: "Knowledge graph",
-    title: "Attribution",
-    body: "Multi-hop retrieval links medial knee travel to weak hip abductors, with glute medius as the primary node.",
-  },
-  {
-    tag: "Reasoning",
-    title: "Prescription",
-    body: "Cue the lifter to drive the knees out over the toes, and program banded goblet squats as the accessory.",
-  },
-];
+const STEPS = ["observation", "attribution", "prescription"];
 
 function Diagnosis() {
+  const { t } = useI18n();
   return (
     <section id="how" className={`${SECTION} border-t border-white/10 py-24`}>
       <Reveal>
         <h2 className="max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
-          Every cue carries its reasoning.
+          {t("landing.diagnosis.title")}
         </h2>
         <p className="mt-4 max-w-xl text-zinc-400">
-          One detected fault, walked from what the camera saw to the exercise you should do about it.
+          {t("landing.diagnosis.sub")}
         </p>
       </Reveal>
 
       <div className="relative mt-14 grid gap-0">
-        {STEPS.map((s, i) => (
-          <Reveal key={s.title} delay={i * 0.1}>
+        {STEPS.map((key, i) => (
+          <Reveal key={key} delay={i * 0.1}>
             <div className="relative grid grid-cols-[auto_1fr] gap-6 pb-10 last:pb-0">
               {/* rail */}
               <div className="flex flex-col items-center">
@@ -287,9 +301,9 @@ function Diagnosis() {
                 {i < STEPS.length - 1 && <div className="mt-1 w-px flex-1 bg-gradient-to-b from-[#16b8a8]/40 to-white/5" />}
               </div>
               <div className="pb-2">
-                <span className="font-mono text-xs uppercase tracking-wider text-zinc-500">{s.tag}</span>
-                <h3 className="mt-1 font-display text-xl font-semibold text-zinc-50">{s.title}</h3>
-                <p className="mt-2 max-w-2xl leading-relaxed text-zinc-300">{s.body}</p>
+                <span className="font-mono text-xs uppercase tracking-wider text-zinc-500">{t(`landing.step.${key}.tag`)}</span>
+                <h3 className="mt-1 font-display text-xl font-semibold text-zinc-50">{t(`landing.step.${key}.title`)}</h3>
+                <p className="mt-2 max-w-2xl leading-relaxed text-zinc-300">{t(`landing.step.${key}.body`)}</p>
               </div>
             </div>
           </Reveal>
@@ -300,6 +314,7 @@ function Diagnosis() {
 }
 
 function FrameStrip() {
+  const { t } = useI18n();
   const seeds = ["squat-descent", "barbell-lift", "gym-athlete"];
   return (
     <div className="flex gap-2">
@@ -307,7 +322,7 @@ function FrameStrip() {
         <div key={seed} className="relative flex-1 overflow-hidden rounded-lg border border-white/10">
           <img
             src={`https://picsum.photos/seed/${seed}/240/200`}
-            alt="Sampled video frame under analysis"
+            alt={t("landing.frame.alt")}
             loading="lazy"
             className="h-20 w-full object-cover opacity-80 grayscale contrast-[1.05] sm:h-24"
           />
@@ -322,13 +337,14 @@ function FrameStrip() {
 }
 
 function Bento() {
+  const { t } = useI18n();
   return (
     <section className="border-t border-white/10 bg-white/[0.015] py-24">
       <div className={SECTION}>
         <Reveal>
-          <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#3ee07a]">Under the hood</p>
+          <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#3ee07a]">{t("landing.bento.kicker")}</p>
           <h2 className="mt-3 max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
-            Four signals, read locally and fused.
+            {t("landing.bento.title")}
           </h2>
         </Reveal>
 
@@ -339,10 +355,9 @@ function Bento() {
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <PersonSimpleRun size={26} weight="duotone" className="text-[#3ee07a]" />
-                  <h3 className="mt-3 font-display text-xl font-semibold text-zinc-50">Pose perception</h3>
+                  <h3 className="mt-3 font-display text-xl font-semibold text-zinc-50">{t("landing.bento.pose.title")}</h3>
                   <p className="mt-2 max-w-sm text-sm leading-relaxed text-zinc-400">
-                    MediaPipe and MMPose landmarks on 33 keypoints. Joint geometry like knee
-                    valgus maps straight into language the graph understands.
+                    {t("landing.bento.pose.body")}
                   </p>
                 </div>
                 <svg viewBox="0 0 90 120" className="hidden w-16 shrink-0 sm:block" aria-hidden>
@@ -362,10 +377,9 @@ function Bento() {
           <Reveal className="md:col-span-2 md:row-span-2" delay={0.12}>
             <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#121517] p-6">
               <TreeStructure size={26} weight="duotone" className="text-[#3ee07a]" />
-              <h3 className="mt-3 font-display text-xl font-semibold text-zinc-50">Knowledge graph</h3>
+              <h3 className="mt-3 font-display text-xl font-semibold text-zinc-50">{t("landing.bento.kg.title")}</h3>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                A fitness knowledge graph links fault to cause to fix, with multi-hop retrieval over
-                sourced biomechanics.
+                {t("landing.bento.kg.body")}
               </p>
               <svg viewBox="0 0 220 200" className="mt-auto w-full" aria-hidden>
                 <g stroke="#16b8a8" strokeOpacity="0.5" strokeWidth="2">
@@ -399,7 +413,7 @@ function Bento() {
           <Reveal className="md:col-span-2" delay={0.18}>
             <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#121517] p-6">
               <Ruler size={24} weight="duotone" className="text-[#3ee07a]" />
-              <h3 className="mt-3 font-display text-lg font-semibold text-zinc-50">Interpretable rules</h3>
+              <h3 className="mt-3 font-display text-lg font-semibold text-zinc-50">{t("landing.bento.rules.title")}</h3>
               <div className="mt-3 space-y-1.5 font-mono text-[11px] text-zinc-400">
                 <p><span className="text-[#f5b945]">knee_valgus</span> &gt; thr</p>
                 <p><span className="text-zinc-200">depth</span> below parallel</p>
@@ -412,9 +426,9 @@ function Bento() {
           <Reveal className="md:col-span-2" delay={0.24}>
             <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#121517] p-6">
               <FilmStrip size={24} weight="duotone" className="text-[#3ee07a]" />
-              <h3 className="mt-3 font-display text-lg font-semibold text-zinc-50">VideoMAE motion</h3>
+              <h3 className="mt-3 font-display text-lg font-semibold text-zinc-50">{t("landing.bento.videomae.title")}</h3>
               <p className="mt-2 text-sm leading-relaxed text-zinc-400">
-                Spatio-temporal features tell a clean rep from a subtle error.
+                {t("landing.bento.videomae.body")}
               </p>
               <div className="mt-4">
                 <FrameStrip />
@@ -427,31 +441,27 @@ function Bento() {
   );
 }
 
-const METHODS = [
-  { label: "Score agreement", body: "Spearman correlation against expert ranking, so the model's ordering tracks a human judge." },
-  { label: "Grounding and hallucination", body: "RAGAS faithfulness checks that every claim stays anchored to the retrieved evidence." },
-  { label: "Usefulness", body: "A user study with lifters across experience levels rates the skeleton overlay and the written advice." },
-];
+const METHODS = ["m1", "m2", "m3"];
 
 function Evaluation() {
+  const { t } = useI18n();
   return (
     <section id="eval" className={`${SECTION} border-t border-white/10 py-24`}>
       <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
         <Reveal>
           <h2 className="font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
-            Held to a measurable bar.
+            {t("landing.eval.title")}
           </h2>
           <p className="mt-4 max-w-md text-zinc-400">
-            Explainability only counts if it is checkable. x-coach is validated on agreement,
-            grounding, and whether lifters actually act on it.
+            {t("landing.eval.sub")}
           </p>
         </Reveal>
         <div className="grid gap-8">
           {METHODS.map((m, i) => (
-            <Reveal key={m.label} delay={i * 0.08}>
+            <Reveal key={m} delay={i * 0.08}>
               <div className="border-l-2 border-[#16b8a8]/40 pl-5">
-                <p className="font-mono text-xs uppercase tracking-wider text-[#3ee07a]">{m.label}</p>
-                <p className="mt-2 text-zinc-300">{m.body}</p>
+                <p className="font-mono text-xs uppercase tracking-wider text-[#3ee07a]">{t(`landing.eval.${m}.label`)}</p>
+                <p className="mt-2 text-zinc-300">{t(`landing.eval.${m}.body`)}</p>
               </div>
             </Reveal>
           ))}
@@ -462,6 +472,7 @@ function Evaluation() {
 }
 
 function CTA() {
+  const { t } = useI18n();
   return (
     <section className="relative overflow-hidden border-t border-white/10 py-24">
       <div
@@ -472,11 +483,10 @@ function CTA() {
       <div className={`${SECTION} relative text-center`}>
         <Reveal>
           <h2 className="mx-auto max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-5xl">
-            See it analyze a real squat.
+            {t("landing.cta.title")}
           </h2>
           <p className="mx-auto mt-4 max-w-md text-zinc-400">
-            Upload a clip or open a labeled sample, and watch the skeleton, the faults, and the
-            grounded feedback come back together.
+            {t("landing.cta.sub")}
           </p>
           <div className="mt-9 flex justify-center">
             <PrimaryCTA />
@@ -488,6 +498,7 @@ function CTA() {
 }
 
 function Footer() {
+  const { t } = useI18n();
   return (
     <footer className="border-t border-white/10 py-12">
       <div className={`${SECTION} flex flex-col items-center justify-between gap-6 sm:flex-row`}>
@@ -498,11 +509,11 @@ function Footer() {
           </span>
         </div>
         <div className="flex items-center gap-7 text-sm text-zinc-400">
-          <a href="#how" className="transition-colors hover:text-zinc-100">How it works</a>
-          <a href="#pipeline" className="transition-colors hover:text-zinc-100">Pipeline</a>
-          <a href="#eval" className="transition-colors hover:text-zinc-100">Evaluation</a>
+          <a href="#how" className="transition-colors hover:text-zinc-100">{t("landing.nav.how")}</a>
+          <a href="#pipeline" className="transition-colors hover:text-zinc-100">{t("landing.footer.pipeline")}</a>
+          <a href="#eval" className="transition-colors hover:text-zinc-100">{t("landing.nav.eval")}</a>
         </div>
-        <p className="text-sm text-zinc-500">Explainable squat coaching, research prototype.</p>
+        <p className="text-sm text-zinc-500">{t("landing.footer.tagline")}</p>
       </div>
     </footer>
   );
