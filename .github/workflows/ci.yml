@@ -73,3 +73,46 @@ jobs:
           name: backend-coverage-html-py${{ matrix.python-version }}
           path: htmlcov/
           if-no-files-found: ignore
+
+  frontend:
+    name: Frontend tests & coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: yarn
+          cache-dependency-path: frontend/yarn.lock
+
+      - name: Install dependencies
+        run: yarn install --frozen-lockfile
+
+      # Vitest enforces the coverage thresholds in vite.config.ts and writes lcov.
+      - name: Run tests with coverage
+        run: yarn test:coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
+
+      - name: Upload coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-coverage-html
+          path: frontend/coverage/
+          if-no-files-found: ignore
