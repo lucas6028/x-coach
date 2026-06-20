@@ -9,7 +9,7 @@ python-multipart==0.0.18
 numpy==2.4.3
 opencv-python==4.13.0.92
 mediapipe==0.10.14
-tqdm==4.67.3
+tqdm==4.68.3
 networkx==3.6.1
 pydantic==2.12.5
 langchain==1.2.10
