@@ -24,4 +24,5 @@ pypdf>=4
 
 # Test + coverage tooling
 pytest>=8,<9
+pytest-cov>=5,<7
 coverage>=7,<8

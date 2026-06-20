@@ -48,13 +48,21 @@ jobs:
             --ignore=tests/test_mediapipe_smoothing.py \
             --ignore=tests/test_mmpose_pose_extraction.py \
             --ignore=tests/test_videomae_video_classifier.py \
-            --ignore=tests/test_backend_analysis.py
+            --ignore=tests/test_backend_analysis.py \
+            --cov --cov-branch --cov-report=xml
 
-      # Measure + enforce backend coverage. The self-contained tests/test_backend.py cover
-      # backend/app at 100 percent; fail the build if it regresses below 95%.
+      # Enforce backend coverage threshold separately.
       - name: Backend coverage
         run: |
           python scripts/run_backend_coverage.py --html --fail-under 95
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: py${{ matrix.python-version }}
+          fail_ci_if_error: false
 
       - name: Upload coverage HTML report
         if: always()
