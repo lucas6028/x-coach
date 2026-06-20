@@ -146,6 +146,30 @@ Each row in `Segmentation.csv` is one repetition annotation with `video_id`, `re
 
 **Good for your project if:** you want a **fitness-specific 3D motion dataset** for AI coaching, especially where exercise repetitions and form feedback matter more than generic action recognition.
 
+**Local dataset statistics from `data/Fit3D/`:**
+
+| Item | Count |
+| --- | ---: |
+| Subjects (total) | 11 |
+| — train (full 3D GT) | 8: s03, s04, s05, s07, s08, s09, s10, s11 |
+| — test (video + camera only, **no GT**) | 3: s02, s12, s13 |
+| Synchronized cameras | 4 (50591643, 58860488, 60457274, 65906101) |
+| Activity types per subject | 47 (28 named exercises + 19 warmup routines), identical set for every subject |
+| Videos (total) | 1,645 |
+| — train videos (8 subj × 4 cam × 47) | 1,504 |
+| — test videos (3 subj × 47, single view) | 141 |
+| `joints3d_25` GT sequences (train) | 376 (8 × 47) |
+| **GT 3D skeletons / frames (train)** | **444,823** (25 joints each; ×4 cameras = 1,779,292 image-space projections) |
+| SMPL-X parameter sequences (train) | 376 |
+| GHUM (`gpp`) parameter sequences (train) | 376 |
+| Sequences with repetition annotations (train) | 296 of 376 |
+| Repetition-boundary frame indices (train) | 1,822 |
+| **Repetitions (boundaries − 1 per sequence, ≥5/seq)** | **1,526** |
+
+Per-subject GT 3D skeleton frames (train): s03 57,592 · s04 59,700 · s05 51,213 · s07 50,970 · s08 47,276 · s09 54,147 · s10 60,237 · s11 63,688.
+
+Each train sequence ships `videos/{cam}/`, `camera_parameters/{cam}/` (extrinsics + intrinsics w/ & w/o distortion), `joints3d_25/`, `smplx/`, `gpp/`, and `rep_ann.json`. **Not in the local download:** per-repetition correctness/quality labels, natural-language feedback, and instructor/trainee tags — the AIFit feedback is derived by reference comparison, not shipped as labels. The test split additionally omits all 3D GT and rep annotations (videos + camera parameters only), so every 3D-GT experiment is confined to the 8 train subjects.
+
 ---
 
 ## 8. Squat Dataset / Waseda-style Squat Classification
@@ -205,7 +229,7 @@ Each row in `Segmentation.csv` is one repetition annotation with `video_id`, `re
 | **IntelliRehabDS**        | Patient rehab movement assessment                                 | Kinect 3D skeleton                      | Yes                                       | Yes                 |
 | **PHYTMO**                | IMU-based rehab / gait analysis                                   | Wearable IMU + optical reference        | Yes                                       | Yes                 |
 | **UTD-MHAD**              | General action recognition / sensor fusion                        | RGB + depth + skeleton + IMU            | Action label only                         | Not mainly rehab    |
-| **Fit3D**                 | 3D fitness pose, mesh, repetition, and coaching feedback           | Multi-view images + 3D skeleton/mesh    | Feedback / deviation-oriented             | No, fitness-focused |
+| **Fit3D**                 | 3D fitness pose, mesh, repetition, and coaching feedback           | Multi-view images + 3D skeleton/mesh    | No shipped labels (3D GT + rep boundaries) | No, fitness-focused |
 | **Squat Dataset/Waseda**  | Squat-specific posture classification                             | Side-view images / squat videos         | Yes, posture-error classes                | No, fitness-focused |
 | **KIMORE**                | Clinical rehab movement assessment                                | RGB-D video + skeleton                  | Clinical scores/features                  | Yes                 |
 | **ExeCheck/ExeChecker**   | Interpretable rehab feedback and joint-error localization          | RGB-D video + Azure Kinect skeleton     | Yes, paired correct/incorrect + JoA       | Yes                 |
