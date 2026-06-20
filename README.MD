@@ -28,7 +28,7 @@ x-coach is an AI coaching research prototype for squat analysis. It connects vid
 - `demo/` - browser demo assets and pose-estimation prototype code.
 - `docs/` - longer walkthroughs.
 - `notes/` - research notes and experiment summaries.
-- `tests/` - unit tests for core behavior and analysis helpers.
+- `tests/` - Python unit tests (pytest) for core behavior and analysis helpers. Frontend tests are Vitest, under `frontend/` (`yarn test`).
 
 ## Data Areas
 

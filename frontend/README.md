@@ -15,6 +15,24 @@ yarn dev          # http://localhost:5173  (proxies /api -> http://localhost:800
 
 Build / type-check: `yarn build`.
 
+## Test
+
+Unit/component tests run on **Vitest** + **React Testing Library** in a `jsdom`
+environment (config lives in `vite.config.ts`; global stubs for
+`matchMedia`/`localStorage`/`canvas`/`IntersectionObserver`/media APIs live in
+`src/test/setup.ts`).
+
+```bash
+yarn test            # run once
+yarn test:watch      # watch mode
+yarn test:coverage   # run with a V8 coverage report (text + html + lcov)
+```
+
+Coverage thresholds are enforced in `vite.config.ts` (statements 68%, lines/functions 70%,
+branches 60%); the HTML report is written to `frontend/coverage/` (git-ignored) and `lcov.info`
+is uploaded by CI. Tests cover the API client, i18n/theme/pose/format helpers, every component,
+the `App` shell, and the landing page.
+
 ## What it does
 
 - **Upload** a squat video (primary flow) or pick from the **sample library** (instant demo).
@@ -35,8 +53,14 @@ src/
   api.ts                 typed fetch client + interfaces mirroring the backend
   lib/pose.ts            33-landmark topology + fault→landmark groups
   lib/format.ts          time/severity formatting helpers
+  lib/i18n.tsx           en / zh-Hant dictionaries + t() provider and label helpers
+  lib/theme.ts           light/dark/system theme controller
   App.tsx                state + responsive layout
+  main.tsx               router entry (landing "/" + app "/app")
   components/            Sidebar, Header, VideoPanel, SkeletonOverlay, Timeline,
                          MetricsCards, ReasoningLog, KnowledgeGraphWidget,
-                         LibraryPicker, UploadDropzone, ChatInput
+                         LibraryPicker, UploadDropzone, ChatInput,
+                         ThemeToggle, LanguageToggle, DemoIntro, ResizeHandle
+  landing/               marketing landing page (Landing, Reveal, PosePreview, …)
+  test/                  Vitest setup, shared fixtures/render helpers, *.test.ts(x)
 ```
