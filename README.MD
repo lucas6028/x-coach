@@ -4,7 +4,7 @@ x-coach is an AI coaching research prototype for squat analysis. It connects vid
 
 ## What This Project Does
 
-- Extracts pose landmarks from squat videos with MediaPipe or MMPose-compatible outputs.
+- Extracts pose landmarks from squat videos with MediaPipe or RTMPose-compatible outputs.
 - Builds pose-only and VideoMAE feature representations for labeled squat clips.
 - Trains lightweight video-level classifiers for squat error labels.
 - Builds REHAB24-6 repetition-level skeleton features and correctness classifiers.

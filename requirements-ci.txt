@@ -7,7 +7,7 @@
 # with loose, Linux-friendly version ranges.
 #
 # Heavy/data-dependent test modules are skipped in CI (see .github/workflows/ci.yml):
-#   - test_mediapipe_smoothing / test_mmpose_pose_extraction / test_videomae_video_classifier
+#   - test_mediapipe_smoothing / test_rtmpose_pose_extraction / test_videomae_video_classifier
 #     (need mediapipe / opencv / torch)
 #   - test_backend_analysis (integration test against the real data/ tree, KG and RAG stores)
 

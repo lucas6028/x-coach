@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.pose.mmpose_pose_extraction import main
+from src.pose.rtmpose_pose_extraction import main
 
 
 if __name__ == "__main__":

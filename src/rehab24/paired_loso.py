@@ -111,7 +111,7 @@ def report(rows: list[dict], title: str, baseline_name: str, candidate_name: str
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Paired LOSO comparison of two REHAB24-6 feature backbones.")
-    parser.add_argument("--baseline-dir", type=Path, default=DEFAULT_PROCESSED_ROOT / "mmpose_skeleton_features")
+    parser.add_argument("--baseline-dir", type=Path, default=DEFAULT_PROCESSED_ROOT / "rtmpose_skeleton_features")
     parser.add_argument("--candidate-dir", type=Path, default=DEFAULT_PROCESSED_ROOT / "hrnet_w48_skeleton_features")
     parser.add_argument("--baseline-name", type=str, default="rtmpose")
     parser.add_argument("--candidate-name", type=str, default="hrnet")

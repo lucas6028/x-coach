@@ -44,11 +44,11 @@
 - **風險**：過度平滑會吃掉深蹲底部的轉折（correctness 訊號就在轉折），需調截止頻率並用 LOSO 掃。
 
 ### ⭐ R2. 換更強的 2D backbone（基礎建設已在）
-- **做法**：repo 已有 `extract_mmpose_skeleton_features.py`／`mmpose_skeleton_features.py`（COCO-WholeBody → MediaPipe 33-landmark 對齊）。把 backbone 換成 **RTMPose-m/l** 或 **ViTPose**，重抽一份特徵，丟同一個分類器比 LOSO。
+- **做法**：repo 已有 `extract_rtmpose_skeleton_features.py`／`rtmpose_skeleton_features.py`（COCO-WholeBody → MediaPipe 33-landmark 對齊）。把 backbone 換成 **RTMPose-m/l** 或 **ViTPose**，重抽一份特徵，丟同一個分類器比 LOSO。
 - **文獻佐證**：基準上 RTMPose/ViTPose 的 OKS 明顯優於 MediaPipe（肩、肘、腕分佈更集中）；ViTPose 為 COCO SOTA，RTMPose-m 75.8% AP 且可即時。MediaPipe 偏向速度而非精度。
 - **預期效益**：更準的 2D = 更乾淨的角度特徵。這是「把估計品質往 mocap 推」最直接的一刀。估計 +0.02～0.04，且與 R1 可疊加。
-- **成本**：中。基礎已存在，主要是裝 mmpose 環境 + GPU 抽 130 支影片 + 確認 landmark 對齊正確。
-- **改哪裡**：沿用 `mmpose_skeleton_features.py`；驗證 COCO→BlazePose 對齊（尤其髖/肩 scale pair）後 `train_correctness_classifier.py --feature-dir .../mmpose_skeleton_features`。
+- **成本**：中。基礎已存在，主要是裝 rtmlib 環境 + GPU 抽 130 支影片 + 確認 landmark 對齊正確。
+- **改哪裡**：沿用 `rtmpose_skeleton_features.py`；驗證 COCO→BlazePose 對齊（尤其髖/肩 scale pair）後 `train_correctness_classifier.py --feature-dir .../rtmpose_skeleton_features`。
 - **風險**：COCO-WholeBody 與 BlazePose 的關節定義不完全等價（如髖中心、足部），對齊誤差會抵銷精度收益——對齊驗證是成敗關鍵。
 
 ### R3. 信賴度感知的插補與加權（低成本清理）
@@ -109,7 +109,7 @@ summary 第 3 點已立規矩：**±0.08 折間 std ＞ 想衝的進步幅度**�
 階段 4（條件）：R6 多視角僅作為上限探針，量「單目還能再拿回多少」。
 ```
 
-**最可能的高 CP 值組合**：R1 + R2 + R3。三者都打中 summary 點名的雜訊來源（抖動、估計精度、遮擋），成本低到中，且基礎建設（mmpose 路線）已存在。R5 是上限賭注，值得做但要有「可能打平甚至輸」的心理準備，並務必帶消融。
+**最可能的高 CP 值組合**：R1 + R2 + R3。三者都打中 summary 點名的雜訊來源（抖動、估計精度、遮擋），成本低到中，且基礎建設（rtmpose 路線）已存在。R5 是上限賭注，值得做但要有「可能打平甚至輸」的心理準備，並務必帶消融。
 
 ---
 

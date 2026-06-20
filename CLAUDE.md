@@ -23,7 +23,7 @@ The most important structural convention: **`scripts/` are thin CLI entry points
 
 `src/` and `scripts/` mirror each other in four workflow areas:
 
-- **`pose/`** — MediaPipe / MMPose landmark extraction (`process_videos.py`, `mmpose_pose_extraction.py` adapts COCO-WholeBody to the MediaPipe 33-landmark layout), pose features, camera-view estimation, and `pose_rule_detector.py` (interpretable squat-fault rules over 33 landmarks with tunable thresholds).
+- **`pose/`** — MediaPipe / RTMPose landmark extraction (`process_videos.py`, `rtmpose_pose_extraction.py` adapts COCO-WholeBody to the MediaPipe 33-landmark layout; defaults to RTMPose/RTMW via `rtmlib`, with an optional `--runtime mmpose` path for OpenMMLab models such as HRNet), pose features, camera-view estimation, and `pose_rule_detector.py` (interpretable squat-fault rules over 33 landmarks with tunable thresholds).
 - **`video/`** — VideoMAE spatio-temporal feature extraction and lightweight video-level error classifiers (`videomae_video_classifier.py`), plus experiment grids and error analysis.
 - **`knowledge/`** — local RAG (`rag_vector_db.py`) and the squat knowledge graph (`extract_kg.py`, `graph_retrieval.py`, `perception_to_graph.py`). The RAG store uses a built-in offline `HashEmbeddingBackend`, so the vector DB builds/queries with no external API.
 - **`rehab24/`** — REHAB24-6 dataset pipeline: repetition-level manifest + subject-wise splits, skeleton features (local), VideoMAE features (GPU/Colab), feature fusion, and a correctness classifier.

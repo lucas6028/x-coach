@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from src.pose.mmpose_pose_extraction import (
+from src.pose.rtmpose_pose_extraction import (
     LANDMARK_COUNT,
     coco_wholebody_to_mediapipe_landmarks,
     prediction_instances,
@@ -12,7 +12,7 @@ from src.pose.mmpose_pose_extraction import (
 )
 
 
-class MMPosePoseExtractionTests(unittest.TestCase):
+class RTMPosePoseExtractionTests(unittest.TestCase):
     def test_coco_wholebody_adapter_outputs_mediapipe_33_landmarks(self) -> None:
         keypoints = np.zeros((133, 2), dtype=np.float32)
         scores = np.ones(133, dtype=np.float32)

@@ -71,7 +71,7 @@ class ComparePoseBackendsTests(unittest.TestCase):
                 ],
             )
 
-            rows = classifier_metric_rows("mmpose", path)
+            rows = classifier_metric_rows("rtmpose", path)
             balanced_accuracy = next(row for row in rows if row.metric == "balanced_accuracy")
             balanced_accuracy_std = next(row for row in rows if row.metric == "balanced_accuracy_std")
 
@@ -162,7 +162,7 @@ class ComparePoseBackendsTests(unittest.TestCase):
             rows = classifier_metric_rows("mediapipe", path)
             rows += [
                 type(rows[0])(
-                    backend="mmpose",
+                    backend="rtmpose",
                     metric_group="classifier",
                     label="combined",
                     metric="balanced_accuracy",
@@ -172,7 +172,7 @@ class ComparePoseBackendsTests(unittest.TestCase):
                 )
             ]
 
-            markdown = markdown_table(rows, left_backend="mediapipe", right_backend="mmpose")
+            markdown = markdown_table(rows, left_backend="mediapipe", right_backend="rtmpose")
 
             self.assertIn("| classifier | combined | balanced_accuracy | 0.6000 | 0.7000 | 0.1000 |", markdown)
 

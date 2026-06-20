@@ -420,7 +420,7 @@ const Cover: Page = () => (
         }}
       >
         <span style={{ border: `1px solid ${line}`, borderRadius: 999, padding: '8px 18px' }}>
-          MediaPipe · MMPose
+          MediaPipe · RTMPose
         </span>
         <span style={{ border: `1px solid ${line}`, borderRadius: 999, padding: '8px 18px' }}>
           VideoMAE
@@ -571,7 +571,7 @@ const Architecture: Page = () => (
       <PipeNode
         n="01"
         title="多模態感知"
-        sub="Pose：MediaPipe / MMPose 骨架；Video：VideoMAE 時空特徵；錯誤的時間定位。"
+        sub="Pose：MediaPipe / RTMPose 骨架；Video：VideoMAE 時空特徵；錯誤的時間定位。"
         done
       />
       <Arrow />
@@ -784,12 +784,12 @@ const Exp2: Page = () => (
 );
 
 // =========================================================================
-// 07 — Experiment 3: MMPose vs MediaPipe backend
+// 07 — Experiment 3: RTMPose vs MediaPipe backend
 // =========================================================================
 const Exp3: Page = () => (
   <Shell
     eyebrow="實驗三 · Backend 比較"
-    heading="換 backbone：MMPose 不是萬用升級"
+    heading="換 backbone：RTMPose 不是萬用升級"
     tag="exp-03"
   >
     <div
@@ -805,7 +805,7 @@ const Exp3: Page = () => (
     </div>
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
       <Bar label="MediaPipe（正規化）" sub="recall 0.578" value={0.608} display="0.608" color={cyan} />
-      <Bar label="MMPose（正規化）" sub="recall 0.789 · +0.094" value={0.702} display="0.702" best />
+      <Bar label="RTMPose（正規化）" sub="recall 0.789 · +0.094" value={0.702} display="0.702" best />
     </div>
     <div style={{ display: 'flex', gap: 28, marginTop: 40 }}>
       <div
@@ -819,7 +819,7 @@ const Exp3: Page = () => (
           lineHeight: 1.55,
         }}
       >
-        <b style={{ color: 'var(--osd-accent)' }}>各取所長：</b>MMPose 是最佳膝內扣偵測器；
+        <b style={{ color: 'var(--osd-accent)' }}>各取所長：</b>RTMPose 是最佳膝內扣偵測器；
         combined 上 MediaPipe（0.635）仍略勝（specificity 更穩）。
       </div>
       <div
@@ -869,7 +869,7 @@ const Exp4: Page = () => (
         display="0.633"
         color={cyan}
       />
-      <Bar label="MMPose 單目（2D-only）" sub="±0.051 · 丟了深度通道" value={0.57} display="0.570" color={faint} />
+      <Bar label="RTMPose 單目（2D-only）" sub="±0.051 · 丟了深度通道" value={0.57} display="0.570" color={faint} />
       <Bar label="VideoMAE" sub="±0.044 · 近隨機" value={0.536} display="0.536" color={faint} />
     </div>
     <div style={{ display: 'flex', gap: 28, marginTop: 34 }}>
@@ -1008,7 +1008,7 @@ const Closing: Page = () => (
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
           <NextRow>
-            Late fusion / gating：MediaPipe 顧 specificity、MMPose 顧 inward recall。
+            Late fusion / gating：MediaPipe 顧 specificity、RTMPose 顧 inward recall。
           </NextRow>
           <NextRow>2D→3D lifting 補回深度，改善上肢動作。</NextRow>
           <NextRow>高信心錯誤案例分析 + backend-specific 規則門檻。</NextRow>

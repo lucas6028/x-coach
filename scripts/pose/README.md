@@ -1,6 +1,6 @@
 # Pose Scripts
 
-Pose workflow entry points for MediaPipe/MMPose extraction, pose features, view metadata, rule detection, evaluation, and backend comparison.
+Pose workflow entry points for MediaPipe/RTMPose extraction, pose features, view metadata, rule detection, evaluation, and backend comparison.
 
 ## Pose Extraction
 
@@ -11,8 +11,8 @@ python scripts/pose/run_pose_extraction.py --dataset unlabeled --limit 5
 # Extract pose JSON for labeled clips without writing annotated videos.
 python scripts/pose/run_pose_extraction.py --dataset labeled --no-video
 
-# Extract MMPose-compatible pose JSON.
-python scripts/pose/run_mmpose_pose_extraction.py
+# Extract RTMPose-compatible pose JSON (rtmlib runtime by default; --runtime mmpose runs HRNet).
+python scripts/pose/run_rtmpose_pose_extraction.py
 ```
 
 ## Pose Features And View Metadata

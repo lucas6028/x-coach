@@ -83,7 +83,7 @@ python scripts/run_backend_coverage.py --fail-under 95   # non-zero exit if belo
 `.github/workflows/ci.yml` runs on every push/PR to `main` (Python 3.11 + 3.12). It installs
 the lean `requirements-ci.txt` (no torch/opencv/mediapipe — they're mocked), runs the
 deterministic test subset, and enforces backend coverage with `--fail-under 95`. The heavy
-(`test_mediapipe_smoothing`, `test_mmpose_pose_extraction`, `test_videomae_video_classifier`)
+(`test_mediapipe_smoothing`, `test_rtmpose_pose_extraction`, `test_videomae_video_classifier`)
 and data-dependent (`test_backend_analysis`) modules are skipped there.
 
 ## Notes

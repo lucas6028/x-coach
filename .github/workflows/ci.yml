@@ -48,7 +48,7 @@ jobs:
         run: |
           python -m pytest tests/ -v \
             --ignore=tests/test_mediapipe_smoothing.py \
-            --ignore=tests/test_mmpose_pose_extraction.py \
+            --ignore=tests/test_rtmpose_pose_extraction.py \
             --ignore=tests/test_videomae_video_classifier.py \
             --ignore=tests/test_backend_analysis.py \
             --cov --cov-branch --cov-report=xml

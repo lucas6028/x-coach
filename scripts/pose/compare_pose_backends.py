@@ -267,25 +267,25 @@ def collect_rows(args: argparse.Namespace) -> list[MetricRow]:
 
     rows: list[MetricRow] = []
     rows.extend(pose_quality_rows("mediapipe", args.mediapipe_pose_json_dir))
-    rows.extend(pose_quality_rows("mmpose", args.mmpose_pose_json_dir))
+    rows.extend(pose_quality_rows("rtmpose", args.rtmpose_pose_json_dir))
     rows.extend(rule_metric_rows("mediapipe", args.mediapipe_rule_metrics))
-    rows.extend(rule_metric_rows("mmpose", args.mmpose_rule_metrics))
+    rows.extend(rule_metric_rows("rtmpose", args.rtmpose_rule_metrics))
     rows.extend(classifier_metric_rows("mediapipe", media_classifier_summary))
-    rows.extend(classifier_metric_rows("mmpose", args.mmpose_classifier_summary))
+    rows.extend(classifier_metric_rows("rtmpose", args.rtmpose_classifier_summary))
     return rows
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Compare MediaPipe and MMPose squat-analysis artifacts.")
+    parser = argparse.ArgumentParser(description="Compare MediaPipe and RTMPose squat-analysis artifacts.")
     parser.add_argument(
         "--mediapipe-pose-json-dir",
         type=Path,
         default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "pose_json",
     )
     parser.add_argument(
-        "--mmpose-pose-json-dir",
+        "--rtmpose-pose-json-dir",
         type=Path,
-        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "mmpose_pose_json",
+        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "rtmpose_pose_json",
     )
     parser.add_argument(
         "--mediapipe-rule-metrics",
@@ -293,25 +293,25 @@ def main() -> None:
         default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "pose_rule_validation_metrics.csv",
     )
     parser.add_argument(
-        "--mmpose-rule-metrics",
+        "--rtmpose-rule-metrics",
         type=Path,
-        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "mmpose_pose_rule_validation_metrics.csv",
+        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "rtmpose_pose_rule_validation_metrics.csv",
     )
     parser.add_argument("--mediapipe-classifier-summary", type=Path, default=None)
     parser.add_argument(
-        "--mmpose-classifier-summary",
+        "--rtmpose-classifier-summary",
         type=Path,
-        default=REPO_ROOT / "data" / "Squat" / "mmpose_pose_classifier_experiments" / "metrics" / "experiment_summary.csv",
+        default=REPO_ROOT / "data" / "Squat" / "rtmpose_pose_classifier_experiments" / "metrics" / "experiment_summary.csv",
     )
     parser.add_argument(
         "--output-csv",
         type=Path,
-        default=REPO_ROOT / "data" / "Squat" / "mmpose_mediapipe_comparison" / "backend_comparison.csv",
+        default=REPO_ROOT / "data" / "Squat" / "rtmpose_mediapipe_comparison" / "backend_comparison.csv",
     )
     parser.add_argument(
         "--output-markdown",
         type=Path,
-        default=REPO_ROOT / "data" / "Squat" / "mmpose_mediapipe_comparison" / "backend_comparison.md",
+        default=REPO_ROOT / "data" / "Squat" / "rtmpose_mediapipe_comparison" / "backend_comparison.md",
     )
     args = parser.parse_args()
 
@@ -320,7 +320,7 @@ def main() -> None:
         raise SystemExit("No comparison rows were collected. Check the artifact paths.")
 
     write_rows_csv(args.output_csv, rows)
-    markdown = markdown_table(rows, left_backend="mediapipe", right_backend="mmpose")
+    markdown = markdown_table(rows, left_backend="mediapipe", right_backend="rtmpose")
     write_markdown(args.output_markdown, markdown)
     print(f"Saved comparison CSV to {args.output_csv}")
     print(f"Saved comparison Markdown to {args.output_markdown}")
