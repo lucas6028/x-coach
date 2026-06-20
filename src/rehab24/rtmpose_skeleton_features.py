@@ -1,21 +1,22 @@
-"""Extract REHAB24-6 repetition-level skeleton features from RGB video via MMPose.
+"""Extract REHAB24-6 repetition-level skeleton features from RGB video via RTMPose.
 
 A third estimated-skeleton comparison group alongside the Vicon mocap baseline
-and the MediaPipe pseudo-3D features. MMPose / RTMPose (run through the
-``src.pose.mmpose_pose_extraction`` helpers, defaulting to the Colab-GPU-friendly
-``rtmlib`` runtime) produces **2D image keypoints only** — there is no learned
+and the MediaPipe pseudo-3D features. RTMPose / RTMW (run through the
+``src.pose.rtmpose_pose_extraction`` helpers, defaulting to the Colab-GPU-friendly
+``rtmlib`` runtime; ``--runtime mmpose`` swaps in an OpenMMLab model such as HRNet)
+produces **2D image keypoints only** — there is no learned
 depth, unlike MediaPipe's BlazePose world landmarks. We map COCO-WholeBody-133 to
 the MediaPipe-33 layout and run the *same* geometric pipeline as
 :mod:`src.rehab24.mediapipe_skeleton_features`, but on the 2D image branch alone.
 
 The resulting ``.npz`` bundles are drop-in compatible with the correctness
 classifier and LOSO driver (they carry the ``video_feature`` key); train with
-``--feature-dir .../mmpose_skeleton_features``. Because the feature is 2D-only,
+``--feature-dir .../rtmpose_skeleton_features``. Because the feature is 2D-only,
 its dimension is half of the MediaPipe bundle — the classifier reads the feature
 dimension dynamically, so this is fine; just interpret the comparison as
 "more-accurate 2D keypoints, no depth" vs MediaPipe's "pseudo-3D".
 
-GPU note: unlike MediaPipe (CPU-only TFLite), MMPose/RTMPose genuinely uses the
+GPU note: unlike MediaPipe (CPU-only TFLite), RTMPose genuinely uses the
 GPU, so a single Colab GPU process is the right way to run this — no
 multiprocessing needed (the GPU serializes the work anyway).
 """
@@ -29,7 +30,7 @@ from typing import Any
 
 import numpy as np
 
-from src.pose.mmpose_pose_extraction import (
+from src.pose.rtmpose_pose_extraction import (
     coco_wholebody_to_mediapipe_landmarks,
     import_mmpose_inferencer,
     import_rtmlib_wholebody,
@@ -94,7 +95,7 @@ def landmarks_from_video(
     *,
     bbox_thr: float = 0.3,
 ) -> np.ndarray:
-    """Run MMPose/RTMPose over a video, returning normalized image landmarks.
+    """Run RTMPose over a video, returning normalized image landmarks.
 
     Shape: image (T, 33, 2) with x/y normalized to the frame size. Missing-detection
     frames are NaN-filled then linearly interpolated along the time axis so the
@@ -143,7 +144,7 @@ def landmarks_from_video(
 
 
 def extract_feature_vector(image: np.ndarray, first_frame: int, last_frame: int) -> np.ndarray:
-    """Build a repetition feature vector from MMPose 2D image landmarks only."""
+    """Build a repetition feature vector from RTMPose 2D image landmarks only."""
     total_frames = int(image.shape[0])
     start, stop = frame_bounds(first_frame, last_frame, total_frames)
     segment_image = image[start:stop, :, :2]
@@ -186,7 +187,7 @@ def extract_features_for_manifest(
     video_limit: int | None = None,
     overwrite: bool = False,
 ) -> int:
-    """Extract MMPose 2D skeleton features for every manifest row.
+    """Extract RTMPose 2D skeleton features for every manifest row.
 
     The pose model runs once per source video (videos are shared across
     repetitions); each repetition is then sliced and saved as an ``.npz`` bundle.
@@ -229,11 +230,12 @@ def extract_features_for_manifest(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Extract REHAB24-6 repetition-level 2D skeleton features from RGB video using MMPose/RTMPose."
+        description="Extract REHAB24-6 repetition-level 2D skeleton features from RGB video using "
+        "RTMPose/RTMW (rtmlib runtime by default; --runtime mmpose runs an OpenMMLab model such as HRNet)."
     )
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_PROCESSED_ROOT / "manifest.csv")
-    parser.add_argument("--output-dir", type=Path, default=DEFAULT_PROCESSED_ROOT / "mmpose_skeleton_features")
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_PROCESSED_ROOT / "rtmpose_skeleton_features")
     parser.add_argument(
         "--runtime",
         choices=("rtmlib", "mmpose"),

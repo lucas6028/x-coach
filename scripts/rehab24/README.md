@@ -21,15 +21,15 @@ python scripts/rehab24/extract_mediapipe_skeleton_features.py
 # smoke test on one video: --video-limit 1 --output-dir /tmp/mp_smoke
 ```
 
-Extract the same geometric features from the RGB videos via MMPose / RTMPose
+Extract the same geometric features from the RGB videos via RTMPose / RTMW
 (monocular **2D** keypoints — more accurate joints than MediaPipe but no learned
 depth, so it runs the 2D image branch only; feature dim 1188 vs MediaPipe's 2970).
-Unlike MediaPipe, MMPose uses the GPU, so run it on Colab — see
-`notebooks/rehab24_mmpose_colab.ipynb`:
+Unlike MediaPipe, RTMPose uses the GPU, so run it on Colab — see
+`notebooks/rehab24_rtmpose_colab.ipynb`:
 
 ```bash
 # locally (needs rtmlib + onnxruntime); on Colab the notebook drives this for you
-python scripts/rehab24/extract_mmpose_skeleton_features.py \
+python scripts/rehab24/extract_rtmpose_skeleton_features.py \
   --runtime rtmlib --model balanced --device cuda:0
 # smoke test on one video: --video-limit 1
 ```
@@ -59,7 +59,7 @@ pip install --no-build-isolation "chumpy==0.70"   # mmpose dep; setup.py needs w
 pip install --no-deps "mmpose==1.3.2"             # --no-deps skips xtcocotools (no Windows wheel);
                                                   #   src/pose aliases pycocotools for it at runtime
 # verify (run from repo root): prints "GPU True"
-python -c "import torch; from src.pose.mmpose_pose_extraction import import_mmpose_inferencer; import_mmpose_inferencer(); print('GPU', torch.cuda.is_available())"
+python -c "import torch; from src.pose.rtmpose_pose_extraction import import_mmpose_inferencer; import_mmpose_inferencer(); print('GPU', torch.cuda.is_available())"
 ```
 
 Then extract (resumable — re-run the same line to continue after a stop). 6 GB VRAM is
@@ -68,7 +68,7 @@ more accurate (slower) backbone:
 
 ```powershell
 $env:PYTHONPATH = (Get-Location)
-python scripts/rehab24/extract_mmpose_skeleton_features.py `
+python scripts/rehab24/extract_rtmpose_skeleton_features.py `
   --runtime mmpose --model td-hm_hrnet-w32_dark-8xb64-210e_coco-wholebody-256x192 `
   --device cuda:0 --output-dir data/REHAB24-6/processed/hrnet_skeleton_features
 # smoke test on one video: --video-limit 1
@@ -96,9 +96,9 @@ python scripts/rehab24/train_correctness_classifier.py
 python scripts/rehab24/train_correctness_classifier.py \
   --feature-dir data/REHAB24-6/processed/mediapipe_skeleton_features
 
-# MMPose / RTMPose (RGB-estimated 2D) skeleton features
+# RTMPose / RTMW (RGB-estimated 2D) skeleton features
 python scripts/rehab24/train_correctness_classifier.py \
-  --feature-dir data/REHAB24-6/processed/mmpose_skeleton_features
+  --feature-dir data/REHAB24-6/processed/rtmpose_skeleton_features
 ```
 
 Cross-validate any feature set with Leave-One-Subject-Out (10 subjects rotate
@@ -107,8 +107,8 @@ fixed split only tests 2 subjects):
 
 ```bash
 python scripts/rehab24/loso_cross_validation.py \
-  --feature-dir data/REHAB24-6/processed/mmpose_skeleton_features \
-  --summary-output data/REHAB24-6/processed/correctness_loso_mmpose.json
+  --feature-dir data/REHAB24-6/processed/rtmpose_skeleton_features \
+  --summary-output data/REHAB24-6/processed/correctness_loso_rtmpose.json
 
 # HRNet 2D features (same command, different feature dir). For the HRNet-vs-RTMPose
 # paired comparison, the RTMPose features above must exist too — see the HRNet notebook.

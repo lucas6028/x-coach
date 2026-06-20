@@ -1,4 +1,4 @@
-## MMPose 技術細節與實作方式
+## RTMPose 技術細節與實作方式
 
 1. 我們使用的是「全身姿態估計」後端。
 
@@ -58,7 +58,7 @@
 	
 	  都是基於 MediaPipe Pose 的 33-landmark 格式設計的。
 
-  所以我們沒有重寫整個分析流程，而是把 MMPose / RTMW 輸出的 COCO-WholeBody 關鍵點轉成類似 MediaPipe 的格式，讓後續程式可以沿用。
+  所以我們沒有重寫整個分析流程，而是把 RTMPose / RTMW 輸出的 COCO-WholeBody 關鍵點轉成類似 MediaPipe 的格式，讓後續程式可以沿用。
 
   簡化來說：
 
@@ -73,9 +73,9 @@
   > 本研究使用全身姿態估計後端，具體而言，是透過 rtmlib 執行 RTMPose/RTMW 系列的全身姿態模型。模型會輸出 COCO-WholeBody 格式的人體關鍵點，接著再將這些關鍵點轉換為與 MediaPipe 相容的 33-
   > landmark 格式，以便銜接既有的姿態特徵擷取與動作品質分析流程。
 
-### 為什麼使用 MMPose whole-body
+### 為什麼使用 RTMPose whole-body
 
-這次選擇 MMPose `wholebody` inferencer，而不是只用 body-only pose model，主要原因是既有 squat 分析邏輯不只需要 hips、knees、ankles，也需要 heel 與 toe/foot landmarks。
+這次選擇 RTMPose `wholebody` 模型，而不是只用 body-only pose model，主要原因是既有 squat 分析邏輯不只需要 hips、knees、ankles，也需要 heel 與 toe/foot landmarks。
 
 目前 feature extractor 與 rule detector 會使用以下 foot-related 訊號：
 
@@ -88,21 +88,21 @@
 
 如果改用 COCO body-only 17 keypoints，通常只會有 ankle，沒有 heel 與 toe，因此 knees-forward 和 heel-rise 相關特徵會失真或被迫移除。使用 whole-body model 可以保留比較公平的 biomechanical feature set。
 
-### MMPose 輸入與輸出
+### RTMPose 輸入與輸出
 
 實作檔案是：
 
 ```text
-src/pose/mmpose_pose_extraction.py
+src/pose/rtmpose_pose_extraction.py
 ```
 
 主要執行方式：
 
 ```bash
-python scripts/pose/run_mmpose_pose_extraction.py \
+python scripts/pose/run_rtmpose_pose_extraction.py \
   --video-dir data/Squat/Labeled_Dataset/videos \
   --split-dir data/Squat/Labeled_Dataset/Splits \
-  --output-dir data/Squat/Labeled_Dataset/mmpose_pose_json \
+  --output-dir data/Squat/Labeled_Dataset/rtmpose_pose_json \
   --model wholebody \
   --device cuda:0
 ```
@@ -110,10 +110,10 @@ python scripts/pose/run_mmpose_pose_extraction.py \
 程式會對每支影片逐幀讀取 OpenCV frame，送進：
 
 ```python
-MMPoseInferencer(pose2d="wholebody", device="cuda:0", show_progress=False)
+Wholebody(mode="balanced", backend="onnxruntime", device="cuda")
 ```
 
-每一幀會呼叫 inferencer，取得 MMPose prediction，再取出最高信心的人體 instance。輸出會寫成與既有 MediaPipe pipeline 相容的 JSON：
+每一幀會呼叫 inferencer，取得 RTMPose prediction，再取出最高信心的人體 instance。輸出會寫成與既有 MediaPipe pipeline 相容的 JSON：
 
 ```json
 {
@@ -122,8 +122,8 @@ MMPoseInferencer(pose2d="wholebody", device="cuda:0", show_progress=False)
     "width": 480,
     "height": 600,
     "total_frames": 90,
-    "backend": "mmpose",
-    "mmpose_model": "wholebody",
+    "backend": "rtmlib",
+    "pose_model": "wholebody",
     "keypoint_schema": "coco_wholebody_133_to_mediapipe_33",
     "world_landmarks": false
   },
@@ -148,11 +148,11 @@ MMPoseInferencer(pose2d="wholebody", device="cuda:0", show_progress=False)
 - `metadata.height`
 - `metadata.total_frames`
 
-因此 `src/pose/pose_feature_extraction.py`、`src/pose/pose_rule_detector.py`、`src/pose/view_estimation.py` 都可以直接讀取 MMPose JSON，不需要另外寫一套下游 feature/rule/classifier。
+因此 `src/pose/pose_feature_extraction.py`、`src/pose/pose_rule_detector.py`、`src/pose/view_estimation.py` 都可以直接讀取 RTMPose JSON，不需要另外寫一套下游 feature/rule/classifier。
 
 ### COCO-WholeBody 到 MediaPipe 33 landmarks 的轉換
 
-MMPose whole-body 使用 COCO-WholeBody keypoint schema。既有程式則假設 MediaPipe Pose 33 landmark schema。為了沿用既有 feature/rule pipeline，本次新增 adapter：
+RTMPose whole-body 使用 COCO-WholeBody keypoint schema。既有程式則假設 MediaPipe Pose 33 landmark schema。為了沿用既有 feature/rule pipeline，本次新增 adapter：
 
 ```python
 coco_wholebody_to_mediapipe_landmarks(...)
@@ -194,7 +194,7 @@ MediaPipe 有 33 個 landmarks，但 COCO-WholeBody 沒有完全對應 MediaPipe
 
 ### 座標與 confidence 處理
 
-MMPose 輸出的 keypoints 是 pixel coordinates。既有 MediaPipe pipeline 使用 normalized coordinates，因此 adapter 會做：
+RTMPose 輸出的 keypoints 是 pixel coordinates。既有 MediaPipe pipeline 使用 normalized coordinates，因此 adapter 會做：
 
 ```python
 x_normalized = x_pixel / frame_width
@@ -203,7 +203,7 @@ z = 0.0
 visibility = keypoint_score
 ```
 
-注意：MMPose whole-body 這裡沒有產生 MediaPipe-style 3D world landmarks，所以：
+注意：RTMPose whole-body 這裡沒有產生 MediaPipe-style 3D world landmarks，所以：
 
 ```python
 world_landmarks = None
@@ -214,11 +214,11 @@ world_landmarks = None
 - 如果 `world_landmarks` 可用，優先用 world landmarks 算角度。
 - 如果 `world_landmarks` 不可用或有效點不足，改用 image landmarks。
 
-因此 MMPose backend 會主要依賴 2D normalized image geometry。這是與 MediaPipe 比較時需要記錄的限制。
+因此 RTMPose backend 會主要依賴 2D normalized image geometry。這是與 MediaPipe 比較時需要記錄的限制。
 
 ### 多人或背景人體的處理
 
-MMPose inferencer 可能在一幀中回傳多個 person instances。這次採用簡單、可重複的策略：
+RTMPose inferencer 可能在一幀中回傳多個 person instances。這次採用簡單、可重複的策略：
 
 ```python
 select_primary_instance(instances)
@@ -237,11 +237,11 @@ select_primary_instance(instances)
 
 ```text
 video.mp4
-  -> MMPose wholebody inferencer
+  -> RTMPose wholebody inferencer
   -> COCO-WholeBody keypoints
   -> MediaPipe-33-compatible JSON
   -> pose_feature_extraction.py
-  -> mmpose_pose_features/*.npz
+  -> rtmpose_pose_features/*.npz
   -> run_videomae_experiment_grid.py
   -> classifier metrics
 ```
@@ -249,14 +249,14 @@ video.mp4
 Rule-based 路線則是：
 
 ```text
-MMPose MediaPipe-compatible JSON
+RTMPose MediaPipe-compatible JSON
   -> run_view_estimation.py
   -> run_pose_rule_detection.py
   -> evaluate_pose_rule_detection.py
-  -> mmpose_pose_rule_validation_metrics.csv
+  -> rtmpose_pose_rule_validation_metrics.csv
 ```
 
-這樣做的好處是比較時只替換 pose backend，其餘 downstream feature aggregation、rules、classifier、threshold selection 都維持一致。也就是說，MediaPipe vs MMPose 的差異主要來自 pose estimator 本身，而不是下游訓練或評估邏輯不同。
+這樣做的好處是比較時只替換 pose backend，其餘 downstream feature aggregation、rules、classifier、threshold selection 都維持一致。也就是說，MediaPipe vs RTMPose 的差異主要來自 pose estimator 本身，而不是下游訓練或評估邏輯不同。
 
 ### Comparison report 的技術做法
 
@@ -292,15 +292,15 @@ backend_comparison.csv
 backend_comparison.md
 ```
 
-Markdown table 會以 MediaPipe 作為左側 baseline，MMPose 作為右側 backend，並計算：
+Markdown table 會以 MediaPipe 作為左側 baseline，RTMPose 作為右側 backend，並計算：
 
 ```text
-mmpose_minus_mediapipe
+rtmpose_minus_mediapipe
 ```
 
 ### 為什麼不直接改 feature extractor
 
-這次沒有把 `src/pose/pose_feature_extraction.py` 改成 backend-specific 設計，原因是目前比較目標是「替換 pose estimator，其他條件固定」。如果在 feature extractor 中為 MMPose 加入太多特殊邏輯，會讓比較結果混入 feature engineering 差異。
+這次沒有把 `src/pose/pose_feature_extraction.py` 改成 backend-specific 設計，原因是目前比較目標是「替換 pose estimator，其他條件固定」。如果在 feature extractor 中為 RTMPose 加入太多特殊邏輯，會讓比較結果混入 feature engineering 差異。
 
 目前採用 adapter 的方式有三個優點：
 
@@ -308,39 +308,39 @@ mmpose_minus_mediapipe
 - 所有 downstream code 可以重用。
 - 測試範圍集中在 keypoint schema conversion，比較容易驗證。
 
-未來如果要做更完整的 MMPose-native feature，可以再新增獨立的 feature extractor，而不是改動這條公平比較 baseline。
+未來如果要做更完整的 RTMPose-native feature，可以再新增獨立的 feature extractor，而不是改動這條公平比較 baseline。
 
 
 ## 更新摘要
 
-本次新增一條以 MMPose whole-body pose estimation 為基礎的特徵抽取與比較流程，用來和既有 MediaPipe pose pipeline 比較 rule-based detection 與 pose-only classifier 的效果。
+本次新增一條以 RTMPose whole-body pose estimation 為基礎的特徵抽取與比較流程，用來和既有 MediaPipe pose pipeline 比較 rule-based detection 與 pose-only classifier 的效果。
 
-核心設計是讓 MMPose 輸出轉成既有 MediaPipe 33 landmark JSON 格式，因此後續的 pose feature extraction、rule detector、view estimation、classifier training 都可以沿用現有程式，不需要另外建立一套下游模型流程。
+核心設計是讓 RTMPose 輸出轉成既有 MediaPipe 33 landmark JSON 格式，因此後續的 pose feature extraction、rule detector、view estimation、classifier training 都可以沿用現有程式，不需要另外建立一套下游模型流程。
 
 ## 新增檔案
 
-- `src/pose/mmpose_pose_extraction.py`
-  - 使用 MMPose `wholebody` inferencer 逐幀抽取 pose。
+- `src/pose/rtmpose_pose_extraction.py`
+  - 使用 RTMPose `wholebody` 模型逐幀抽取 pose。
   - 將 COCO-WholeBody keypoints 轉成 MediaPipe 33 landmark schema。
   - 保留 shoulders、hips、knees、ankles、heels、toe/foot points，讓現有深蹲幾何特徵可以繼續使用。
   - 因 RTMW whole-body 輸出為 2D keypoints，`world_landmarks` 會寫成 `None`。
 
-- `scripts/pose/run_mmpose_pose_extraction.py`
-  - MMPose pose extraction 的批次執行入口。
+- `scripts/pose/run_rtmpose_pose_extraction.py`
+  - RTMPose pose extraction 的批次執行入口。
   - 支援 train/val/test split、`--limit`、`--overwrite`、`--device` 與 `--model`。
 
 - `scripts/pose/compare_pose_backends.py`
-  - 彙整 MediaPipe 與 MMPose 的比較結果。
+  - 彙整 MediaPipe 與 RTMPose 的比較結果。
   - 比較項目包含 pose extraction quality、rule-based metrics、classifier metrics。
   - 輸出 long-format CSV 與 Markdown comparison table。
 
-- `notebooks/run_mmpose_pose_comparison.ipynb`
+- `notebooks/run_rtmpose_pose_comparison.ipynb`
   - Google Colab T4 GPU 用的完整執行 notebook。
-  - 流程包含 MMPose 安裝、pose extraction、feature extraction、view metadata、rule evaluation、classifier grid、最終比較報表。
+  - 流程包含 RTMPose 安裝、pose extraction、feature extraction、view metadata、rule evaluation、classifier grid、最終比較報表。
 
-- `tests/test_mmpose_pose_extraction.py`
+- `tests/test_rtmpose_pose_extraction.py`
   - 測試 COCO-WholeBody 到 MediaPipe 33 landmarks 的轉換。
-  - 測試 MMPose inferencer prediction shape 的解析與 primary instance 選擇。
+  - 測試 RTMPose inferencer prediction shape 的解析與 primary instance 選擇。
 
 - `tests/test_compare_pose_backends.py`
   - 測試 classifier summary 的多 seed 平均。
@@ -352,28 +352,28 @@ mmpose_minus_mediapipe
 建議在 Google Colab T4 GPU 上直接執行：
 
 ```text
-notebooks/run_mmpose_pose_comparison.ipynb
+notebooks/run_rtmpose_pose_comparison.ipynb
 ```
 
 Notebook 會依序產生以下主要輸出：
 
 ```text
-data/Squat/Labeled_Dataset/mmpose_pose_json/
-data/Squat/Labeled_Dataset/mmpose_pose_features/
-data/Squat/Labeled_Dataset/mmpose_view_metadata.csv
-data/Squat/Labeled_Dataset/mmpose_pose_rule_detections/
-data/Squat/Labeled_Dataset/mmpose_pose_rule_validation_metrics.csv
-data/Squat/mmpose_pose_classifier_experiments/
-data/Squat/mmpose_mediapipe_comparison/backend_comparison.csv
-data/Squat/mmpose_mediapipe_comparison/backend_comparison.md
+data/Squat/Labeled_Dataset/rtmpose_pose_json/
+data/Squat/Labeled_Dataset/rtmpose_pose_features/
+data/Squat/Labeled_Dataset/rtmpose_view_metadata.csv
+data/Squat/Labeled_Dataset/rtmpose_pose_rule_detections/
+data/Squat/Labeled_Dataset/rtmpose_pose_rule_validation_metrics.csv
+data/Squat/rtmpose_pose_classifier_experiments/
+data/Squat/rtmpose_mediapipe_comparison/backend_comparison.csv
+data/Squat/rtmpose_mediapipe_comparison/backend_comparison.md
 ```
 
-若只想先 smoke test 少量影片，可先在 Colab 或本機已安裝 MMPose 的環境執行：
+若只想先 smoke test 少量影片，可直接在 Colab 或本機執行（rtmlib runtime 為預設）：
 
 ```bash
-python scripts/pose/run_mmpose_pose_extraction.py \
+python scripts/pose/run_rtmpose_pose_extraction.py \
   --video-dir data/Squat/Labeled_Dataset/videos \
-  --output-dir data/Squat/Labeled_Dataset/mmpose_pose_json \
+  --output-dir data/Squat/Labeled_Dataset/rtmpose_pose_json \
   --splits test \
   --limit 1 \
   --device cuda:0
@@ -381,19 +381,19 @@ python scripts/pose/run_mmpose_pose_extraction.py \
 
 ## 比較方式
 
-MMPose pose JSON 會先轉成與 MediaPipe 相同的 feature bundle：
+RTMPose pose JSON 會先轉成與 MediaPipe 相同的 feature bundle：
 
 ```bash
 python scripts/pose/run_pose_feature_extraction.py \
-  --pose-json-dir data/Squat/Labeled_Dataset/mmpose_pose_json \
-  --output-dir data/Squat/Labeled_Dataset/mmpose_pose_features \
+  --pose-json-dir data/Squat/Labeled_Dataset/rtmpose_pose_json \
+  --output-dir data/Squat/Labeled_Dataset/rtmpose_pose_features \
   --overwrite
 ```
 
 接著可以用同一組 rule detector 和 classifier 設定比較兩個 backend：
 
-- Rule-based：比較 `pose_rule_validation_metrics.csv` 與 `mmpose_pose_rule_validation_metrics.csv`。
-- Classifier：比較 MediaPipe pose features 與 MMPose pose features 在相同 label modes、seeds、normalization 與 threshold objective 下的 test selected-threshold metrics。
+- Rule-based：比較 `pose_rule_validation_metrics.csv` 與 `rtmpose_pose_rule_validation_metrics.csv`。
+- Classifier：比較 MediaPipe pose features 與 RTMPose pose features 在相同 label modes、seeds、normalization 與 threshold objective 下的 test selected-threshold metrics。
 - Extraction quality：比較 processed videos、pose detected ratio、valid lower-body ratio。
 
 最終彙整命令：
@@ -404,12 +404,12 @@ python scripts/pose/compare_pose_backends.py
 
 ## 已完成驗證
 
-已在本機完成不依賴 MMPose GPU runtime 的測試：
+已在本機完成不依賴 GPU runtime 的測試：
 
 ```bash
-python3 -m py_compile src/pose/mmpose_pose_extraction.py scripts/pose/run_mmpose_pose_extraction.py scripts/pose/compare_pose_backends.py
-.venv/bin/python -m unittest tests.test_mmpose_pose_extraction tests.test_compare_pose_backends tests.test_pose_rule_detector tests.test_videomae_video_classifier
-python3 -m json.tool notebooks/run_mmpose_pose_comparison.ipynb
+python3 -m py_compile src/pose/rtmpose_pose_extraction.py scripts/pose/run_rtmpose_pose_extraction.py scripts/pose/compare_pose_backends.py
+.venv/bin/python -m unittest tests.test_rtmpose_pose_extraction tests.test_compare_pose_backends tests.test_pose_rule_detector tests.test_videomae_video_classifier
+python3 -m json.tool notebooks/run_rtmpose_pose_comparison.ipynb
 ```
 
 結果：
@@ -420,7 +420,7 @@ python3 -m json.tool notebooks/run_mmpose_pose_comparison.ipynb
 
 ## 注意事項
 
-- 本機尚未實際跑 MMPose extraction，因為 MMPose、MMCV、MMDetection 與 GPU runtime 主要預期在 Colab T4 環境安裝與執行。
-- 目前 MMPose 輸出使用 2D keypoints，沒有 MediaPipe `world_landmarks`，因此 feature extractor 會以 image landmarks 做幾何計算。
-- MMPose whole-body 是目前預設 backend，原因是 body-only 模型缺少 heel/toe keypoints，會削弱 knees-forward 與 heel-rise 相關特徵與規則。
+- 本機尚未實際跑 RTMPose extraction，因為 rtmlib、ONNX Runtime 與 GPU runtime 主要預期在 Colab T4 環境安裝與執行。
+- 目前 RTMPose 輸出使用 2D keypoints，沒有 MediaPipe `world_landmarks`，因此 feature extractor 會以 image landmarks 做幾何計算。
+- RTMPose whole-body 是目前預設 backend，原因是 body-only 模型缺少 heel/toe keypoints，會削弱 knees-forward 與 heel-rise 相關特徵與規則。
 - `compare_pose_backends.py` 不會自動重新產生 MediaPipe baseline；若 baseline 檔案不存在，會輸出 warning 並只比較已存在的 artifact。

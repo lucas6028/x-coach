@@ -26,10 +26,10 @@ transformers==5.5.0
 pytest>=8,<9
 coverage>=7,<8
 
-# Optional: MMPose-based pose extraction (src/pose/mmpose_pose_extraction.py).
+# Optional: RTMPose/MMPose-based pose extraction (src/pose/rtmpose_pose_extraction.py).
 # Lazily imported and not installed in the base .venv; install only if you
-# need the COCO-WholeBody / RTMPose path. Versions left unpinned because the
-# mmcv/mmpose stack is environment- and CUDA-specific.
+# need the COCO-WholeBody / RTMPose path (rtmlib) or the MMPose runtime (HRNet).
+# Versions left unpinned because the mmcv/mmpose stack is environment- and CUDA-specific.
 # mmpose
 # rtmlib
 # pycocotools

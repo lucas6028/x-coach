@@ -230,7 +230,7 @@ const en: Dict = {
   "landing.bento.title": "Four signals, read locally and fused.",
   "landing.bento.pose.title": "Pose perception",
   "landing.bento.pose.body":
-    "MediaPipe and MMPose landmarks on 33 keypoints. Joint geometry like knee valgus maps straight into language the graph understands.",
+    "MediaPipe and RTMPose landmarks on 33 keypoints. Joint geometry like knee valgus maps straight into language the graph understands.",
   "landing.bento.kg.title": "Knowledge graph",
   "landing.bento.kg.body":
     "A fitness knowledge graph links fault to cause to fix, with multi-hop retrieval over sourced biomechanics.",
@@ -493,7 +493,7 @@ const zhHant: Dict = {
   "landing.bento.title": "四種訊號，於本地讀取並融合。",
   "landing.bento.pose.title": "姿態感知",
   "landing.bento.pose.body":
-    "MediaPipe 與 MMPose 在 33 個關鍵點上的標記。像膝外翻這類關節幾何，可直接對應成知識圖譜理解的語言。",
+    "MediaPipe 與 RTMPose 在 33 個關鍵點上的標記。像膝外翻這類關節幾何，可直接對應成知識圖譜理解的語言。",
   "landing.bento.kg.title": "知識圖譜",
   "landing.bento.kg.body":
     "健身知識圖譜將錯誤、成因與修正串連起來，並在具來源的生物力學上進行多跳檢索。",

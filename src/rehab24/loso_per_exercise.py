@@ -62,7 +62,7 @@ EXERCISE_NAMES = {
 DEFAULT_SOURCES: dict[str, str] = {
     "vicon": "skeleton_features",
     "mediapipe": "mediapipe_skeleton_features",
-    "mmpose": "mmpose_skeleton_features",
+    "rtmpose": "rtmpose_skeleton_features",
     "videomae": "videomae_features",
 }
 

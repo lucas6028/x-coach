@@ -49,7 +49,7 @@ RIGHT_TOE_CANDIDATES = (20, 21)
 
 
 @dataclass(frozen=True)
-class MMPoseRequest:
+class PoseRequest:
     split_name: str
     video_id: str
     video_path: Path
@@ -87,8 +87,8 @@ def build_requests(
     split_dir: Path,
     output_dir: Path,
     split_names: Sequence[str],
-) -> list[MMPoseRequest]:
-    requests: list[MMPoseRequest] = []
+) -> list[PoseRequest]:
+    requests: list[PoseRequest] = []
     missing: list[str] = []
     for split_name in split_names:
         for video_id in load_json_list(split_dir / f"{split_name}_keys.json"):
@@ -97,7 +97,7 @@ def build_requests(
                 missing.append(f"{split_name}/{video_id}")
                 continue
             requests.append(
-                MMPoseRequest(
+                PoseRequest(
                     split_name=split_name,
                     video_id=video_id,
                     video_path=video_path,
@@ -113,7 +113,7 @@ def build_requests(
     return requests
 
 
-def iter_requests(requests: Sequence[MMPoseRequest], limit: int | None) -> Iterable[MMPoseRequest]:
+def iter_requests(requests: Sequence[PoseRequest], limit: int | None) -> Iterable[PoseRequest]:
     yield from requests if limit is None else requests[:limit]
 
 
@@ -449,7 +449,7 @@ def process_video(
             "total_frames": total_frames,
             "backend": "mmpose" if runtime == "mmpose" else "rtmlib",
             "pose_runtime": runtime,
-            "mmpose_model": model,
+            "pose_model": model,
             "keypoint_schema": "coco_wholebody_133_to_mediapipe_33",
             "world_landmarks": False,
         },
@@ -510,7 +510,10 @@ def process_video(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Batch process squat videos with MMPose whole-body pose estimation.")
+    parser = argparse.ArgumentParser(
+        description="Batch process squat videos with RTMPose/RTMW whole-body pose estimation "
+        "(rtmlib runtime by default; --runtime mmpose runs an OpenMMLab model such as HRNet)."
+    )
     parser.add_argument(
         "--video-dir",
         type=Path,
@@ -526,8 +529,8 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "mmpose_pose_json",
-        help="Directory for MMPose pose JSON outputs.",
+        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "rtmpose_pose_json",
+        help="Directory for RTMPose pose JSON outputs.",
     )
     parser.add_argument("--splits", type=parse_split_names, default=list(SPLIT_NAMES))
     parser.add_argument("--limit", type=int, default=None)
@@ -543,7 +546,7 @@ def main() -> None:
         default="balanced",
         help="For --runtime rtmlib: performance, lightweight, or balanced. For --runtime mmpose: model alias/config.",
     )
-    parser.add_argument("--device", default="cuda:0", help="MMPose device, e.g. cuda:0 or cpu.")
+    parser.add_argument("--device", default="cuda:0", help="Inference device, e.g. cuda:0 or cpu.")
     parser.add_argument("--bbox-thr", type=float, default=0.3)
     args = parser.parse_args()
 
@@ -557,7 +560,7 @@ def main() -> None:
         raise SystemExit("No videos were found to process.")
 
     print(f"Found {len(requests)} videos to process from {args.video_dir}.")
-    print(f"Writing MMPose pose outputs under {args.output_dir}.")
+    print(f"Writing RTMPose pose outputs under {args.output_dir}.")
 
     processed = 0
     skipped = 0
