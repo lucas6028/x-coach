@@ -424,3 +424,4 @@ frontend/coverage/
 .yarn/
 .venv-mmpose/*
 .kaggle_tmp/*
+third_party/

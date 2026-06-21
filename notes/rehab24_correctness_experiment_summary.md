@@ -76,6 +76,45 @@ REHAB24-6 pipeline 以 repetition 為單位，訓練一個輕量分類器判斷�
 
 產物：`data/REHAB24-6/processed/correctness_loso_per_exercise.json`（4 來源）、`correctness_loso_per_exercise_hrnet.json`（HRNet-w48 vs RTMPose）。執行：`python scripts/rehab24/loso_per_exercise.py`（4 來源）；HRNet 對照 `python scripts/rehab24/loso_per_exercise.py --sources rtmpose=rtmpose_skeleton_features hrnet=hrnet_w48_skeleton_features --summary-output data/REHAB24-6/processed/correctness_loso_per_exercise_hrnet.json`。（RTMPose 欄位完全重現原表，確認折切分確定性、可逐欄並列。）
 
+## 2D→3D Lifting 實驗：深度可否從單目恢復（R5）
+
+第 6/7 點留下的假設：2D-only backbone（RTMPose/HRNet）追不上 MediaPipe pseudo-3D，是因為**丟了深度通道**；若用 2D→3D lifting 把深度補回，應能逼近含深度的設定。本實驗用三條互補路線直接檢驗「深度訊號能否從單目 2D 恢復」。
+
+每條路線都訓練一個**不看 correctness 標籤**的 lifter（純幾何映射），再用 lifted-3D 重建骨架特徵跑同一套 LOSO，因此下游 LOSO 仍是乾淨的泛化估計。每條都做「**同一 2D 來源、只換 3D block**」的對照，隔離「lifted 3D 帶來的增益」。各路線 feature_dim 不同（關節佈局不同），故重點是**同路線內 lifted vs 2D 的 delta** 與**跨路線排序**，不是絕對值並列。
+
+### 三條路線（9 折 LOSO，排除 P10；mean±std / pooled）
+
+| 路線 | 設定 | feat_dim | 9 折 mean±std | pooled | lifter recon MSE |
+|---|---|---|---|---|---|
+| **S1 MediaPipe 空間** | mediapipe pseudo-3D（上界，既有） | 2970 | **0.633 ± 0.055** | 0.642 | — |
+| | lifted3d（自訓 TCN，由 MP-2D 抬升） | 2970 | 0.621 ± 0.041 | 0.627 | 0.039 |
+| | mp2d（MP image 2D-only，下界） | 1188 | 0.607 ± 0.059 | 0.601 | — |
+| **S2 Vicon 空間** | Vicon 真實 3D mocap（上界，既有） | 2340 | **0.702 ± 0.078** | 0.722 | — |
+| | lifted3d_vicon（自訓 TCN，由 Vicon-2D 抬升） | 2340 | 0.566 ± 0.050 | 0.595 | 0.170 |
+| | vicon2d（Vicon 投影 2D-only，下界） | 936 | 0.583 ± 0.055 | 0.590 | — |
+| **S3 預訓練 lifter** | vp3d_lifted（VideoPose3D 抬升 + COCO-2D） | 1530 | 0.635 ± 0.067 | 0.652 | — |
+| | vp3d_2d（COCO-17 image 2D-only，下界） | 612 | 0.631 ± 0.068 | 0.622 | — |
+
+### 核心結論：lifting 能補回「偽深度」，補不回「真深度」
+
+1. **S1：lifted3d（0.621）落在 mp2d（0.607）與 mediapipe（0.633）之間**，約恢復一半（且整段落差本來就只有 0.026）。recon MSE 僅 0.039——因為 lifting 的監督目標 MediaPipe world 本身就是 BlazePose 的**單目學習估計**，其「深度」大半是 2D 可導出的，所以 lifter 能模仿大半。
+
+2. **S2（決定性）：lifted3d_vicon（0.566）≈ vicon2d（0.583），甚至略低（在雜訊內），且都遠低於真實 Vicon 3D（0.702）。** 抬升從單一視角的 Vicon-2D**完全沒補回**那 +0.12 的真深度增益。recon MSE 0.170（是 S1 的 4 倍）——真實 mocap 深度是貨真價實的離面（out-of-plane）訊號，**單目 2D 推不出來**。
+
+3. **S3（最強反證）：連在海量 H36M mocap 上預訓練的 VideoPose3D，lifted（0.635）也只比自己的 2D（0.631）高 +0.004（9 折，雜訊內；pooled +0.030）。** 升級 lifter 容量／資料量改變不了結論：**深度增益不是 lifter 不夠強，而是訊號根本不在單目 2D 裡。** lifted 3D 幾何健全（骨長 CV 1.5–3%、股骨≈脛骨），排除了「抬升壞掉」的可能。
+
+4. **修正 R5 假設**：第 6/7 點期待「lifting 把深度補回就能逼近含深度設定」——**只對偽深度成立**。MediaPipe 之所以贏 2D-only backbone，主要不是它的 BlazePose world 帶了多少真深度（mp2d→mediapipe 只差 0.026），而是**它的 2D 本身就比 RTMPose/HRNet 的 2D 更能判別**（見第 5 點）。真深度只有 Vicon 那種量測級 3D 才有，而那條路單鏡頭補不回來。
+
+5. **側發現：2D 品質才是單目這條線的主槓桿。** 各 2D-only 下界排序：vp3d_2d（COCO-17 MediaPipe 2D）**0.631** ≳ mp2d（MediaPipe-33 2D）0.607 > HRNet-2D 0.575 ≈ RTMPose-2D 0.570。MediaPipe 系的 2D 全面優於 RTMPose/HRNet 的 2D；且最好的 2D-only（0.631）已逼近 MediaPipe pseudo-3D（0.633）。**這正是「MediaPipe-2D-only vs RTMPose-2D-only」對照所缺的一塊**：MediaPipe 的優勢主要來自 2D 而非深度。
+
+6. **產品意涵（x-coach 單鏡頭深蹲教練）**：靠 2D→3D lifting 把單目推向 mocap 水準是**死路**——無論自訓 TCN 或 SOTA 預訓練 lifter 都補不回真深度。能真正加訊號的只有 (a) **更好的 2D**（squat 上好 2D ≈ pseudo-3D 已夠用），或 (b) **真 3D 量測**（多視角／深度感測）。先前「需要 lifting 補深度」的方向應降權，「拿最好的單目 2D」應升權。
+
+產物：`correctness_loso_{lifted3d,mp2d,lifted3d_vicon,vicon2d,vp3d_lifted,vp3d_2d}.json`（各含每折明細）、`lift_2d_to_3d_metrics.json`、`lift_2d_to_3d_vicon_metrics.json`、`lift_2d_to_3d_vp3d_metrics.json`。執行：
+- S1：`python scripts/rehab24/lift_2d_to_3d.py` → LOSO 各 feature_dir。
+- S2：`python scripts/rehab24/lift_2d_to_3d_vicon.py` → LOSO。
+- S3：`python scripts/rehab24/lift_2d_to_3d_pretrained.py`（需先 clone VideoPose3D + 下載 `pretrained_h36m_detectron_coco.bin` 至 `third_party/VideoPose3D`）→ LOSO。
+S1/S2 在本機 CPU 訓練（各早停 ~47/75 epoch）；S3 VideoPose3D 為輕量 TCN，本機 CPU 推論 130 支影片約數分鐘。**MotionBERT（重型 transformer）尚未跑**——預期與 VideoPose3D 同結論，若要確認需上 Kaggle GPU。
+
 ## 過擬合程度（train@0.5 → test selected，固定切分）
 
 | 設定 | Train bal_acc (0.5) | Test bal_acc (selected) | 落差 |
@@ -106,7 +145,7 @@ REHAB24-6 pipeline 以 repetition 為單位，訓練一個輕量分類器判斷�
 
 ## 建議的下一步
 
-1. 以 **Skeleton-only（Vicon）作為 correctness 上限基線**，**MediaPipe 單目估計骨架作為可部署基線**——兩者都站得住，VideoMAE 不可單獨採信。後續單目品質改進（多視角融合、時間平滑、更強 backbone、2D→3D lifting）以縮小那 6 點差距為目標。
+1. 以 **Skeleton-only（Vicon）作為 correctness 上限基線**，**MediaPipe 單目估計骨架作為可部署基線**——兩者都站得住，VideoMAE 不可單獨採信。**縮小那 6 點差距的方向已修正**（見「2D→3D Lifting 實驗」）：**2D→3D lifting 是死路**（自訓 TCN 與 SOTA 預訓練 VideoPose3D 都補不回真深度），應降權；改以「**拿最好的單目 2D**」（MediaPipe 系 2D > RTMPose/HRNet 2D）＋（若可行）**真 3D 量測（多視角／深度感測）** 為主線。
 2. **先解決 VideoMAE 過擬合再談融合**：加強正則化（dropout / weight decay）、降維（PCA / 線性探針）、確認 VideoMAE 特徵是否做了 subject-wise 正規化，並複查 split 是否真的 subject-disjoint。
 3. **改進融合方式**：以 late fusion / gating 取代早期 concat，或先凍結 skeleton 分支再小幅引入 video 分支，避免壞特徵主導。
 4. **報告口徑**：以 test selected-threshold 為準，並附上 train→test 落差佐證泛化，不要只報訓練或固定 0.5 的數字。
