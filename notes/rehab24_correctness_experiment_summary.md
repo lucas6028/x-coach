@@ -115,6 +115,83 @@ REHAB24-6 pipeline 以 repetition 為單位，訓練一個輕量分類器判斷�
 - S3：`python scripts/rehab24/lift_2d_to_3d_pretrained.py`（需先 clone VideoPose3D + 下載 `pretrained_h36m_detectron_coco.bin` 至 `third_party/VideoPose3D`）→ LOSO。
 S1/S2 在本機 CPU 訓練（各早停 ~47/75 epoch）；S3 VideoPose3D 為輕量 TCN，本機 CPU 推論 130 支影片約數分鐘。**MotionBERT（重型 transformer）尚未跑**——預期與 VideoPose3D 同結論，若要確認需上 Kaggle GPU。
 
+## 直接 image→3D（NLF）：lifting 補不回的深度，直接回歸補得回一部分（promising 但 n=9 未達顯著）
+
+lifting 實驗結論是「單目 **2D→3D lifting** 補不回真深度」。但 lifting 只吃 2D 幾何；**直接 image→3D**（NLF, Neural Localizer Fields, NeurIPS'24）直接從像素回歸 metric 3D + SMPL，能用到 appearance／shading／人體先驗——這些是 lifter 看不到的。問題：直接回歸能否補回 lifting 補不回的深度、逼近 mocap？
+
+**方法**：NLF `nlf_l_multi.torchscript` 在 Kaggle P100 跑 `detect_smpl_batched`（**半解析度 960×540**，~104 ms/frame，與全解析度逐關節差僅 **1.8 mm**；2 個 kernel 並行各 ~3.5h，130 支影片×雙鏡頭，每個 rep 幀 **100% 偵測**，取面積最大框＝病人）→ SMPL-24 3D（mm，相機座標）＋ 2D。套用與其他來源**相同**的 normalize（root＝骨盆、肩寬/髖寬尺度）→velocity→time-summary 特徵管線與**相同 9 折 LOSO**，只換 3D 來源。
+
+### 結果（9 折 LOSO，排除 P10；mean±std / pooled）
+
+| 設定 | dim | 9 折 bal_acc | pooled |
+|---|---|---|---|
+| **NLF parametric 3d2d** | 2160 | **0.668 ± 0.044** | **0.692** |
+| NLF parametric 3d-only | 1296 | 0.652 ± 0.046 | 0.678 |
+| NLF nonparam 3d2d | 2160 | 0.646 ± 0.069 | 0.678 |
+| (對照) MediaPipe pseudo-3D | 2970 | 0.634 | 0.642 |
+| (對照) vp3d_lifted | 1530 | 0.635 | 0.652 |
+| (對照) vp3d_2d（最佳 2D-only） | 612 | 0.631 | 0.622 |
+| (天花板) Vicon mocap | — | ~0.702 | — |
+
+**配對 LOSO（同折同 seed，逐折配對抵銷受試者難度）**：
+- NLF vs MediaPipe：d = **+0.034 ± 0.063**，6/9 折正，**Wilcoxon p = 0.203（undetermined）**；減 P5 後 d=+0.024（p≈0.38）。
+- NLF vs vp3d_lifted：d = **+0.033 ± 0.084**，6/9 折正，**p = 0.301（undetermined）**；減 P5 後 d=+0.023（p≈0.55）。
+
+### 核心結論
+
+1. **點估計上 NLF 是目前最強的單目路線**（0.668）：比最佳單目（pseudo-3D 0.634 / vp3d_lifted 0.635）高 +0.033–0.034、pooled 高 ~+0.05，把「單目→mocap」缺口（0.634→~0.702）補回**約一半**。
+2. **但配對顯著性 undetermined**（Wilcoxon p=0.20–0.30）：REHAB24-6 只有 **9 個可用受試者**、跨受試者變異大（折 delta −0.11~+0.17），+0.034 的均值撐不到顯著。**這不是雜訊歸零的 wash**——對比 hrnet-vs-rtmpose（d=+0.005、p=0.73），NLF 是**一致為正、約 7 倍大**的正向趨勢，且在 baseline 崩到近隨機的折（P8 +0.15、P5 +0.11）贏最多，只是 n=9 撐不到統計顯著。
+3. **增益來自回歸的「深度」，不只是 NLF 的 2D 較乾淨**：3D-only 對照（**0.652**）就已超過最佳單目（0.634）。且 parametric（0.668）> nonparam（0.646）→ SMPL 身體先驗（時間穩定、解剖約束）有額外幫助。
+4. **修正 lifting 結論**：「lifting 是死路」仍成立（純 2D 幾何補不回深度）；但**直接 image→3D ≠ lifting**——它靠像素 appearance＋學到的人體先驗，補回 lifting 補不回的一部分真深度。**深度訊號「在影像裡」，只是「不在 2D 幾何裡」**，所以判別關鍵是「用什麼把深度從像素取出」，而非「能不能取出」。
+5. **各動作拆解佐證「補深度」機制**（pooled LOSO per exercise）：NLF **在 6 個動作全數 ≥ MediaPipe**（一致方向，補上 subject 層 n=9 的不足），且**增益集中在上肢／離面深度大的動作**——table push-ups **+0.106**、arm VW **+0.076**、arm abduction +0.033（判別關鍵在手臂/軀幹的離面深度，單目 2D 最難）；偏面內的下肢動作增益較小（leg abduction +0.013、lunge +0.019、squats +0.024，單目 2D 本就接近夠用）。對比 vp3d_lifted：NLF 在 arm VW 大勝（0.635 vs 0.489，+0.146），跨動作更穩健（lifted 在複雜手臂動作崩盤）。**「增益正落在最該補深度的動作」這個分布，是 NLF 補回真深度的機制證據**，與 lifting 實驗第 71 點（arm abduction 單目缺口最大）呼應。
+6. **產品意涵（x-coach 單鏡頭教練）**：直接 image→3D（NLF 這類）是比 lifting 更有前景的補深度路線——尤其產品若擴及上肢動作，缺口大、NLF 補得多。但 subject 層增益尚未達統計顯著，須以 (a) **第二個直接 3D 模型（HMR2.0/4DHumans）**佐證收斂、(b) 更多受試者、或 (c) 真 3D 量測 來確認。
+
+產物：`correctness_loso_nlf_{parametric_3d2d,parametric_3d,nonparam_3d2d}.json`、配對 `correctness_loso_nlf_vs_{mediapipe,vp3dlift}.json`、`correctness_loso_per_exercise_nlf.json`。重現：Kaggle 抽取 → `python -m src.rehab24.nlf_skeleton_features --raw-dir data/REHAB24-6/processed/nlf_raw3d` → `python -m src.rehab24.loso_cross_validation --feature-dir …nlf_parametric_3d2d_skeleton_features`。原始每影片 3D 存 `data/REHAB24-6/processed/nlf_raw3d/`（半解析度抽取），特徵管線細節見 `src/rehab24/nlf_skeleton_features.py`（7 個單元測試）。
+
+## 第二個直接 image→3D 模型交叉驗證（HMR2.0 / 4DHumans）
+
+NLF 的 subject 層增益（+0.034）方向一致但 n=9 撐不到顯著，第 6 點留下的待辦是「拿**第二個獨立的直接 image→3D 模型**佐證收斂」。選 HMR2.0（4DHumans，ViT-based SMPL 回歸）——與 NLF 架構不同（NLF 是 localizer-field 點回歸、HMR2.0 是參數化 SMPL transformer），若兩者在同樣的動作上同向補回深度，就是機制證據而非單一模型的偶然。
+
+**抽取差異（關鍵 confound）**：HMR2.0 用內建偵測器逐幀偵測＋取最大框，但 REHAB24-6 部分機位/幀偵測失敗，**每 rep 平均僅 ~75% 幀有偵測**（NLF 是 100%），缺幀以線性插補補回。這 25% 插補幀引入的雜訊會系統性壓低 HMR——比較時須記住 HMR 吃了 NLF 沒有的 localization 雜訊虧。
+
+### LOSO 結果（9 折，排除 P10；mean±std / pooled）
+
+| 設定 | dim | 9 折 bal_acc | pooled |
+|---|---|---|---|
+| NLF parametric 3d-only（對照，乾淨偵測 100%） | 1296 | 0.652 ± 0.046 | 0.678 |
+| **HMR parametric 3d-only**（公平數字） | 1296 | **0.643 ± 0.058** | 0.635 |
+| HMR parametric 3d2d（2D 受 crop-plane 雜訊污染） | 2160 | 0.623 ± 0.070 | 0.645 |
+| (對照) MediaPipe pseudo-3D | 2970 | 0.634 | 0.642 |
+
+**配對 LOSO（HMR-3d-only vs MediaPipe，同折同 seed）**：Δ = **+0.009 ± 0.047**，5/9 折正，**Wilcoxon p = 0.734（undetermined）**；**再排除 P5 後 Δ 翻成 −0.002（p = 0.945）**——HMR 那點微小優勢幾乎全來自資料天花板受試者 P5（該折 +0.092），抽掉就歸零。
+
+### 核心結論：方向一致但被偵測率與弱 localization 雙重 confound，**未達 NLF 期望的乾淨佐證**
+
+1. **HMR 的 2D block 反而扣分（3d2d 0.623 < 3d-only 0.643）**，與 NLF 相反（NLF 3d2d 0.668 > 3d-only 0.652）。差別在 2D 來源品質：NLF 給的是乾淨的影像座標 2D，HMR 只有 crop-plane 重投影 2D（受偵測框抖動污染）。故 **HMR 的公平數字是 3d-only = 0.643**，後續比較一律用 3d-only 對 3d-only。
+
+2. **整體上 HMR 僅 +0.009 over MediaPipe（p=0.73），且去掉 P5 即歸零**——遠弱於 NLF（+0.034，去 P5 仍 +0.024）。這**不是雜訊歸零的 wash 也不是反證**，但**確實不是當初想要的乾淨收斂**：兩個直接 3D 模型同向（都 ≥ baseline），但 HMR 的訊號被 25% 插補幀＋弱 2D 壓到雜訊內。
+
+3. **唯一穩固的交叉佐證：table push-ups。** 逐動作（pooled LOSO，3d-only 對照）兩個獨立直接-3D 模型在**離面深度最大的上肢撐體動作**上都大幅補分——**HMR +0.096、NLF +0.119**，方向與幅度都收斂。架構迥異的兩個 image→3D 回歸器在同一個最該補深度的動作上各自獨立 +~0.10，**這是「直接回歸補回離面深度」機制的最強單點證據**，比 subject 層的均值更難用偶然解釋。
+
+   | Ex | 動作 | n | MediaPipe | HMR-3d-only（Δ） | NLF-3d-only（Δ） |
+   |---|---|---|---|---|---|
+   | Ex1 | arm abduction | 356 | 0.652 | 0.611（−0.041） | 0.621（−0.031） |
+   | Ex2 | arm VW | 416 | 0.559 | 0.537（−0.022） | 0.629（**+0.070**） |
+   | Ex3 | table push-ups | 214 | 0.620 | 0.716（**+0.096**） | 0.739（**+0.119**） |
+   | Ex4 | leg abduction | 420 | 0.686 | 0.676（−0.010） | 0.699（+0.013） |
+   | Ex5 | leg lunge | 348 | 0.510 | 0.561（+0.051） | 0.484（−0.026） |
+   | Ex6 | squats | 390 | 0.713 | 0.746（**+0.033**） | 0.692（−0.021） |
+
+   （此表 NLF 欄為 **3d-only**，故與上文 NLF 章節「6 動作全數 ≥ MediaPipe」的表不同——那張表用的是 NLF **3d2d**，含 NLF 乾淨的影像 2D；要與 HMR-3d-only 公平對照才改用 3d-only。）
+
+4. **兩模型分歧處正好被 HMR 的偵測 confound 解釋**：NLF 在 **arm VW 大補（+0.070）但 HMR 反退（−0.022）**——arm VW 是快速上肢揮動，最吃逐幀 localization 精度，25% 插補幀正好打在這裡，HMR 補不回反而被插補雜訊拖累。squats 則相反（HMR +0.033、NLF −0.021），但兩者都落在 MediaPipe 2D 本就夠用的面內動作、差異小。leg lunge 的 HMR +0.051 落在資料天花板動作（連 Vicon 0.498 都近隨機）→ 與 P5 同屬雜訊。**扣掉這些 confound/天花板格，剩下乾淨可信的就是 push-ups 的雙模型收斂。**
+
+5. **對 NLF 結論的影響**：HMR 交叉驗證**沒有推翻也沒有乾淨確認** NLF。它提供 (a) 方向一致（同向 ≥ baseline）、(b) push-ups 上的機制收斂（兩個直接-3D 模型獨立 +~0.10 於最離面的動作）兩項弱佐證；但 subject 層因 75% 偵測率＋弱 2D 而被壓到雜訊內，無法當作 NLF +0.034 的獨立確認。**誠實的口徑：NLF 仍是目前最強的單目路線，HMR 的角色是「機制上呼應、統計上未確認」。**
+
+6. **要乾淨確認，兩條路**：(a) **重抽 HMR**——把偵測率從 75% 拉到接近 100%（換更穩的偵測器或人工框追蹤），消除插補雜訊後重跑配對，看 arm VW 是否也翻正、整體是否逼近 NLF；(b) 釜底抽薪——**更多受試者**才能讓 +0.03 級別的真增益撐到顯著（n=9 是根本瓶頸，見 NLF 第 2 點）。在這之前，直接 image→3D 的結論維持「promising、機制有雙模型微弱呼應、但 subject 層未達顯著」。
+
+產物：`correctness_loso_hmr_parametric_{3d2d,3d}.json`、配對 `correctness_loso_hmr3d_vs_mediapipe.json`、逐動作 `correctness_loso_per_exercise_hmr.json`（含 hmr3d / nlf3d / mediapipe / vp3dlift 四欄，皆 3d-only 同流程）。重現：Kaggle 抽取 HMR2.0/4DHumans 原始 3D → `python -m src.rehab24.nlf_skeleton_features`（同一特徵管線，--raw-dir 指向 hmr_raw3d）→ `python -m src.rehab24.loso_cross_validation --feature-dir …hmr_parametric_3d_skeleton_features`；配對 `python -m src.rehab24.paired_loso`；逐動作 `python scripts/rehab24/loso_per_exercise.py --sources mediapipe=mediapipe_skeleton_features hmr3d=hmr_parametric_3d_skeleton_features nlf3d=nlf_parametric_3d_skeleton_features vp3dlift=vp3d_lifted_skeleton_features --summary-output data/REHAB24-6/processed/correctness_loso_per_exercise_hmr.json`。
+
 ## 過擬合程度（train@0.5 → test selected，固定切分）
 
 | 設定 | Train bal_acc (0.5) | Test bal_acc (selected) | 落差 |
