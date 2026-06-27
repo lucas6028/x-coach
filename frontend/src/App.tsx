@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, type Analysis } from "./api";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
@@ -37,6 +38,7 @@ export default function App() {
   const [feedbackWidth, setFeedbackWidth] = useState(384);
   const [resizing, setResizing] = useState(false);
 
+  const [searchParams] = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const seek = useCallback((t: number) => {
@@ -78,6 +80,30 @@ export default function App() {
       setStatusMsg("");
     }
   }, [t]);
+
+  // Replay a saved analysis when arriving from history via /app?analysis=<id>.
+  const loadStored = useCallback(async (id: string) => {
+    setLoading(true);
+    setError("");
+    setStatusMsg(t("app.loading", { id }));
+    setAnalysis(null);
+    try {
+      const row = await api.getStoredAnalysis(id);
+      setAnalysis(row.result);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+      setStatusMsg("");
+    }
+  }, [t]);
+
+  const storedId = searchParams.get("analysis");
+  useEffect(() => {
+    if (storedId) void loadStored(storedId);
+    // Re-run only when the requested id changes (not on unrelated re-renders).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storedId]);
 
   // Reset playback state whenever a new analysis arrives.
   useEffect(() => {

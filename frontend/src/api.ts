@@ -1,5 +1,7 @@
 // Typed client for the x-coach FastAPI backend. URLs are relative; Vite proxies /api -> :8000.
 
+import { supabase } from "./lib/supabase";
+
 export interface VideoMeta {
   fps: number;
   width: number;
@@ -84,6 +86,34 @@ export interface Analysis {
   pose: PoseBlock;
   ground_truth?: Record<string, number[][]>;
   source: "library" | "upload";
+  // Present when an authenticated upload was persisted to the user's history (null if the
+  // save failed). Absent for anonymous uploads and library clips.
+  analysis_id?: string | null;
+}
+
+// A row in the user's history list (the promoted columns, no heavy result payload).
+export interface HistoryItem {
+  id: string;
+  video_id: string;
+  source: string;
+  view_type: string | null;
+  fault_count: number;
+  created_at: string;
+}
+export interface HistoryPage {
+  total: number;
+  items: HistoryItem[];
+}
+
+// A single stored analysis row; `result` is the full Analysis document for replay.
+export interface StoredAnalysis {
+  id: string;
+  video_id: string;
+  source: string;
+  view_type: string | null;
+  fault_count: number;
+  created_at: string;
+  result: Analysis;
 }
 
 export interface LibraryItem {
@@ -98,8 +128,19 @@ export interface LibraryPage {
   items: LibraryItem[];
 }
 
+// Bearer header for the current Supabase session, or {} when logged out / not configured.
+// Returning {} (not a header with an empty token) keeps anonymous requests single-arg.
+async function authHeader(): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function getJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const headers = await authHeader();
+  // Only pass an init object when we actually have a token, so public reads stay header-free.
+  const res = Object.keys(headers).length ? await fetch(url, { headers }) : await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   return (await res.json()) as T;
 }
@@ -119,10 +160,21 @@ export const api = {
 
   videoFileUrl: (videoId: string) => `/api/video-file/${videoId}`,
 
+  // The caller's saved analyses, newest first (requires a signed-in session).
+  listAnalyses: (limit = 50, offset = 0) =>
+    getJSON<HistoryPage>(`/api/analyses?limit=${limit}&offset=${offset}`),
+
+  // One saved analysis row, including the full `result` for replay (requires a session).
+  getStoredAnalysis: (id: string) => getJSON<StoredAnalysis>(`/api/analyses/${id}`),
+
   async analyzeUpload(file: File): Promise<Analysis> {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch("/api/analyze", { method: "POST", body: form });
+    const res = await fetch("/api/analyze", {
+      method: "POST",
+      body: form,
+      headers: await authHeader(),
+    });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
       throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);

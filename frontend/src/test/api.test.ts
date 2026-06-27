@@ -75,6 +75,37 @@ describe("api.graph", () => {
   });
 });
 
+describe("api.listAnalyses", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("builds the URL with default limit and offset", async () => {
+    mockFetch({ total: 0, items: [] });
+    await api.listAnalyses();
+    expect(fetch).toHaveBeenCalledWith("/api/analyses?limit=50&offset=0");
+  });
+
+  it("passes a custom limit and offset", async () => {
+    mockFetch({ total: 0, items: [] });
+    await api.listAnalyses(10, 20);
+    expect(fetch).toHaveBeenCalledWith("/api/analyses?limit=10&offset=20");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 401);
+    await expect(api.listAnalyses()).rejects.toThrow("401");
+  });
+});
+
+describe("api.getStoredAnalysis", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches the stored-analysis row endpoint", async () => {
+    mockFetch({ id: "a1", result: { video_id: "v1" } });
+    await api.getStoredAnalysis("a1");
+    expect(fetch).toHaveBeenCalledWith("/api/analyses/a1");
+  });
+});
+
 describe("api.analyzeUpload", () => {
   afterEach(() => vi.restoreAllMocks());
 

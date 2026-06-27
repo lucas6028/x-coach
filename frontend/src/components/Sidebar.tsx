@@ -1,6 +1,8 @@
+import { Link } from "react-router-dom";
 import ThemeToggle from "./ThemeToggle";
 import LanguageToggle from "./LanguageToggle";
 import { useI18n } from "../lib/i18n";
+import { useAuth } from "../lib/auth";
 
 interface Props {
   open: boolean;
@@ -16,6 +18,7 @@ interface Props {
 // Width is driven from the parent so it can be dragged to resize.
 export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary }: Props) {
   const { t } = useI18n();
+  const { user, signOut } = useAuth();
   return (
     <aside
       style={{ width }}
@@ -59,9 +62,61 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
             <span className="material-symbols-outlined">folder_data</span>
             {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
           </button>
+          <Link
+            to="/history"
+            title={t("nav.history")}
+            className={`flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors ${
+              open ? "" : "justify-center"
+            }`}
+          >
+            <span className="material-symbols-outlined">history</span>
+            {open && <span className="text-sm font-medium">{t("nav.history")}</span>}
+          </Link>
         </nav>
       </div>
       <div className="p-2 border-t border-border-dark flex flex-col gap-2">
+        {/* Account: signed-in identity + sign out, or a sign-in entry point. */}
+        {user ? (
+          open ? (
+            <div className="flex items-center gap-2 px-1">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                <span className="material-symbols-outlined text-lg">person</span>
+              </span>
+              <span className="min-w-0 flex-1 truncate text-xs text-muted" title={user.email ?? ""}>
+                {user.email}
+              </span>
+              <button
+                onClick={() => void signOut()}
+                aria-label={t("account.signout")}
+                title={t("account.signout")}
+                className="shrink-0 flex h-8 w-8 items-center justify-center rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg">logout</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => void signOut()}
+              aria-label={t("account.signout")}
+              title={t("account.signout")}
+              className="w-10 h-10 mx-auto flex items-center justify-center rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
+            >
+              <span className="material-symbols-outlined">logout</span>
+            </button>
+          )
+        ) : (
+          <Link
+            to="/login"
+            aria-label={t("account.signin")}
+            title={t("account.signin")}
+            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors ${
+              open ? "" : "justify-center px-0"
+            }`}
+          >
+            <span className="material-symbols-outlined">login</span>
+            {open && <span className="text-sm font-medium">{t("account.signin")}</span>}
+          </Link>
+        )}
         <LanguageToggle expanded={open} />
         <ThemeToggle expanded={open} />
         {open && (

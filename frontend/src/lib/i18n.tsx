@@ -275,6 +275,54 @@ const en: Dict = {
   "landing.showcase.highknee.note": "Knee-drive height and left-right landing symmetry.",
   "landing.showcase.situps.name": "Sit-ups",
   "landing.showcase.situps.note": "Trunk flexion and neck compensation, rep by rep.",
+
+  // Auth — login + session
+  "auth.checking": "Checking your session…",
+  "auth.back": "Back to home",
+  "auth.signInTitle": "Sign in",
+  "auth.signInSub": "Welcome back. Pick up your saved analyses.",
+  "auth.signUpTitle": "Create your account",
+  "auth.signUpSub": "Save every analysis to your history.",
+  "auth.email": "Email",
+  "auth.password": "Password",
+  "auth.signInBtn": "Sign in",
+  "auth.signUpBtn": "Create account",
+  "auth.or": "or",
+  "auth.google": "Continue with Google",
+  "auth.noAccount": "New here?",
+  "auth.toSignup": "Create an account",
+  "auth.haveAccount": "Already have an account?",
+  "auth.toSignin": "Sign in",
+  "auth.demoLink": "Continue without an account",
+  "auth.errorTitle": "Couldn't sign you in",
+  "auth.confirmEmail": "Check your inbox to confirm your email, then sign in.",
+  "auth.notConfigured": "Sign-in isn't set up on this server yet. You can still use the demo.",
+  "auth.brandHeadline": "Coaching you can revisit.",
+  "auth.brandSub":
+    "Sign in to keep every squat analysis, with its skeleton, faults, and grounded feedback.",
+  "auth.point1": "Every analysis saved to your history",
+  "auth.point2": "Reopen any past rep, exactly as analyzed",
+  "auth.point3": "Private to you, enforced at the database",
+
+  // Account / nav
+  "nav.history": "My records",
+  "account.signin": "Sign in",
+  "account.signout": "Sign out",
+
+  // History page (我的紀錄)
+  "history.title": "My records",
+  "history.subtitle": "Saved analyses for {email}.",
+  "history.subtitleAnon": "Your saved analyses.",
+  "history.newAnalysis": "New analysis",
+  "history.empty": "No saved analyses yet.",
+  "history.emptyHint": "Analyze a squat while signed in and it lands here.",
+  "history.startCta": "Analyze a squat",
+  "history.errorTitle": "Couldn't load your history",
+  "history.retry": "Retry",
+  "history.rowTitle": "{view} squat",
+  "history.clean": "clean rep",
+  "history.faultOne": "1 fault",
+  "history.faultMany": "{count} faults",
 };
 
 const zhHant: Dict = {
@@ -538,6 +586,53 @@ const zhHant: Dict = {
   "landing.showcase.highknee.note": "抬膝高度與左右落地的對稱性。",
   "landing.showcase.situps.name": "仰臥起坐",
   "landing.showcase.situps.note": "逐下檢視軀幹屈曲與頸部代償。",
+
+  // Auth — login + session
+  "auth.checking": "確認登入狀態中…",
+  "auth.back": "返回首頁",
+  "auth.signInTitle": "登入",
+  "auth.signInSub": "歡迎回來，繼續查看你儲存的分析。",
+  "auth.signUpTitle": "建立帳號",
+  "auth.signUpSub": "把每一次分析都存進你的紀錄。",
+  "auth.email": "電子郵件",
+  "auth.password": "密碼",
+  "auth.signInBtn": "登入",
+  "auth.signUpBtn": "建立帳號",
+  "auth.or": "或",
+  "auth.google": "使用 Google 繼續",
+  "auth.noAccount": "還沒有帳號？",
+  "auth.toSignup": "建立帳號",
+  "auth.haveAccount": "已經有帳號了？",
+  "auth.toSignin": "登入",
+  "auth.demoLink": "不登入，直接試用",
+  "auth.errorTitle": "無法登入",
+  "auth.confirmEmail": "請至信箱點擊確認連結，再回來登入。",
+  "auth.notConfigured": "此伺服器尚未設定登入功能，你仍可使用示範。",
+  "auth.brandHeadline": "可以回顧的教練回饋。",
+  "auth.brandSub": "登入後，每一段深蹲分析（骨架、錯誤與有據回饋）都會為你保留。",
+  "auth.point1": "每次分析都存進你的紀錄",
+  "auth.point2": "隨時重開任何一次動作，完整重現",
+  "auth.point3": "僅你可見，由資料庫層級保護",
+
+  // Account / nav
+  "nav.history": "我的紀錄",
+  "account.signin": "登入",
+  "account.signout": "登出",
+
+  // History page (我的紀錄)
+  "history.title": "我的紀錄",
+  "history.subtitle": "{email} 的已存分析。",
+  "history.subtitleAnon": "你的已存分析。",
+  "history.newAnalysis": "新分析",
+  "history.empty": "還沒有已存的分析。",
+  "history.emptyHint": "登入狀態下分析一段深蹲，就會出現在這裡。",
+  "history.startCta": "分析深蹲",
+  "history.errorTitle": "無法載入你的紀錄",
+  "history.retry": "重試",
+  "history.rowTitle": "{view}深蹲",
+  "history.clean": "標準動作",
+  "history.faultOne": "1 個錯誤",
+  "history.faultMany": "{count} 個錯誤",
 };
 
 const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };

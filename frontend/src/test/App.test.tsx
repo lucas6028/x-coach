@@ -3,15 +3,18 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
+import { AuthProvider } from "../lib/auth";
 import App from "../App";
 import { mockAnalysis } from "./fixtures";
 
 function renderApp() {
   return render(
     <MemoryRouter>
-      <I18nProvider>
-        <App />
-      </I18nProvider>
+      <AuthProvider>
+        <I18nProvider>
+          <App />
+        </I18nProvider>
+      </AuthProvider>
     </MemoryRouter>
   );
 }
