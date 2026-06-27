@@ -12,7 +12,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app import config
-from backend.app.routers import analyze, knowledge, videos
+from backend.app.routers import analyses, analyze, knowledge, videos
+from backend.app.settings import get_settings
 
 app = FastAPI(
     title="x-coach API",
@@ -29,6 +30,7 @@ app.add_middleware(
 )
 
 app.include_router(analyze.router)
+app.include_router(analyses.router)
 app.include_router(videos.router)
 app.include_router(knowledge.router)
 
@@ -38,6 +40,7 @@ def health() -> dict:
     """Liveness check plus a quick view of which data stores are present."""
     return {
         "status": "ok",
+        "auth_configured": get_settings().auth_configured,
         "stores": {
             "labeled_videos": config.VIDEOS_DIR.exists(),
             "detections": config.DETECTIONS_DIR.exists(),

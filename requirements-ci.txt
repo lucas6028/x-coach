@@ -16,6 +16,9 @@ fastapi>=0.110,<1
 python-multipart>=0.0.9
 httpx>=0.27,<1
 
+pydantic-settings>=2,<3
+PyJWT>=2.9,<3
+
 # Imported at app load (src/knowledge) and by the light unit tests
 numpy>=1.26,<3
 networkx>=3,<4

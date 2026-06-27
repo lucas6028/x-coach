@@ -10,22 +10,36 @@ From the **repository root** (so `from src... import` resolves), with the venv a
 
 ```bash
 source .venv/bin/activate
-pip install -r requirements.txt          # first time (adds fastapi/uvicorn/python-multipart)
+pip install -r requirements.txt          # first time (adds fastapi/uvicorn/python-multipart + supabase/PyJWT)
+cp .env.example .env                      # then fill in the Supabase keys (see Auth below)
 uvicorn backend.app.main:app --reload --port 8000
 ```
 
+## Auth & persistence (Supabase)
+
+Auth and history are **optional**: with no Supabase env set the server still runs — uploads are
+analyzed but nothing is saved (public demo), and the history endpoints return 503/401.
+
+Configure via `.env` at the repo root (gitignored; see `.env.example`):
+`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_JWT_SECRET`. The frontend authenticates with
+Supabase Auth and sends `Authorization: Bearer <access_token>`; the backend verifies it locally
+(HS256) and forwards it to Postgres so **RLS** scopes every row to its owner. Apply the schema
+first — see `db/migrations/` (and its README for why migrations don't live under `supabase/`).
+
 ## Endpoints
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET  | `/api/health` | liveness + which data stores are present |
-| POST | `/api/analyze` | upload a squat video → MediaPipe extract → rule detection (+retrieval) |
-| GET  | `/api/videos?limit=&offset=&fault=` | list precomputed labeled clips (faulty clips first) |
-| GET  | `/api/analysis/{video_id}` | precomputed analysis for a library clip (retrieval enriched on demand) |
-| GET  | `/api/pose/{video_id}` | slim 33-landmark overlay block |
-| GET  | `/api/video-file/{video_id}` | stream the source mp4 (supports HTTP Range / seeking) |
-| GET  | `/api/knowledge/graph?query=` | knowledge-graph subgraph for the KG widget |
-| GET  | `/api/knowledge/rag?query=` | ranked RAG snippets |
+| Method | Path | Auth | Purpose |
+|--------|------|------|---------|
+| GET  | `/api/health` | — | liveness + which data stores are present + `auth_configured` |
+| POST | `/api/analyze` | optional | upload a squat video → extract → rule detection (+retrieval); persists + returns `analysis_id` when authenticated |
+| GET  | `/api/analyses?limit=&offset=` | required | the caller's analysis history (newest first) |
+| GET  | `/api/analyses/{analysis_id}` | required | one of the caller's analyses (full `result`) |
+| GET  | `/api/videos?limit=&offset=&fault=` | — | list precomputed labeled clips (faulty clips first) |
+| GET  | `/api/analysis/{video_id}` | — | precomputed analysis for a library clip (retrieval enriched on demand) |
+| GET  | `/api/pose/{video_id}` | — | slim 33-landmark overlay block |
+| GET  | `/api/video-file/{video_id}` | — | stream the source mp4 (supports HTTP Range / seeking) |
+| GET  | `/api/knowledge/graph?query=` | — | knowledge-graph subgraph for the KG widget |
+| GET  | `/api/knowledge/rag?query=` | — | ranked RAG snippets |
 
 Interactive docs: <http://localhost:8000/docs>.
 
@@ -35,11 +49,14 @@ Interactive docs: <http://localhost:8000/docs>.
 backend/app/
   main.py            FastAPI app, CORS, router wiring, /api/health
   config.py          repo-root paths + runtime/upload dirs
+  settings.py        env-driven secrets (Supabase URL / anon key / JWT secret)
+  auth.py            Supabase JWT verification + get_current_user / get_optional_user
   services/
     analysis.py      live upload: process_video + detect_pose_rules_from_json + slim pose block
     library.py       list/load precomputed labeled videos + ground-truth labels
     knowledge.py     wrappers over retrieve_graph_context / query_vector_db
-  routers/           analyze.py, videos.py, knowledge.py
+    store.py         user-scoped Supabase persistence (videos + analyses, RLS-enforced)
+  routers/           analyze.py, analyses.py, videos.py, knowledge.py
 ```
 
 Uploaded videos and their derived pose JSON land in `data/runtime/` (gitignored).
@@ -47,16 +64,17 @@ Uploaded videos and their derived pose JSON land in `data/runtime/` (gitignored)
 ## Tests
 
 The backend has a self-contained suite at `tests/test_backend.py` that covers every section
-(`config`, the three `services/`, the three `routers/`, and `main`) at **100% line + branch
-coverage**. The heavy ML pipeline (`src.pose.*`) and knowledge retrieval (`src.knowledge.*`)
-are mocked, so the suite runs fast and needs no MediaPipe/torch or `data/` fixtures.
+(`config`, `settings`, `auth`, the four `services/`, the four `routers/`, and `main`) at
+**100% line + branch coverage**. The heavy ML pipeline (`src.pose.*`), knowledge retrieval
+(`src.knowledge.*`), and the Supabase client are mocked, so the suite runs fast and needs no
+MediaPipe/torch, `data/` fixtures, or a live Supabase project.
 
 Run from the **repository root** (scope to `tests/` — a bare `pytest` collects the stale
 root-level `test_metadata.py`):
 
 ```bash
 source .venv/bin/activate
-python -m pytest tests/test_backend.py            # backend API suite (69 tests)
+python -m pytest tests/test_backend.py            # backend API suite (106 tests)
 python -m pytest tests/test_backend.py -k Library # one class
 ```
 

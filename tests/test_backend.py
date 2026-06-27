@@ -3,13 +3,17 @@
 Every backend section is exercised here:
 
 - ``config``            -> path config, runtime-dir creation, env-driven concurrency cap.
+- ``settings``          -> Supabase env settings + ``auth_configured`` + cached getter.
+- ``auth``              -> bearer parsing, Supabase JWT verification, required/optional deps.
 - ``services.analysis`` -> pose-block slimming, upload persistence, full upload pipeline.
 - ``services.library``  -> split lookup, listing/ordering/filtering, precomputed analysis load.
 - ``services.knowledge``-> KG / RAG passthrough to ``src/``.
-- ``routers.analyze``   -> upload endpoint (validation + success + failure mapping).
+- ``services.store``    -> user-scoped Supabase reads/writes (client mocked).
+- ``routers.analyze``   -> upload endpoint (validation, success, 422 mapping, optional persist).
+- ``routers.analyses``  -> per-user history list/fetch (auth required).
 - ``routers.videos``    -> listing, analysis, pose, and video-file streaming endpoints.
 - ``routers.knowledge`` -> graph / rag query endpoints + query validation.
-- ``main``              -> health endpoint, store-presence reporting, startup dir creation.
+- ``main``              -> health endpoint, store-presence + auth-configured reporting, startup.
 
 The heavy ML pipeline (``src.pose.process_videos`` / ``src.pose.pose_rule_detector``) and the
 knowledge retrieval (``src.knowledge.*``) are mocked so the API layer is tested in isolation,
@@ -28,11 +32,15 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import jwt
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from backend.app import config
+from backend.app import auth, config
+from backend.app import settings as app_settings
+from backend.app.auth import CurrentUser, get_current_user, get_optional_user
 from backend.app.main import app
-from backend.app.services import analysis, knowledge, library
+from backend.app.services import analysis, knowledge, library, store
 
 
 # --------------------------------------------------------------------------- helpers
@@ -587,6 +595,57 @@ class AnalyzeRouterTests(_TempConfigBase):
             )
         self.assertEqual(resp.status_code, 200)
 
+    def test_anonymous_upload_does_not_persist(self) -> None:
+        fake_result = {"detections": [], "source": "upload"}
+        with mock.patch.object(
+            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+        ), mock.patch.object(
+            analysis, "analyze_video_file", return_value=fake_result
+        ), mock.patch.object(store, "persist_analysis") as persist:
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 200)
+        persist.assert_not_called()
+        self.assertNotIn("analysis_id", resp.json())
+
+    def test_authenticated_upload_persists_and_returns_id(self) -> None:
+        app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+        fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
+        with mock.patch.object(
+            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+        ), mock.patch.object(
+            analysis, "analyze_video_file", return_value=fake_result
+        ), mock.patch.object(store, "persist_analysis", return_value="analysis-1") as persist:
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["analysis_id"], "analysis-1")
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], "u1")
+        self.assertEqual(kwargs["token"], "tok")
+        self.assertEqual(kwargs["video_id"], "upload_abc")
+        self.assertEqual(kwargs["source"], "upload")
+        self.assertEqual(kwargs["filename"], "clip.mp4")
+
+    def test_authenticated_upload_persist_failure_sets_id_none(self) -> None:
+        app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+        with mock.patch.object(
+            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+        ), mock.patch.object(
+            analysis, "analyze_video_file", return_value={"detections": []}
+        ), mock.patch.object(
+            store, "persist_analysis", side_effect=RuntimeError("db down")
+        ):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.json()["analysis_id"])
+
 
 class VideosRouterTests(_TempConfigBase):
     def setUp(self) -> None:
@@ -740,6 +799,8 @@ class MainAppTests(_TempConfigBase):
         paths = self.client.get("/openapi.json").json()["paths"]
         for expected in (
             "/api/analyze",
+            "/api/analyses",
+            "/api/analyses/{analysis_id}",
             "/api/videos",
             "/api/analysis/{video_id}",
             "/api/pose/{video_id}",
@@ -749,6 +810,338 @@ class MainAppTests(_TempConfigBase):
             "/api/health",
         ):
             self.assertIn(expected, paths)
+
+    def test_health_reports_auth_configured_true(self) -> None:
+        with mock.patch(
+            "backend.app.main.get_settings",
+            return_value=types.SimpleNamespace(auth_configured=True),
+        ):
+            resp = self.client.get("/api/health")
+        self.assertTrue(resp.json()["auth_configured"])
+
+    def test_health_reports_auth_not_configured(self) -> None:
+        with mock.patch(
+            "backend.app.main.get_settings",
+            return_value=types.SimpleNamespace(auth_configured=False),
+        ):
+            resp = self.client.get("/api/health")
+        self.assertFalse(resp.json()["auth_configured"])
+
+
+# ------------------------------------------------------------------------- settings
+
+
+class SettingsTests(unittest.TestCase):
+    def test_auth_configured_true_when_all_present(self) -> None:
+        s = app_settings.Settings(
+            supabase_url="https://x.supabase.co",
+            supabase_anon_key="anon",
+            supabase_jwt_secret="secret",
+        )
+        self.assertTrue(s.auth_configured)
+
+    def test_auth_configured_false_when_any_missing(self) -> None:
+        s = app_settings.Settings(
+            supabase_url="https://x.supabase.co",
+            supabase_anon_key="",
+            supabase_jwt_secret="secret",
+        )
+        self.assertFalse(s.auth_configured)
+
+    def test_get_settings_is_cached(self) -> None:
+        app_settings.get_settings.cache_clear()
+        self.addCleanup(app_settings.get_settings.cache_clear)
+        self.assertIs(app_settings.get_settings(), app_settings.get_settings())
+
+
+# ----------------------------------------------------------------------------- auth
+
+
+# Long enough (>=32 bytes) to satisfy PyJWT's HS256 minimum-key-length check.
+_TEST_SECRET = "test-secret-key-padded-to-32-bytes-minimum"
+
+
+def _auth_settings(secret: str = _TEST_SECRET):
+    return types.SimpleNamespace(
+        supabase_jwt_secret=secret, jwt_algorithm="HS256", jwt_audience="authenticated"
+    )
+
+
+def _make_token(
+    *, secret: str = _TEST_SECRET, sub: str | None = "user-1", aud: str = "authenticated", **extra
+) -> str:
+    payload: dict = {"aud": aud, **extra}
+    if sub is not None:
+        payload["sub"] = sub
+    return jwt.encode(payload, secret, algorithm="HS256")
+
+
+class ExtractBearerTests(unittest.TestCase):
+    def test_none_header_returns_none(self) -> None:
+        self.assertIsNone(auth._extract_bearer(None))
+
+    def test_single_token_returns_none(self) -> None:
+        self.assertIsNone(auth._extract_bearer("Bearer"))
+
+    def test_empty_token_returns_none(self) -> None:
+        self.assertIsNone(auth._extract_bearer("Bearer    "))
+
+    def test_wrong_scheme_returns_none(self) -> None:
+        self.assertIsNone(auth._extract_bearer("Token abc"))
+
+    def test_valid_bearer(self) -> None:
+        self.assertEqual(auth._extract_bearer("Bearer abc.def"), "abc.def")
+
+    def test_scheme_is_case_insensitive(self) -> None:
+        self.assertEqual(auth._extract_bearer("bearer abc.def"), "abc.def")
+
+
+class VerifyTests(unittest.TestCase):
+    def test_valid_token_returns_user(self) -> None:
+        token = _make_token(sub="user-42", email="a@b.c")
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+            user = auth._verify(token)
+        self.assertEqual(user.id, "user-42")
+        self.assertEqual(user.email, "a@b.c")
+        self.assertEqual(user.token, token)
+
+    def test_no_secret_configured_is_503(self) -> None:
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings(secret="")):
+            with self.assertRaises(HTTPException) as ctx:
+                auth._verify("whatever")
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_bad_signature_is_401(self) -> None:
+        token = _make_token(secret="a-different-secret-also-32-bytes-long-xx")
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+            with self.assertRaises(HTTPException) as ctx:
+                auth._verify(token)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_token_without_subject_is_401(self) -> None:
+        token = _make_token(sub=None)
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+            with self.assertRaises(HTTPException) as ctx:
+                auth._verify(token)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+
+class AuthDependencyTests(unittest.TestCase):
+    def test_get_current_user_missing_token_is_401(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            get_current_user(authorization=None)
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_get_current_user_valid(self) -> None:
+        token = _make_token(sub="u9")
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+            user = get_current_user(authorization=f"Bearer {token}")
+        self.assertEqual(user.id, "u9")
+
+    def test_get_optional_user_no_header_returns_none(self) -> None:
+        self.assertIsNone(get_optional_user(authorization=None))
+
+    def test_get_optional_user_valid(self) -> None:
+        token = _make_token(sub="u9")
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+            user = get_optional_user(authorization=f"Bearer {token}")
+        self.assertEqual(user.id, "u9")
+
+    def test_get_optional_user_present_but_invalid_raises_401(self) -> None:
+        token = _make_token(secret="a-different-secret-also-32-bytes-long-xx")
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+            with self.assertRaises(HTTPException) as ctx:
+                get_optional_user(authorization=f"Bearer {token}")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+
+# ---------------------------------------------------------------------- services.store
+
+
+class _Resp:
+    def __init__(self, data=None, count=None) -> None:
+        self.data = data
+        self.count = count
+
+
+class _FakeQuery:
+    """Records chained PostgREST calls and returns a preset response on execute()."""
+
+    def __init__(self, resp: _Resp) -> None:
+        self._resp = resp
+        self.inserted: dict | None = None
+        self.upserted: dict | None = None
+        self.range_args: tuple | None = None
+
+    def upsert(self, row, **kwargs):
+        self.upserted = row
+        return self
+
+    def insert(self, row, **kwargs):
+        self.inserted = row
+        return self
+
+    def select(self, *a, **k):
+        return self
+
+    def order(self, *a, **k):
+        return self
+
+    def range(self, start, end):
+        self.range_args = (start, end)
+        return self
+
+    def eq(self, *a, **k):
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def execute(self):
+        return self._resp
+
+
+def _fake_client(resp: _Resp) -> tuple[mock.Mock, _FakeQuery]:
+    query = _FakeQuery(resp)
+    client = mock.Mock()
+    client.table.return_value = query
+    return client, query
+
+
+class StoreSummarizeTests(unittest.TestCase):
+    def test_summarize_promotes_fields(self) -> None:
+        result = {
+            "view": {"view_type": "rear"},
+            "detections": [{"fault_id": "a"}, {"fault_id": "b"}],
+            "pipeline_version": "rules-v3",
+        }
+        self.assertEqual(store._summarize(result), ("rear", 2, "rules-v3"))
+
+    def test_summarize_handles_missing(self) -> None:
+        self.assertEqual(store._summarize({}), (None, 0, None))
+
+
+class StoreUserClientTests(unittest.TestCase):
+    def test_user_client_auths_with_token(self) -> None:
+        created: dict = {}
+        fake_supabase = types.ModuleType("supabase")
+
+        def fake_create_client(url, key):
+            created["args"] = (url, key)
+            client = mock.Mock()
+            return client
+
+        fake_supabase.create_client = fake_create_client  # type: ignore[attr-defined]
+        fake_settings = types.SimpleNamespace(supabase_url="u", supabase_anon_key="k")
+        with mock.patch.dict(sys.modules, {"supabase": fake_supabase}), mock.patch(
+            "backend.app.settings.get_settings", return_value=fake_settings
+        ):
+            client = store._user_client("tok123")
+        self.assertEqual(created["args"], ("u", "k"))
+        client.postgrest.auth.assert_called_once_with("tok123")
+
+
+class StorePersistTests(unittest.TestCase):
+    def test_persist_inserts_and_returns_id(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "analysis-1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            aid = store.persist_analysis(
+                token="t",
+                user_id="u1",
+                video_id="vid",
+                source="upload",
+                result={"view": {"view_type": "rear"}, "detections": [1]},
+                filename="clip.mp4",
+            )
+        self.assertEqual(aid, "analysis-1")
+        # Promoted columns landed on the analyses insert.
+        self.assertEqual(query.inserted["user_id"], "u1")
+        self.assertEqual(query.inserted["view_type"], "rear")
+        self.assertEqual(query.inserted["fault_count"], 1)
+        # The video row was upserted with the runtime storage key.
+        self.assertEqual(query.upserted["video_id"], "vid")
+        self.assertEqual(query.upserted["status"], "done")
+
+    def test_persist_returns_empty_when_no_row(self) -> None:
+        client, _ = _fake_client(_Resp(data=[]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            aid = store.persist_analysis(
+                token="t", user_id="u1", video_id="vid", source="upload", result={}
+            )
+        self.assertEqual(aid, "")
+
+
+class StoreListTests(unittest.TestCase):
+    def test_list_returns_total_and_items(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "a"}], count=3))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            out = store.list_analyses(token="t", limit=10, offset=5)
+        self.assertEqual(out, {"total": 3, "items": [{"id": "a"}]})
+        self.assertEqual(query.range_args, (5, 14))
+
+    def test_list_handles_empty(self) -> None:
+        client, _ = _fake_client(_Resp(data=None, count=None))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            out = store.list_analyses(token="t")
+        self.assertEqual(out, {"total": 0, "items": []})
+
+    def test_list_clamps_limit_and_offset(self) -> None:
+        client, query = _fake_client(_Resp(data=[], count=0))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.list_analyses(token="t", limit=9999, offset=-5)
+        # limit clamped to 200, offset floored to 0 -> range(0, 199).
+        self.assertEqual(query.range_args, (0, 199))
+
+
+class StoreGetTests(unittest.TestCase):
+    def test_get_returns_row(self) -> None:
+        client, _ = _fake_client(_Resp(data=[{"id": "a", "result": {}}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            row = store.get_analysis(token="t", analysis_id="a")
+        self.assertEqual(row, {"id": "a", "result": {}})
+
+    def test_get_returns_none_when_absent(self) -> None:
+        client, _ = _fake_client(_Resp(data=[]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertIsNone(store.get_analysis(token="t", analysis_id="ghost"))
+
+
+# ---------------------------------------------------------------- routers.analyses
+
+
+class AnalysesRouterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+
+    def test_list_passes_params_and_returns_payload(self) -> None:
+        with mock.patch.object(
+            store, "list_analyses", return_value={"total": 1, "items": [{"id": "a"}]}
+        ) as ls:
+            resp = self.client.get("/api/analyses", params={"limit": 5, "offset": 2})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"total": 1, "items": [{"id": "a"}]})
+        ls.assert_called_once_with(token="tok", limit=5, offset=2)
+
+    def test_get_returns_analysis(self) -> None:
+        with mock.patch.object(
+            store, "get_analysis", return_value={"id": "a", "result": {"detections": []}}
+        ) as ga:
+            resp = self.client.get("/api/analyses/a")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["id"], "a")
+        ga.assert_called_once_with(token="tok", analysis_id="a")
+
+    def test_get_missing_is_404(self) -> None:
+        with mock.patch.object(store, "get_analysis", return_value=None):
+            resp = self.client.get("/api/analyses/ghost")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.get("/api/analyses")
+        self.assertEqual(resp.status_code, 401)
 
 
 if __name__ == "__main__":
