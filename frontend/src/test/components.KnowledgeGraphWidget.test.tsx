@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect } from "vitest";
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import KnowledgeGraphWidget from "../components/KnowledgeGraphWidget";
 import { renderWithProviders } from "./renderWithProviders";
@@ -15,10 +15,19 @@ describe("KnowledgeGraphWidget", () => {
     expect(screen.getByText("Knowledge Graph")).toBeInTheDocument();
   });
 
-  it("shows the GraphRAG badge", () => {
+  it("summarises the graph as a node count on the compact card", () => {
     renderWithProviders(
       <KnowledgeGraphWidget analysis={mockAnalysis} activeFaultId={null} />
     );
+    expect(screen.getByText(/nodes/i)).toBeInTheDocument();
+  });
+
+  it("shows the GraphRAG badge inside the fullscreen overlay", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <KnowledgeGraphWidget analysis={mockAnalysis} activeFaultId={null} />
+    );
+    await user.click(screen.getByRole("button", { name: /Expand to full screen/i }));
     expect(screen.getByText("GraphRAG")).toBeInTheDocument();
   });
 
@@ -29,10 +38,12 @@ describe("KnowledgeGraphWidget", () => {
     expect(screen.getByText(/No graph context/i)).toBeInTheDocument();
   });
 
-  it("renders the SVG graph when retrievals are present", () => {
+  it("renders the SVG graph in the fullscreen overlay when retrievals are present", async () => {
+    const user = userEvent.setup();
     renderWithProviders(
       <KnowledgeGraphWidget analysis={mockAnalysis} activeFaultId={null} />
     );
+    await user.click(screen.getByRole("button", { name: /Expand to full screen/i }));
     expect(document.querySelector("svg")).toBeInTheDocument();
   });
 
@@ -80,24 +91,28 @@ describe("KnowledgeGraphWidget", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("renders legend color keys when there is graph data", () => {
+  it("renders legend color keys in the fullscreen overlay", async () => {
+    const user = userEvent.setup();
     renderWithProviders(
       <KnowledgeGraphWidget analysis={mockAnalysis} activeFaultId={null} />
     );
+    await user.click(screen.getByRole("button", { name: /Expand to full screen/i }));
     // legend shows cause / risk / correction
     expect(screen.getByText("Cause")).toBeInTheDocument();
     expect(screen.getByText("Risk")).toBeInTheDocument();
     expect(screen.getByText("Fix")).toBeInTheDocument();
   });
 
-  it("uses the activeFaultId to select the retrieval", () => {
+  it("uses the activeFaultId to select the retrieval", async () => {
+    const user = userEvent.setup();
     renderWithProviders(
       <KnowledgeGraphWidget
         analysis={mockAnalysis}
         activeFaultId="knees_inward_1"
       />
     );
-    // With the matching fault, the graph should still render
+    // With the matching fault, the graph should still render once expanded
+    await user.click(screen.getByRole("button", { name: /Expand to full screen/i }));
     expect(document.querySelector("svg")).toBeInTheDocument();
   });
 });

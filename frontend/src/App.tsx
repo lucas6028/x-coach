@@ -12,8 +12,6 @@ import ChatInput from "./components/ChatInput";
 import ResizeHandle from "./components/ResizeHandle";
 import { useI18n } from "./lib/i18n";
 
-type MobileTab = "feedback" | "graph";
-
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 const SIDEBAR_MIN = 160;
@@ -30,7 +28,6 @@ export default function App() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
-  const [mobileTab, setMobileTab] = useState<MobileTab>("feedback");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
@@ -189,40 +186,19 @@ export default function App() {
               onResizeEnd={() => setResizing(false)}
             />
 
-            {/* Right: knowledge graph + reasoning (desktop). Tabbed on mobile. */}
+            {/* Right: coaching feedback, then a compact knowledge-graph card and
+                the follow-up input pinned to the foot of the column. */}
             <aside
               style={{ ["--fbw" as string]: `${feedbackWidth}px` }}
               className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
             >
-              <div className="flex lg:hidden border-b border-border-dark">
-                {(["feedback", "graph"] as MobileTab[]).map((tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setMobileTab(tab)}
-                    className={`flex-1 py-2 text-xs uppercase tracking-wide ${
-                      mobileTab === tab ? "text-primary border-b-2 border-primary" : "text-muted"
-                    }`}
-                  >
-                    {t(tab === "feedback" ? "tab.coaching" : "tab.graph")}
-                  </button>
-                ))}
-              </div>
-
-              <div className={`${mobileTab === "graph" ? "block" : "hidden"} lg:block`}>
-                <KnowledgeGraphWidget analysis={analysis!} activeFaultId={activeFaultId} />
-              </div>
-              <div
-                className={`${
-                  mobileTab === "feedback" ? "flex" : "hidden"
-                } lg:flex flex-col flex-1 min-h-0`}
-              >
-                <ReasoningLog
-                  analysis={analysis!}
-                  currentTime={currentTime}
-                  onSeek={seek}
-                />
-                <ChatInput />
-              </div>
+              <ReasoningLog
+                analysis={analysis!}
+                currentTime={currentTime}
+                onSeek={seek}
+              />
+              <KnowledgeGraphWidget analysis={analysis!} activeFaultId={activeFaultId} />
+              <ChatInput />
             </aside>
           </div>
         )}

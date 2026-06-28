@@ -115,6 +115,8 @@ const en: Dict = {
 
   // Knowledge graph
   "kg.title": "Knowledge Graph",
+  "kg.chain": "Fault → cause → fix",
+  "kg.nodes": "{count} nodes",
   "kg.empty": "No graph context for this clip.",
   "kg.focus": "Showing",
   "kg.expand": "Expand to full screen",
@@ -453,6 +455,8 @@ const zhHant: Dict = {
 
   // Knowledge graph
   "kg.title": "知識圖譜",
+  "kg.chain": "錯誤 → 成因 → 修正",
+  "kg.nodes": "{count} 個節點",
   "kg.empty": "此片段沒有圖譜脈絡。",
   "kg.focus": "顯示",
   "kg.expand": "全螢幕檢視",

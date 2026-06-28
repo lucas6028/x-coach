@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowsOut, Graph, X } from "@phosphor-icons/react";
+import { ArrowUpRight, Graph, X } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import type { Analysis, Retrieval } from "../api";
 import { useI18n, faultLabel } from "../lib/i18n";
@@ -272,6 +272,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
   const { center, neighbors } = useMemo(() => collect(retrieval), [retrieval]);
   const presentKinds = KIND_ORDER.filter((k) => neighbors.some((n) => n.kind === k));
   const hasGraph = neighbors.length > 0;
+  const nodeCount = neighbors.length + (center ? 1 : 0);
   const centerLabel = center ? faultLabel(t, center) : "";
   const animKey = (retrieval?.fault_id ?? "none") + (fullscreen ? "-fs" : "");
 
@@ -283,56 +284,45 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
     return () => window.removeEventListener("keydown", onKey);
   }, [fullscreen]);
 
-  const emptyState = (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
-      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-content/5 text-faint">
-        <Graph size={22} weight="duotone" />
-      </span>
-      <p className="text-xs text-faint">{t("kg.empty")}</p>
-    </div>
-  );
-
   return (
     <>
-      <div className="relative flex h-60 flex-col border-b border-border-dark bg-background">
-        {/* Header */}
-        <div className="flex items-center justify-between gap-2 px-3 pt-3">
-          <h2 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-content">
-            <Graph size={17} weight="duotone" className="text-primary" />
-            {t("kg.title")}
-          </h2>
-          <div className="flex items-center gap-1.5">
-            <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-medium text-primary">
-              GraphRAG
-            </span>
-            {hasGraph && (
-              <button
-                onClick={() => setFullscreen(true)}
-                aria-label={t("kg.expand")}
-                title={t("kg.expand")}
-                className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-content/5 hover:text-content active:scale-95"
-              >
-                <ArrowsOut size={18} />
-              </button>
-            )}
+      {/* Compact summary card — sits at the foot of the feedback column and
+          opens the full node-link graph in an overlay. Shares the feedback
+          panel's background so it reads as coaching content, not part of the
+          follow-up input below it. */}
+      <div className="bg-background px-3 py-3">
+        <button
+          onClick={() => hasGraph && setFullscreen(true)}
+          disabled={!hasGraph}
+          aria-label={hasGraph ? t("kg.expand") : t("kg.empty")}
+          title={hasGraph ? t("kg.expand") : t("kg.empty")}
+          className="group flex w-full items-center gap-3 rounded-xl border border-border-dark bg-surface px-3 py-2.5 text-left transition-colors hover:border-content/20 hover:bg-content/[0.03] disabled:cursor-default disabled:opacity-70 disabled:hover:border-border-dark disabled:hover:bg-surface"
+        >
+          <span
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+            style={{
+              color: "rgb(var(--c-fault))",
+              backgroundColor: "rgb(var(--c-fault) / 0.12)",
+            }}
+          >
+            <Graph size={20} weight="duotone" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="text-sm font-semibold text-content">{t("kg.title")}</h2>
+            <p className="truncate text-xs text-muted">
+              {hasGraph
+                ? `${t("kg.chain")} · ${t("kg.nodes", { count: nodeCount })}`
+                : t("kg.empty")}
+            </p>
           </div>
-        </div>
-
-        {/* Canvas */}
-        <div className="relative min-h-0 flex-1">
-          {hasGraph ? (
-            <GraphScene centerLabel={centerLabel} neighbors={neighbors.slice(0, 8)} large={false} animateKey={animKey} />
-          ) : (
-            emptyState
+          {hasGraph && (
+            <ArrowUpRight
+              size={18}
+              weight="bold"
+              className="shrink-0 text-muted transition-colors group-hover:text-content"
+            />
           )}
-        </div>
-
-        {/* Legend */}
-        {presentKinds.length > 0 && (
-          <div className="border-t border-border-dark px-3 py-2">
-            <Legend kinds={presentKinds} t={t} />
-          </div>
-        )}
+        </button>
       </div>
 
       {/* Fullscreen overlay */}
