@@ -1,56 +1,51 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ThemeToggle from "../components/ThemeToggle";
 import { renderWithProviders } from "./renderWithProviders";
 
-describe("ThemeToggle — collapsed (expanded=false)", () => {
+describe("ThemeToggle (dropdown)", () => {
   beforeEach(() => localStorage.clear());
 
-  it("renders a single cycling button", () => {
-    renderWithProviders(<ThemeToggle expanded={false} />);
+  it("renders only the trigger button while closed", () => {
+    renderWithProviders(<ThemeToggle />);
     expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("cycles to 'system' when current is 'light'", async () => {
+  it("opens a menu of three options when clicked", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("theme", "light");
-    renderWithProviders(<ThemeToggle expanded={false} />);
-    const btn = screen.getByRole("button");
-    expect(btn.getAttribute("aria-label")).toMatch(/Light/);
-    await user.click(btn);
-    // After clicking light → system; localStorage should reflect the new value
-    expect(localStorage.getItem("theme")).toBe("system");
-  });
-});
-
-describe("ThemeToggle — expanded (expanded=true)", () => {
-  beforeEach(() => localStorage.clear());
-
-  it("renders three option buttons", () => {
-    renderWithProviders(<ThemeToggle expanded={true} />);
-    expect(screen.getAllByRole("button")).toHaveLength(3);
+    renderWithProviders(<ThemeToggle />);
+    await user.click(screen.getByRole("button"));
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(3);
   });
 
-  it("marks the current theme button as pressed", () => {
+  it("marks the current theme as checked", async () => {
+    const user = userEvent.setup();
     localStorage.setItem("theme", "dark");
-    renderWithProviders(<ThemeToggle expanded={true} />);
-    const darkBtn = screen.getByRole("button", { name: /dark/i });
-    expect(darkBtn).toHaveAttribute("aria-pressed", "true");
+    renderWithProviders(<ThemeToggle />);
+    await user.click(screen.getByRole("button"));
+    expect(screen.getByRole("menuitemradio", { name: /dark/i })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
   });
 
-  it("un-presses other buttons", () => {
-    localStorage.setItem("theme", "dark");
-    renderWithProviders(<ThemeToggle expanded={true} />);
-    const lightBtn = screen.getByRole("button", { name: /light/i });
-    expect(lightBtn).toHaveAttribute("aria-pressed", "false");
-  });
-
-  it("switches theme when an option button is clicked", async () => {
+  it("switches theme when an option is selected", async () => {
     const user = userEvent.setup();
     localStorage.setItem("theme", "system");
-    renderWithProviders(<ThemeToggle expanded={true} />);
-    await user.click(screen.getByRole("button", { name: /light/i }));
+    renderWithProviders(<ThemeToggle />);
+    await user.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("menuitemradio", { name: /light/i }));
     expect(localStorage.getItem("theme")).toBe("light");
+  });
+
+  it("closes the menu after a selection", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ThemeToggle />);
+    await user.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("menuitemradio", { name: /dark/i }));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });

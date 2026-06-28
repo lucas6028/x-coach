@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
+import {
+  CaretRight,
+  FilmSlate,
+  Plus,
+  PersonSimpleRun,
+  SignOut,
+  VideoCamera,
+  WarningCircle,
+} from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
 import { useAuth } from "../lib/auth";
@@ -54,7 +63,7 @@ export default function History() {
               to="/app"
               className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
             >
-              <span className="material-symbols-outlined text-lg">add</span>
+              <Plus size={18} />
               <span className="hidden sm:inline">{t("history.newAnalysis")}</span>
             </Link>
             <button
@@ -64,7 +73,7 @@ export default function History() {
               }}
               className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
             >
-              <span className="material-symbols-outlined text-lg">logout</span>
+              <SignOut size={18} />
               <span className="hidden sm:inline">{t("account.signout")}</span>
             </button>
           </div>
@@ -96,7 +105,7 @@ export default function History() {
 
         {status === "error" && (
           <div className="mt-8 flex items-start gap-2.5 rounded-2xl border border-danger/30 bg-danger/[0.06] p-4 text-sm text-danger">
-            <span className="material-symbols-outlined text-lg leading-none">error</span>
+            <WarningCircle size={18} className="shrink-0" />
             <div className="min-w-0 flex-1">
               <p className="font-medium">{t("history.errorTitle")}</p>
               <p className="mt-0.5 break-words text-danger/80">{error}</p>
@@ -113,7 +122,7 @@ export default function History() {
         {status === "ready" && items.length === 0 && (
           <div className="mt-8 flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border-dark bg-content/[0.02] px-6 py-16 text-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
-              <span className="material-symbols-outlined text-3xl">video_library</span>
+              <FilmSlate size={30} weight="duotone" />
             </span>
             <div>
               <p className="font-medium text-content">{t("history.empty")}</p>
@@ -123,7 +132,7 @@ export default function History() {
               to="/app"
               className="mt-1 inline-flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content transition-colors hover:bg-primary/90 active:scale-[0.99]"
             >
-              <span className="material-symbols-outlined text-lg">videocam</span>
+              <VideoCamera size={18} weight="fill" />
               {t("history.startCta")}
             </Link>
           </div>
@@ -140,7 +149,7 @@ export default function History() {
                     className="group flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
                   >
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                      <span className="material-symbols-outlined">directions_run</span>
+                      <PersonSimpleRun size={22} weight="duotone" />
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium text-content">
@@ -161,9 +170,10 @@ export default function History() {
                           ? t("history.faultOne")
                           : t("history.faultMany", { count: it.fault_count })}
                     </span>
-                    <span className="material-symbols-outlined shrink-0 text-muted transition-transform group-hover:translate-x-0.5">
-                      chevron_right
-                    </span>
+                    <CaretRight
+                      size={18}
+                      className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
+                    />
                   </Link>
                 </li>
               );

@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { ArrowRight, Brain, CheckCircle } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import type { Analysis, Detection, Retrieval, RagResult } from "../api";
 import { fmtTime } from "../lib/format";
@@ -149,7 +150,7 @@ function FaultCard({
         {/* the actionable cue carries the most visual weight */}
         {corrections.length > 0 && (
           <div className="mx-4 mb-4 mt-3 flex items-start gap-2.5 rounded-lg bg-secondary/10 p-3">
-            <span className="material-symbols-outlined mt-px text-base text-secondary">arrow_forward</span>
+            <ArrowRight size={16} weight="bold" className="mt-px shrink-0 text-secondary" />
             <div className="min-w-0">
               <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">
                 {t("feedback.cue")}
@@ -188,7 +189,7 @@ export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="flex items-center justify-between gap-2 border-b border-border-dark bg-surface-dark px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-content">
-          <span className="material-symbols-outlined text-base text-primary">psychology</span>
+          <Brain size={17} weight="duotone" className="text-primary" />
           {t("feedback.title")}
         </h2>
         <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-mono text-[10px] text-primary">
@@ -200,7 +201,7 @@ export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
         {detections.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-secondary/10">
-              <span className="material-symbols-outlined text-3xl text-secondary">check_circle</span>
+              <CheckCircle size={30} weight="fill" className="text-secondary" />
             </span>
             <p className="max-w-[15rem] text-sm text-muted">{t("feedback.noFaults")}</p>
           </div>

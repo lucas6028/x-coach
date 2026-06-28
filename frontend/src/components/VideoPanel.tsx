@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Analysis } from "../api";
+import { CheckCircle, CornersOut, Pause, Play, Warning } from "@phosphor-icons/react";
 import { fmtTime } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+import MetricsCards from "./MetricsCards";
 import SkeletonOverlay from "./SkeletonOverlay";
 import Timeline from "./Timeline";
 
@@ -28,6 +30,7 @@ export default function VideoPanel({
 
   const { width, height } = analysis.metadata;
   const aspect = width && height ? width / height : 9 / 16;
+  const portrait = aspect < 1;
 
   useEffect(() => {
     const v = videoRef.current;
@@ -83,11 +86,16 @@ export default function VideoPanel({
   const faultCount = analysis.detections.length;
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex justify-center">
+    <div className="flex flex-col gap-3 lg:h-full lg:min-h-0">
+      {/* On desktop the video grows to fill the column (no dead space below it):
+          portrait fills height, landscape fills width — each keeps its aspect so
+          neither letterboxes. Mobile keeps a fixed, scrollable height. */}
+      <div className="flex items-center justify-center lg:flex-1 lg:min-h-0">
         <div
           ref={wrapRef}
-          className="group relative h-[58vh] max-w-full bg-black rounded-xl ring-1 ring-border-dark shadow-2xl shadow-black/60 overflow-hidden"
+          className={`group relative h-[58vh] max-w-full bg-black rounded-xl ring-1 ring-border-dark shadow-2xl shadow-black/60 overflow-hidden ${
+            portrait ? "lg:h-full lg:w-auto" : "lg:h-auto lg:w-full lg:max-h-full"
+          }`}
           style={{ aspectRatio: String(aspect) }}
         >
           <video
@@ -99,20 +107,33 @@ export default function VideoPanel({
           />
           <SkeletonOverlay analysis={analysis} videoRef={videoRef} onActiveFault={onActiveFault} />
 
-          {/* status badge */}
+          {/* status badge. The metrics panel sits beside it: it folds to icon-only
+              whenever the panel is alongside on a narrow row (mobile, or any
+              portrait clip), and shows its full label only on a wide landscape
+              row. The panel's faults cell carries the status when the label hides. */}
           <div
-            className={`absolute top-3 left-3 z-20 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium text-white backdrop-blur-md shadow-lg ${
-              faultCount > 0 ? "bg-danger/85" : "bg-secondary/85"
-            }`}
+            className={`absolute top-3 left-3 z-20 flex items-center px-2.5 py-1 rounded-full text-[11px] font-medium text-white backdrop-blur-md shadow-lg ${
+              portrait ? "gap-0" : "gap-0 sm:gap-1.5"
+            } ${faultCount > 0 ? "bg-danger/85" : "bg-secondary/85"}`}
           >
-            <span className="material-symbols-outlined text-sm leading-none">
-              {faultCount > 0 ? "warning" : "check_circle"}
+            {faultCount > 0 ? (
+              <Warning size={14} weight="fill" />
+            ) : (
+              <CheckCircle size={14} weight="fill" />
+            )}
+            <span className={portrait ? "hidden" : "hidden sm:inline"}>
+              {faultCount > 0
+                ? faultCount === 1
+                  ? t("video.faultOne")
+                  : t("video.faultMany", { count: faultCount })
+                : t("video.noFaults")}
             </span>
-            {faultCount > 0
-              ? faultCount === 1
-                ? t("video.faultOne")
-                : t("video.faultMany", { count: faultCount })
-              : t("video.noFaults")}
+          </div>
+
+          {/* biomechanics metrics HUD (top-right). pointer-events-none keeps the
+              corner click-through to play/pause; the panel itself is read-only. */}
+          <div className="absolute top-3 right-3 z-20 pointer-events-none">
+            <MetricsCards analysis={analysis} portrait={portrait} />
           </div>
 
           {/* center play / pause overlay */}
@@ -124,9 +145,7 @@ export default function VideoPanel({
             }`}
           >
             <span className="flex items-center justify-center w-16 h-16 rounded-full bg-black/45 backdrop-blur-sm ring-1 ring-white/25 text-white transition-transform hover:scale-110">
-              <span className="material-symbols-outlined text-4xl leading-none">
-                {playing ? "pause" : "play_arrow"}
-              </span>
+              {playing ? <Pause size={34} weight="fill" /> : <Play size={34} weight="fill" />}
             </span>
           </button>
 
@@ -142,9 +161,7 @@ export default function VideoPanel({
                 aria-label={playing ? t("a11y.pause") : t("a11y.play")}
                 className="text-white hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined">
-                  {playing ? "pause" : "play_arrow"}
-                </span>
+                {playing ? <Pause size={22} weight="fill" /> : <Play size={22} weight="fill" />}
               </button>
               <span className="font-mono text-[11px] text-white/80 tabular-nums">
                 {fmtTime(time)} <span className="text-white/40">/</span> {fmtTime(duration || 0)}
@@ -155,7 +172,7 @@ export default function VideoPanel({
                 aria-label={t("a11y.fullscreen")}
                 className="text-white/80 hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-xl">fullscreen</span>
+                <CornersOut size={20} />
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { type ReactNode } from "react";
+import { CircleNotch } from "@phosphor-icons/react";
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
@@ -15,7 +16,7 @@ export default function RequireAuth({ children }: { children: ReactNode }) {
   if (loading) {
     return (
       <div className="grid min-h-[100dvh] place-items-center bg-background-dark text-muted">
-        <span className="material-symbols-outlined animate-spin text-2xl">progress_activity</span>
+        <CircleNotch size={24} className="animate-spin" />
         <span className="sr-only">{t("auth.checking")}</span>
       </div>
     );

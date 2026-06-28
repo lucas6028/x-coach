@@ -1,3 +1,4 @@
+import { Brain, FilmSlate, Graph, PersonSimpleRun, WarningCircle, type Icon } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useI18n } from "../lib/i18n";
 import UploadDropzone from "./UploadDropzone";
@@ -10,10 +11,10 @@ interface Props {
   error: string;
 }
 
-const STEPS: { icon: string; titleKey: string; bodyKey: string }[] = [
-  { icon: "directions_run", titleKey: "demo.get1.title", bodyKey: "demo.get1.body" },
-  { icon: "psychology", titleKey: "demo.get2.title", bodyKey: "demo.get2.body" },
-  { icon: "hub", titleKey: "demo.get3.title", bodyKey: "demo.get3.body" },
+const STEPS: { Icon: Icon; titleKey: string; bodyKey: string }[] = [
+  { Icon: PersonSimpleRun, titleKey: "demo.get1.title", bodyKey: "demo.get1.body" },
+  { Icon: Brain, titleKey: "demo.get2.title", bodyKey: "demo.get2.body" },
+  { Icon: Graph, titleKey: "demo.get3.title", bodyKey: "demo.get3.body" },
 ];
 
 // The demo's pre-analysis onboarding. Theme-aware (uses semantic tokens so it
@@ -52,13 +53,13 @@ export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, e
               disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-2xl border border-border-dark bg-content/[0.02] px-5 py-3.5 text-sm font-medium text-content transition-colors hover:bg-content/[0.05] active:scale-[0.99] disabled:opacity-50"
             >
-              <span className="material-symbols-outlined text-lg text-primary">video_library</span>
+              <FilmSlate size={18} weight="duotone" className="text-primary" />
               {t("demo.sampleBtn")}
             </button>
 
             {error && (
               <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-danger/30 bg-danger/[0.06] p-3.5 text-sm text-danger">
-                <span className="material-symbols-outlined text-lg leading-none">error</span>
+                <WarningCircle size={18} className="shrink-0" />
                 <div className="min-w-0">
                   <p className="font-medium">{t("demo.errorTitle")}</p>
                   <p className="mt-0.5 break-words text-danger/80">{error}</p>
@@ -75,7 +76,7 @@ export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, e
             {STEPS.map((s) => (
               <div key={s.titleKey} className="flex items-start gap-4 p-5">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <span className="material-symbols-outlined">{s.icon}</span>
+                  <s.Icon size={22} weight="duotone" />
                 </span>
                 <div className="min-w-0">
                   <p className="font-medium text-content">{t(s.titleKey)}</p>

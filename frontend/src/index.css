@@ -35,10 +35,6 @@ body {
   color: rgb(var(--c-content));
 }
 
-.material-symbols-outlined {
-  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
-}
-
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;

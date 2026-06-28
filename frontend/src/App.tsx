@@ -4,7 +4,6 @@ import { api, type Analysis } from "./api";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import VideoPanel from "./components/VideoPanel";
-import MetricsCards from "./components/MetricsCards";
 import ReasoningLog from "./components/ReasoningLog";
 import KnowledgeGraphWidget from "./components/KnowledgeGraphWidget";
 import LibraryPicker from "./components/LibraryPicker";
@@ -32,7 +31,7 @@ export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>("feedback");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const [feedbackWidth, setFeedbackWidth] = useState(384);
@@ -170,9 +169,9 @@ export default function App() {
           />
         ) : (
           <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden scrollbar-thin">
-            {/* Left: video + timeline + metrics. Mobile scrolls with the page;
-                desktop is a bounded, independently-scrolling column. */}
-            <div className="min-w-0 flex flex-col gap-4 p-4 bg-content/[0.03] lg:flex-1 lg:min-h-0 lg:overflow-y-auto scrollbar-thin">
+            {/* Left: video (with overlaid metrics HUD) + timeline. Mobile scrolls
+                with the page; desktop is a bounded, independently-scrolling column. */}
+            <div className="min-w-0 flex flex-col gap-4 p-4 bg-content/[0.03] lg:flex-1 lg:min-h-0 lg:overflow-hidden">
               <VideoPanel
                 analysis={analysis!}
                 videoRef={videoRef}
@@ -180,7 +179,6 @@ export default function App() {
                 onActiveFault={setActiveFaultId}
                 onSeek={seek}
               />
-              <MetricsCards analysis={analysis!} />
             </div>
 
             {/* Drag to resize video vs. feedback (desktop only — panes stack on mobile). */}

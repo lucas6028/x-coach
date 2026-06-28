@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { X } from "@phosphor-icons/react";
 import { api, type LibraryItem } from "../api";
 import { useI18n, viewLabel } from "../lib/i18n";
 
@@ -45,7 +46,7 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
             {t("library.title")} {total ? `(${total})` : ""}
           </h2>
           <button onClick={onClose} aria-label={t("a11y.close")} className="text-muted hover:text-content">
-            <span className="material-symbols-outlined">close</span>
+            <X size={20} />
           </button>
         </div>
         <div className="p-3 flex gap-2 flex-wrap border-b border-border-dark">

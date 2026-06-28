@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { CircleNotch, UploadSimple } from "@phosphor-icons/react";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -40,9 +41,11 @@ export default function UploadDropzone({ onFile, loading, statusMsg }: Props) {
           loading ? "animate-pulse" : "transition-transform group-hover:-translate-y-0.5"
         }`}
       >
-        <span className="material-symbols-outlined text-3xl">
-          {loading ? "hourglass_top" : "upload"}
-        </span>
+        {loading ? (
+          <CircleNotch size={30} className="animate-spin" />
+        ) : (
+          <UploadSimple size={30} />
+        )}
       </span>
       <p className="text-content font-medium">
         {loading ? t("upload.analysing") : t("upload.prompt")}

@@ -1,4 +1,15 @@
 import { useState, type FormEvent } from "react";
+import {
+  ArrowCounterClockwise,
+  ArrowLeft,
+  CircleNotch,
+  ClockCounterClockwise,
+  EnvelopeSimple,
+  Info,
+  Lock,
+  WarningCircle,
+  type Icon,
+} from "@phosphor-icons/react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { useAuth } from "../lib/auth";
@@ -7,10 +18,10 @@ import { useI18n } from "../lib/i18n";
 type Mode = "signin" | "signup";
 
 // Brand-side value points (why make an account): persistence is the whole reason to sign in.
-const POINTS: { icon: string; key: string }[] = [
-  { icon: "history", key: "auth.point1" },
-  { icon: "replay", key: "auth.point2" },
-  { icon: "lock", key: "auth.point3" },
+const POINTS: { Icon: Icon; key: string }[] = [
+  { Icon: ClockCounterClockwise, key: "auth.point1" },
+  { Icon: ArrowCounterClockwise, key: "auth.point2" },
+  { Icon: Lock, key: "auth.point3" },
 ];
 
 // The Google "G" is a brand mark (the OAuth convention), not a hand-rolled generic icon.
@@ -101,7 +112,7 @@ export default function Login() {
             {POINTS.map((p) => (
               <li key={p.key} className="flex items-center gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <span className="material-symbols-outlined text-xl">{p.icon}</span>
+                  <p.Icon size={20} weight="duotone" />
                 </span>
                 <span className="text-sm text-content">{t(p.key)}</span>
               </li>
@@ -125,7 +136,7 @@ export default function Login() {
             to="/"
             className="mb-8 inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-content"
           >
-            <span className="material-symbols-outlined text-lg">arrow_back</span>
+            <ArrowLeft size={18} />
             {t("auth.back")}
           </Link>
 
@@ -138,7 +149,7 @@ export default function Login() {
 
           {!configured && (
             <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-border-dark bg-content/[0.03] p-3.5 text-sm text-muted">
-              <span className="material-symbols-outlined text-lg leading-none text-faint">info</span>
+              <Info size={18} className="shrink-0 text-faint" />
               <span>{t("auth.notConfigured")}</span>
             </div>
           )}
@@ -177,7 +188,7 @@ export default function Login() {
 
             {error && (
               <div className="flex items-start gap-2.5 rounded-xl border border-danger/30 bg-danger/[0.06] p-3.5 text-sm text-danger">
-                <span className="material-symbols-outlined text-lg leading-none">error</span>
+                <WarningCircle size={18} className="shrink-0" />
                 <div className="min-w-0">
                   <p className="font-medium">{t("auth.errorTitle")}</p>
                   <p className="mt-0.5 break-words text-danger/80">{error}</p>
@@ -187,7 +198,7 @@ export default function Login() {
 
             {notice && (
               <div className="flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/[0.06] p-3.5 text-sm text-primary">
-                <span className="material-symbols-outlined text-lg leading-none">mark_email_unread</span>
+                <EnvelopeSimple size={18} className="shrink-0" />
                 <span>{notice}</span>
               </div>
             )}
@@ -197,11 +208,7 @@ export default function Login() {
               disabled={busy || !configured}
               className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content transition-colors hover:bg-primary/90 active:scale-[0.99] disabled:opacity-60"
             >
-              {busy && (
-                <span className="material-symbols-outlined animate-spin text-lg leading-none">
-                  progress_activity
-                </span>
-              )}
+              {busy && <CircleNotch size={18} className="animate-spin" />}
               {t(isSignup ? "auth.signUpBtn" : "auth.signInBtn")}
             </button>
           </form>

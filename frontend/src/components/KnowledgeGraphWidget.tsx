@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ArrowsOut, Graph, X } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import type { Analysis, Retrieval } from "../api";
 import { useI18n, faultLabel } from "../lib/i18n";
@@ -285,7 +286,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
   const emptyState = (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
       <span className="flex h-10 w-10 items-center justify-center rounded-full bg-content/5 text-faint">
-        <span className="material-symbols-outlined">hub</span>
+        <Graph size={22} weight="duotone" />
       </span>
       <p className="text-xs text-faint">{t("kg.empty")}</p>
     </div>
@@ -297,7 +298,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
         {/* Header */}
         <div className="flex items-center justify-between gap-2 px-3 pt-3">
           <h2 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-content">
-            <span className="material-symbols-outlined text-base text-primary">hub</span>
+            <Graph size={17} weight="duotone" className="text-primary" />
             {t("kg.title")}
           </h2>
           <div className="flex items-center gap-1.5">
@@ -311,7 +312,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
                 title={t("kg.expand")}
                 className="flex h-7 w-7 items-center justify-center rounded-lg text-muted transition-colors hover:bg-content/5 hover:text-content active:scale-95"
               >
-                <span className="material-symbols-outlined text-lg">open_in_full</span>
+                <ArrowsOut size={18} />
               </button>
             )}
           </div>
@@ -348,7 +349,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
           <div className="flex items-center justify-between gap-2 border-b border-border-dark px-4 py-3 sm:px-6">
             <div className="flex items-center gap-2 min-w-0">
               <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-content">
-                <span className="material-symbols-outlined text-primary">hub</span>
+                <Graph size={20} weight="duotone" className="text-primary" />
                 {t("kg.title")}
               </h2>
               <span className="rounded-full bg-primary/10 px-2 py-0.5 font-mono text-[10px] font-medium text-primary">
@@ -366,7 +367,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
               title={t("kg.collapse")}
               className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-content/5 hover:text-content active:scale-95"
             >
-              <span className="material-symbols-outlined">close</span>
+              <X size={20} />
             </button>
           </div>
 

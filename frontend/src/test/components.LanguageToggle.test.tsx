@@ -1,54 +1,43 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LanguageToggle from "../components/LanguageToggle";
 import { renderWithProviders } from "./renderWithProviders";
 
-describe("LanguageToggle — collapsed (expanded=false)", () => {
+describe("LanguageToggle (dropdown)", () => {
   beforeEach(() => localStorage.clear());
 
-  it("renders a single cycling button", () => {
-    renderWithProviders(<LanguageToggle expanded={false} />);
+  it("renders only the trigger button while closed", () => {
+    renderWithProviders(<LanguageToggle />);
     expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
-  it("cycles to zh-Hant when current is en", async () => {
+  it("opens a menu of the available languages when clicked", async () => {
     const user = userEvent.setup();
-    localStorage.setItem("lang", "en");
-    renderWithProviders(<LanguageToggle expanded={false} />);
+    renderWithProviders(<LanguageToggle />);
     await user.click(screen.getByRole("button"));
-    expect(localStorage.getItem("lang")).toBe("zh-Hant");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getAllByRole("menuitemradio")).toHaveLength(2);
   });
 
-  it("cycles back to en when current is zh-Hant", async () => {
+  it("marks the current language as checked", async () => {
     const user = userEvent.setup();
     localStorage.setItem("lang", "zh-Hant");
-    renderWithProviders(<LanguageToggle expanded={false} />);
+    renderWithProviders(<LanguageToggle />);
     await user.click(screen.getByRole("button"));
-    expect(localStorage.getItem("lang")).toBe("en");
-  });
-});
-
-describe("LanguageToggle — expanded (expanded=true)", () => {
-  beforeEach(() => localStorage.clear());
-
-  it("renders two language buttons", () => {
-    renderWithProviders(<LanguageToggle expanded={true} />);
-    expect(screen.getAllByRole("button")).toHaveLength(2);
+    expect(screen.getByRole("menuitemradio", { name: /繁體中文/i })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
   });
 
-  it("marks the current language as pressed", () => {
-    localStorage.setItem("lang", "zh-Hant");
-    renderWithProviders(<LanguageToggle expanded={true} />);
-    const zhBtn = screen.getByRole("button", { name: /繁體中文/i });
-    expect(zhBtn).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("switches language when a button is clicked", async () => {
+  it("switches language when an option is selected", async () => {
     const user = userEvent.setup();
     localStorage.setItem("lang", "en");
-    renderWithProviders(<LanguageToggle expanded={true} />);
-    await user.click(screen.getByRole("button", { name: /繁體中文/i }));
+    renderWithProviders(<LanguageToggle />);
+    await user.click(screen.getByRole("button"));
+    await user.click(screen.getByRole("menuitemradio", { name: /繁體中文/i }));
     expect(localStorage.getItem("lang")).toBe("zh-Hant");
   });
 });
