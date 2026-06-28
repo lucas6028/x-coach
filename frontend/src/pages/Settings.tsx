@@ -1,0 +1,182 @@
+import { useState } from "react";
+import {
+  ArrowLeft,
+  CheckCircle,
+  ClockCounterClockwise,
+  Trash,
+  WarningCircle,
+} from "@phosphor-icons/react";
+import { Link } from "react-router-dom";
+import { api } from "../api";
+import { useAuth } from "../lib/auth";
+import { useI18n } from "../lib/i18n";
+import { avatarUrl, displayName, initial } from "../lib/profile";
+
+type ClearState =
+  | { kind: "idle" }
+  | { kind: "confirm" }
+  | { kind: "working" }
+  | { kind: "done"; deleted: number }
+  | { kind: "error"; message: string };
+
+// Account settings: profile display + a danger zone to clear saved analyses.
+// Product UI — kept in the app's token system, RequireAuth-gated by the router.
+export default function Settings() {
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const [imgError, setImgError] = useState(false);
+  const [clear, setClear] = useState<ClearState>({ kind: "idle" });
+
+  if (!user) return null;
+
+  const url = imgError ? null : avatarUrl(user);
+  const name = displayName(user);
+  const provider = (user.app_metadata?.provider as string) ?? "email";
+  const providerLabel =
+    provider === "google" ? t("settings.provider.google") : t("settings.provider.email");
+
+  const runClear = async () => {
+    setClear({ kind: "working" });
+    try {
+      const { deleted } = await api.deleteAnalyses();
+      setClear({ kind: "done", deleted });
+    } catch (e) {
+      setClear({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  return (
+    <div className="min-h-[100dvh] bg-background-dark text-content">
+      <header className="sticky top-0 z-10 border-b border-border-dark bg-background-dark/95 px-4 backdrop-blur lg:px-6">
+        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between gap-3">
+          <Link to="/app" className="flex items-center gap-2.5">
+            <img src="/icon.svg" alt="" className="h-8 w-8 rounded" />
+            <span className="font-display font-bold tracking-tight">X-Coach</span>
+          </Link>
+          <Link
+            to="/app"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
+          >
+            <ArrowLeft size={18} />
+            <span className="hidden sm:inline">{t("settings.backToStudio")}</span>
+          </Link>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
+        <h1 className="font-display text-2xl font-bold tracking-tight">{t("settings.title")}</h1>
+        <p className="mt-1.5 text-sm text-muted">{t("settings.subtitle")}</p>
+
+        {/* Profile */}
+        <section className="mt-8">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-faint">
+            {t("settings.profile")}
+          </h2>
+          <div className="mt-3 flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-5">
+            {url ? (
+              <img
+                src={url}
+                alt=""
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+                className="h-16 w-16 shrink-0 rounded-full object-cover ring-1 ring-border-dark"
+              />
+            ) : (
+              <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xl font-semibold text-primary ring-1 ring-border-dark">
+                {initial(user)}
+              </span>
+            )}
+            <dl className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <dt className="w-20 shrink-0 text-xs text-faint">{t("settings.name")}</dt>
+                <dd className="min-w-0 truncate font-medium text-content">{name}</dd>
+              </div>
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <dt className="w-20 shrink-0 text-xs text-faint">{t("settings.email")}</dt>
+                <dd className="min-w-0 truncate text-sm text-muted">{user.email}</dd>
+              </div>
+              <div className="flex flex-wrap items-baseline gap-x-2">
+                <dt className="w-20 shrink-0 text-xs text-faint">{t("settings.provider")}</dt>
+                <dd className="min-w-0 truncate text-sm text-muted">{providerLabel}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        {/* Danger zone */}
+        <section className="mt-10">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-danger/80">
+            {t("settings.danger")}
+          </h2>
+          <div className="mt-3 divide-y divide-danger/15 rounded-2xl border border-danger/30 bg-danger/[0.04]">
+            {/* Clear saved analyses */}
+            <div className="flex flex-wrap items-center justify-between gap-4 p-5">
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 font-medium text-content">
+                  <ClockCounterClockwise size={18} weight="duotone" className="text-danger" />
+                  {t("settings.clearTitle")}
+                </p>
+                <p className="mt-1 text-sm text-muted">{t("settings.clearDesc")}</p>
+
+                {clear.kind === "done" && (
+                  <p className="mt-2 flex items-center gap-1.5 text-sm text-secondary">
+                    <CheckCircle size={16} weight="fill" />
+                    {clear.deleted === 0
+                      ? t("settings.clearedNone")
+                      : clear.deleted === 1
+                        ? t("settings.clearedOne")
+                        : t("settings.clearedMany", { count: clear.deleted })}
+                  </p>
+                )}
+                {clear.kind === "error" && (
+                  <p className="mt-2 flex items-center gap-1.5 text-sm text-danger">
+                    <WarningCircle size={16} weight="fill" />
+                    {t("settings.clearError")}
+                  </p>
+                )}
+              </div>
+
+              {clear.kind === "confirm" ? (
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => setClear({ kind: "idle" })}
+                    className="rounded-xl px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
+                  >
+                    {t("settings.clearCancel")}
+                  </button>
+                  <button
+                    onClick={() => void runClear()}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-700 active:scale-[0.99]"
+                  >
+                    <Trash size={16} weight="fill" />
+                    {t("settings.clearConfirm")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setClear({ kind: "confirm" })}
+                  disabled={clear.kind === "working"}
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border border-danger/40 px-4 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/10 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Trash size={16} />
+                  {clear.kind === "working" ? t("settings.clearing") : t("settings.clearCta")}
+                </button>
+              )}
+            </div>
+
+            {/* Account deletion: not wired (backend holds no service-role key). */}
+            <div className="flex flex-wrap items-center justify-between gap-4 p-5">
+              <div className="min-w-0 flex-1">
+                <p className="flex items-center gap-2 font-medium text-content">
+                  <Trash size={18} weight="duotone" className="text-danger" />
+                  {t("settings.deleteAccount")}
+                </p>
+                <p className="mt-1 text-sm text-muted">{t("settings.deleteAccountDesc")}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}

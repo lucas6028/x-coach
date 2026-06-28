@@ -991,6 +991,7 @@ class _FakeQuery:
         self.inserted: dict | None = None
         self.upserted: dict | None = None
         self.range_args: tuple | None = None
+        self.deleted = False
 
     def upsert(self, row, **kwargs):
         self.upserted = row
@@ -998,6 +999,10 @@ class _FakeQuery:
 
     def insert(self, row, **kwargs):
         self.inserted = row
+        return self
+
+    def delete(self, *a, **k):
+        self.deleted = True
         return self
 
     def select(self, *a, **k):
@@ -1112,6 +1117,24 @@ class StoreListTests(unittest.TestCase):
         self.assertEqual(query.range_args, (0, 199))
 
 
+class StoreDeleteTests(unittest.TestCase):
+    def test_delete_all_returns_count_and_filters_by_user(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "a"}, {"id": "b"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            n = store.delete_all_analyses(token="t", user_id="u1")
+        self.assertEqual(n, 2)
+        self.assertTrue(query.deleted)
+        # Both the analyses and the source video rows are cleared.
+        self.assertEqual(client.table.call_count, 2)
+        client.table.assert_any_call("analyses")
+        client.table.assert_any_call("videos")
+
+    def test_delete_all_handles_empty(self) -> None:
+        client, _ = _fake_client(_Resp(data=None))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertEqual(store.delete_all_analyses(token="t", user_id="u1"), 0)
+
+
 class StoreGetTests(unittest.TestCase):
     def test_get_returns_row(self) -> None:
         client, _ = _fake_client(_Resp(data=[{"id": "a", "result": {}}]))
@@ -1156,6 +1179,18 @@ class AnalysesRouterTests(unittest.TestCase):
         with mock.patch.object(store, "get_analysis", return_value=None):
             resp = self.client.get("/api/analyses/ghost")
         self.assertEqual(resp.status_code, 404)
+
+    def test_delete_all_returns_count(self) -> None:
+        with mock.patch.object(store, "delete_all_analyses", return_value=3) as da:
+            resp = self.client.delete("/api/analyses")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"deleted": 3})
+        da.assert_called_once_with(token="tok", user_id="u1")
+
+    def test_delete_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.delete("/api/analyses")
+        self.assertEqual(resp.status_code, 401)
 
     def test_requires_auth(self) -> None:
         app.dependency_overrides.clear()  # drop the override -> real dependency runs

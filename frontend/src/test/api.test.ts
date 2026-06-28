@@ -106,6 +106,23 @@ describe("api.getStoredAnalysis", () => {
   });
 });
 
+describe("api.deleteAnalyses", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("DELETEs the analyses endpoint and returns the count", async () => {
+    const spy = mockFetch({ deleted: 4 });
+    const result = await api.deleteAnalyses();
+    expect(result).toEqual({ deleted: 4 });
+    expect(spy.mock.calls[0][0]).toBe("/api/analyses");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 401);
+    await expect(api.deleteAnalyses()).rejects.toThrow("401");
+  });
+});
+
 describe("api.analyzeUpload", () => {
   afterEach(() => vi.restoreAllMocks());
 

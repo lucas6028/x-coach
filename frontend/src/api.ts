@@ -167,6 +167,13 @@ export const api = {
   // One saved analysis row, including the full `result` for replay (requires a session).
   getStoredAnalysis: (id: string) => getJSON<StoredAnalysis>(`/api/analyses/${id}`),
 
+  // Delete all of the caller's saved analyses (requires a session). Returns the count removed.
+  async deleteAnalyses(): Promise<{ deleted: number }> {
+    const res = await fetch("/api/analyses", { method: "DELETE", headers: await authHeader() });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/analyses`);
+    return (await res.json()) as { deleted: number };
+  },
+
   async analyzeUpload(file: File): Promise<Analysis> {
     const form = new FormData();
     form.append("file", file);

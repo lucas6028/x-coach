@@ -25,6 +25,15 @@ def list_my_analyses(
     return store.list_analyses(token=user.token, limit=limit, offset=offset)
 
 
+@router.delete("/analyses")
+def delete_my_analyses(
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Delete all of the caller's saved analyses (and source video rows): ``{"deleted": n}``."""
+    deleted = store.delete_all_analyses(token=user.token, user_id=user.id)
+    return {"deleted": deleted}
+
+
 @router.get("/analyses/{analysis_id}")
 def get_my_analysis(
     analysis_id: str,

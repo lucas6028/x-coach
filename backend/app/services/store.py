@@ -102,6 +102,20 @@ def list_analyses(*, token: str, limit: int = 50, offset: int = 0) -> dict[str, 
     return {"total": resp.count or 0, "items": resp.data or []}
 
 
+def delete_all_analyses(*, token: str, user_id: str) -> int:
+    """Delete every analysis (and source video row) owned by the caller; return how many analyses
+    were removed.
+
+    RLS already scopes writes to ``auth.uid() = user_id``, but we also filter by ``user_id``
+    explicitly: PostgREST refuses an unfiltered bulk delete, and the predicate is a second guard.
+    """
+    client = _user_client(token)
+    resp = client.table("analyses").delete().eq("user_id", user_id).execute()
+    # Drop the (now orphaned) source video rows too, so a "clear" leaves no residue.
+    client.table("videos").delete().eq("user_id", user_id).execute()
+    return len(resp.data or [])
+
+
 def get_analysis(*, token: str, analysis_id: str) -> dict[str, Any] | None:
     """Return one analysis row (full ``result`` JSONB) owned by the caller, or ``None``."""
     client = _user_client(token)

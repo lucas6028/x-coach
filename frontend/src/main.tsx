@@ -5,6 +5,7 @@ import App from "./App";
 import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
+import Settings from "./pages/Settings";
 import RequireAuth from "./components/RequireAuth";
 import { I18nProvider } from "./lib/i18n";
 import { AuthProvider } from "./lib/auth";
@@ -24,6 +25,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth>
                   <History />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <RequireAuth>
+                  <Settings />
                 </RequireAuth>
               }
             />

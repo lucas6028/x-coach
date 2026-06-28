@@ -1,10 +1,11 @@
-import { List, SignIn, SignOut, User } from "@phosphor-icons/react";
+import { List, SignIn } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import type { Analysis } from "../api";
 import { useI18n, viewLabel } from "../lib/i18n";
 import { useAuth } from "../lib/auth";
 import ThemeToggle from "./ThemeToggle";
 import LanguageToggle from "./LanguageToggle";
+import AccountMenu from "./AccountMenu";
 
 interface Props {
   analysis: Analysis | null;
@@ -14,7 +15,7 @@ interface Props {
 
 export default function Header({ analysis, loading, onMenu }: Props) {
   const { t } = useI18n();
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   return (
     <header className="relative z-30 h-16 shrink-0 border-b border-border-dark bg-background-dark/95 backdrop-blur flex items-center gap-2 justify-between px-4 lg:px-6">
       <button
@@ -52,22 +53,7 @@ export default function Header({ analysis, loading, onMenu }: Props) {
         <ThemeToggle />
         <div className="mx-1 h-6 w-px bg-border-dark" />
         {user ? (
-          <>
-            <span className="hidden md:flex items-center gap-1.5 max-w-[180px] pl-1 text-xs text-muted">
-              <User size={18} weight="fill" className="text-primary" />
-              <span className="truncate" title={user.email ?? ""}>
-                {user.email}
-              </span>
-            </span>
-            <button
-              onClick={() => void signOut()}
-              aria-label={t("account.signout")}
-              title={t("account.signout")}
-              className="w-10 h-10 flex items-center justify-center rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
-            >
-              <SignOut size={20} />
-            </button>
-          </>
+          <AccountMenu />
         ) : (
           <Link
             to="/login"
