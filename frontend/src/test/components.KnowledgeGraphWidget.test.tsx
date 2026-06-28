@@ -1,9 +1,39 @@
-import { describe, it, expect } from "vitest";
-import { screen } from "@testing-library/react";
+import { describe, it, expect, vi } from "vitest";
+import { screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import KnowledgeGraphWidget from "../components/KnowledgeGraphWidget";
 import { renderWithProviders } from "./renderWithProviders";
 import { mockAnalysis, mockCleanAnalysis } from "./fixtures";
+
+// The global setup freezes requestAnimationFrame, so framer-motion's
+// AnimatePresence exit animation would never finish (the overlay would never
+// unmount) under test. The close animation is declarative config; here we only
+// need to assert the open/close *behavior*, so mock the animation primitives to
+// mount/unmount synchronously and pass DOM props straight through.
+vi.mock("motion/react", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  const cache: Record<string, React.ComponentType<Record<string, unknown>>> = {};
+  const motion = new Proxy({} as Record<string, unknown>, {
+    get: (_t, tag: string) => {
+      if (!cache[tag]) {
+        cache[tag] = React.forwardRef<unknown, Record<string, unknown>>((props, ref) => {
+          // Drop framer-only props; forward everything else (role, className, onClick…).
+          const { initial, animate, exit, transition, variants, children, ...rest } = props;
+          void initial; void animate; void exit; void transition; void variants;
+          return React.createElement(tag, { ...rest, ref }, children as React.ReactNode);
+        }) as unknown as React.ComponentType<Record<string, unknown>>;
+      }
+      return cache[tag];
+    },
+  });
+  return {
+    __esModule: true,
+    motion,
+    AnimatePresence: ({ children }: { children: React.ReactNode }) =>
+      React.createElement(React.Fragment, null, children),
+    useReducedMotion: () => true,
+  };
+});
 
 const emptyAnalysis = { ...mockCleanAnalysis, retrievals: [] };
 
@@ -78,6 +108,32 @@ describe("KnowledgeGraphWidget", () => {
     await user.click(screen.getByRole("button", { name: /Expand to full screen/i }));
     await user.click(screen.getByRole("button", { name: /Close full screen/i }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("closes the fullscreen dialog when clicking empty graph space", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <KnowledgeGraphWidget analysis={mockAnalysis} activeFaultId={null} />
+    );
+    await user.click(screen.getByRole("button", { name: /Expand to full screen/i }));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // A click on the graph canvas background (not a node) bubbles up and closes.
+    const svg = document.querySelector("svg.select-none") as SVGSVGElement;
+    fireEvent.click(svg);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("keeps the dialog open when a graph node is clicked", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <KnowledgeGraphWidget analysis={mockAnalysis} activeFaultId={null} />
+    );
+    await user.click(screen.getByRole("button", { name: /Expand to full screen/i }));
+    // Clicking a draggable node stops propagation, so the overlay stays open.
+    const node = document.querySelector("svg.select-none g g") as SVGGElement;
+    expect(node).not.toBeNull();
+    fireEvent.click(node);
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("closes fullscreen on Escape key", async () => {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, Graph, X } from "@phosphor-icons/react";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { Analysis, Retrieval } from "../api";
 import { useI18n, faultLabel } from "../lib/i18n";
 
@@ -187,6 +187,7 @@ function GraphScene({
               onPointerDown={onDown({ kind: "node", i })}
               onPointerMove={onMove}
               onPointerUp={onUp}
+              onClick={(e) => e.stopPropagation()}
               style={{ cursor: grabbing ? "grabbing" : "grab", touchAction: "none" }}
             >
               {/* generous invisible hit area */}
@@ -212,6 +213,7 @@ function GraphScene({
           onPointerDown={onDown({ kind: "center" })}
           onPointerMove={onMove}
           onPointerUp={onUp}
+          onClick={(e) => e.stopPropagation()}
           style={{ cursor: drag?.kind === "center" ? "grabbing" : "grab", touchAction: "none" }}
         >
           <circle cx={cpos.x} cy={cpos.y} r={large ? 36 : 16} fill={CENTER} fillOpacity={0.12} />
@@ -325,17 +327,24 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
         </button>
       </div>
 
-      {/* Fullscreen overlay */}
-      {fullscreen && (
-        <motion.div
-          role="dialog"
-          aria-modal="true"
-          aria-label={t("kg.title")}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 flex flex-col bg-background"
-        >
+      {/* Fullscreen overlay — AnimatePresence keeps it mounted long enough to
+          play the fade/scale-out on close. */}
+      <AnimatePresence>
+        {fullscreen && (
+          <motion.div
+            key="kg-fullscreen"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("kg.title")}
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            // A symmetric ease — the previous easeOut-expo front-loaded the
+            // progress, so the fade-out finished within a few ms and read as an
+            // instant vanish. easeInOut keeps the close perceptible.
+            transition={{ duration: 0.22, ease: "easeInOut" }}
+            className="fixed inset-0 z-50 flex flex-col bg-background"
+          >
           <div className="flex items-center justify-between gap-2 border-b border-border-dark px-4 py-3 sm:px-6">
             <div className="flex items-center gap-2 min-w-0">
               <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-content">
@@ -361,7 +370,12 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
             </button>
           </div>
 
-          <div className="relative min-h-0 flex-1">
+          {/* Clicking empty canvas (anything but a draggable node) closes the
+              overlay; nodes stopPropagation so dragging them stays put. */}
+          <div
+            className="relative min-h-0 flex-1"
+            onClick={() => setFullscreen(false)}
+          >
             <GraphScene centerLabel={centerLabel} neighbors={neighbors.slice(0, 14)} large animateKey={animKey} />
           </div>
 
@@ -370,8 +384,9 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
               <Legend kinds={presentKinds} t={t} />
             </div>
           )}
-        </motion.div>
-      )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
