@@ -265,3 +265,9 @@
 - [ ] 檔案驗證：驗真實 MIME/codec（別只信副檔名）、限大小/長度、ffmpeg 正規化方向與格式
 - [ ] 可重現性：每筆分析存 pipeline 版本 + 當時規則閾值（detector 閾值可調）
 - [ ] 重構 repo-root / `sys.path` 耦合 → 儲存抽象層（dev 用本機、prod 用 R2/S3）
+
+## Demo
+- [ ] Line ChatBot
+- [ ] QR Code demo, real time interaction
+
+- [ ] 動作偵測、分類
