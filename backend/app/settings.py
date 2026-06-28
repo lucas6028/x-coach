@@ -7,10 +7,12 @@ at the repo root (gitignored). Nothing here is committed.
 Required for auth + persistence (P1):
     SUPABASE_URL          https://<project>.supabase.co
     SUPABASE_ANON_KEY     anon public key (client acts as the user; RLS enforced)
-    SUPABASE_JWT_SECRET   the project's JWT secret (HS256) — used to verify access tokens
 
-If these are unset the server still runs: auth-gated endpoints return 503 and ``/api/analyze``
-falls back to anonymous "demo" mode (analysis works, nothing is persisted).
+Access tokens are validated through the Supabase Auth API (see ``auth._verify``), so no JWT
+signing secret is needed here — that works whether the project signs tokens with the legacy
+HS256 secret or the newer asymmetric keys. If these vars are unset the server still runs:
+auth-gated endpoints return 503 and ``/api/analyze`` falls back to anonymous "demo" mode
+(analysis works, nothing is persisted).
 """
 
 from __future__ import annotations
@@ -32,16 +34,11 @@ class Settings(BaseSettings):
 
     supabase_url: str = ""
     supabase_anon_key: str = ""
-    supabase_jwt_secret: str = ""
-
-    # Supabase signs access tokens with HS256 and aud="authenticated".
-    jwt_algorithm: str = "HS256"
-    jwt_audience: str = "authenticated"
 
     @property
     def auth_configured(self) -> bool:
-        """True only when all three Supabase secrets are present."""
-        return bool(self.supabase_url and self.supabase_anon_key and self.supabase_jwt_secret)
+        """True when the Supabase project URL and anon key are both present."""
+        return bool(self.supabase_url and self.supabase_anon_key)
 
 
 @lru_cache(maxsize=1)

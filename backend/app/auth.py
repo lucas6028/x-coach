@@ -1,10 +1,10 @@
-"""Supabase JWT verification and FastAPI auth dependencies.
+"""Supabase token validation and FastAPI auth dependencies.
 
 The backend is stateless: it does not issue or store sessions. The frontend authenticates
-with Supabase Auth, receives an access token (JWT), and sends it as ``Authorization: Bearer
-<token>``. We verify that token locally with the project's JWT secret (HS256) to reject forged
-or expired tokens early, and we carry the raw token forward so DB calls can act *as the user*
-(``services/store``) — letting Postgres RLS be the ownership backstop.
+with Supabase Auth, receives an access token, and sends it as ``Authorization: Bearer
+<token>``. We validate that token through Supabase's Auth API (``_verify``) — which works for
+any signing scheme the project uses — and carry the raw token forward so DB calls can act *as
+the user* (``services/store``), letting Postgres RLS be the ownership backstop.
 
 Two dependencies:
   - ``get_current_user``  — required auth; 401 when no valid token is present (history endpoints).
@@ -42,37 +42,43 @@ def _extract_bearer(authorization: str | None) -> str | None:
 
 
 def _verify(token: str) -> CurrentUser:
-    """Verify a Supabase access token and return the caller, or raise 401/503."""
-    import jwt  # deferred: PyJWT is only needed when a request actually carries a token.
+    """Validate a Supabase access token via the Auth API and return the caller, or raise 401/503.
 
+    We ask Supabase to validate the token (``GET /auth/v1/user`` under the hood) rather than
+    verifying its signature locally. That works regardless of the project's JWT signing scheme:
+    legacy HS256 shared secret OR the newer asymmetric signing keys (ES256/RS256 via JWKS) that
+    recent projects default to. Local HS256 verification silently breaks the moment a project
+    uses asymmetric keys; this does not. Cost is one Auth round-trip per request, which is fine
+    at prototype scale (cache or move to JWKS verification if it ever matters).
+    """
     settings = get_settings()
-    if not settings.supabase_jwt_secret:
+    if not settings.auth_configured:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Authentication is not configured on the server.",
         )
+
+    from supabase import create_client  # deferred: only needed when a request carries a token.
+
+    client = create_client(settings.supabase_url, settings.supabase_anon_key)
     try:
-        claims = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=[settings.jwt_algorithm],
-            audience=settings.jwt_audience,
-        )
-    except jwt.PyJWTError as exc:  # invalid signature, expired, wrong audience, malformed...
+        response = client.auth.get_user(token)
+    except Exception as exc:  # noqa: BLE001 — any failure here means the token isn't usable.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
 
-    user_id = claims.get("sub")
+    user = getattr(response, "user", None)
+    user_id = getattr(user, "id", None)
     if not user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has no subject.",
+            detail="Invalid or expired token.",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return CurrentUser(id=str(user_id), token=token, email=claims.get("email"))
+    return CurrentUser(id=str(user_id), token=token, email=getattr(user, "email", None))
 
 
 def get_current_user(authorization: str | None = Header(default=None)) -> CurrentUser:

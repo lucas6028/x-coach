@@ -6,7 +6,6 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.18
 pydantic-settings==2.14.1
-PyJWT>=2.9,<3
 supabase>=2.0,<3
 
 numpy==2.4.3

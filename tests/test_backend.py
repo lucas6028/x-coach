@@ -32,7 +32,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import jwt
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -832,11 +831,10 @@ class MainAppTests(_TempConfigBase):
 
 
 class SettingsTests(unittest.TestCase):
-    def test_auth_configured_true_when_all_present(self) -> None:
+    def test_auth_configured_true_when_present(self) -> None:
         s = app_settings.Settings(
             supabase_url="https://x.supabase.co",
             supabase_anon_key="anon",
-            supabase_jwt_secret="secret",
         )
         self.assertTrue(s.auth_configured)
 
@@ -844,7 +842,6 @@ class SettingsTests(unittest.TestCase):
         s = app_settings.Settings(
             supabase_url="https://x.supabase.co",
             supabase_anon_key="",
-            supabase_jwt_secret="secret",
         )
         self.assertFalse(s.auth_configured)
 
@@ -857,23 +854,28 @@ class SettingsTests(unittest.TestCase):
 # ----------------------------------------------------------------------------- auth
 
 
-# Long enough (>=32 bytes) to satisfy PyJWT's HS256 minimum-key-length check.
-_TEST_SECRET = "test-secret-key-padded-to-32-bytes-minimum"
-
-
-def _auth_settings(secret: str = _TEST_SECRET):
+def _auth_settings(*, configured: bool = True):
     return types.SimpleNamespace(
-        supabase_jwt_secret=secret, jwt_algorithm="HS256", jwt_audience="authenticated"
+        auth_configured=configured,
+        supabase_url="https://x.supabase.co",
+        supabase_anon_key="anon-key",
     )
 
 
-def _make_token(
-    *, secret: str = _TEST_SECRET, sub: str | None = "user-1", aud: str = "authenticated", **extra
-) -> str:
-    payload: dict = {"aud": aud, **extra}
-    if sub is not None:
-        payload["sub"] = sub
-    return jwt.encode(payload, secret, algorithm="HS256")
+def _fake_supabase(*, user=None, raises: bool = False):
+    """A fake ``supabase`` module whose ``create_client(...).auth.get_user`` is controllable."""
+    module = types.ModuleType("supabase")
+
+    def create_client(url, key):
+        client = mock.Mock()
+        if raises:
+            client.auth.get_user.side_effect = RuntimeError("invalid token")
+        else:
+            client.auth.get_user.return_value = types.SimpleNamespace(user=user)
+        return client
+
+    module.create_client = create_client  # type: ignore[attr-defined]
+    return module
 
 
 class ExtractBearerTests(unittest.TestCase):
@@ -898,31 +900,46 @@ class ExtractBearerTests(unittest.TestCase):
 
 class VerifyTests(unittest.TestCase):
     def test_valid_token_returns_user(self) -> None:
-        token = _make_token(sub="user-42", email="a@b.c")
-        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
-            user = auth._verify(token)
+        fake = _fake_supabase(user=types.SimpleNamespace(id="user-42", email="a@b.c"))
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()), mock.patch.dict(
+            sys.modules, {"supabase": fake}
+        ):
+            user = auth._verify("tok")
         self.assertEqual(user.id, "user-42")
         self.assertEqual(user.email, "a@b.c")
-        self.assertEqual(user.token, token)
+        self.assertEqual(user.token, "tok")
 
-    def test_no_secret_configured_is_503(self) -> None:
-        with mock.patch.object(auth, "get_settings", return_value=_auth_settings(secret="")):
+    def test_not_configured_is_503(self) -> None:
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings(configured=False)):
             with self.assertRaises(HTTPException) as ctx:
                 auth._verify("whatever")
         self.assertEqual(ctx.exception.status_code, 503)
 
-    def test_bad_signature_is_401(self) -> None:
-        token = _make_token(secret="a-different-secret-also-32-bytes-long-xx")
-        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+    def test_get_user_error_is_401(self) -> None:
+        fake = _fake_supabase(raises=True)
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()), mock.patch.dict(
+            sys.modules, {"supabase": fake}
+        ):
             with self.assertRaises(HTTPException) as ctx:
-                auth._verify(token)
+                auth._verify("bad")
         self.assertEqual(ctx.exception.status_code, 401)
 
-    def test_token_without_subject_is_401(self) -> None:
-        token = _make_token(sub=None)
-        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+    def test_no_user_is_401(self) -> None:
+        fake = _fake_supabase(user=None)
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()), mock.patch.dict(
+            sys.modules, {"supabase": fake}
+        ):
             with self.assertRaises(HTTPException) as ctx:
-                auth._verify(token)
+                auth._verify("tok")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_user_without_id_is_401(self) -> None:
+        fake = _fake_supabase(user=types.SimpleNamespace(id=None, email=None))
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()), mock.patch.dict(
+            sys.modules, {"supabase": fake}
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                auth._verify("tok")
         self.assertEqual(ctx.exception.status_code, 401)
 
 
@@ -933,25 +950,27 @@ class AuthDependencyTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 401)
 
     def test_get_current_user_valid(self) -> None:
-        token = _make_token(sub="u9")
-        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
-            user = get_current_user(authorization=f"Bearer {token}")
+        sentinel = CurrentUser(id="u9", token="tok")
+        with mock.patch.object(auth, "_verify", return_value=sentinel) as verify:
+            user = get_current_user(authorization="Bearer tok")
         self.assertEqual(user.id, "u9")
+        verify.assert_called_once_with("tok")
 
     def test_get_optional_user_no_header_returns_none(self) -> None:
         self.assertIsNone(get_optional_user(authorization=None))
 
     def test_get_optional_user_valid(self) -> None:
-        token = _make_token(sub="u9")
-        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
-            user = get_optional_user(authorization=f"Bearer {token}")
+        sentinel = CurrentUser(id="u9", token="tok")
+        with mock.patch.object(auth, "_verify", return_value=sentinel):
+            user = get_optional_user(authorization="Bearer tok")
         self.assertEqual(user.id, "u9")
 
     def test_get_optional_user_present_but_invalid_raises_401(self) -> None:
-        token = _make_token(secret="a-different-secret-also-32-bytes-long-xx")
-        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()):
+        with mock.patch.object(
+            auth, "_verify", side_effect=HTTPException(status_code=401, detail="bad")
+        ):
             with self.assertRaises(HTTPException) as ctx:
-                get_optional_user(authorization=f"Bearer {token}")
+                get_optional_user(authorization="Bearer tok")
         self.assertEqual(ctx.exception.status_code, 401)
 
 
