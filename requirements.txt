@@ -21,7 +21,7 @@ langchain-community==0.4.2
 langchain-google-genai==4.2.1
 langchain-openrouter==0.2.1
 openrouter==0.8.1
-langchain-text-splitters==1.1.1
+langchain-text-splitters==1.1.2
 pypdf==6.8.0
 beautifulsoup4==4.15.0
 torch==2.11.0
