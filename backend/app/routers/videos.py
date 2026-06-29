@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from backend.app import config
 from backend.app.services import analysis, library
 
 router = APIRouter(prefix="/api", tags=["videos"])
@@ -38,12 +37,9 @@ def get_pose(video_id: str) -> dict:
 @router.get("/video-file/{video_id}")
 def get_video_file(video_id: str) -> FileResponse:
     """Stream the source mp4 (library clip or a prior upload). Supports HTTP Range seeking."""
-    path = library.video_path(video_id)
-    if path is None:
-        # Fall back to an uploaded file in the runtime dir.
-        for candidate in config.UPLOAD_DIR.glob(f"{video_id}.*"):
-            path = candidate
-            break
+    # Fall back to an uploaded file in the runtime dir. Both lookups validate ``video_id`` and
+    # match exact names only — never a glob — so a wildcard id cannot reach another user's clip.
+    path = library.video_path(video_id) or library.uploaded_video_path(video_id)
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail=f"No video file for '{video_id}'.")
     return FileResponse(path, media_type="video/mp4")
