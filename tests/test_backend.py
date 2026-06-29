@@ -750,6 +750,37 @@ class KnowledgeRouterTests(_TempConfigBase):
     def test_rag_requires_query(self) -> None:
         self.assertEqual(self.client.get("/api/knowledge/rag").status_code, 422)
 
+    def test_graph_rejects_out_of_range_hops(self) -> None:
+        # Unbounded / non-positive traversal depth is rejected before any retrieval runs.
+        with mock.patch.object(knowledge, "graph_context", return_value={}) as gc:
+            for hops in (0, -1, 4, 9999):
+                resp = self.client.get(
+                    "/api/knowledge/graph", params={"query": "knees", "hops": hops}
+                )
+                self.assertEqual(resp.status_code, 422, hops)
+            gc.assert_not_called()
+
+    def test_graph_accepts_hops_upper_bound(self) -> None:
+        with mock.patch.object(knowledge, "graph_context", return_value={}) as gc:
+            resp = self.client.get("/api/knowledge/graph", params={"query": "knees", "hops": 3})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(gc.call_args.kwargs["hops"], 3)
+
+    def test_rag_rejects_out_of_range_top_k(self) -> None:
+        with mock.patch.object(knowledge, "rag_snippets", return_value={}) as rs:
+            for top_k in (0, -1, 51, 9999):
+                resp = self.client.get(
+                    "/api/knowledge/rag", params={"query": "depth", "top_k": top_k}
+                )
+                self.assertEqual(resp.status_code, 422, top_k)
+            rs.assert_not_called()
+
+    def test_rag_accepts_top_k_upper_bound(self) -> None:
+        with mock.patch.object(knowledge, "rag_snippets", return_value={}) as rs:
+            resp = self.client.get("/api/knowledge/rag", params={"query": "depth", "top_k": 50})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(rs.call_args.kwargs["top_k"], 50)
+
 
 # ------------------------------------------------------------------------- main
 
