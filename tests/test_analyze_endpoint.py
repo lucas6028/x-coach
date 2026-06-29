@@ -39,17 +39,22 @@ def _upload(filename: str = "clip.mp4", data: bytes = b"fake-video-bytes") -> Up
 
 class AnalyzeEndpointTests(unittest.TestCase):
     def setUp(self) -> None:
-        self._orig_save = analysis_service.save_upload
+        self._orig_save = analysis_service.save_upload_stream
         self._orig_analyze = analysis_service.analyze_video_file
         self._orig_semaphore = analyze_router._ANALYSIS_SEMAPHORE
-        # No real disk I/O: hand back a deterministic (video_id, path) pair.
-        analysis_service.save_upload = lambda data, suffix=".mp4": (
-            "upload_test",
-            Path(f"upload_test{suffix}"),
-        )
+
+        # No real disk I/O: consume the upload (so the empty-file contract still holds) and then
+        # hand back a deterministic (video_id, path) pair.
+        async def fake_save_stream(file, *, suffix=".mp4", max_bytes=None):
+            data = await file.read()
+            if not data:
+                raise analysis_service.EmptyUploadError("Uploaded file is empty.")
+            return "upload_test", Path(f"upload_test{suffix}")
+
+        analysis_service.save_upload_stream = fake_save_stream
 
     def tearDown(self) -> None:
-        analysis_service.save_upload = self._orig_save
+        analysis_service.save_upload_stream = self._orig_save
         analysis_service.analyze_video_file = self._orig_analyze
         analyze_router._ANALYSIS_SEMAPHORE = self._orig_semaphore
 

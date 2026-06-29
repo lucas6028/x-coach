@@ -50,18 +50,25 @@ async def analyze(
     if suffix not in _ALLOWED_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'.")
 
-    data = await file.read()
-    if not data:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    # Stream straight to disk under a hard size cap: the whole clip is never held in RAM, and a
+    # body that slipped past the Content-Length middleware (chunked / understated length) is
+    # aborted here. Excess uploads still queue on the semaphore below.
+    try:
+        video_id, saved_path = await analysis.save_upload_stream(
+            file, suffix=suffix, max_bytes=config.MAX_UPLOAD_BYTES
+        )
+    except analysis.EmptyUploadError as exc:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.") from exc
+    except analysis.UploadTooLargeError as exc:
+        raise HTTPException(status_code=413, detail="Uploaded file is too large.") from exc
 
-    video_id, saved_path = await run_in_threadpool(analysis.save_upload, data, suffix=suffix)
-    del data  # bytes are now on disk; don't pin the whole video in RAM while queued for a slot.
     try:
         async with _ANALYSIS_SEMAPHORE:
             result = await run_in_threadpool(
                 analysis.analyze_video_file, saved_path, video_id=video_id
             )
     except RuntimeError as exc:
+        saved_path.unlink(missing_ok=True)  # don't leave a permanent file for a failed analysis
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     if user is not None:

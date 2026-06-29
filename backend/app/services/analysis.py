@@ -15,6 +15,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from starlette.datastructures import UploadFile
+
 from backend.app import config
 
 # NOTE: ``src.pose.process_videos`` / ``src.pose.pose_rule_detector`` are imported lazily inside
@@ -95,10 +97,46 @@ def analyze_video_file(source_path: Path, *, video_id: str | None = None) -> dic
     return result
 
 
-def save_upload(file_bytes: bytes, suffix: str = ".mp4") -> tuple[str, Path]:
-    """Persist uploaded bytes under the runtime upload dir, returning ``(video_id, path)``."""
+# Stream the upload to disk a chunk at a time so the whole clip is never held in RAM at once.
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MiB
+
+
+class EmptyUploadError(Exception):
+    """Raised when an upload contains no bytes."""
+
+
+class UploadTooLargeError(Exception):
+    """Raised when an upload exceeds the configured size cap while streaming."""
+
+
+async def save_upload_stream(
+    file: UploadFile, *, suffix: str = ".mp4", max_bytes: int
+) -> tuple[str, Path]:
+    """Stream an upload to the runtime dir in bounded chunks, returning ``(video_id, path)``.
+
+    Reads the upload a chunk at a time instead of ``await file.read()`` so the whole video is
+    never materialised in memory at once, and aborts (deleting the partial file) once the running
+    byte count exceeds ``max_bytes`` — a backstop for requests that omit or understate
+    ``Content-Length`` and so slip past the size-limit middleware. Raises ``EmptyUploadError``
+    for a zero-byte upload and ``UploadTooLargeError`` when the cap is exceeded.
+    """
     config.ensure_runtime_dirs()
     video_id = f"upload_{uuid.uuid4().hex[:12]}"
     dest = config.UPLOAD_DIR / f"{video_id}{suffix}"
-    dest.write_bytes(file_bytes)
+    total = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise UploadTooLargeError(f"Upload exceeds the {max_bytes}-byte limit.")
+                out.write(chunk)
+        if total == 0:
+            raise EmptyUploadError("Uploaded file is empty.")
+    except (EmptyUploadError, UploadTooLargeError):
+        dest.unlink(missing_ok=True)
+        raise
     return video_id, dest

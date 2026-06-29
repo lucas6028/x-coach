@@ -37,6 +37,13 @@ SPLIT_NAMES = ("train", "val", "test")
 # ``uvicorn --workers N`` the effective ceiling is N * MAX_CONCURRENT_ANALYSES.
 MAX_CONCURRENT_ANALYSES = max(1, int(os.getenv("XCOACH_MAX_CONCURRENT_ANALYSES", "2")))
 
+# Hard cap on a single upload's size. Oversized requests are rejected (HTTP 413) before the body
+# is buffered, and the upload handler re-checks while streaming — so a client cannot exhaust RAM
+# (``await file.read()`` of the whole clip) or disk by posting a giant / unbounded body. Interim
+# guard until presigned direct-to-storage upload (P2) takes large bodies off the API path
+# entirely. Override with ``XCOACH_MAX_UPLOAD_MB`` (defaults to 200 MB).
+MAX_UPLOAD_BYTES = max(1, int(os.getenv("XCOACH_MAX_UPLOAD_MB", "200"))) * 1024 * 1024
+
 # Allowed origins for the Vite dev server.
 CORS_ORIGINS = [
     "http://localhost:5173",

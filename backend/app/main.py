@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app import config
+from backend.app.middleware import BodySizeLimitMiddleware
 from backend.app.routers import analyses, analyze, knowledge, videos
 from backend.app.settings import get_settings
 
@@ -19,6 +20,14 @@ app = FastAPI(
     title="x-coach API",
     description="Explainable squat-coaching: pose perception + biomechanics rules + KG/RAG retrieval.",
     version="0.1.0",
+)
+
+# Reject over-large uploads (HTTP 413) before the body is buffered. Added before CORS so CORS
+# ends up the *outermost* middleware (Starlette applies the last-added first), letting the 413
+# still carry CORS headers — otherwise a browser couldn't read the rejection cross-origin.
+app.add_middleware(
+    BodySizeLimitMiddleware,
+    max_body_bytes=lambda: config.MAX_UPLOAD_BYTES,
 )
 
 app.add_middleware(

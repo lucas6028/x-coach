@@ -22,7 +22,9 @@ exactly as the backend's deferred-import design intends.
 
 from __future__ import annotations
 
+import asyncio
 import importlib
+import io
 import json
 import os
 import sys
@@ -34,6 +36,7 @@ from unittest import mock
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from starlette.datastructures import UploadFile
 
 from backend.app import auth, config
 from backend.app import settings as app_settings
@@ -238,9 +241,18 @@ class StripFrameMetricsTests(unittest.TestCase):
         self.assertEqual(out, {"detections": []})
 
 
-class SaveUploadTests(_TempConfigBase):
-    def test_persists_bytes_and_returns_id_and_path(self) -> None:
-        video_id, dest = analysis.save_upload(b"hello-bytes", suffix=".mov")
+class SaveUploadStreamTests(_TempConfigBase):
+    @staticmethod
+    def _upload(data: bytes, filename: str = "clip.mp4") -> UploadFile:
+        return UploadFile(file=io.BytesIO(data), filename=filename)
+
+    def _save(self, data: bytes, *, suffix: str = ".mp4", max_bytes: int = 1_000):
+        return asyncio.run(
+            analysis.save_upload_stream(self._upload(data), suffix=suffix, max_bytes=max_bytes)
+        )
+
+    def test_streams_bytes_and_returns_id_and_path(self) -> None:
+        video_id, dest = self._save(b"hello-bytes", suffix=".mov")
         self.assertTrue(video_id.startswith("upload_"))
         self.assertTrue(dest.exists())
         self.assertEqual(dest.read_bytes(), b"hello-bytes")
@@ -248,13 +260,30 @@ class SaveUploadTests(_TempConfigBase):
         self.assertEqual(dest.parent, self.upload_dir)
 
     def test_default_suffix_is_mp4(self) -> None:
-        _, dest = analysis.save_upload(b"x")
+        _, dest = self._save(b"x")
         self.assertEqual(dest.suffix, ".mp4")
 
     def test_ids_are_unique(self) -> None:
-        id1, _ = analysis.save_upload(b"a")
-        id2, _ = analysis.save_upload(b"b")
+        id1, _ = self._save(b"a")
+        id2, _ = self._save(b"b")
         self.assertNotEqual(id1, id2)
+
+    def test_streams_multi_chunk_file(self) -> None:
+        # Larger than one read chunk so the loop iterates more than once.
+        big = b"y" * (analysis._UPLOAD_CHUNK_BYTES + 1234)
+        _, dest = self._save(big, max_bytes=len(big) + 10)
+        self.assertEqual(dest.stat().st_size, len(big))
+
+    def test_empty_upload_raises_and_leaves_no_file(self) -> None:
+        with self.assertRaises(analysis.EmptyUploadError):
+            self._save(b"")
+        self.assertEqual(list(self.upload_dir.glob("*")), [])
+
+    def test_oversize_upload_raises_and_deletes_partial(self) -> None:
+        with self.assertRaises(analysis.UploadTooLargeError):
+            self._save(b"x" * 50, max_bytes=10)
+        # The partial file was cleaned up rather than left on disk.
+        self.assertEqual(list(self.upload_dir.glob("*")), [])
 
 
 class AnalyzeVideoFileTests(_TempConfigBase):
@@ -561,7 +590,9 @@ class AnalyzeRouterTests(_TempConfigBase):
     def test_success_returns_analysis(self) -> None:
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
         with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(return_value=("upload_abc", self.upload_dir / "u.mp4")),
         ), mock.patch.object(analysis, "analyze_video_file", return_value=fake_result):
             resp = self.client.post(
                 "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
@@ -571,7 +602,9 @@ class AnalyzeRouterTests(_TempConfigBase):
 
     def test_pipeline_runtime_error_maps_to_422(self) -> None:
         with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(return_value=("upload_abc", self.upload_dir / "u.mp4")),
         ), mock.patch.object(
             analysis, "analyze_video_file", side_effect=RuntimeError("boom")
         ):
@@ -587,7 +620,9 @@ class AnalyzeRouterTests(_TempConfigBase):
 
     def test_uppercase_suffix_accepted(self) -> None:
         with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(return_value=("upload_abc", self.upload_dir / "u.mp4")),
         ), mock.patch.object(analysis, "analyze_video_file", return_value={"ok": True}):
             resp = self.client.post(
                 "/api/analyze", files={"file": ("CLIP.MP4", b"abcd", "video/mp4")}
@@ -597,7 +632,9 @@ class AnalyzeRouterTests(_TempConfigBase):
     def test_anonymous_upload_does_not_persist(self) -> None:
         fake_result = {"detections": [], "source": "upload"}
         with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(return_value=("upload_abc", self.upload_dir / "u.mp4")),
         ), mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ), mock.patch.object(store, "persist_analysis") as persist:
@@ -613,7 +650,9 @@ class AnalyzeRouterTests(_TempConfigBase):
         self.addCleanup(app.dependency_overrides.clear)
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
         with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(return_value=("upload_abc", self.upload_dir / "u.mp4")),
         ), mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ), mock.patch.object(store, "persist_analysis", return_value="analysis-1") as persist:
@@ -633,7 +672,9 @@ class AnalyzeRouterTests(_TempConfigBase):
         app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="tok")
         self.addCleanup(app.dependency_overrides.clear)
         with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(return_value=("upload_abc", self.upload_dir / "u.mp4")),
         ), mock.patch.object(
             analysis, "analyze_video_file", return_value={"detections": []}
         ), mock.patch.object(
@@ -644,6 +685,112 @@ class AnalyzeRouterTests(_TempConfigBase):
             )
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(resp.json()["analysis_id"])
+
+    def test_upload_too_large_maps_to_413(self) -> None:
+        # The streaming saver aborts an over-cap upload; the router surfaces it as 413.
+        with mock.patch.object(
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(side_effect=analysis.UploadTooLargeError("too big")),
+        ):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 413)
+        self.assertIn("too large", resp.json()["detail"].lower())
+
+    def test_failed_analysis_cleans_up_saved_upload(self) -> None:
+        saved = self.upload_dir / "upload_keep.mp4"
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        saved.write_bytes(b"video")
+        with mock.patch.object(
+            analysis,
+            "save_upload_stream",
+            new=mock.AsyncMock(return_value=("upload_keep", saved)),
+        ), mock.patch.object(
+            analysis, "analyze_video_file", side_effect=RuntimeError("boom")
+        ):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 422)
+        self.assertFalse(saved.exists())  # the upload was not left behind
+
+    def test_oversized_upload_rejected_by_middleware_with_413_and_cors(self) -> None:
+        # Content-Length over the cap is rejected before the body is buffered; CORS is outermost
+        # so the rejection is still readable cross-origin.
+        with mock.patch.object(config, "MAX_UPLOAD_BYTES", 5):
+            resp = self.client.post(
+                "/api/analyze",
+                files={"file": ("clip.mp4", b"x" * 200, "video/mp4")},
+                headers={"Origin": "http://localhost:5173"},
+            )
+        self.assertEqual(resp.status_code, 413)
+        self.assertIn("too large", resp.json()["detail"].lower())
+        self.assertEqual(
+            resp.headers.get("access-control-allow-origin"), "http://localhost:5173"
+        )
+
+
+class BodySizeLimitMiddlewareTests(unittest.TestCase):
+    """Direct ASGI-level tests for the body-size guard (no FastAPI app needed)."""
+
+    def _run(self, *, scope: dict, limit):
+        from backend.app.middleware import BodySizeLimitMiddleware
+
+        sent: list[dict] = []
+        called = {"app": False}
+
+        async def downstream(scope, receive, send):
+            called["app"] = True
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"ok"})
+
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(message):
+            sent.append(message)
+
+        mw = BodySizeLimitMiddleware(downstream, max_body_bytes=limit)
+        asyncio.run(mw(scope, receive, send))
+        return called["app"], sent
+
+    @staticmethod
+    def _http(content_length=None) -> dict:
+        headers = []
+        if content_length is not None:
+            headers.append((b"content-length", str(content_length).encode()))
+        return {"type": "http", "headers": headers}
+
+    def test_rejects_over_limit(self) -> None:
+        app_called, sent = self._run(scope=self._http(100), limit=10)
+        self.assertFalse(app_called)
+        self.assertEqual(sent[0]["status"], 413)
+        self.assertIn(b"too large", sent[1]["body"])
+
+    def test_allows_under_limit(self) -> None:
+        app_called, sent = self._run(scope=self._http(5), limit=10)
+        self.assertTrue(app_called)
+        self.assertEqual(sent[0]["status"], 200)
+
+    def test_allows_when_no_content_length(self) -> None:
+        app_called, _ = self._run(scope=self._http(None), limit=10)
+        self.assertTrue(app_called)
+
+    def test_allows_when_content_length_unparseable(self) -> None:
+        scope = {"type": "http", "headers": [(b"content-length", b"not-a-number")]}
+        app_called, _ = self._run(scope=scope, limit=10)
+        self.assertTrue(app_called)
+
+    def test_passes_through_non_http_scope(self) -> None:
+        app_called, _ = self._run(scope={"type": "lifespan", "headers": []}, limit=10)
+        self.assertTrue(app_called)
+
+    def test_callable_limit_is_evaluated_per_request(self) -> None:
+        app_called, sent = self._run(scope=self._http(100), limit=lambda: 10)
+        self.assertFalse(app_called)
+        self.assertEqual(sent[0]["status"], 413)
 
 
 class VideosRouterTests(_TempConfigBase):
