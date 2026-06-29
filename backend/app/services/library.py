@@ -23,6 +23,23 @@ _LABEL_FILES = {
     "knees_inward": config.LABELS_DIR / "error_knees_inward.json",
 }
 
+# Suffixes an uploaded source clip may carry (mirrors the analyze router's allow-list).
+_UPLOAD_SUFFIXES = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+
+# A ``video_id`` is a filename stem (a dataset slug or ``upload_<hex>``). It is interpolated
+# into filesystem paths and, previously, into a glob pattern — so it must never carry path
+# separators, parent-dir hops, NUL, or glob metacharacters. We deny exactly those rather than
+# allow-list a charset, so legitimate dataset slugs (which may use varied punctuation) are not
+# rejected while traversal / wildcard injection is shut out.
+_UNSAFE_VIDEO_ID_CHARS = frozenset("*?[]/\\\x00")
+
+
+def is_safe_video_id(video_id: str) -> bool:
+    """True if ``video_id`` is safe to interpolate into a data-directory path lookup."""
+    if not video_id or ".." in video_id:
+        return False
+    return not any(ch in _UNSAFE_VIDEO_ID_CHARS for ch in video_id)
+
 
 @functools.lru_cache(maxsize=1)
 def _labels() -> dict[str, dict[str, list]]:
@@ -42,11 +59,15 @@ def _split_of(video_id: str) -> str | None:
 
 
 def detection_path(video_id: str) -> Path | None:
+    if not is_safe_video_id(video_id):
+        return None
     split = _split_of(video_id)
     return config.DETECTIONS_DIR / split / f"{video_id}.json" if split else None
 
 
 def pose_json_path(video_id: str) -> Path | None:
+    if not is_safe_video_id(video_id):
+        return None
     for split in config.SPLIT_NAMES:
         candidate = config.POSE_JSON_DIR / split / f"{video_id}.json"
         if candidate.exists():
@@ -55,8 +76,26 @@ def pose_json_path(video_id: str) -> Path | None:
 
 
 def video_path(video_id: str) -> Path | None:
+    if not is_safe_video_id(video_id):
+        return None
     candidate = config.VIDEOS_DIR / f"{video_id}.mp4"
     return candidate if candidate.exists() else None
+
+
+def uploaded_video_path(video_id: str) -> Path | None:
+    """Resolve a prior upload to its on-disk path by trying each allowed suffix.
+
+    Replaces a ``glob(f"{video_id}.*")`` lookup: globbing let a crafted ``video_id`` (e.g.
+    ``*`` or ``upload_a*``) expand into a wildcard match and return *another* user's upload.
+    This does exact-name existence checks instead, so only the requested id can ever match.
+    """
+    if not is_safe_video_id(video_id):
+        return None
+    for suffix in _UPLOAD_SUFFIXES:
+        candidate = config.UPLOAD_DIR / f"{video_id}{suffix}"
+        if candidate.exists():
+            return candidate
+    return None
 
 
 def list_videos(*, limit: int = 50, offset: int = 0, fault: str | None = None) -> dict[str, Any]:
