@@ -1,0 +1,66 @@
+# Fit3D pipeline (`scripts/fit3d`)
+
+Fit3D (AIFit, CVPR'21) ships **mocap-grade 3D ground truth** (`joints3d_25`, world
+metres, Z up), 4 calibrated camera views, SMPLX meshes, and per-action repetition
+annotations for 8 train subjects × 47 actions. We use the 3D ground truth to attack
+the project's depth-bottleneck question *directly* (with mocap truth) instead of
+indirectly (via downstream LOSO accuracy, n=9).
+
+Data is already extracted under `data/Fit3D/{train,test}/<subj>/`. Logic lives in
+`src/fit3d/`; run everything from the repo root.
+
+## Joint layout
+
+`joints3d_25` is the **Human3.6M-17 convention** for indices 0..16 plus 8 extremity
+points (feet/hands), verified against the official limb connectivity in
+`sminchisescu-research/imar_vision_datasets_tools`. Constants and the world→camera→image
+projection (ported from their `util/dataset_util.py`) live in `src/fit3d/dataset.py`.
+
+## Experiment 2 — view-dependence of 2D squat-rule readings (runs locally, no GPU)
+
+For each squat rep we read every biomechanical cue from the view-invariant 3D truth
+and from each camera's 2D projection (identical formulas, `src/fit3d/biomech.py`), then
+report which cues survive single-view 2D and which need 3D.
+
+```bash
+python scripts/fit3d/run_view_dependence.py --action squat \
+    --json data/Fit3D/derived/view_dependence_squat.json \
+    --csv  data/Fit3D/derived/view_dependence_squat.csv
+```
+
+Headline result (40 reps, 8 subjects, 4 cameras) is in
+`notes/fit3d_view_dependence_summary.md`: projected 2D **knee/hip angle** and
+**hip-below-knee depth** are *view-corrupted* (a deep 78° squat reads as 108–133°
+depending on camera); **torso lean** and **knee-width/valgus** rank reliably across
+views. Fit3D's 4 cameras are all ~45° obliques — there is no pure side view, which is
+the realistic phone-camera coaching regime.
+
+## Experiment 1 — monocular-3D depth recovery vs mocap truth
+
+`src/fit3d/depth_eval.py` decomposes a monocular 3D prediction's error against GT into
+per-axis components (in-plane x/y vs **depth** z) — the split that separates "lifting
+already solves this" from the actual bottleneck — plus Procrustes-aligned MPJPE and the
+squat-cue errors set beside experiment 2's single-view 2D baseline. NLF SMPL-24 output is
+mapped to Human3.6M-17 with the **L/R convention resolved against the GT** (not assumed).
+
+```bash
+python scripts/fit3d/run_depth_eval.py --pred-root data/Fit3D/derived/preds/nlf \
+    --json data/Fit3D/derived/depth_eval_squat_nlf.json
+```
+
+Result (32 train-squat sequences, NLF on Kaggle P100, full writeup in
+`notes/fit3d_depth_recovery_summary.md`): NLF per-axis **depth error 42 mm is on par with
+in-plane** (ez/exy = 1.16) — depth is no longer the failure axis — and NLF roughly
+**halves** the per-frame knee/hip/torso-lean error that single-view 2D projection
+introduces. The route past the depth bottleneck is direct image->3D, not 2D-lifting.
+
+### Kaggle GPU extraction
+
+The NLF kernel (`scratchpad`/`haoping6028/fit3d-nlf-extract`) mirrors the proven
+`rehab24-nlf-extract-c1` recipe (torch 2.5.1+cu121, `detect_smpl_batched`, half-res,
+largest-area box), reads the `fit3d-squat-nlf-input` dataset, processes all GT frames
+(~42 min, 100% detection), and saves per-video SMPL-24 npz named `<subj>__squat__<cam>.npz`.
+To extend beyond squats, add the action's videos to the input dataset + manifest and
+re-run. (Kaggle MCP note: `dataset_create_new` / `kernel_push` work; `kernel_pull` /
+`kernel_status` / `kernel_output` / `datasets_list` are broken — use `uv run --with kaggle
+-- kaggle ...` for those.)

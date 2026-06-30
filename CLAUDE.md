@@ -27,10 +27,11 @@ The most important structural convention: **`scripts/` are thin CLI entry points
 - **`video/`** — VideoMAE spatio-temporal feature extraction and lightweight video-level error classifiers (`videomae_video_classifier.py`), plus experiment grids and error analysis.
 - **`knowledge/`** — local RAG (`rag_vector_db.py`) and the squat knowledge graph (`extract_kg.py`, `graph_retrieval.py`, `perception_to_graph.py`). The RAG store uses a built-in offline `HashEmbeddingBackend`, so the vector DB builds/queries with no external API.
 - **`rehab24/`** — REHAB24-6 dataset pipeline: repetition-level manifest + subject-wise splits, skeleton features (local), VideoMAE features (GPU/Colab), feature fusion, and a correctness classifier.
+- **`fit3d/`** — Fit3D (AIFit) mocap-grade 3D ground truth + 4 calibrated views, used to measure the depth bottleneck *directly*: `dataset.py` (H36M-17-core joint layout + world→camera→image projection), `biomech.py` (squat cues computed identically from 3D truth or 2D projection), `view_dependence.py` (experiment 2: which cues survive single-view 2D — runs locally), `depth_eval.py` (experiment 1: in-plane vs depth error of monocular 3D vs GT — needs GPU predictions).
 
 **Cross-pipeline link:** `pose_rule_detector` can enrich detected faults with retrieved knowledge via `src/knowledge/graph_retrieval.py` (the RAG/KG store under `data/rag/vector_db` and `data/kg`). This retrieval is optional — pass `--no-retrieval` to run rules standalone.
 
-Common workflow commands live in the per-directory READMEs: `scripts/{pose,video,knowledge,rehab24}/README.md`.
+Common workflow commands live in the per-directory READMEs: `scripts/{pose,video,knowledge,rehab24,fit3d}/README.md`.
 
 ## Data layout
 
@@ -38,6 +39,7 @@ Pipelines read/write under `data/` and paths are resolved relative to the repo r
 
 - `data/Squat/{Unlabeled,Labeled}_Dataset/` — videos, processed pose JSON, pose features, VideoMAE features, `Splits/`, `Labels/`.
 - `data/REHAB24-6/` — REHAB24-6 source data and derived features.
+- `data/Fit3D/{train,test}/<subj>/` — Fit3D `joints3d_25` (world-metre 3D GT), `camera_parameters` (4 views), `videos`, `smplx`, `rep_ann.json`; derived outputs under `data/Fit3D/derived/`.
 - `data/kg/` — knowledge-graph `.graphml` files and canonical mapping JSON under `data/kg/docs/`.
 - `data/rag/{docs,vector_db}/` — RAG source documents and the built index (chunks, hash embeddings, manifest).
 
