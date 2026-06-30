@@ -361,6 +361,46 @@ class LibraryHelperTests(_TempConfigBase):
         self.assertEqual(library.video_path("clipA"), self.videos_dir / "clipA.mp4")
         self.assertIsNone(library.video_path("missing"))
 
+    def test_uploaded_video_path_resolves_exact_name(self) -> None:
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        (self.upload_dir / "upload_abc.webm").write_bytes(b"v")
+        self.assertEqual(
+            library.uploaded_video_path("upload_abc"), self.upload_dir / "upload_abc.webm"
+        )
+        self.assertIsNone(library.uploaded_video_path("missing"))
+
+    def test_uploaded_video_path_does_not_glob(self) -> None:
+        # Regression for the glob-injection IDOR: a wildcard id must never expand to match a
+        # real upload — only the exact requested id may resolve.
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        (self.upload_dir / "upload_secret.mp4").write_bytes(b"v")
+        self.assertIsNone(library.uploaded_video_path("*"))
+        self.assertIsNone(library.uploaded_video_path("upload_*"))
+        self.assertIsNone(library.uploaded_video_path("upload_s*"))
+
+    def test_path_resolvers_reject_unsafe_ids(self) -> None:
+        # Even with matching files on disk, an unsafe id resolves to nothing.
+        self.write_detection("clipA", "train", _detection_payload([]))
+        self.write_pose_json("clipA", "train", _pose_payload())
+        self.write_video("clipA")
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        (self.upload_dir / "clipA.mp4").write_bytes(b"v")
+        for bad in ("*", "upload_*", "a?b", "a[bc]", "..", "../etc", "a/b", "a\\b"):
+            self.assertIsNone(library.detection_path(bad), bad)
+            self.assertIsNone(library.pose_json_path(bad), bad)
+            self.assertIsNone(library.video_path(bad), bad)
+            self.assertIsNone(library.uploaded_video_path(bad), bad)
+
+
+class IsSafeVideoIdTests(unittest.TestCase):
+    def test_accepts_normal_ids(self) -> None:
+        for ok in ("clipA", "upload_ab12cd34ef56", "subject-01_rep.2", "1", "a.b-c_d"):
+            self.assertTrue(library.is_safe_video_id(ok), ok)
+
+    def test_rejects_glob_traversal_and_separators(self) -> None:
+        for bad in ("", "*", "?", "a*b", "a?b", "[abc]", "a/b", "a\\b", "..", "../x", "x\x00y"):
+            self.assertFalse(library.is_safe_video_id(bad), bad)
+
 
 class ListVideosTests(_TempConfigBase):
     def _seed(self) -> None:
@@ -706,6 +746,16 @@ class VideosRouterTests(_TempConfigBase):
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         resp = self.client.get("/api/video-file/ghost")
         self.assertEqual(resp.status_code, 404)
+
+    def test_get_video_file_rejects_glob_wildcard(self) -> None:
+        # Regression for the glob-injection IDOR: a wildcard id must not stream another user's
+        # upload. Previously ``glob(f"{video_id}.*")`` let ``*`` match an arbitrary upload.
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        (self.upload_dir / "upload_victim.mp4").write_bytes(b"secret")
+        for wid in ("*", "upload_*", "upload_v*"):
+            resp = self.client.get(f"/api/video-file/{wid}")
+            self.assertEqual(resp.status_code, 404, wid)
+            self.assertNotIn(b"secret", resp.content)
 
 
 class KnowledgeRouterTests(_TempConfigBase):
