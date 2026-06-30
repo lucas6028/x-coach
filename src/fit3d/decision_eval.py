@@ -243,7 +243,9 @@ def analyse(records: list[dict]) -> dict:
             "swept_flip": {name: _swept_flip(gt, arm, cue.fault_when) for name, arm in arms.items()},
             "per_subject_flip": {
                 "raw2d": _per_subject_flip(gt, v2, subj, thr, cue.fault_when),
+                "deb2d": _per_subject_flip(gt, v2_deb, subj, thr, cue.fault_when),
                 "nlf": _per_subject_flip(gt, nl, subj, thr, cue.fault_when),
+                "debnlf": _per_subject_flip(gt, nl_deb, subj, thr, cue.fault_when),
             },
         }
         out[cue.name] = cue_out
@@ -297,25 +299,38 @@ def format_report(result: dict) -> str:
     ]
 
     # --- Headline: the depth verdict (knee angle at parallel), the geometrically-corrupted cue ---
-    if result["per_cue"].get("knee_angle", {}).get("threshold_is_canonical"):
-        m = result["per_cue"]["knee_angle"]
+    km = result["per_cue"].get("knee_angle", {})
+    if km.get("threshold_is_canonical"):
+        m = km
         t = m["at_threshold"]
+        prevalence = t["raw2d"]["true_fault_rate"]
         lines.append(f"  [DEPTH VERDICT] knee angle at parallel ({m['threshold_used']:.0f} deg), "
-                     f"true-fault prevalence {t['raw2d']['true_fault_rate']*100:.0f}%:")
-        lines.append(f"  {'readout':<22}{'flip':>8}{'false-alarm':>14}{'miss':>8}")
-        lines.append("  " + "-" * 52)
-        labels = [("raw2d", "raw 2D (deployed)"), ("deb2d", "oracle-calib 2D"),
-                  ("nlf", "raw NLF"), ("debnlf", "oracle-calib NLF")]
-        for key, lbl in labels:
-            a = t[key]
-            fa = "n/a" if not np.isfinite(a["false_alarm"]) else f"{a['false_alarm']*100:.0f}%"
-            ms = "n/a" if not np.isfinite(a["miss"]) else f"{a['miss']*100:.0f}%"
-            lines.append(f"  {lbl:<22}{a['flip']*100:>7.0f}%{fa:>14}{ms:>8}")
-        lines.append(f"  => fair (calibrated both): 2D flips depth verdict {t['deb2d']['flip']*100:.0f}% of reps, "
-                     f"NLF {t['debnlf']['flip']*100:.0f}%.")
-        lines.append(f"     calibrated 2D trades false-alarms for misses ({t['deb2d']['false_alarm']*100:.0f}% FA "
-                     f"+ {t['deb2d']['miss']*100:.0f}% miss); one per-view offset can't fix both -- NLF gets both low.")
-        lines.append(f"     as deployed (no calibration) 2D false-fails {t['raw2d']['false_alarm']*100:.0f}% of good squats.")
+                     f"true-fault prevalence {prevalence*100:.0f}%:")
+        if prevalence > 0.9:
+            # The true-OK class is near-empty (e.g. hip-hinge deadlift: knees never bend to parallel),
+            # so the false-alarm rate -- the meaningful error here -- has too few reps to be reliable.
+            # Knee depth simply isn't this movement's cue; read the needs-3D map below, not this box.
+            lines.append("  (degenerate: almost no good-rep reference -> knee depth is not this movement's"
+                         " cue; see the needs-3D map below, not this box)")
+        else:
+            lines.append(f"  {'readout':<22}{'flip':>8}{'false-alarm':>14}{'miss':>8}")
+            lines.append("  " + "-" * 52)
+            labels = [("raw2d", "raw 2D (deployed)"), ("deb2d", "oracle-calib 2D"),
+                      ("nlf", "raw NLF"), ("debnlf", "oracle-calib NLF")]
+            for key, lbl in labels:
+                a = t[key]
+                fa = "n/a" if not np.isfinite(a["false_alarm"]) else f"{a['false_alarm']*100:.0f}%"
+                ms = "n/a" if not np.isfinite(a["miss"]) else f"{a['miss']*100:.0f}%"
+                lines.append(f"  {lbl:<22}{a['flip']*100:>7.0f}%{fa:>14}{ms:>8}")
+            ps = m["per_subject_flip"]
+            lines.append(f"  => fair (calibrated both): 2D flips depth verdict {t['deb2d']['flip']*100:.0f}% of reps, "
+                         f"NLF {t['debnlf']['flip']*100:.0f}%.")
+            lines.append(f"     per-subject calibrated flip: 2D {ps['deb2d']['mean']*100:.0f}+/-{ps['deb2d']['std']*100:.0f}%"
+                         f" vs NLF {ps['debnlf']['mean']*100:.0f}+/-{ps['debnlf']['std']*100:.0f}% "
+                         f"(raw 2D {ps['raw2d']['mean']*100:.0f}+/-{ps['raw2d']['std']*100:.0f}%).")
+            lines.append(f"     calibrated 2D trades false-alarms for misses ({t['deb2d']['false_alarm']*100:.0f}% FA "
+                         f"+ {t['deb2d']['miss']*100:.0f}% miss); one per-view offset can't fix both -- NLF gets both low.")
+            lines.append(f"     as deployed (no calibration) 2D false-fails {t['raw2d']['false_alarm']*100:.0f}% of good squats.")
         lines.append("")
 
     # --- Cross-cue needs-3D map (fair, threshold-agnostic: debiased swept flip on both arms) ---

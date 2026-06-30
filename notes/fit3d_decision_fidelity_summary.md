@@ -47,9 +47,18 @@ descriptive rates + per-subject spread, **no p-value** over the pooled 160 readi
 * **Calibration is not enough.** One per-view offset removes most false alarms (14%) but
   then *misses 42% of the genuinely shallow reps* — it cannot fix both error types at once,
   because the residual cross-view scatter is rep-dependent, not a constant. Net flip 16%.
-* **NLF gets both low** (7% FA, 0% miss; 7% flip). So **after the best possible per-view
-  calibration, single-view 2D still flips the depth verdict ~2× more than NLF** — the
-  airtight version of "you need direct 3D for the depth verdict."
+* **NLF gets both low** (7% FA, 0% miss; 7% flip).
+
+**Does the calibrated gap survive per subject?** (The *raw* finding clearly does — see below.
+This is the question for the novel *calibrated* claim, whose edge is only ~10 FA + ~5 miss
+reps.) Per-subject calibrated knee-flip — **NLF ≤ calibrated-2D in 7/8 subjects** (strictly
+lower in 5, tie in 2, higher in 1 — s08, by 5 pts). So the *direction* "NLF beats even
+oracle-calibrated 2D" is robust, not a 1–2-subject artifact. But the *magnitude* of the mean
+gap (deb-2D 16% vs NLF 7%) is **concentrated in 2 hard subjects** (s05 45→0, s07 50→40);
+for the other ~half, per-view calibration alone already gets 2D to 0–10%. So the honest claim:
+**calibration sharply reduces the depth-verdict gap but does not close it** — it cannot for
+the subjects whose form sits near the threshold, where the residual scatter (not a constant)
+straddles the line. Direct 3D removes that residual.
 
 (The knee@90 headline box is squat-appropriate. For the hip-hinge **deadlift** knee@90 is
 degenerate — 93% prevalence, knee depth isn't the deadlift cue — so read deadlift off the
@@ -97,6 +106,10 @@ as above; its hip cue: 2D 30±23% vs NLF 13±19%.)
 - **Oracle debiasing is an upper bound**, not a deployable calibration — it uses the GT to
   compute each camera's offset. A real system has no per-view GT; the *raw* rows are the
   honest as-deployed numbers, and they are far worse for 2D.
+- **Calibration is modeled as a per-view offset.** An affine/scale per-view calibration would
+  face the same *rep-dependent* residual: the 14%-false-alarm + 42%-miss tradeoff is the
+  signature of scatter that no per-camera *constant or linear* map can remove (it depends on
+  the athlete's pose, not the camera). That is exactly what direct 3D removes.
 - **All-competent population**: false-alarm is the measurable error; true-fault prevalence
   is low (squat 8%) so `miss` rests on few reps. Reported descriptively, no significance
   test over the non-independent 160.
