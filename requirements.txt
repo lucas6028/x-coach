@@ -10,7 +10,7 @@ supabase>=2.0,<3
 
 numpy==2.4.3
 opencv-python==4.13.0.92
-mediapipe==0.10.14
+mediapipe==0.10.35
 tqdm==4.68.3
 networkx==3.6.1
 pydantic==2.12.5
