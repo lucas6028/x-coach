@@ -54,6 +54,27 @@ in-plane** (ez/exy = 1.16) — depth is no longer the failure axis — and NLF r
 **halves** the per-frame knee/hip/torso-lean error that single-view 2D projection
 introduces. The route past the depth bottleneck is direct image->3D, not 2D-lifting.
 
+## Experiment 3 — coaching-verdict fidelity (2D vs NLF 3D, runs locally)
+
+`src/fit3d/decision_eval.py` translates the cue findings into the pass/fault **verdict** a
+coaching app emits, and asks how often a single 2D camera flips that verdict vs the mocap
+truth — and whether NLF fixes it. The 2D arm is reported raw **and** after oracle per-view
+debiasing (the cap on what calibration can buy), with the same debiasing applied to NLF, so
+the deciding comparison is fair.
+
+```bash
+python scripts/fit3d/run_decision_eval.py --pred-root data/Fit3D/derived/preds/nlf \
+    --action squat --json data/Fit3D/derived/decision_eval_squat_nlf.json
+```
+
+Result (full writeup `notes/fit3d_decision_fidelity_summary.md`): as deployed, single-view
+2D **false-fails 82% of good squats** on the depth verdict; even oracle per-view calibration
+leaves it flipping the verdict 16% (14% false-alarm + 42% missed shallow reps — one offset
+can't fix both), vs **7% for NLF**. The needs-3D map (squat/deadlift/thruster) is consistent
+with experiment 2: **direct 3D rescues the sagittal depth/flexion verdicts** (knee, hip,
+hips-below-knee) it geometrically corrupts, while **calibrated 2D is better for valgus** and
+ties on torso-lean — so route by fault type, don't replace 2D wholesale.
+
 ### Kaggle GPU extraction
 
 The NLF kernel (`scratchpad`/`haoping6028/fit3d-nlf-extract`) mirrors the proven
