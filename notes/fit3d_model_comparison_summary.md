@@ -116,20 +116,27 @@ Depth axis ez/exy: squat 1.16 / 1.57 / 1.50; deadlift 1.17 / 1.66 / 1.50; thrust
 
 5. **Mechanism confirmed by THREE independent architectures.** Localizer-field (NLF),
    parametric-SMPL transformer (HMR2.0), and single-shot full-frame SMPL-X (Multi-HMR) *all*
-   recover the sagittal knee/hip cues single-view 2D corrupts (every knee entry halves the 2D
-   error; every ez/exy is ~1.2–1.7, nowhere near 2D-lifting's ez>>exy). Three architectures this
-   different agreeing is strong mechanism evidence — the depth-from-pixels signal is real and
-   general, definitively closing the REHAB24 second-model thread.
+   recover **each movement's defining rotation-invariant cue** — squat & thruster: knee flexion
+   (2D ~17–18° → 7.1/7.9/9.7 and 5.9/6.6/6.9); deadlift: the hip hinge (2D 17.8° → 7.9/7.8/10.2).
+   (Deadlift *knee* is low-signal for everyone — knees barely bend in a hip-hinge, so even NLF is
+   only 7.5 — which is why we read each movement off its own cue, as in experiments 1–2.) Every
+   ez/exy is ~0.95–1.7, nowhere near 2D-lifting's ez>>exy. Three architectures this different
+   agreeing on the defining cue is strong mechanism evidence — the depth-from-pixels signal is real
+   and general, definitively closing the REHAB24 second-model thread.
 
-6. **NLF is the best direct-3D depth model on Fit3D — and it is not just HMR2.0's crop handicap.**
-   Multi-HMR is full-frame (no crop) yet its depth axis (ez/exy 1.21–1.50) still does **not** beat
-   NLF (0.95–1.17), and its knee is the weakest of the three on squat/deadlift. So removing the
-   crop handicap does not close the gap: NLF's localizer-field approach genuinely wins on
-   out-of-plane depth. Multi-HMR *is* competitive where it counts least for the confounds — it is
-   **best on hip on thruster (8.34°)** and ties HMR2.0 elsewhere on the rotation-invariant cues.
+6. **No model beat NLF under this setup; NLF has the lowest rotation-invariant knee error in all
+   three actions** — a *modest* edge (squat 7.1 vs 9.7, deadlift 7.5 vs 12.4, thruster 5.9 vs 6.9).
+   Two honesty limits on how far to push this ranking: (a) Multi-HMR ran with **non-native
+   preprocessing** (a white square-pad, not its own crop) and an **assumed 60° FOV**, so this is
+   **not a clean head-to-head** — we do *not* claim strict dominance, and we do *not* use the
+   FOV-confounded ez/exy to argue "full-frame can't close the depth gap." (b) The one confound we
+   *did* rule out is subsampling: masking NLF/HMR2.0 to the same every-6th frames leaves their cue
+   error unchanged (squat knee NLF 7.09→7.09, HMR2.0 7.88→7.87), so the gap is not a frame-count
+   artefact. Reassuringly, Multi-HMR's *hip* is competitive/best (**thruster 8.34°**, squat 9.49°),
+   which argues the preprocessing did not broadly wreck its pose — but we can't call it neutral.
 
-The practical takeaway is unchanged and now robust across three models: **use direct image->3D
-(NLF preferred) for the depth/flexion verdicts, keep calibrated 2D for frontal-plane faults.**
+The practical takeaway is robust across three models: **use direct image->3D for the depth/flexion
+verdicts (NLF is the strongest here), keep calibrated 2D for frontal-plane faults.**
 
 Reproduce: `python scripts/fit3d/run_model_comparison.py --action squat \
 --model NLF=data/Fit3D/derived/preds/nlf --model HMR2=data/Fit3D/derived/preds/hmr2 \
