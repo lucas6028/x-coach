@@ -36,15 +36,19 @@ RTMPose keypoint MAE vs GT-projected: 55–59 px on ~900 px images (the raw dete
 
 ## Findings
 
-1. **On the depth cue the detector error is ~0 — a real 2D detector is already as good as a
-   perfect one, and both fail.** The knee-angle detector term is **−0.77 / −0.45 / +0.22 deg**
-   across squat / deadlift / thruster (per-subject −0.7±1.5, −0.4±1.5, +0.2±1.2 over 7–8 subjects,
-   centred on zero). So the entire ~14–18° knee error is **projection geometry**, not detector
-   accuracy: even a *perfect* 2D detector (mocap-2D) reads the squat-depth cue 14–18° off, and
-   RTMPose is already at that ceiling. Only direct 3D (~6–8°) removes it. **This is the direct,
-   mocap-GT proof of "depth is the bottleneck, not 2D accuracy"** — the thing HRNet-vs-RTMPose on
-   REHAB24 could only hint at indirectly. No amount of 2D-detector improvement can help the depth
-   cue; you must change modality to 3D.
+1. **On the depth cue, a real 2D detector and a perfect one agree — and both fail.** The knee-angle
+   detector term is **−0.77 / −0.45 / +0.22 deg** across squat / deadlift / thruster (per-subject
+   −0.7±1.5, −0.4±1.5, +0.2±1.2 over 7–8 subjects). i.e. real-2D and mocap-2D agree to **within ±1°,
+   *below* the per-subject spread (±1.5°)** — statistically indistinguishable. (The small *negative*
+   values are not RTMPose "beating ground truth": mocap-2D is the H36M **mocap** joint convention
+   projected, RTMPose is the **COCO** convention, so mocap-2D is not a strict upper bound — a
+   different-but-valid convention can land a hair closer on the angle. That two *independent* 2D
+   conventions both read the depth cue ~14–18° off is *stronger* evidence the corruption is
+   projection geometry than a single reading would be.) So the entire ~14–18° knee error is
+   **projection**, not detector accuracy: even a *perfect* 2D detector reads squat depth 14–18° off,
+   RTMPose is already at that ceiling, and only direct 3D (~6–8°) removes it. **This is the direct,
+   mocap-GT proof of "depth is the bottleneck, not 2D accuracy"** — what HRNet-vs-RTMPose on REHAB24
+   could only hint at indirectly. No 2D-detector improvement can help the depth cue; change modality.
 
 2. **Valgus is the mirror image — detector-dominated, so a better 2D detector is exactly the fix.**
    The perfect detector reads valgus well (mocap-2D 0.04) and the *real* detector adds the error
