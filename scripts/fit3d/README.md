@@ -97,6 +97,27 @@ quirk** (closing the REHAB24 thread that was confounded there by 75% detection).
 cues. NLF remains the best depth model (ez/exy ~1.0 vs HMR2.0/Multi-HMR's ~1.2–1.6); full-frame
 Multi-HMR does not close the gap, so NLF's advantage is genuine, not just HMR2.0's crop handicap.
 
+## 2D-vs-3D-vs-mocap decomposition — detector error vs projection error (runs locally, CPU)
+
+`src/fit3d/twod_vs_threed.py` decomposes a single-view 2D pipeline's cue error into
+**detector error (real-2D − mocap-2D)** + **projection error (mocap-2D − GT-3D)**, where real-2D is
+RTMPose (`rtmlib`, extracted by `run_rtmpose_fit3d.py`), mocap-2D is the GT projection (a *perfect*
+detector), and 3D is NLF/HMR2.0/Multi-HMR.
+
+```bash
+pip install rtmlib onnxruntime
+python scripts/fit3d/run_rtmpose_fit3d.py --mode balanced --subsample 15   # ~one-time CPU extraction
+python scripts/fit3d/run_twod_vs_threed.py --action squat \
+    --model NLF=data/Fit3D/derived/preds/nlf --model HMR2=data/Fit3D/derived/preds/hmr2 \
+    --model MultiHMR=data/Fit3D/derived/preds/multihmr
+```
+
+Result (`notes/fit3d_2d_vs_3d_summary.md`): on the **knee** cue the **detector error is ~0** across
+all three actions (a strong real detector, RTMPose, is already as good as a *perfect* one) — the
+whole ~14–18° error is projection geometry, and only 3D (~6–8°) fixes it. This is the direct mocap-GT
+proof of "depth is the bottleneck, not 2D accuracy". **Valgus** is the mirror image (detector-
+dominated → a better 2D detector helps, 3D not needed).
+
 ### Kaggle GPU extraction
 
 The NLF kernel (`scratchpad`/`haoping6028/fit3d-nlf-extract`) mirrors the proven
