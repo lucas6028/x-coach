@@ -46,3 +46,13 @@ Pipelines read/write under `data/` and paths are resolved relative to the repo r
 - Modules favor a local-first, dependency-light style (stdlib + numpy/networkx; pure-function helpers that are unit-tested in isolation — e.g. `compute_frame_metrics`, feature-vector builders, normalization payloads).
 - `test_metadata.py` at the repo root is a stale ad-hoc script (imports the old `src.rag_vector_db` path, which no longer exists). It is not a real test and breaks bare `pytest` collection — scope test runs to `tests/`. Prefer the modules under `src/knowledge/`; don't model new code on it.
 - `notes/` holds experiment summaries and results; `docs/` has longer walkthroughs (KG LLM extraction, MediaPipe processing).
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
