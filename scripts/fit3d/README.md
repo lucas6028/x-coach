@@ -75,6 +75,27 @@ with experiment 2: **direct 3D rescues the sagittal depth/flexion verdicts** (kn
 hips-below-knee) it geometrically corrupts, while **calibrated 2D is better for valgus** and
 ties on torso-lean — so route by fault type, don't replace 2D wholesale.
 
+## Model comparison — is depth recovery an NLF quirk or general? (runs locally)
+
+`src/fit3d/model_comparison.py` compares direct image->3D models (NLF vs HMR2.0 vs ...) on the
+same Fit3D videos. Because body conventions differ per model, it ranks on **bias-tolerant**
+metrics — ez/exy depth-axis pattern, rotation-invariant knee/hip cues, pa_mpjpe, and the
+**debiased** verdict-flip — not raw MPJPE.
+
+```bash
+python scripts/fit3d/run_model_comparison.py --action squat \
+    --model NLF=data/Fit3D/derived/preds/nlf \
+    --model HMR2=data/Fit3D/derived/preds/hmr2
+```
+
+Result (`notes/fit3d_model_comparison_summary.md`): HMR2.0 (a parametric-SMPL transformer,
+architecturally distinct from NLF's localizer field) **independently recovers the sagittal
+knee/hip cues** single-view 2D corrupts — knee within ~1deg of NLF, hip often better — across
+squat/deadlift/thruster. So direct image->3D depth recovery is a **general mechanism, not an NLF
+quirk** (closing the REHAB24 thread that was confounded there by 75% detection). NLF is the
+cleaner model on the depth axis (ez/exy ~1.0 vs HMR2.0's ~1.5, from HMR2.0's crop-frame
+orientation). Multi-HMR (full-frame SMPL-X, 2024 SOTA) pending.
+
 ### Kaggle GPU extraction
 
 The NLF kernel (`scratchpad`/`haoping6028/fit3d-nlf-extract`) mirrors the proven
