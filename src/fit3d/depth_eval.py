@@ -117,7 +117,7 @@ def procrustes_align(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
         d = np.sign(np.linalg.det(Vt.T @ U.T))
         D = np.diag([1, 1, d])
         Rm = Vt.T @ D @ U.T
-        scale = S.sum() * d / (Pc ** 2).sum() if (Pc ** 2).sum() > 1e-12 else 1.0
+        scale = float(np.dot(S, [1, 1, d])) / (Pc ** 2).sum() if (Pc ** 2).sum() > 1e-12 else 1.0
         out[f] = (scale * (P - muP) @ Rm.T) + muG
     return out
 
