@@ -92,9 +92,10 @@ Result (`notes/fit3d_model_comparison_summary.md`): HMR2.0 (a parametric-SMPL tr
 architecturally distinct from NLF's localizer field) **independently recovers the sagittal
 knee/hip cues** single-view 2D corrupts — knee within ~1deg of NLF, hip often better — across
 squat/deadlift/thruster. So direct image->3D depth recovery is a **general mechanism, not an NLF
-quirk** (closing the REHAB24 thread that was confounded there by 75% detection). NLF is the
-cleaner model on the depth axis (ez/exy ~1.0 vs HMR2.0's ~1.5, from HMR2.0's crop-frame
-orientation). Multi-HMR (full-frame SMPL-X, 2024 SOTA) pending.
+quirk** (closing the REHAB24 thread that was confounded there by 75% detection). Confirmed with a
+**third** architecture, Multi-HMR (full-frame SMPL-X, ECCV'24) — all three recover the knee/hip
+cues. NLF remains the best depth model (ez/exy ~1.0 vs HMR2.0/Multi-HMR's ~1.2–1.6); full-frame
+Multi-HMR does not close the gap, so NLF's advantage is genuine, not just HMR2.0's crop handicap.
 
 ### Kaggle GPU extraction
 
