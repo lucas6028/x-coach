@@ -1,44 +1,15 @@
 import { useMemo } from "react";
 import { ArrowRight, Brain, CheckCircle } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import type { Analysis, Detection, Retrieval, RagResult } from "../api";
+import type { Analysis, Detection, Retrieval } from "../api";
 import { fmtTime } from "../lib/format";
+import { keyEvidence, ragSnippet, retrievalByFault, summaryCategory } from "../lib/retrieval";
 import { useI18n, faultLabel, phaseLabel, severityText } from "../lib/i18n";
 
 interface Props {
   analysis: Analysis;
   currentTime: number;
   onSeek: (t: number) => void;
-}
-
-interface SummaryNode {
-  node_id: string;
-  label: string;
-}
-
-function summaryCategory(retrieval: Retrieval | undefined, key: string): string[] {
-  if (!retrieval) return [];
-  const results = (retrieval.context.results as Array<Record<string, unknown>>) || [];
-  const out: string[] = [];
-  for (const seed of results) {
-    const summary = (seed.summary as Record<string, SummaryNode[]>) || {};
-    for (const n of summary[key] || []) out.push(n.node_id);
-  }
-  return Array.from(new Set(out)).slice(0, 4);
-}
-
-function ragSnippet(retrieval: Retrieval | undefined): string | null {
-  if (!retrieval || retrieval.retrieval_mode !== "rag") return null;
-  const results = (retrieval.context.results as RagResult[]) || [];
-  return results.length ? results[0].text.slice(0, 200) + "…" : null;
-}
-
-function keyEvidence(d: Detection): string {
-  const ev = d.evidence || {};
-  const entries = Object.entries(ev).filter(([, v]) => typeof v === "number");
-  if (!entries.length) return "";
-  const [k, v] = entries[0];
-  return `${k.replace(/_/g, " ")} ${typeof v === "number" ? v.toFixed(2) : v}`;
 }
 
 // Severity drives a small graded signal (real semantic state, not decoration):
@@ -177,11 +148,7 @@ function FaultCard({
 export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
   const { t } = useI18n();
   const reduce = useReducedMotion();
-  const retrievalByFault = useMemo(() => {
-    const m = new Map<string, Retrieval>();
-    for (const r of analysis.retrievals) if (!m.has(r.fault_id)) m.set(r.fault_id, r);
-    return m;
-  }, [analysis]);
+  const byFault = useMemo(() => retrievalByFault(analysis.retrievals), [analysis]);
 
   const detections = analysis.detections;
 
@@ -215,7 +182,7 @@ export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
             >
               <FaultCard
                 d={d}
-                retrieval={retrievalByFault.get(d.fault_id)}
+                retrieval={byFault.get(d.fault_id)}
                 active={currentTime >= d.start_time && currentTime <= d.end_time}
                 last={i === detections.length - 1}
                 onSeek={onSeek}

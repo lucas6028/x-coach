@@ -152,6 +152,18 @@ export interface ChatResponse {
   model: string;
 }
 
+// Carries the HTTP status so the UI can tell an expired session (401) apart from an LLM outage
+// (502/503) and message the user accordingly, instead of a single undifferentiated failure.
+export class ChatError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "ChatError";
+  }
+}
+
 export interface LibraryItem {
   video_id: string;
   split: string;
@@ -224,7 +236,10 @@ export const api = {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
-      throw new Error((detail as { detail?: string }).detail || `Chat failed (${res.status})`);
+      throw new ChatError(
+        (detail as { detail?: string }).detail || `Chat failed (${res.status})`,
+        res.status
+      );
     }
     return (await res.json()) as ChatResponse;
   },

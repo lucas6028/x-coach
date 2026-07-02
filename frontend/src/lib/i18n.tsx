@@ -73,6 +73,7 @@ const en: Dict = {
   "chat.thinking": "Coach is thinking…",
   "chat.signIn": "Sign in to chat with the AI coach about this analysis.",
   "chat.error": "Couldn't reach the coach. Please try again.",
+  "chat.sessionExpired": "Your session expired. Please sign in again to keep chatting.",
   "chat.you": "You",
   "chat.coach": "Coach",
 
@@ -423,6 +424,7 @@ const zhHant: Dict = {
   "chat.thinking": "教練思考中…",
   "chat.signIn": "登入即可就本次分析與 AI 教練對話。",
   "chat.error": "無法連線至教練，請再試一次。",
+  "chat.sessionExpired": "登入階段已過期，請重新登入以繼續對話。",
   "chat.you": "你",
   "chat.coach": "教練",
 
