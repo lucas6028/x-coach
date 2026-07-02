@@ -4,11 +4,10 @@ import { api, type Analysis } from "./api";
 import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import VideoPanel from "./components/VideoPanel";
-import ReasoningLog from "./components/ReasoningLog";
+import CoachTray from "./components/CoachTray";
 import KnowledgeGraphWidget from "./components/KnowledgeGraphWidget";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
-import ChatInput from "./components/ChatInput";
 import ResizeHandle from "./components/ResizeHandle";
 import { useI18n } from "./lib/i18n";
 
@@ -186,19 +185,14 @@ export default function App() {
               onResizeEnd={() => setResizing(false)}
             />
 
-            {/* Right: coaching feedback, then a compact knowledge-graph card and
-                the follow-up input pinned to the foot of the column. */}
+            {/* Right: a compact knowledge-graph card, then one unified "coach chat" tray that
+                holds the grounded fault-card analysis and the follow-up conversation together. */}
             <aside
               style={{ ["--fbw" as string]: `${feedbackWidth}px` }}
               className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
             >
-              <ReasoningLog
-                analysis={analysis!}
-                currentTime={currentTime}
-                onSeek={seek}
-              />
               <KnowledgeGraphWidget analysis={analysis!} activeFaultId={activeFaultId} />
-              <ChatInput analysis={analysis!} />
+              <CoachTray analysis={analysis!} currentTime={currentTime} onSeek={seek} />
             </aside>
           </div>
         )}
