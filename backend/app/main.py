@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app import config
-from backend.app.routers import analyses, analyze, knowledge, videos
+from backend.app.routers import analyses, analyze, chat, knowledge, videos
 from backend.app.settings import get_settings
 
 app = FastAPI(
@@ -33,14 +33,17 @@ app.include_router(analyze.router)
 app.include_router(analyses.router)
 app.include_router(videos.router)
 app.include_router(knowledge.router)
+app.include_router(chat.router)
 
 
 @app.get("/api/health", tags=["meta"])
 def health() -> dict:
     """Liveness check plus a quick view of which data stores are present."""
+    settings = get_settings()
     return {
         "status": "ok",
-        "auth_configured": get_settings().auth_configured,
+        "auth_configured": settings.auth_configured,
+        "chat_configured": settings.chat_configured,
         "stores": {
             "labeled_videos": config.VIDEOS_DIR.exists(),
             "detections": config.DETECTIONS_DIR.exists(),

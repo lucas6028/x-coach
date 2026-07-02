@@ -116,6 +116,42 @@ export interface StoredAnalysis {
   result: Analysis;
 }
 
+// ---- Conversational coaching (LLM chat, grounded in an analysis) --------------------------
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// One detected fault plus its retrieved knowledge, as the frontend already derives it for the
+// ReasoningLog view. Sent to the backend so it can build a grounded system prompt server-side.
+export interface ChatFaultContext {
+  fault_name: string;
+  phase?: string;
+  severity?: number;
+  start_time?: number;
+  end_time?: number;
+  evidence?: string;
+  causes: string[];
+  risks: string[];
+  corrections: string[];
+  rag_snippet?: string | null;
+}
+
+export interface ChatContext {
+  video_id?: string;
+  view_type?: string;
+  view_confidence?: number;
+  fault_count: number;
+  quality: Record<string, number>;
+  faults: ChatFaultContext[];
+}
+
+export interface ChatResponse {
+  reply: string;
+  model: string;
+}
+
 export interface LibraryItem {
   video_id: string;
   split: string;
@@ -146,7 +182,10 @@ async function getJSON<T>(url: string): Promise<T> {
 }
 
 export const api = {
-  health: () => getJSON<{ status: string }>("/api/health"),
+  health: () =>
+    getJSON<{ status: string; auth_configured?: boolean; chat_configured?: boolean }>(
+      "/api/health"
+    ),
 
   listVideos: (limit = 50, offset = 0, fault?: string) =>
     getJSON<LibraryPage>(
@@ -172,6 +211,22 @@ export const api = {
     const res = await fetch("/api/analyses", { method: "DELETE", headers: await authHeader() });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/analyses`);
     return (await res.json()) as { deleted: number };
+  },
+
+  // Grounded follow-up chat about an analysis (requires a signed-in session; 401 otherwise).
+  // `messages` is the conversation so far, oldest first, with the new user turn last; `context`
+  // is the compact grounding blob from buildChatContext(analysis).
+  async chat(messages: ChatMessage[], context: ChatContext): Promise<ChatResponse> {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ messages, context }),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error((detail as { detail?: string }).detail || `Chat failed (${res.status})`);
+    }
+    return (await res.json()) as ChatResponse;
   },
 
   async analyzeUpload(file: File): Promise<Analysis> {

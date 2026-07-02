@@ -7,6 +7,7 @@ uvicorn[standard]==0.34.0
 python-multipart==0.0.18
 pydantic-settings==2.14.1
 supabase>=2.0,<3
+httpx>=0.27,<0.29  # OpenRouter (LLM chat) client; also a transitive supabase dep — pinned explicitly here
 
 numpy==2.4.3
 opencv-python==4.13.0.92

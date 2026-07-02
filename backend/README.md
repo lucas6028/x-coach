@@ -40,6 +40,7 @@ first — see `db/migrations/` (and its README for why migrations don't live und
 | GET  | `/api/video-file/{video_id}` | — | stream the source mp4 (supports HTTP Range / seeking) |
 | GET  | `/api/knowledge/graph?query=` | — | knowledge-graph subgraph for the KG widget |
 | GET  | `/api/knowledge/rag?query=` | — | ranked RAG snippets |
+| POST | `/api/chat` | required | grounded LLM follow-up chat over an analysis (503 if `OPENROUTER_API_KEY` unset, 502 on upstream error) |
 
 Interactive docs: <http://localhost:8000/docs>.
 
@@ -109,4 +110,8 @@ and data-dependent (`test_backend_analysis`) modules are skipped there.
 - Live `/api/analyze` runs MediaPipe (`model_complexity=2`) on CPU — expect ~15–25s for a ~3s clip.
 - The analysis response is the `detect_pose_rules_from_json` dict with `frame_metrics` dropped and
   a compact `pose` block (x, y, visibility only) attached for the skeleton overlay.
-- Fully offline: no API key needed (the LLM reasoning layer is deferred).
+- The analysis pipeline is fully offline (no API key needed). The **conversational-coaching**
+  layer (`/api/chat`) is the one exception: it calls OpenRouter, so it needs `OPENROUTER_API_KEY`
+  in `.env` — without it the endpoint returns 503 and the frontend shows a disabled "coming soon"
+  chat. The chat answers only from the analysis's detected faults + retrieved KG/RAG knowledge
+  (grounding is enforced server-side); the key never reaches the browser.

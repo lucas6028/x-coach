@@ -62,9 +62,19 @@ const en: Dict = {
   "metric.landmarkConf": "landmark confidence",
   "metric.framesRatio": "{valid}/{total} frames",
 
-  // Chat input
+  // Chat input — disabled fallback (auth/LLM not configured) + the working grounded chat.
   "chat.placeholder": "Ask the AI Coach… (LLM layer coming soon)",
   "chat.title": "Conversational coaching arrives with the LLM layer.",
+  "chat.heading": "AI Coach",
+  "chat.grounded": "grounded in your analysis",
+  "chat.intro": "Ask a follow-up about your squat — answers stay grounded in the detected faults and retrieved cues.",
+  "chat.placeholderActive": "Ask a follow-up…",
+  "chat.send": "Send message",
+  "chat.thinking": "Coach is thinking…",
+  "chat.signIn": "Sign in to chat with the AI coach about this analysis.",
+  "chat.error": "Couldn't reach the coach. Please try again.",
+  "chat.you": "You",
+  "chat.coach": "Coach",
 
   // Library picker
   "library.title": "Sample Library",
@@ -402,9 +412,19 @@ const zhHant: Dict = {
   "metric.landmarkConf": "關鍵點信心度",
   "metric.framesRatio": "{valid}/{total} 影格",
 
-  // Chat input
+  // Chat input — disabled fallback (auth/LLM not configured) + the working grounded chat.
   "chat.placeholder": "詢問 AI 教練…（LLM 功能即將推出）",
   "chat.title": "對話式教練功能將隨 LLM 層推出。",
+  "chat.heading": "AI 教練",
+  "chat.grounded": "根據你的分析",
+  "chat.intro": "針對你的深蹲追問後續問題——回答將僅根據偵測到的錯誤與檢索到的提示。",
+  "chat.placeholderActive": "追問後續問題…",
+  "chat.send": "傳送訊息",
+  "chat.thinking": "教練思考中…",
+  "chat.signIn": "登入即可就本次分析與 AI 教練對話。",
+  "chat.error": "無法連線至教練，請再試一次。",
+  "chat.you": "你",
+  "chat.coach": "教練",
 
   // Library picker
   "library.title": "範例資料庫",
