@@ -182,13 +182,15 @@ export default function CoachTray({
       {/* One scroll thread: the grounded analysis first, then the conversation. */}
       <div ref={scrollRef} className="scrollbar-thin flex-1 overflow-y-auto">
         {detections.length === 0 ? (
-          // Clean rep — a compact, warm banner at the top of the thread (not a full-height void),
-          // so the follow-up conversation can still sit below it.
-          <div className="m-4 flex items-center gap-3 rounded-xl border border-secondary/20 bg-secondary/[0.06] p-4">
-            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-secondary/10">
-              <CheckCircle size={26} weight="fill" className="text-secondary" />
-            </span>
-            <p className="text-sm leading-relaxed text-content">{t("feedback.noFaults")}</p>
+          // Clean rep — a compact, warm banner, with the KG card flush below it (same stack).
+          <div className="space-y-4 p-4">
+            <div className="flex items-center gap-3 rounded-xl border border-secondary/20 bg-secondary/[0.06] p-4">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-secondary/10">
+                <CheckCircle size={26} weight="fill" className="text-secondary" />
+              </span>
+              <p className="text-sm leading-relaxed text-content">{t("feedback.noFaults")}</p>
+            </div>
+            <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
           </div>
         ) : (
           <div className="space-y-4 p-4">
@@ -208,12 +210,16 @@ export default function CoachTray({
                 />
               </motion.div>
             ))}
+            {/* Knowledge graph — the last item in the fault-card stack, indented by a rail-width
+                spacer so its box is the SAME width as the fault cards and sits flush with them. */}
+            <div className="flex gap-3">
+              <span className="w-2.5 shrink-0" aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
+              </div>
+            </div>
           </div>
         )}
-
-        {/* Knowledge graph — sits directly below the fault cards as part of the same coaching
-            column, tracing the active fault → cause → fix; expands to a fullscreen instrument. */}
-        <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
 
         {/* Follow-up conversation — same thread, below the analysis. Only when chat is usable. */}
         {isWorking && (
