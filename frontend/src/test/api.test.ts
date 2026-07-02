@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { api } from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {

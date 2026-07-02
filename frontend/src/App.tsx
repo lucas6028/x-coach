@@ -198,7 +198,7 @@ export default function App() {
                 onSeek={seek}
               />
               <KnowledgeGraphWidget analysis={analysis!} activeFaultId={activeFaultId} />
-              <ChatInput />
+              <ChatInput analysis={analysis!} />
             </aside>
           </div>
         )}

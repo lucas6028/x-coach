@@ -35,10 +35,23 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
 
+    # LLM conversational-coaching layer, served via OpenRouter (OpenAI-compatible API).
+    # The key is server-side only — it is never sent to the browser. Model ids use OpenRouter's
+    # ``vendor/model`` namespace; the default is a cost-effective, capable general model that can
+    # be overridden per-deployment without a code change.
+    openrouter_api_key: str = ""
+    openrouter_model: str = "anthropic/claude-sonnet-5"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+
     @property
     def auth_configured(self) -> bool:
         """True when the Supabase project URL and anon key are both present."""
         return bool(self.supabase_url and self.supabase_anon_key)
+
+    @property
+    def chat_configured(self) -> bool:
+        """True when an OpenRouter API key is present (the chat endpoint is otherwise 503)."""
+        return bool(self.openrouter_api_key)
 
 
 @lru_cache(maxsize=1)

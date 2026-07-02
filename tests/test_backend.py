@@ -887,6 +887,7 @@ class MainAppTests(_TempConfigBase):
             "/api/video-file/{video_id}",
             "/api/knowledge/graph",
             "/api/knowledge/rag",
+            "/api/chat",
             "/api/health",
         ):
             self.assertIn(expected, paths)
@@ -894,18 +895,22 @@ class MainAppTests(_TempConfigBase):
     def test_health_reports_auth_configured_true(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=True),
+            return_value=types.SimpleNamespace(auth_configured=True, chat_configured=True),
         ):
             resp = self.client.get("/api/health")
-        self.assertTrue(resp.json()["auth_configured"])
+        body = resp.json()
+        self.assertTrue(body["auth_configured"])
+        self.assertTrue(body["chat_configured"])
 
     def test_health_reports_auth_not_configured(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=False),
+            return_value=types.SimpleNamespace(auth_configured=False, chat_configured=False),
         ):
             resp = self.client.get("/api/health")
-        self.assertFalse(resp.json()["auth_configured"])
+        body = resp.json()
+        self.assertFalse(body["auth_configured"])
+        self.assertFalse(body["chat_configured"])
 
 
 # ------------------------------------------------------------------------- settings
@@ -925,6 +930,10 @@ class SettingsTests(unittest.TestCase):
             supabase_anon_key="",
         )
         self.assertFalse(s.auth_configured)
+
+    def test_chat_configured_tracks_openrouter_key(self) -> None:
+        self.assertTrue(app_settings.Settings(openrouter_api_key="sk-or-123").chat_configured)
+        self.assertFalse(app_settings.Settings(openrouter_api_key="").chat_configured)
 
     def test_get_settings_is_cached(self) -> None:
         app_settings.get_settings.cache_clear()
