@@ -154,6 +154,27 @@ class ChatCompletionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 chat_service._chat_completion([{"role": "user", "content": "hi"}])
 
+    def test_empty_content_becomes_runtime_error(self) -> None:
+        # An empty/blank completion must raise (not return "") so no empty assistant turn is stored.
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"choices": [{"message": {"content": "   "}}]}
+        with mock.patch.object(chat_service, "get_settings", return_value=self._settings()), mock.patch(
+            "httpx.post", return_value=resp
+        ):
+            with self.assertRaises(RuntimeError):
+                chat_service._chat_completion([{"role": "user", "content": "hi"}])
+
+    def test_malformed_response_shape_becomes_runtime_error(self) -> None:
+        resp = mock.Mock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {"unexpected": True}  # no "choices"
+        with mock.patch.object(chat_service, "get_settings", return_value=self._settings()), mock.patch(
+            "httpx.post", return_value=resp
+        ):
+            with self.assertRaises(RuntimeError):
+                chat_service._chat_completion([{"role": "user", "content": "hi"}])
+
 
 # --------------------------------------------------------------------- router contract
 

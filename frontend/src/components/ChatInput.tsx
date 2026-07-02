@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Brain, CircleNotch, PaperPlaneTilt, SignIn } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import { api, type Analysis, type ChatMessage } from "../api";
+import { api, ChatError, type Analysis, type ChatMessage } from "../api";
 import { buildChatContext } from "../lib/grounding";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
@@ -35,14 +35,18 @@ export default function ChatInput({ analysis }: { analysis?: Analysis }) {
   }, [analysis?.video_id]);
 
   // Ask the backend once (only when we'd otherwise show the working chat) whether the LLM is
-  // configured. A missing key → fall back to the disabled affordance rather than a broken input.
+  // configured, so a key-less server shows the disabled affordance rather than a broken input.
+  // Only a *definitive* chat_configured=false disables the chat; a transient health-check failure
+  // stays optimistic (assume available) — otherwise one network blip would wrongly lock a fully
+  // configured chat into the "coming soon" state with no retry. A real misconfig then surfaces as
+  // a 503 on send, which is recoverable, unlike the permanent fallback.
   useEffect(() => {
     if (!configured || !user) return;
     let active = true;
     api
       .health()
       .then((h) => active && setChatOnServer(!!h.chat_configured))
-      .catch(() => active && setChatOnServer(false));
+      .catch(() => active && setChatOnServer(true));
     return () => {
       active = false;
     };
@@ -112,8 +116,14 @@ export default function ChatInput({ analysis }: { analysis?: Analysis }) {
     try {
       const { reply } = await api.chat(next, buildChatContext(analysis));
       setMessages((m) => [...m, { role: "assistant", content: reply }]);
-    } catch {
-      setError(t("chat.error"));
+    } catch (e) {
+      // Roll back the optimistic user turn and restore the text, so a retry doesn't duplicate it
+      // (in the transcript or in the history re-sent to the LLM).
+      setMessages((m) => m.slice(0, -1));
+      setInput(text);
+      // Distinguish an expired session (401 → re-auth) from a transient LLM/backend outage.
+      const expired = e instanceof ChatError && e.status === 401;
+      setError(expired ? t("chat.sessionExpired") : t("chat.error"));
     } finally {
       setLoading(false);
     }

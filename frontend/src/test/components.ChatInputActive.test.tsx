@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
-import type { Analysis } from "../api";
+import { ChatError, type Analysis } from "../api";
 
 // Mutable auth state so individual tests can flip signed-in vs signed-out (hoisted so the
 // vi.mock factory can close over it).
@@ -14,7 +14,12 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("../lib/auth", () => ({ useAuth: () => h.auth }));
-vi.mock("../api", () => ({ api: { chat: h.chat, health: h.health } }));
+// Preserve the real module (ChatError, types) and only stub the network methods, so the
+// component's `instanceof ChatError` status check exercises the genuine error type.
+vi.mock("../api", async (importActual) => {
+  const actual = await importActual<typeof import("../api")>();
+  return { ...actual, api: { ...actual.api, chat: h.chat, health: h.health } };
+});
 
 import ChatInput from "../components/ChatInput";
 
@@ -69,14 +74,39 @@ describe("ChatInput (active)", () => {
     expect(await screen.findByText("Drive your knees out over your toes.")).toBeInTheDocument();
   });
 
-  it("shows an error when the coach is unreachable", async () => {
+  it("shows an error and rolls back the optimistic turn when the coach is unreachable", async () => {
     h.chat.mockRejectedValue(new Error("network"));
     renderPanel();
 
-    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "hi");
+    const box = screen.getByPlaceholderText(/Ask a follow-up/i) as HTMLInputElement;
+    await userEvent.type(box, "hi");
     await userEvent.keyboard("{Enter}"); // exercises Enter-to-send
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/try again/i);
+    // The failed user turn is rolled back (no orphaned "You" bubble) and the text is restored so a
+    // retry can't duplicate it.
+    expect(screen.queryByText(/^You$/)).not.toBeInTheDocument();
+    expect(box.value).toBe("hi");
+  });
+
+  it("tells the user to sign in again on a 401 (expired session)", async () => {
+    h.chat.mockRejectedValue(new ChatError("Missing bearer token.", 401));
+    renderPanel();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "hi");
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/sign in again/i);
+  });
+
+  it("keeps a working chat when the one-shot health check fails transiently", async () => {
+    h.health.mockRejectedValue(new Error("blip"));
+    h.chat.mockResolvedValue({ reply: "ok", model: "m" });
+    renderPanel();
+
+    // A rejected health check must NOT collapse to the disabled fallback: the live input stays.
+    const box = await screen.findByPlaceholderText(/Ask a follow-up/i);
+    expect(box).not.toBeDisabled();
   });
 
   it("invites sign-in when configured but signed out", () => {

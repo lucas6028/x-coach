@@ -123,9 +123,20 @@ def _chat_completion(messages: list[dict[str, str]]) -> str:
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
     except Exception as exc:  # noqa: BLE001 — any failure here is an upstream/transport problem.
         raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
+
+    # Extract + validate the reply. An empty/blank or malformed completion (a refusal, a truncated
+    # stream, an unexpected shape) must raise, not return "" — otherwise the caller stores an empty
+    # assistant turn that the request validator (content min_length=1) then rejects on the *next*
+    # send, wedging the whole conversation. Surface it as an error the router maps to 502 instead.
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError(f"OpenRouter returned an unexpected response shape: {exc}") from exc
+    if not content or not content.strip():
+        raise RuntimeError("OpenRouter returned an empty message.")
+    return content
 
 
 def answer(*, messages: list[dict[str, str]], context: dict[str, Any]) -> dict[str, Any]:
