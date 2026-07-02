@@ -1,16 +1,8 @@
-import { useMemo } from "react";
-import { ArrowRight, Brain, CheckCircle } from "@phosphor-icons/react";
-import { motion, useReducedMotion } from "motion/react";
-import type { Analysis, Detection, Retrieval } from "../api";
+import { ArrowRight } from "@phosphor-icons/react";
+import type { Detection, Retrieval } from "../api";
 import { fmtTime } from "../lib/format";
-import { keyEvidence, ragSnippet, retrievalByFault, summaryCategory } from "../lib/retrieval";
+import { keyEvidence, ragSnippet, summaryCategory } from "../lib/retrieval";
 import { useI18n, faultLabel, phaseLabel, severityText } from "../lib/i18n";
-
-interface Props {
-  analysis: Analysis;
-  currentTime: number;
-  onSeek: (t: number) => void;
-}
 
 // Severity drives a small graded signal (real semantic state, not decoration):
 // high = danger red, moderate = amber, mild = muted neutral.
@@ -31,7 +23,11 @@ const SEV_CHIP: Record<SevLevel, string> = {
   mild: "bg-content/5 text-muted",
 };
 
-function FaultCard({
+// One detected fault rendered as the coach's grounded analysis card: timecode + fault + severity,
+// the measured evidence, the KG-retrieved likely cause / injury risk, and the corrective cue
+// (highest visual weight). Clicking seeks the video; `active` marks the fault the playhead is in.
+// Lives on a temporal rail so a sequence of faults reads as one connected thought.
+export default function FaultCard({
   d,
   retrieval,
   active,
@@ -141,56 +137,6 @@ function FaultCard({
           <div className="px-4 pb-4 pt-2" />
         )}
       </button>
-    </div>
-  );
-}
-
-export default function ReasoningLog({ analysis, currentTime, onSeek }: Props) {
-  const { t } = useI18n();
-  const reduce = useReducedMotion();
-  const byFault = useMemo(() => retrievalByFault(analysis.retrievals), [analysis]);
-
-  const detections = analysis.detections;
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="flex items-center justify-between gap-2 border-b border-border-dark bg-surface-dark px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-content">
-          <Brain size={17} weight="duotone" className="text-primary" />
-          {t("feedback.title")}
-        </h2>
-        <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-mono text-[10px] text-primary">
-          {t("feedback.badge")}
-        </span>
-      </div>
-
-      <div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto p-4">
-        {detections.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-secondary/10">
-              <CheckCircle size={30} weight="fill" className="text-secondary" />
-            </span>
-            <p className="max-w-[15rem] text-sm text-muted">{t("feedback.noFaults")}</p>
-          </div>
-        ) : (
-          detections.map((d, i) => (
-            <motion.div
-              key={i}
-              initial={reduce ? false : { opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: i * 0.05, ease: [0.16, 1, 0.3, 1] }}
-            >
-              <FaultCard
-                d={d}
-                retrieval={byFault.get(d.fault_id)}
-                active={currentTime >= d.start_time && currentTime <= d.end_time}
-                last={i === detections.length - 1}
-                onSeek={onSeek}
-              />
-            </motion.div>
-          ))
-        )}
-      </div>
     </div>
   );
 }

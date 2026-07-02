@@ -76,6 +76,7 @@ const en: Dict = {
   "chat.sessionExpired": "Your session expired. Please sign in again to keep chatting.",
   "chat.you": "You",
   "chat.coach": "Coach",
+  "coach.followUp": "Follow-up",
 
   // Library picker
   "library.title": "Sample Library",
@@ -427,6 +428,7 @@ const zhHant: Dict = {
   "chat.sessionExpired": "登入階段已過期，請重新登入以繼續對話。",
   "chat.you": "你",
   "chat.coach": "教練",
+  "coach.followUp": "後續追問",
 
   // Library picker
   "library.title": "範例資料庫",
