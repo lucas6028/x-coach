@@ -5,7 +5,6 @@ import Sidebar from "./components/Sidebar";
 import Header from "./components/Header";
 import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
-import KnowledgeGraphWidget from "./components/KnowledgeGraphWidget";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
@@ -185,14 +184,18 @@ export default function App() {
               onResizeEnd={() => setResizing(false)}
             />
 
-            {/* Right: a compact knowledge-graph card, then one unified "coach chat" tray that
-                holds the grounded fault-card analysis and the follow-up conversation together. */}
+            {/* Right: one unified "coach chat" tray — the grounded fault-card analysis, the
+                knowledge graph below it, and the follow-up conversation, all in one thread. */}
             <aside
               style={{ ["--fbw" as string]: `${feedbackWidth}px` }}
               className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
             >
-              <KnowledgeGraphWidget analysis={analysis!} activeFaultId={activeFaultId} />
-              <CoachTray analysis={analysis!} currentTime={currentTime} onSeek={seek} />
+              <CoachTray
+                analysis={analysis!}
+                currentTime={currentTime}
+                onSeek={seek}
+                activeFaultId={activeFaultId}
+              />
             </aside>
           </div>
         )}

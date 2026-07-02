@@ -8,11 +8,15 @@ import { retrievalByFault } from "../lib/retrieval";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import FaultCard from "./FaultCard";
+import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
 
 interface Props {
   analysis: Analysis;
   currentTime: number;
   onSeek: (t: number) => void;
+  // Which fault the playhead is currently inside — drives the KG's centered node. Defaults to
+  // null (no active fault → the graph seeds from the first retrieval).
+  activeFaultId?: string | null;
 }
 
 // The coaching tray, unified as one "chat room": the grounded rule+GraphRAG analysis (fault cards
@@ -21,7 +25,12 @@ interface Props {
 // (the client already holds the analysis); only the composer adapts to the three honest states —
 // working chat (signed in + server-configured), a sign-in invite, or the disabled "coming soon"
 // affordance when auth or the OpenRouter key is absent.
-export default function CoachTray({ analysis, currentTime, onSeek }: Props) {
+export default function CoachTray({
+  analysis,
+  currentTime,
+  onSeek,
+  activeFaultId = null,
+}: Props) {
   const { t } = useI18n();
   const { configured, user } = useAuth();
   const reduce = useReducedMotion();
@@ -201,6 +210,10 @@ export default function CoachTray({ analysis, currentTime, onSeek }: Props) {
             ))}
           </div>
         )}
+
+        {/* Knowledge graph — sits directly below the fault cards as part of the same coaching
+            column, tracing the active fault → cause → fix; expands to a fullscreen instrument. */}
+        <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
 
         {/* Follow-up conversation — same thread, below the analysis. Only when chat is usable. */}
         {isWorking && (
