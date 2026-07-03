@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fault Card — design options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // Exact x-coach tokens so every class here maps 1:1 to the React app.
+  const withVar = (n) => `rgb(var(${n}) / <alpha-value>)`;
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          primary: "#0f758a",
+          "primary-content": "#ffffff",
+          secondary: "#42d159",
+          danger: "#ef4444",
+          background: withVar("--c-bg"),
+          "background-dark": withVar("--c-bg"),
+          surface: withVar("--c-surface"),
+          "surface-dark": withVar("--c-surface"),
+          border: withVar("--c-border"),
+          "border-dark": withVar("--c-border"),
+          content: withVar("--c-content"),
+          muted: withVar("--c-muted"),
+          faint: withVar("--c-faint"),
+          track: withVar("--c-track"),
+        },
+        fontFamily: {
+          display: ["Space Grotesk", "sans-serif"],
+          body: ["Noto Sans", "sans-serif"],
+          mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  .dark {
+    --c-bg: 18 20 22;
+    --c-surface: 30 33 36;
+    --c-border: 42 46 51;
+    --c-content: 243 244 246;
+    --c-muted: 156 163 175;
+    --c-faint: 107 114 128;
+    --c-track: 55 65 81;
+  }
+  body { font-family: "Space Grotesk", sans-serif; }
+</style>
+</head>
+<body class="bg-background text-content antialiased">
+
+<!-- Phosphor glyphs (real icon paths from the library the app already uses) -->
+<svg width="0" height="0" class="hidden">
+  <symbol id="i-arrow-right" viewBox="0 0 256 256"><path fill="currentColor" d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 256 256"><path fill="currentColor" d="M236.8,188.09,149.35,36.22a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM120,104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,88a12,12,0,1,1,12-12A12,12,0,0,1,128,192Z"/></symbol>
+  <symbol id="i-target" viewBox="0 0 256 256"><path fill="currentColor" d="M128,72a56,56,0,1,0,56,56A56.06,56.06,0,0,0,128,72Zm0,96a40,40,0,1,1,40-40A40,40,0,0,1,128,168Zm104-48h-16.4a88.11,88.11,0,0,0-79.6-79.6V24a8,8,0,0,0-16,0V40.4A88.11,88.11,0,0,0,40.4,120H24a8,8,0,0,0,0,16H40.4A88.11,88.11,0,0,0,120,215.6V232a8,8,0,0,0,16,0V215.6A88.11,88.11,0,0,0,215.6,136H232a8,8,0,0,0,0-16ZM128,200a72,72,0,1,1,72-72A72.08,72.08,0,0,1,128,200Z"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 256 256"><path fill="currentColor" d="M232,128a8,8,0,0,1-8,8H184a8,8,0,0,1-7.16-4.42L146.06,70l-36.9,110.53a8,8,0,0,1-15.07.4L67.94,120H32a8,8,0,0,1,0-16H72a8,8,0,0,1,7.44,5l19.16,49.83,37.24-111.6a8,8,0,0,1,15.15.1L179.06,120H224A8,8,0,0,1,232,128Z"/></symbol>
+</svg>
+
+<header class="mx-auto max-w-[1500px] px-6 pt-10 pb-4">
+  <h1 class="font-display text-2xl font-bold tracking-tight">Fault Card — design options</h1>
+  <p class="mt-2 max-w-[70ch] text-sm leading-relaxed text-muted">
+    Six directions for the coaching fault card, rendered in the real tray dark theme with live
+    tokens. Every card shows the same data a detection carries: timecode, fault, phase, severity,
+    the measured evidence, the KG cause and injury risk, and the corrective cue. Each column shows a
+    High-severity active card (playhead inside) plus a Moderate inactive one so you can judge state
+    and severity theming. Tell me the number to apply.
+  </p>
+</header>
+
+<main class="mx-auto flex max-w-[1500px] flex-wrap items-start gap-x-8 gap-y-12 px-6 pb-24">
+
+  <!-- ============================================================= -->
+  <!-- 1 · BASELINE (current)                                         -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">01 · Baseline (current)</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Today's card, for reference. Temporal rail, boxed sections, cue in a green tint.</p>
+    </div>
+    <div class="rounded-2xl bg-surface-dark p-4">
+      <!-- active / high -->
+      <div class="flex gap-3">
+        <div class="flex flex-col items-center pt-1.5">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-danger opacity-60 animate-ping"></span>
+            <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-danger"></span>
+          </span>
+          <span class="mt-1 w-px flex-1 bg-border-dark"></span>
+        </div>
+        <button class="mb-1 w-full overflow-hidden rounded-xl border border-primary/50 bg-primary/[0.04] text-left ring-1 ring-primary/30">
+          <div class="flex items-start justify-between gap-3 px-4 pt-3.5">
+            <div class="min-w-0">
+              <span class="font-mono text-[11px] text-faint">0:01</span>
+              <p class="font-display font-semibold leading-tight text-content">Knee Valgus</p>
+              <p class="mt-0.5 text-xs text-muted">descent phase</p>
+            </div>
+            <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1 text-[11px] font-medium text-danger">
+              <span class="h-1.5 w-1.5 rounded-full bg-danger"></span>High
+            </span>
+          </div>
+          <div class="mt-2.5 px-4">
+            <span class="inline-block rounded-md bg-content/5 px-2 py-1 font-mono text-[11px] text-muted">knee valgus ratio 0.82</span>
+          </div>
+          <dl class="mt-3 space-y-2 border-t border-border-dark/70 px-4 pt-3">
+            <div class="flex gap-2 text-xs leading-relaxed"><dt class="shrink-0 text-muted">Likely cause</dt><dd class="font-medium text-primary">Weak hip abductors</dd></div>
+            <div class="flex gap-2 text-xs leading-relaxed"><dt class="shrink-0 text-muted">Injury risk</dt><dd class="font-medium text-danger">ACL strain</dd></div>
+          </dl>
+          <div class="mx-4 mb-4 mt-3 flex items-start gap-2.5 rounded-lg bg-secondary/10 p-3">
+            <svg class="mt-px h-4 w-4 shrink-0 text-secondary"><use href="#i-arrow-right"/></svg>
+            <div class="min-w-0">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-secondary">Cue</span>
+              <p class="text-sm font-medium text-content">Drive knees out</p>
+            </div>
+          </div>
+        </button>
+      </div>
+      <!-- inactive / moderate -->
+      <div class="flex gap-3">
+        <div class="flex flex-col items-center pt-1.5">
+          <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500"></span>
+        </div>
+        <button class="mb-1 w-full overflow-hidden rounded-xl border border-border-dark bg-surface text-left">
+          <div class="flex items-start justify-between gap-3 px-4 pt-3.5">
+            <div class="min-w-0">
+              <span class="font-mono text-[11px] text-faint">0:04</span>
+              <p class="font-display font-semibold leading-tight text-content">Insufficient Depth</p>
+              <p class="mt-0.5 text-xs text-muted">bottom phase</p>
+            </div>
+            <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-400">
+              <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Moderate
+            </span>
+          </div>
+          <div class="mt-2.5 px-4">
+            <span class="inline-block rounded-md bg-content/5 px-2 py-1 font-mono text-[11px] text-muted">hip knee ratio 0.94</span>
+          </div>
+          <div class="mx-4 mb-4 mt-3 flex items-start gap-2.5 rounded-lg bg-secondary/10 p-3">
+            <svg class="mt-px h-4 w-4 shrink-0 text-secondary"><use href="#i-arrow-right"/></svg>
+            <div class="min-w-0">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-secondary">Cue</span>
+              <p class="text-sm font-medium text-content">Sink hips below knee level</p>
+            </div>
+          </div>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 2 · SEVERITY SPINE                                             -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">02 · Severity Spine</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">A bold severity edge carries the signal. Flat body, cue as a full-width footer. Calm, scannable.</p>
+    </div>
+    <div class="space-y-3">
+      <!-- active / high -->
+      <button class="flex w-full overflow-hidden rounded-xl border border-primary/40 bg-surface text-left ring-1 ring-primary/25">
+        <span class="w-1.5 shrink-0 bg-danger"></span>
+        <span class="min-w-0 flex-1">
+          <span class="flex items-center justify-between gap-2 px-4 pt-3">
+            <span class="font-mono text-[11px] text-faint">0:01</span>
+            <span class="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-danger">
+              <svg class="h-3.5 w-3.5"><use href="#i-pulse"/></svg>High severity
+            </span>
+          </span>
+          <p class="mt-1 px-4 font-display text-lg font-semibold leading-tight text-content">Knee Valgus</p>
+          <p class="px-4 text-xs text-muted">descent phase · knee valgus ratio <span class="font-mono text-content">0.82</span></p>
+          <div class="mt-3 space-y-1.5 px-4 text-xs leading-relaxed">
+            <p class="flex gap-2"><span class="h-2 w-2 translate-y-1 shrink-0 rounded-sm bg-primary/60"></span><span class="text-muted">Cause</span><span class="font-medium text-content">Weak hip abductors</span></p>
+            <p class="flex gap-2"><span class="h-2 w-2 translate-y-1 shrink-0 rounded-sm bg-danger/70"></span><span class="text-muted">Risk</span><span class="font-medium text-content">ACL strain</span></p>
+          </div>
+          <span class="mt-3 flex items-center gap-2 bg-secondary/10 px-4 py-2.5 text-sm font-semibold text-content">
+            <svg class="h-4 w-4 shrink-0 text-secondary"><use href="#i-arrow-right"/></svg>Drive knees out
+          </span>
+        </span>
+      </button>
+      <!-- inactive / moderate -->
+      <button class="flex w-full overflow-hidden rounded-xl border border-border-dark bg-surface text-left">
+        <span class="w-1.5 shrink-0 bg-amber-500"></span>
+        <span class="min-w-0 flex-1">
+          <span class="flex items-center justify-between gap-2 px-4 pt-3">
+            <span class="font-mono text-[11px] text-faint">0:04</span>
+            <span class="text-[11px] font-semibold uppercase tracking-wide text-amber-400">Moderate</span>
+          </span>
+          <p class="mt-1 px-4 font-display text-lg font-semibold leading-tight text-content">Insufficient Depth</p>
+          <p class="px-4 text-xs text-muted">bottom phase · hip knee ratio <span class="font-mono text-content">0.94</span></p>
+          <span class="mt-3 flex items-center gap-2 bg-secondary/10 px-4 py-2.5 text-sm font-semibold text-content">
+            <svg class="h-4 w-4 shrink-0 text-secondary"><use href="#i-arrow-right"/></svg>Sink hips below knee level
+          </span>
+        </span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 3 · DIAGNOSTIC READOUT                                         -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">03 · Diagnostic Readout</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">The measured number is the hero. Instrument-panel feel, fitting a biomechanics tool. Denser, sharper corners.</p>
+    </div>
+    <div class="space-y-3">
+      <!-- active / high -->
+      <button class="block w-full rounded-lg border border-primary/40 bg-surface p-4 text-left ring-1 ring-primary/25">
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-2">
+            <span class="h-2 w-2 rounded-full bg-danger"></span>
+            <span class="font-display text-sm font-semibold text-content">Knee Valgus</span>
+          </span>
+          <span class="font-mono text-[11px] text-faint">0:01</span>
+        </div>
+        <div class="mt-3 flex items-end gap-2">
+          <span class="font-mono text-4xl font-semibold leading-none tracking-tight text-content">0.82</span>
+          <span class="mb-0.5 flex flex-col leading-tight">
+            <span class="font-mono text-[11px] text-muted">valgus ratio</span>
+            <span class="text-[11px] font-semibold text-danger">flagged high</span>
+          </span>
+        </div>
+        <div class="mt-4 grid grid-cols-[auto,1fr] gap-x-3 gap-y-2 border-t border-border-dark/70 pt-3 text-xs">
+          <span class="font-mono uppercase tracking-wide text-faint">phase</span><span class="text-content">descent</span>
+          <span class="font-mono uppercase tracking-wide text-faint">cause</span><span class="text-content">Weak hip abductors</span>
+          <span class="font-mono uppercase tracking-wide text-faint">risk</span><span class="font-medium text-danger">ACL strain</span>
+          <span class="font-mono uppercase tracking-wide text-secondary">fix</span><span class="font-semibold text-content">Drive knees out</span>
+        </div>
+      </button>
+      <!-- inactive / moderate -->
+      <button class="block w-full rounded-lg border border-border-dark bg-surface p-4 text-left">
+        <div class="flex items-center justify-between">
+          <span class="flex items-center gap-2">
+            <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+            <span class="font-display text-sm font-semibold text-content">Insufficient Depth</span>
+          </span>
+          <span class="font-mono text-[11px] text-faint">0:04</span>
+        </div>
+        <div class="mt-3 flex items-end gap-2">
+          <span class="font-mono text-4xl font-semibold leading-none tracking-tight text-content">0.94</span>
+          <span class="mb-0.5 flex flex-col leading-tight">
+            <span class="font-mono text-[11px] text-muted">hip / knee</span>
+            <span class="text-[11px] font-semibold text-amber-400">below target</span>
+          </span>
+        </div>
+        <div class="mt-4 grid grid-cols-[auto,1fr] gap-x-3 gap-y-2 border-t border-border-dark/70 pt-3 text-xs">
+          <span class="font-mono uppercase tracking-wide text-faint">phase</span><span class="text-content">bottom</span>
+          <span class="font-mono uppercase tracking-wide text-secondary">fix</span><span class="font-semibold text-content">Sink hips below knee level</span>
+        </div>
+      </button>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 4 · CAUSAL LADDER                                              -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">04 · Causal Ladder</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Reads as a chain: cause leads to risk leads to fix. Most explanatory, best for teaching the "why".</p>
+    </div>
+    <div class="space-y-3">
+      <!-- active / high -->
+      <button class="block w-full rounded-xl border border-primary/40 bg-surface p-4 text-left ring-1 ring-primary/25">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <span class="font-mono text-[11px] text-faint">0:01 · descent</span>
+            <p class="font-display font-semibold leading-tight text-content">Knee Valgus</p>
+          </div>
+          <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1 text-[11px] font-medium text-danger">
+            <span class="h-1.5 w-1.5 rounded-full bg-danger"></span>High
+          </span>
+        </div>
+        <span class="mt-2 inline-block rounded-md bg-content/5 px-2 py-1 font-mono text-[11px] text-muted">knee valgus ratio 0.82</span>
+        <ol class="mt-3.5 space-y-0">
+          <li class="relative flex gap-3 pb-3">
+            <span class="absolute left-[3px] top-3 h-full w-px bg-border-dark"></span>
+            <span class="relative mt-1 h-2 w-2 shrink-0 rounded-full bg-primary/70"></span>
+            <span class="text-xs leading-relaxed"><span class="block text-[10px] font-semibold uppercase tracking-wide text-faint">Cause</span><span class="text-content">Weak hip abductors</span></span>
+          </li>
+          <li class="relative flex gap-3 pb-3">
+            <span class="absolute left-[3px] top-3 h-full w-px bg-border-dark"></span>
+            <span class="relative mt-1 h-2 w-2 shrink-0 rounded-full bg-danger/80"></span>
+            <span class="text-xs leading-relaxed"><span class="block text-[10px] font-semibold uppercase tracking-wide text-faint">Risk</span><span class="font-medium text-danger">ACL strain</span></span>
+          </li>
+          <li class="relative flex gap-3">
+            <span class="relative mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-secondary/15"><svg class="h-2.5 w-2.5 text-secondary"><use href="#i-arrow-right"/></svg></span>
+            <span class="leading-snug"><span class="block text-[10px] font-semibold uppercase tracking-wide text-secondary">Fix</span><span class="text-sm font-semibold text-content">Drive knees out</span></span>
+          </li>
+        </ol>
+      </button>
+      <!-- inactive / moderate -->
+      <button class="block w-full rounded-xl border border-border-dark bg-surface p-4 text-left">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <span class="font-mono text-[11px] text-faint">0:04 · bottom</span>
+            <p class="font-display font-semibold leading-tight text-content">Insufficient Depth</p>
+          </div>
+          <span class="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-400">
+            <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Moderate
+          </span>
+        </div>
+        <span class="mt-2 inline-block rounded-md bg-content/5 px-2 py-1 font-mono text-[11px] text-muted">hip knee ratio 0.94</span>
+        <ol class="mt-3.5">
+          <li class="relative flex gap-3">
+            <span class="relative mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-secondary/15"><svg class="h-2.5 w-2.5 text-secondary"><use href="#i-arrow-right"/></svg></span>
+            <span class="leading-snug"><span class="block text-[10px] font-semibold uppercase tracking-wide text-secondary">Fix</span><span class="text-sm font-semibold text-content">Sink hips below knee level</span></span>
+          </li>
+        </ol>
+      </button>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 5 · RAIL TIMELINE (airy)                                       -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">05 · Rail Timeline</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Keeps the temporal rail but goes airy: dividers instead of boxes, severity as an underline. Editorial, light.</p>
+    </div>
+    <div class="rounded-2xl bg-surface-dark px-2 py-3">
+      <!-- active / high -->
+      <div class="flex gap-3 px-2">
+        <div class="flex flex-col items-center pt-1">
+          <span class="font-mono text-[10px] text-faint">0:01</span>
+          <span class="relative mt-1 flex h-3 w-3">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-danger opacity-50 animate-ping"></span>
+            <span class="relative inline-flex h-3 w-3 items-center justify-center rounded-full border-2 border-danger bg-background"></span>
+          </span>
+          <span class="mt-1 w-px flex-1 bg-border-dark"></span>
+        </div>
+        <div class="min-w-0 flex-1 pb-4">
+          <div class="flex items-baseline justify-between gap-2">
+            <p class="font-display text-base font-semibold leading-tight text-content">Knee Valgus</p>
+            <span class="shrink-0 border-b-2 border-danger pb-0.5 text-[11px] font-semibold text-danger">High</span>
+          </div>
+          <p class="text-xs text-muted">descent phase</p>
+          <p class="mt-2 font-mono text-[11px] text-faint">knee valgus ratio <span class="text-content">0.82</span></p>
+          <div class="mt-2.5 space-y-1 text-xs leading-relaxed">
+            <p><span class="text-muted">Cause </span><span class="font-medium text-content">Weak hip abductors</span></p>
+            <p><span class="text-muted">Risk </span><span class="font-medium text-danger">ACL strain</span></p>
+          </div>
+          <p class="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-secondary/10 px-3 py-1.5 text-sm font-semibold text-content">
+            <svg class="h-3.5 w-3.5 text-secondary"><use href="#i-target"/></svg>Drive knees out
+          </p>
+        </div>
+      </div>
+      <!-- inactive / moderate -->
+      <div class="flex gap-3 px-2">
+        <div class="flex flex-col items-center pt-1">
+          <span class="font-mono text-[10px] text-faint">0:04</span>
+          <span class="relative mt-1 inline-flex h-3 w-3 rounded-full border-2 border-amber-500 bg-background"></span>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-baseline justify-between gap-2">
+            <p class="font-display text-base font-semibold leading-tight text-content">Insufficient Depth</p>
+            <span class="shrink-0 border-b-2 border-amber-500 pb-0.5 text-[11px] font-semibold text-amber-400">Moderate</span>
+          </div>
+          <p class="text-xs text-muted">bottom phase</p>
+          <p class="mt-2 font-mono text-[11px] text-faint">hip knee ratio <span class="text-content">0.94</span></p>
+          <p class="mt-2.5 inline-flex items-center gap-1.5 rounded-full bg-secondary/10 px-3 py-1.5 text-sm font-semibold text-content">
+            <svg class="h-3.5 w-3.5 text-secondary"><use href="#i-target"/></svg>Sink hips below knee level
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 6 · ELEVATED ACTION                                            -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">06 · Elevated Action</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Compact elevated cards, reasoning on one line, the cue as a bright action pill. Most "app-like".</p>
+    </div>
+    <div class="space-y-3.5">
+      <!-- active / high -->
+      <button class="block w-full rounded-2xl border border-primary/40 bg-surface p-4 text-left shadow-[0_10px_30px_-12px_rgba(0,0,0,0.7)] ring-1 ring-primary/20">
+        <div class="flex items-center justify-between gap-2">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1 text-[11px] font-semibold text-danger">
+            <span class="h-1.5 w-1.5 rounded-full bg-danger"></span>High
+          </span>
+          <span class="font-mono text-[11px] text-faint">0:01 · descent</span>
+        </div>
+        <p class="mt-2.5 font-display text-lg font-bold leading-tight text-content">Knee Valgus</p>
+        <p class="mt-1 text-xs leading-relaxed text-muted">
+          <span class="font-mono text-faint">0.82</span> valgus. Weak hip abductors, risking <span class="font-medium text-danger">ACL strain</span>.
+        </p>
+        <div class="mt-3 flex items-center gap-2 rounded-xl bg-secondary px-3.5 py-2.5">
+          <svg class="h-4 w-4 shrink-0 text-[#08210e]"><use href="#i-arrow-right"/></svg>
+          <span class="text-sm font-bold text-[#08210e]">Drive knees out</span>
+        </div>
+      </button>
+      <!-- inactive / moderate -->
+      <button class="block w-full rounded-2xl border border-border-dark bg-surface p-4 text-left shadow-[0_10px_30px_-12px_rgba(0,0,0,0.6)]">
+        <div class="flex items-center justify-between gap-2">
+          <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-400">
+            <span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Moderate
+          </span>
+          <span class="font-mono text-[11px] text-faint">0:04 · bottom</span>
+        </div>
+        <p class="mt-2.5 font-display text-lg font-bold leading-tight text-content">Insufficient Depth</p>
+        <p class="mt-1 text-xs leading-relaxed text-muted">
+          <span class="font-mono text-faint">0.94</span> hip / knee ratio, short of parallel.
+        </p>
+        <div class="mt-3 flex items-center gap-2 rounded-xl bg-secondary px-3.5 py-2.5">
+          <svg class="h-4 w-4 shrink-0 text-[#08210e]"><use href="#i-arrow-right"/></svg>
+          <span class="text-sm font-bold text-[#08210e]">Sink hips below knee level</span>
+        </div>
+      </button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="mx-auto max-w-[1500px] px-6 pb-16 text-xs text-faint">
+  Rendered with the app's live tokens (primary #0f758a, secondary #42d159, danger #ef4444) in the
+  dark tray theme. Toggle the <code class="font-mono text-muted">class="dark"</code> on
+  <code class="font-mono text-muted">&lt;html&gt;</code> to preview light mode.
+</footer>
+
+</body>
+</html>
