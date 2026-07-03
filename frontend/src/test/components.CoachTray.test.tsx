@@ -25,14 +25,15 @@ describe("CoachTray — coaching feedback", () => {
     expect(screen.getByText("High")).toBeInTheDocument();
   });
 
-  it("shows the phase tag", () => {
+  it("shows the phase in the header", () => {
     renderWithProviders(<CoachTray analysis={mockAnalysis} currentTime={0} onSeek={vi.fn()} />);
-    expect(screen.getByText(/descent phase/i)).toBeInTheDocument();
+    // Header merges timecode and phase: "0:01 · Descent".
+    expect(screen.getByText(/Descent/)).toBeInTheDocument();
   });
 
   it("shows the start time", () => {
     renderWithProviders(<CoachTray analysis={mockAnalysis} currentTime={0} onSeek={vi.fn()} />);
-    expect(screen.getByText("0:01")).toBeInTheDocument();
+    expect(screen.getByText(/0:01/)).toBeInTheDocument();
   });
 
   it("shows the likely cause, injury risk, and cue from the retrieval", () => {
@@ -64,14 +65,14 @@ describe("CoachTray — coaching feedback", () => {
     // mockDetection spans [1.0, 2.5] — 1.5 is inside it.
     renderWithProviders(<CoachTray analysis={mockAnalysis} currentTime={1.5} onSeek={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Knee Valgus/i }).className).toContain(
-      "border-primary/50"
+      "border-primary/40"
     );
   });
 
   it("leaves the fault card inactive once the playhead passes its end time", () => {
     renderWithProviders(<CoachTray analysis={mockAnalysis} currentTime={3} onSeek={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Knee Valgus/i }).className).not.toContain(
-      "border-primary/50"
+      "border-primary/40"
     );
   });
 });

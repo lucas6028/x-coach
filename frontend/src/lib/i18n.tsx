@@ -96,6 +96,8 @@ const en: Dict = {
   "feedback.graphragContext": "GraphRAG Context",
   "feedback.likelyCause": "Likely cause:",
   "feedback.injuryRisk": "Injury risk:",
+  "feedback.cause": "Cause",
+  "feedback.risk": "Risk",
   "feedback.cue": "Cue",
   "feedback.phaseTag": "during {phase} phase",
 
@@ -448,6 +450,8 @@ const zhHant: Dict = {
   "feedback.graphragContext": "GraphRAG 脈絡",
   "feedback.likelyCause": "可能原因：",
   "feedback.injuryRisk": "受傷風險：",
+  "feedback.cause": "原因",
+  "feedback.risk": "風險",
   "feedback.cue": "提示",
   "feedback.phaseTag": "（{phase}階段）",
 
