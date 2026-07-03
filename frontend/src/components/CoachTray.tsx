@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Brain, CheckCircle, CircleNotch, PaperPlaneTilt, SignIn } from "@phosphor-icons/react";
+import { ArrowRight, Brain, CheckCircle, CircleNotch, PaperPlaneTilt, SignIn } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { api, ChatError, type Analysis, type ChatMessage } from "../api";
 import { buildChatContext } from "../lib/grounding";
@@ -80,8 +80,9 @@ export default function CoachTray({
   const isWorking = configured && !!user && chatOnServer !== false;
   const canSend = !!input.trim() && !loading;
 
-  async function send() {
-    const text = input.trim();
+  // `textArg` lets a starter-suggestion chip send its prompt directly; otherwise we send the input.
+  async function send(textArg?: string) {
+    const text = (textArg ?? input).trim();
     if (!text || loading) return;
     const next: ChatMessage[] = [...messages, { role: "user", content: text }];
     setMessages(next);
@@ -107,7 +108,7 @@ export default function CoachTray({
     <div className="relative" title={t("chat.title")}>
       <input
         disabled
-        className="w-full cursor-not-allowed rounded-md border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-muted placeholder-faint"
+        className="w-full cursor-not-allowed rounded-2xl border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-muted placeholder-faint"
         placeholder={t("chat.placeholder")}
       />
       <PaperPlaneTilt size={18} className="absolute right-2 top-1/2 -translate-y-1/2 text-faint" />
@@ -115,7 +116,7 @@ export default function CoachTray({
   );
 
   const signInComposer = (
-    <div className="flex items-center gap-3 rounded-xl border border-border-dark bg-background/60 p-3">
+    <div className="flex items-center gap-3 rounded-2xl border border-border-dark bg-background/60 p-3">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
         <Brain size={18} weight="duotone" className="text-primary" />
       </span>
@@ -131,7 +132,9 @@ export default function CoachTray({
   );
 
   const workingComposer = (
-    <div className="relative">
+    // Pill composer (design 06). Voice + attach are the multimodal slots this design anticipates;
+    // they slot in beside the input once those features exist, so no dead controls ship now.
+    <div className="flex items-center gap-2 rounded-2xl border border-border-dark bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary/40">
       <input
         value={input}
         onChange={(e) => setInput(e.target.value)}
@@ -143,7 +146,7 @@ export default function CoachTray({
         }}
         disabled={loading}
         aria-label={t("chat.heading")}
-        className="w-full rounded-md border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-content placeholder-faint focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:opacity-60"
+        className="min-w-0 flex-1 bg-transparent px-1.5 text-sm text-content placeholder-faint focus:outline-none disabled:opacity-60"
         placeholder={t("chat.placeholderActive")}
       />
       <button
@@ -151,9 +154,9 @@ export default function CoachTray({
         onClick={() => void send()}
         disabled={!canSend}
         aria-label={t("chat.send")}
-        className="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-primary transition-transform enabled:hover:bg-primary/10 enabled:active:scale-[0.95] disabled:text-faint"
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-content transition enabled:active:scale-95 disabled:bg-content/10 disabled:text-faint"
       >
-        <PaperPlaneTilt size={18} weight={canSend ? "fill" : "regular"} />
+        <PaperPlaneTilt size={16} weight={canSend ? "fill" : "regular"} />
       </button>
     </div>
   );
@@ -225,31 +228,62 @@ export default function CoachTray({
             </div>
 
             {messages.length === 0 && !loading ? (
-              <p className="text-xs leading-relaxed text-muted">{t("chat.intro")}</p>
-            ) : (
-              <div className="space-y-2.5">
-                {messages.map((m, i) => (
-                  <motion.div
-                    key={i}
-                    initial={reduce ? false : { opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                    className={m.role === "user" ? "flex justify-end" : "flex justify-start"}
-                  >
-                    <div
-                      className={`max-w-[85%] rounded-xl px-3 py-2 text-sm leading-relaxed ${
-                        m.role === "user"
-                          ? "bg-primary text-primary-content"
-                          : "border border-border-dark bg-surface text-content"
-                      }`}
+              // Empty state: the intro line plus starter-suggestion chips that send on click. These
+              // are the static entry points; per-answer dynamic follow-ups would need model support.
+              <div>
+                <p className="text-xs leading-relaxed text-muted">{t("chat.intro")}</p>
+                <div className="mt-3 flex flex-col gap-2">
+                  {["chat.suggestFix", "chat.suggestDrill", "chat.suggestWhy"].map((key) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => void send(t(key))}
+                      className="flex items-center justify-between gap-2 rounded-2xl border border-border-dark bg-surface px-3.5 py-2.5 text-left text-[13px] text-content transition-colors hover:bg-content/[0.03]"
                     >
-                      <span className="mb-0.5 block text-[10px] font-medium uppercase tracking-wider opacity-60">
-                        {m.role === "user" ? t("chat.you") : t("chat.coach")}
-                      </span>
+                      <span>{t(key)}</span>
+                      <ArrowRight size={15} className="shrink-0 text-faint" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              // Editorial thread (design 06): the user's turn is a quiet right-aligned line, the
+              // coach's answer is an airy labelled block tagged as grounded in the analysis.
+              <div className="space-y-5">
+                {messages.map((m, i) =>
+                  m.role === "user" ? (
+                    <motion.p
+                      key={i}
+                      initial={reduce ? false : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                      className="text-right text-sm leading-relaxed text-muted"
+                    >
                       {m.content}
-                    </div>
-                  </motion.div>
-                ))}
+                    </motion.p>
+                  ) : (
+                    <motion.div
+                      key={i}
+                      initial={reduce ? false : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+                    >
+                      <div className="mb-1.5 flex items-center gap-2">
+                        <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                          {t("chat.coach")}
+                        </span>
+                        <span
+                          title={t("chat.grounded")}
+                          className="inline-flex items-center gap-1 text-[10px] font-medium text-secondary"
+                        >
+                          <CheckCircle size={12} weight="fill" />
+                          {t("chat.groundedShort")}
+                        </span>
+                      </div>
+                      <p className="text-[15px] leading-relaxed text-content">{m.content}</p>
+                    </motion.div>
+                  ),
+                )}
                 {loading && (
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <CircleNotch size={14} className="animate-spin" />

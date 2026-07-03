@@ -73,6 +73,18 @@ describe("CoachTray — follow-up chat", () => {
     expect(await screen.findByText("Drive your knees out over your toes.")).toBeInTheDocument();
   });
 
+  it("sends a starter suggestion directly when its chip is clicked", async () => {
+    h.chat.mockResolvedValue({ reply: "Fix your knees first.", model: "m" });
+    renderTray();
+
+    await userEvent.click(screen.getByRole("button", { name: /What should I fix first/i }));
+
+    expect(h.chat).toHaveBeenCalledTimes(1);
+    const [messages] = h.chat.mock.calls[0];
+    expect(messages.at(-1)).toEqual({ role: "user", content: "What should I fix first?" });
+    expect(await screen.findByText("Fix your knees first.")).toBeInTheDocument();
+  });
+
   it("shows an error and rolls back the optimistic turn when the coach is unreachable", async () => {
     h.chat.mockRejectedValue(new Error("network"));
     renderTray();
