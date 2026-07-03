@@ -36,11 +36,20 @@ export function ragSnippet(retrieval: Retrieval | undefined): string | null {
   return results.length ? results[0].text.slice(0, 200) + "…" : null;
 }
 
-// The single most informative measured number on a detection (e.g. valgus_angle), or undefined.
+// The single most informative measured number on a detection, formatted with the threshold it
+// breached (e.g. "knee/ankle width 0.78 (< 0.82)"), or undefined when the detector authored no
+// primary metric (e.g. a low-observability note that carries no fault measurement). The detector
+// names the primary metric explicitly via primary_label/primary_value/primary_threshold, so this
+// never has to guess it from key order.
 export function keyEvidence(d: Detection): string | undefined {
   const ev = d.evidence || {};
-  const entries = Object.entries(ev).filter(([, v]) => typeof v === "number");
-  if (!entries.length) return undefined;
-  const [k, v] = entries[0];
-  return `${k.replace(/_/g, " ")} ${typeof v === "number" ? v.toFixed(2) : v}`;
+  const label = ev.primary_label;
+  const value = ev.primary_value;
+  if (typeof label !== "string" || typeof value !== "number") return undefined;
+  const threshold = ev.primary_threshold;
+  const base = `${label} ${value.toFixed(2)}`;
+  if (typeof threshold !== "number") return base;
+  // The reported value is always the min/max on the violating side, so the numeric value-vs-
+  // threshold relationship directly encodes the breach direction (below vs above the limit).
+  return `${base} (${value < threshold ? "<" : ">"} ${threshold})`;
 }

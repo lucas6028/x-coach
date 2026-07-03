@@ -28,7 +28,7 @@ const analysis = {
   view: { view_type: "front", view_confidence: 0.9 },
   quality: { lower_body_visibility_mean: 0.9 },
   detections: [
-    { fault_id: "f1", fault_name: "knees_inward", phase: "descent", severity: 0.8, start_time: 1, end_time: 2, evidence: { knee_valgus_ratio: 0.82 } },
+    { fault_id: "f1", fault_name: "knees_inward", phase: "descent", severity: 0.8, start_time: 1, end_time: 2, evidence: { primary_label: "knee valgus ratio", primary_value: 0.82 } },
   ],
   retrievals: [],
 } as unknown as Analysis;

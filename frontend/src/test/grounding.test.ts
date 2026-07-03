@@ -27,7 +27,7 @@ describe("buildChatContext", () => {
             severity: 0.8,
             start_time: 1,
             end_time: 2,
-            evidence: { knee_valgus_ratio: 0.82 },
+            evidence: { primary_label: "knee valgus ratio", primary_value: 0.82 },
           },
         ] as unknown as Analysis["detections"],
         retrievals: [
