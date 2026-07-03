@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { api } from "../api";
+import { api, ChatError, type ChatContext, type ChatMessage } from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -155,5 +155,47 @@ describe("api.analyzeUpload", () => {
     } as Response);
     const file = new File(["data"], "bad.mp4", { type: "video/mp4" });
     await expect(api.analyzeUpload(file)).rejects.toThrow("Analyze failed (500)");
+  });
+});
+
+describe("api.chat", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const messages: ChatMessage[] = [{ role: "user", content: "why did my knees cave?" }];
+  const context: ChatContext = { fault_count: 0, quality: {}, faults: [] };
+
+  it("POSTs the messages + context and returns the parsed reply", async () => {
+    const spy = mockFetch({ reply: "Drive your knees out.", model: "m" });
+    const result = await api.chat(messages, context);
+    expect(result).toEqual({ reply: "Drive your knees out.", model: "m" });
+    expect(spy.mock.calls[0][0]).toBe("/api/chat");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ messages, context });
+  });
+
+  it("throws a ChatError carrying the HTTP status and backend detail on failure", async () => {
+    mockFetch({ detail: "Missing bearer token." }, false, 401);
+    await expect(api.chat(messages, context)).rejects.toMatchObject({
+      name: "ChatError",
+      status: 401,
+      message: "Missing bearer token.",
+    });
+    await expect(api.chat(messages, context)).rejects.toBeInstanceOf(ChatError);
+  });
+
+  it("falls back to a generic message when the error body isn't JSON", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 502,
+      statusText: "Bad Gateway",
+      json: async () => {
+        throw new Error("not json");
+      },
+    } as unknown as Response);
+    await expect(api.chat(messages, context)).rejects.toMatchObject({
+      status: 502,
+      message: "Chat failed (502)",
+    });
   });
 });

@@ -91,4 +91,9 @@ describe("buildChatContext", () => {
     expect(ctx.faults).toEqual([]);
     expect(ctx.view_confidence).toBeUndefined();
   });
+
+  it("falls back to an empty quality object when the analysis has none", () => {
+    const ctx = buildChatContext(make({ quality: undefined as unknown as Analysis["quality"] }));
+    expect(ctx.quality).toEqual({});
+  });
 });
