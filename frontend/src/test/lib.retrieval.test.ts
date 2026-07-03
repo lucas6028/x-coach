@@ -101,13 +101,29 @@ describe("keyEvidence", () => {
     expect(keyEvidence(d)).toBeUndefined();
   });
 
-  it("returns undefined when no evidence value is numeric", () => {
-    const d = { evidence: { note: "not a number" } } as unknown as Detection;
+  it("returns undefined when the detector authored no primary metric", () => {
+    // e.g. a low-observability note whose only number is camera confidence, not a fault value.
+    const d = { evidence: { reason: "side view required", view_confidence: 0.85 } } as unknown as Detection;
     expect(keyEvidence(d)).toBeUndefined();
   });
 
-  it("formats the first numeric evidence entry with underscores replaced", () => {
-    const d = { evidence: { valgus_angle: 0.3456 } } as unknown as Detection;
+  it("formats the authored primary metric with the threshold it breached", () => {
+    const d = {
+      evidence: { primary_label: "knee/ankle width", primary_value: 0.7812, primary_threshold: 0.82 },
+    } as unknown as Detection;
+    // Value is below the threshold, so the derived comparator reads "<".
+    expect(keyEvidence(d)).toBe("knee/ankle width 0.78 (< 0.82)");
+  });
+
+  it("derives '>' when the breached value sits above its threshold", () => {
+    const d = {
+      evidence: { primary_label: "torso lean angle", primary_value: 42.5, primary_threshold: 35 },
+    } as unknown as Detection;
+    expect(keyEvidence(d)).toBe("torso lean angle 42.50 (> 35)");
+  });
+
+  it("omits the parenthetical when no threshold was authored", () => {
+    const d = { evidence: { primary_label: "valgus angle", primary_value: 0.35 } } as unknown as Detection;
     expect(keyEvidence(d)).toBe("valgus angle 0.35");
   });
 });

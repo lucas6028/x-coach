@@ -74,6 +74,15 @@ class PoseRuleDetectorTests(unittest.TestCase):
         self.assertTrue(any(item.fault_id == "shallow_depth" for item in shallow_detections))
         self.assertFalse(any(item.fault_id == "shallow_depth" for item in deep_detections))
 
+        # Every real fault authors an explicit primary metric (label + value + threshold) so the
+        # frontend/chat surface the breached number without guessing it from evidence key order.
+        shallow = next(item for item in shallow_detections if item.fault_id == "shallow_depth")
+        for key in ("primary_label", "primary_value", "primary_threshold"):
+            self.assertIn(key, shallow.evidence)
+        self.assertIsInstance(shallow.evidence["primary_label"], str)
+        self.assertIsInstance(shallow.evidence["primary_value"], (int, float))
+        self.assertIsInstance(shallow.evidence["primary_threshold"], (int, float))
+
     def test_persistence_filter_suppresses_single_frame_spike(self) -> None:
         base = FrameMetrics(
             frame_index=0,
