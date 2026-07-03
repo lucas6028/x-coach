@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LLM Chat Panel design options</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // Exact x-coach tokens so every class here maps 1:1 to the React app.
+  const withVar = (n) => `rgb(var(${n}) / <alpha-value>)`;
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        colors: {
+          primary: "#0f758a",
+          "primary-content": "#ffffff",
+          secondary: "#42d159",
+          danger: "#ef4444",
+          background: withVar("--c-bg"),
+          "background-dark": withVar("--c-bg"),
+          surface: withVar("--c-surface"),
+          "surface-dark": withVar("--c-surface"),
+          border: withVar("--c-border"),
+          "border-dark": withVar("--c-border"),
+          content: withVar("--c-content"),
+          muted: withVar("--c-muted"),
+          faint: withVar("--c-faint"),
+          track: withVar("--c-track"),
+        },
+        fontFamily: {
+          display: ["Space Grotesk", "sans-serif"],
+          body: ["Noto Sans", "sans-serif"],
+          mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  .dark {
+    --c-bg: 18 20 22;
+    --c-surface: 30 33 36;
+    --c-border: 42 46 51;
+    --c-content: 243 244 246;
+    --c-muted: 156 163 175;
+    --c-faint: 107 114 128;
+    --c-track: 55 65 81;
+  }
+  body { font-family: "Space Grotesk", sans-serif; }
+  @keyframes blink { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }
+  .caret { animation: blink 1s step-end infinite; }
+</style>
+</head>
+<body class="bg-background text-content antialiased">
+
+<!-- Phosphor glyphs (real icon paths from @phosphor-icons, the library the app already uses) -->
+<svg width="0" height="0" class="hidden">
+  <symbol id="i-arrow-right" viewBox="0 0 256 256"><path fill="currentColor" d="M221.66,133.66l-72,72a8,8,0,0,1-11.32-11.32L196.69,136H40a8,8,0,0,1,0-16H196.69L138.34,61.66a8,8,0,0,1,11.32-11.32l72,72A8,8,0,0,1,221.66,133.66Z"/></symbol>
+  <symbol id="i-target" viewBox="0 0 256 256"><path fill="currentColor" d="M128,72a56,56,0,1,0,56,56A56.06,56.06,0,0,0,128,72Zm0,96a40,40,0,1,1,40-40A40,40,0,0,1,128,168Zm104-48h-16.4a88.11,88.11,0,0,0-79.6-79.6V24a8,8,0,0,0-16,0V40.4A88.11,88.11,0,0,0,40.4,120H24a8,8,0,0,0,0,16H40.4A88.11,88.11,0,0,0,120,215.6V232a8,8,0,0,0,16,0V215.6A88.11,88.11,0,0,0,215.6,136H232a8,8,0,0,0,0-16ZM128,200a72,72,0,1,1,72-72A72.08,72.08,0,0,1,128,200Z"/></symbol>
+  <symbol id="i-warning" viewBox="0 0 256 256"><path fill="currentColor" d="M236.8,188.09,149.35,36.22a24.76,24.76,0,0,0-42.7,0L19.2,188.09a23.51,23.51,0,0,0,0,23.72A24.35,24.35,0,0,0,40.55,224h174.9a24.35,24.35,0,0,0,21.33-12.19A23.51,23.51,0,0,0,236.8,188.09ZM120,104a8,8,0,0,1,16,0v40a8,8,0,0,1-16,0Zm8,88a12,12,0,1,1,12-12A12,12,0,0,1,128,192Z"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 256 256"><path fill="currentColor" d="M232,128a8,8,0,0,1-8,8H184a8,8,0,0,1-7.16-4.42L146.06,70l-36.9,110.53a8,8,0,0,1-15.07.4L67.94,120H32a8,8,0,0,1,0-16H72a8,8,0,0,1,7.44,5l19.16,49.83,37.24-111.6a8,8,0,0,1,15.15.1L179.06,120H224A8,8,0,0,1,232,128Z"/></symbol>
+  <symbol id="i-paper-plane" viewBox="0 0 256 256"><path fill="currentColor" d="M227.32,28.68a16,16,0,0,0-15.66-4.08l-.15,0L19.57,82.84a16,16,0,0,0-2.42,29.84l85.62,40.55,40.55,85.62A15.86,15.86,0,0,0,157.74,240q.69,0,1.38-.06a15.88,15.88,0,0,0,14-11.51l58.2-191.94c0-.05,0-.1,0-.15A16,16,0,0,0,227.32,28.68ZM157.83,222.6l-.05.14,0-.07-40-84.47,48-48a8,8,0,0,0-11.31-11.32l-48,48L33.32,98.29l-.07,0,.14-.05L224,40Z"/></symbol>
+  <symbol id="i-user" viewBox="0 0 256 256"><path fill="currentColor" d="M230.92,212c-15.23-26.33-38.7-45.21-66.09-54.16a72,72,0,1,0-73.66,0C63.78,166.78,40.31,185.66,25.08,212a8,8,0,1,0,13.85,8c18.84-32.56,52.14-52,89.07-52s70.23,19.44,89.07,52a8,8,0,1,0,13.85-8ZM72,96a56,56,0,1,1,56,56A56.06,56.06,0,0,1,72,96Z"/></symbol>
+  <symbol id="i-caret-down" viewBox="0 0 256 256"><path fill="currentColor" d="M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 256 256"><path fill="currentColor" d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm45.66,85.66-56,56a8,8,0,0,1-11.32,0l-24-24a8,8,0,0,1,11.32-11.32L112,148.69l50.34-50.35a8,8,0,0,1,11.32,11.32Z"/></symbol>
+  <symbol id="i-play" viewBox="0 0 256 256"><path fill="currentColor" d="M240,128a15.74,15.74,0,0,1-7.6,13.51L88.32,229.65a16,16,0,0,1-16.2.3A15.86,15.86,0,0,1,64,216.13V39.87a15.86,15.86,0,0,1,8.12-13.82,16,16,0,0,1,16.2.3L232.4,114.49A15.74,15.74,0,0,1,240,128Z"/></symbol>
+  <symbol id="i-thumbs-up" viewBox="0 0 256 256"><path fill="currentColor" d="M234,80.12A24,24,0,0,0,216,72H160V56a40,40,0,0,0-40-40,8,8,0,0,0-7.16,4.42L75.06,96H32a16,16,0,0,0-16,16v88a16,16,0,0,0,16,16H204a24,24,0,0,0,23.82-21l12-96A24,24,0,0,0,234,80.12ZM32,112H72v88H32ZM223.94,97l-12,96a8,8,0,0,1-7.94,7H88V105.89l36.71-73.43A24,24,0,0,1,144,56V80a8,8,0,0,0,8,8h64a8,8,0,0,1,7.94,9Z"/></symbol>
+  <symbol id="i-thumbs-down" viewBox="0 0 256 256"><path fill="currentColor" d="M239.82,157l-12-96A24,24,0,0,0,204,40H32A16,16,0,0,0,16,56v88a16,16,0,0,0,16,16H75.06l37.78,75.58A8,8,0,0,0,120,240a40,40,0,0,0,40-40V184h56a24,24,0,0,0,23.82-27ZM72,144H32V56H72Zm150,21.29a7.88,7.88,0,0,1-6,2.71H152a8,8,0,0,0-8,8v24a24,24,0,0,1-19.29,23.54L88,150.11V56H204a8,8,0,0,1,7.94,7l12,96A7.87,7.87,0,0,1,222,165.29Z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 256 256"><path fill="currentColor" d="M216,32H88a8,8,0,0,0-8,8V80H40a8,8,0,0,0-8,8V216a8,8,0,0,0,8,8H168a8,8,0,0,0,8-8V176h40a8,8,0,0,0,8-8V40A8,8,0,0,0,216,32ZM160,208H48V96H160Zm48-48H176V88a8,8,0,0,0-8-8H96V48H208Z"/></symbol>
+  <symbol id="i-microphone" viewBox="0 0 256 256"><path fill="currentColor" d="M128,176a48.05,48.05,0,0,0,48-48V64a48,48,0,0,0-96,0v64A48.05,48.05,0,0,0,128,176ZM96,64a32,32,0,0,1,64,0v64a32,32,0,0,1-64,0Zm40,143.6V232a8,8,0,0,1-16,0V207.6A80.11,80.11,0,0,1,48,128a8,8,0,0,1,16,0,64,64,0,0,0,128,0,8,8,0,0,1,16,0A80.11,80.11,0,0,1,136,207.6Z"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 256 256"><path fill="currentColor" d="M209.66,122.34a8,8,0,0,1,0,11.32l-82.05,82a56,56,0,0,1-79.2-79.21L147.67,35.73a40,40,0,1,1,56.61,56.55L105,193.54a24,24,0,1,1-33.94-33.94l74.53-74a8,8,0,0,1,11.29,11.35l-74.53,74a8,8,0,0,0,11.31,11.31L192.94,81a24,24,0,1,0-33.94-33.95L59.32,147.32a40,40,0,1,0,56.57,56.56l82-82A8,8,0,0,1,209.66,122.34Z"/></symbol>
+</svg>
+
+<header class="mx-auto max-w-[1600px] px-6 pt-10 pb-4">
+  <h1 class="font-display text-2xl font-bold tracking-tight">LLM Chat Panel, design options</h1>
+  <p class="mt-2 max-w-[78ch] text-sm leading-relaxed text-muted">
+    Six directions for the coaching chat panel, rendered at the real tray width (360px) in the live
+    dark theme. Each shows the same grounded exchange (a knee-valgus question answered from the
+    knowledge graph) plus the composer, so you can judge tone and density with real data. Every
+    direction is built around the features this panel will likely grow: grounded citations that trace
+    a claim to its fault or KG node, suggested prompts, streaming, per-message feedback for the eval
+    loop, clickable video timecodes, an evidence disclosure, a faithfulness indicator, and a
+    voice-ready composer. Tell me a number to port into the React CoachTray.
+  </p>
+</header>
+
+<main class="mx-auto flex max-w-[1600px] flex-wrap items-start gap-x-8 gap-y-12 px-6 pb-24">
+
+  <!-- ============================================================= -->
+  <!-- 01 · BASELINE (current)                                        -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">01 · Baseline (current)</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Today's chat. Role-labelled bubbles, one input. Reference anchor. Explores: nothing new, shows where we start.</p>
+    </div>
+    <div class="flex h-[520px] flex-col overflow-hidden rounded-2xl border border-border-dark bg-background">
+      <div class="flex items-center justify-between border-b border-border-dark bg-surface-dark px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15"><svg class="h-3.5 w-3.5 text-primary"><use href="#i-pulse"/></svg></span>
+          <h3 class="text-sm font-semibold text-content">AI Coach</h3>
+        </div>
+        <span class="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">rule + GraphRAG</span>
+      </div>
+      <div class="flex-1 space-y-3 overflow-y-auto p-4">
+        <div class="flex justify-end">
+          <div class="max-w-[85%] rounded-xl bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content">
+            <span class="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-white/60">You</span>
+            Why do my knees cave in at the bottom?
+          </div>
+        </div>
+        <div class="flex justify-start">
+          <div class="max-w-[88%] rounded-xl border border-border-dark bg-surface px-3 py-2 text-sm leading-relaxed text-content">
+            <span class="mb-0.5 block text-[10px] font-medium uppercase tracking-wider text-muted">Coach</span>
+            On the way down your knees track inside your ankles, which usually points to weak hip abductors and raises knee strain. Push your knees out over your toes as you descend.
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-border-dark bg-surface-dark p-3">
+        <div class="relative">
+          <input class="w-full rounded-md border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-content placeholder-faint" placeholder="Ask a follow-up question" />
+          <button class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-primary"><svg class="h-4 w-4"><use href="#i-paper-plane"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 02 · GROUNDED CITATIONS                                        -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">02 · Grounded Citations</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">The faithfulness thesis made visible. Explores: inline citations, a "Grounded in" source strip (click to seek video or open a KG node), suggested prompts.</p>
+    </div>
+    <div class="flex h-[560px] flex-col overflow-hidden rounded-2xl border border-border-dark bg-background">
+      <div class="flex items-center justify-between border-b border-border-dark bg-surface-dark px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15"><svg class="h-3.5 w-3.5 text-primary"><use href="#i-pulse"/></svg></span>
+          <h3 class="text-sm font-semibold text-content">AI Coach</h3>
+        </div>
+        <span class="inline-flex items-center gap-1 rounded-full bg-secondary/12 px-2 py-0.5 text-[10px] font-medium text-secondary"><svg class="h-3 w-3"><use href="#i-check-circle"/></svg>grounded</span>
+      </div>
+      <div class="flex-1 space-y-3 overflow-y-auto p-4">
+        <div class="flex justify-end">
+          <div class="max-w-[85%] rounded-lg bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content">Why do my knees cave in at the bottom?</div>
+        </div>
+        <div class="rounded-lg border border-border-dark bg-surface p-3">
+          <p class="text-sm leading-relaxed text-content">
+            Your knees pass inside your ankles during the descent (<span class="rounded bg-content/10 px-1 font-mono text-[12px] text-content">knee/ankle width 0.78</span>, under the 0.82 limit). That usually traces to
+            <span class="font-medium text-primary">weak hip abductors</span>, which raises
+            <span class="font-medium text-danger">ACL strain</span> risk. Drive your knees out over your toes as you sink.
+          </p>
+          <div class="mt-3 border-t border-border-dark/70 pt-2.5">
+            <p class="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-faint">Grounded in</p>
+            <div class="flex flex-wrap gap-1.5">
+              <button class="inline-flex items-center gap-1 rounded-md bg-primary/15 px-2 py-1 text-[11px] font-medium text-content"><svg class="h-3 w-3 text-primary"><use href="#i-play"/></svg>0:01 Knees Inward</button>
+              <button class="inline-flex items-center gap-1 rounded-md bg-content/8 px-2 py-1 text-[11px] font-medium text-content"><svg class="h-2.5 w-2.5 text-primary"><use href="#i-target"/></svg>Hip abductors</button>
+              <button class="inline-flex items-center gap-1 rounded-md bg-content/8 px-2 py-1 text-[11px] font-medium text-content"><svg class="h-2.5 w-2.5 text-danger"><use href="#i-warning"/></svg>ACL strain</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-border-dark bg-surface-dark p-3">
+        <div class="mb-2 flex flex-wrap gap-1.5">
+          <button class="rounded-md border border-border-dark bg-background px-2.5 py-1 text-[11px] text-muted">Why does depth matter?</button>
+          <button class="rounded-md border border-border-dark bg-background px-2.5 py-1 text-[11px] text-muted">Show me a drill</button>
+        </div>
+        <div class="relative">
+          <input class="w-full rounded-md border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-content placeholder-faint" placeholder="Ask a follow-up question" />
+          <button class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-primary"><svg class="h-4 w-4"><use href="#i-paper-plane"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 03 · COACHING CONSOLE                                          -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">03 · Coaching Console</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Answers become next actions. Explores: suggested questions, an embedded drill card, per-message copy / retry / helpful controls that feed the eval loop.</p>
+    </div>
+    <div class="flex h-[600px] flex-col overflow-hidden rounded-2xl border border-border-dark bg-background">
+      <div class="flex items-center justify-between border-b border-border-dark bg-surface-dark px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15"><svg class="h-3.5 w-3.5 text-primary"><use href="#i-pulse"/></svg></span>
+          <h3 class="text-sm font-semibold text-content">AI Coach</h3>
+        </div>
+        <span class="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">rule + GraphRAG</span>
+      </div>
+      <div class="flex-1 space-y-3 overflow-y-auto p-4">
+        <div class="flex justify-end">
+          <div class="max-w-[85%] rounded-xl bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content">Why do my knees cave in at the bottom?</div>
+        </div>
+        <div class="rounded-xl border border-border-dark bg-surface p-3">
+          <p class="text-sm leading-relaxed text-content">Weak hip abductors let your knees drift inside your ankles under load. Strengthen them and cue the knees out.</p>
+          <div class="mt-3 flex items-start gap-2.5 rounded-xl bg-secondary/10 p-2.5">
+            <span class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-secondary/20"><svg class="h-3.5 w-3.5 text-secondary"><use href="#i-target"/></svg></span>
+            <div class="min-w-0">
+              <p class="text-[10px] font-semibold uppercase tracking-wide text-secondary">Drill</p>
+              <p class="text-sm font-medium text-content">Banded goblet squat</p>
+              <p class="text-xs leading-relaxed text-muted">3 sets of 10, band above the knees, push out the whole rep.</p>
+            </div>
+          </div>
+          <div class="mt-2.5 flex items-center gap-1 border-t border-border-dark/70 pt-2 text-muted">
+            <button class="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-content/10"><svg class="h-4 w-4"><use href="#i-copy"/></svg></button>
+            <button class="flex h-7 items-center gap-1 rounded-lg px-2 text-xs hover:bg-content/10">Retry</button>
+            <span class="mx-0.5 h-4 w-px bg-border-dark"></span>
+            <button class="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-content/10"><svg class="h-4 w-4"><use href="#i-thumbs-up"/></svg></button>
+            <button class="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-content/10"><svg class="h-4 w-4"><use href="#i-thumbs-down"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-border-dark bg-surface-dark p-3">
+        <div class="mb-2 flex flex-wrap gap-1.5">
+          <button class="inline-flex items-center gap-1 rounded-xl border border-border-dark bg-background px-2.5 py-1 text-[11px] text-muted"><svg class="h-2.5 w-2.5 text-primary"><use href="#i-arrow-right"/></svg>Build a week of drills</button>
+          <button class="rounded-xl border border-border-dark bg-background px-2.5 py-1 text-[11px] text-muted">Is this dangerous?</button>
+        </div>
+        <div class="relative">
+          <input class="w-full rounded-xl border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-content placeholder-faint" placeholder="Ask a follow-up question" />
+          <button class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-primary"><svg class="h-4 w-4"><use href="#i-paper-plane"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 04 · TIMELINE ANCHORED                                         -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">04 · Timeline Anchored</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Ties the conversation to the rep. Explores: each answer opens with the exact moments it cites, every timecode seeks the video, inline @0:01 mentions stay in sync with the player.</p>
+    </div>
+    <div class="flex h-[560px] flex-col overflow-hidden rounded-2xl border border-border-dark bg-background">
+      <div class="flex items-center justify-between border-b border-border-dark bg-surface-dark px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15"><svg class="h-3.5 w-3.5 text-primary"><use href="#i-pulse"/></svg></span>
+          <h3 class="text-sm font-semibold text-content">AI Coach</h3>
+        </div>
+        <span class="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">rule + GraphRAG</span>
+      </div>
+      <div class="flex-1 space-y-3 overflow-y-auto p-4">
+        <div class="flex justify-end">
+          <div class="max-w-[85%] rounded-lg bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content">Walk me through what went wrong this rep.</div>
+        </div>
+        <div class="rounded-lg border border-border-dark bg-surface p-3">
+          <div class="mb-2.5 flex flex-wrap gap-1.5">
+            <button class="inline-flex items-center gap-1.5 rounded-md bg-danger/12 px-2 py-1 text-[11px] font-medium text-content"><svg class="h-3 w-3 text-danger"><use href="#i-play"/></svg><span class="font-mono">0:01</span> Knees inward</button>
+            <button class="inline-flex items-center gap-1.5 rounded-md bg-amber-500/12 px-2 py-1 text-[11px] font-medium text-content"><svg class="h-3 w-3 text-amber-400"><use href="#i-play"/></svg><span class="font-mono">0:04</span> Shallow depth</button>
+          </div>
+          <p class="text-sm leading-relaxed text-content">
+            At <button class="rounded bg-primary/15 px-1 font-mono text-[12px] text-content">@0:01</button> your knees drove inward as you broke parallel. You recovered, but at
+            <button class="rounded bg-primary/15 px-1 font-mono text-[12px] text-content">@0:04</button> the hips never sank below the knee, so the squat stayed shallow. Fix the knees first, it often restores the depth on its own.
+          </p>
+        </div>
+      </div>
+      <div class="border-t border-border-dark bg-surface-dark p-3">
+        <div class="relative">
+          <input class="w-full rounded-md border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-content placeholder-faint" placeholder="Ask about a moment" />
+          <button class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-primary"><svg class="h-4 w-4"><use href="#i-paper-plane"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 05 · EVIDENCE DRAWER                                           -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">05 · Evidence Drawer</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Calm answer, evidence one tap away. Explores: a "Show evidence" disclosure that expands measured numbers plus KG cause / risk / fix, and a faithfulness line counting cited claims.</p>
+    </div>
+    <div class="flex h-[600px] flex-col overflow-hidden rounded-2xl border border-border-dark bg-background">
+      <div class="flex items-center justify-between border-b border-border-dark bg-surface-dark px-4 py-3">
+        <div class="flex items-center gap-2">
+          <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15"><svg class="h-3.5 w-3.5 text-primary"><use href="#i-pulse"/></svg></span>
+          <h3 class="text-sm font-semibold text-content">AI Coach</h3>
+        </div>
+        <span class="rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 font-mono text-[10px] text-primary">rule + GraphRAG</span>
+      </div>
+      <div class="flex-1 space-y-3 overflow-y-auto p-4">
+        <div class="flex justify-end">
+          <div class="max-w-[85%] rounded-xl bg-primary px-3 py-2 text-sm leading-relaxed text-primary-content">Why do my knees cave in at the bottom?</div>
+        </div>
+        <div class="rounded-xl border border-border-dark bg-surface p-3">
+          <p class="text-sm leading-relaxed text-content">Your knees drift inside your ankles under load, most likely from weak hip abductors. Cue the knees out over the toes and train the abductors directly.</p>
+          <div class="mt-3 rounded-lg bg-content/[0.04]">
+            <div class="flex items-center justify-between px-3 py-2">
+              <span class="inline-flex items-center gap-1.5 text-[11px] font-medium text-secondary"><svg class="h-3.5 w-3.5"><use href="#i-check-circle"/></svg>Grounded, 3 of 3 claims cited</span>
+              <button class="flex items-center gap-1 text-[11px] text-muted">Hide evidence<svg class="h-3.5 w-3.5 rotate-180"><use href="#i-caret-down"/></svg></button>
+            </div>
+            <div class="space-y-2 border-t border-border-dark/60 px-3 py-2.5 text-xs leading-relaxed">
+              <div class="flex justify-between gap-2"><span class="text-muted">Measured</span><span class="font-mono text-content">knee/ankle width 0.78 (&lt; 0.82)</span></div>
+              <div class="flex justify-between gap-2"><span class="text-muted">Cause</span><span class="font-medium text-primary">Weak hip abductors</span></div>
+              <div class="flex justify-between gap-2"><span class="text-muted">Risk</span><span class="font-medium text-danger">ACL strain</span></div>
+              <div class="flex justify-between gap-2"><span class="text-muted">Source</span><span class="text-content">Squat KG, "knee valgus"</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-border-dark bg-surface-dark p-3">
+        <div class="relative">
+          <input class="w-full rounded-xl border border-border-dark bg-background py-2.5 pl-9 pr-10 text-sm text-content placeholder-faint" placeholder="Ask a follow-up question" />
+          <button class="absolute left-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-faint"><svg class="h-4 w-4"><use href="#i-paperclip"/></svg></button>
+          <button class="absolute right-1.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-lg text-primary"><svg class="h-4 w-4"><use href="#i-paper-plane"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================= -->
+  <!-- 06 · FOCUSED STREAM                                            -->
+  <!-- ============================================================= -->
+  <section class="w-[360px]">
+    <div class="mb-3">
+      <span class="rounded-md bg-content/10 px-2 py-0.5 font-mono text-[11px] font-semibold text-muted">06 · Focused Stream</span>
+      <p class="mt-2 text-xs leading-relaxed text-faint">Airy, one thought at a time. Explores: streaming answer with a live caret, a "grounded" tag, follow-up suggestions after the reply, and a voice-and-attach composer for multimodal input.</p>
+    </div>
+    <div class="flex h-[600px] flex-col overflow-hidden rounded-2xl border border-border-dark bg-background">
+      <div class="flex items-center gap-2 border-b border-border-dark bg-surface-dark px-4 py-3">
+        <span class="flex h-6 w-6 items-center justify-center rounded-full bg-primary/15"><svg class="h-3.5 w-3.5 text-primary"><use href="#i-pulse"/></svg></span>
+        <h3 class="text-sm font-semibold text-content">AI Coach</h3>
+      </div>
+      <div class="flex-1 overflow-y-auto px-5 py-5">
+        <p class="text-right text-sm leading-relaxed text-muted">Why do my knees cave in at the bottom?</p>
+        <div class="mt-5">
+          <div class="mb-2 flex items-center gap-2">
+            <span class="text-[11px] font-semibold uppercase tracking-wide text-primary">Coach</span>
+            <span class="inline-flex items-center gap-1 text-[10px] font-medium text-secondary"><svg class="h-3 w-3"><use href="#i-check-circle"/></svg>grounded</span>
+          </div>
+          <p class="text-[15px] leading-relaxed text-content">
+            Weak hip abductors let your knees fall inside your ankles as you descend, which loads the joint sideways. Push the knees out over the toes and train the abductors<span class="caret ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-primary"></span>
+          </p>
+          <div class="mt-5 flex flex-col gap-2">
+            <button class="flex items-center justify-between rounded-2xl border border-border-dark bg-surface px-3.5 py-2.5 text-left text-[13px] text-content"><span>What about my depth?</span><svg class="h-4 w-4 text-faint"><use href="#i-arrow-right"/></svg></button>
+            <button class="flex items-center justify-between rounded-2xl border border-border-dark bg-surface px-3.5 py-2.5 text-left text-[13px] text-content"><span>Give me a drill for this</span><svg class="h-4 w-4 text-faint"><use href="#i-arrow-right"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="border-t border-border-dark bg-surface-dark p-3">
+        <div class="flex items-center gap-2 rounded-2xl border border-border-dark bg-background px-2 py-1.5">
+          <button class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-faint"><svg class="h-4 w-4"><use href="#i-paperclip"/></svg></button>
+          <input class="min-w-0 flex-1 bg-transparent text-sm text-content placeholder-faint focus:outline-none" placeholder="Ask or hold to speak" />
+          <button class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-faint"><svg class="h-4 w-4"><use href="#i-microphone"/></svg></button>
+          <button class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-content"><svg class="h-4 w-4"><use href="#i-paper-plane"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+</body>
+</html>
