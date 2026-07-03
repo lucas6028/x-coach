@@ -125,4 +125,32 @@ describe("CoachTray — follow-up chat", () => {
     expect(disabled).toBeDisabled();
     expect(h.chat).not.toHaveBeenCalled();
   });
+
+  it("does nothing when Enter is pressed with an empty composer", async () => {
+    renderTray();
+    const box = await screen.findByPlaceholderText(/Ask a follow-up/i);
+    box.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(h.chat).not.toHaveBeenCalled();
+  });
+
+  it("scrolls the thread into view once a turn is sent, when scrollTo is available", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollTo,
+    });
+
+    h.chat.mockResolvedValue({ reply: "Ok.", model: "m" });
+    renderTray();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "hi");
+    await userEvent.click(screen.getByLabelText(/Send message/i));
+    await screen.findByText("Ok.");
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number) });
+
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+  });
 });
