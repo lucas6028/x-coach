@@ -205,19 +205,12 @@ export default function CoachTray({
                   d={d}
                   retrieval={byFault.get(d.fault_id)}
                   active={currentTime >= d.start_time && currentTime <= d.end_time}
-                  last={i === detections.length - 1}
                   onSeek={onSeek}
                 />
               </motion.div>
             ))}
-            {/* Knowledge graph — the last item in the fault-card stack, indented by a rail-width
-                spacer so its box is the SAME width as the fault cards and sits flush with them. */}
-            <div className="flex gap-3">
-              <span className="w-2.5 shrink-0" aria-hidden="true" />
-              <div className="min-w-0 flex-1">
-                <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
-              </div>
-            </div>
+            {/* Knowledge graph — the last item in the fault-card stack, same full width. */}
+            <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
           </div>
         )}
 

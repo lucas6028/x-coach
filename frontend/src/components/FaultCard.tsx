@@ -23,21 +23,22 @@ const SEV_CHIP: Record<SevLevel, string> = {
   mild: "bg-content/5 text-muted",
 };
 
-// One detected fault rendered as the coach's grounded analysis card: timecode + fault + severity,
-// the measured evidence, the KG-retrieved likely cause / injury risk, and the corrective cue
-// (highest visual weight). Clicking seeks the video; `active` marks the fault the playhead is in.
-// Lives on a temporal rail so a sequence of faults reads as one connected thought.
+type Rung = { kind: "cause" | "risk" | "fix"; label: string; text: string };
+
+// One detected fault rendered as the coach's grounded analysis card, read as a causal ladder:
+// timecode + fault + severity up top, the measured evidence, then a connected chain of the
+// KG-retrieved likely cause, the injury risk it leads to, and the corrective cue (the terminal
+// rung, highest visual weight). Clicking seeks the video; `active` marks the fault the playhead
+// is currently inside (carried by the primary ring).
 export default function FaultCard({
   d,
   retrieval,
   active,
-  last,
   onSeek,
 }: {
   d: Detection;
   retrieval: Retrieval | undefined;
   active: boolean;
-  last: boolean;
   onSeek: (t: number) => void;
 }) {
   const { t } = useI18n();
@@ -48,95 +49,89 @@ export default function FaultCard({
   const level = sevLevel(d.severity);
   const evidence = keyEvidence(d);
 
+  // Cause leads to risk leads to fix. Only the rungs the KG actually supplied are shown; the fix
+  // is always the terminal rung so the chain resolves on the action.
+  const rungs: Rung[] = [];
+  if (causes.length) rungs.push({ kind: "cause", label: t("feedback.cause"), text: causes.join(", ") });
+  if (risks.length) rungs.push({ kind: "risk", label: t("feedback.risk"), text: risks.join(", ") });
+  if (corrections.length) rungs.push({ kind: "fix", label: t("feedback.cue"), text: corrections.join(" · ") });
+
   return (
-    <div className="flex gap-3">
-      {/* temporal rail: faults are ordered by when they happen in the rep */}
-      <div className="flex flex-col items-center pt-1.5">
-        <span className="relative flex h-2.5 w-2.5">
-          {active && (
-            <span className={`absolute inline-flex h-full w-full rounded-full ${SEV_DOT[level]} animate-ping opacity-60`} />
-          )}
-          <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${SEV_DOT[level]}`} />
+    <button
+      onClick={() => onSeek(d.start_time)}
+      className={`block w-full rounded-xl border p-4 text-left transition-colors ${
+        active
+          ? "border-primary/40 bg-surface ring-1 ring-primary/25"
+          : "border-border-dark bg-surface hover:bg-content/[0.03]"
+      }`}
+    >
+      {/* header: time + phase, fault, severity */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="font-mono text-[11px] text-faint">
+            {fmtTime(d.start_time)} · {phaseLabel(t, d.phase)}
+          </span>
+          <p className="font-display font-semibold leading-tight text-content">
+            {faultLabel(t, d.fault_name)}
+          </p>
+        </div>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${SEV_CHIP[level]}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${SEV_DOT[level]}`} />
+          {severityText(t, d.severity)}
         </span>
-        {!last && <span className="mt-1 w-px flex-1 bg-border-dark" />}
       </div>
 
-      <button
-        onClick={() => onSeek(d.start_time)}
-        className={`mb-1 w-full overflow-hidden rounded-xl border text-left transition-colors ${
-          active
-            ? "border-primary/50 bg-primary/[0.04] ring-1 ring-primary/30"
-            : "border-border-dark bg-surface hover:bg-content/[0.03]"
-        }`}
-      >
-        {/* header: time, fault, severity */}
-        <div className="flex items-start justify-between gap-3 px-4 pt-3.5">
-          <div className="min-w-0">
-            <span className="font-mono text-[11px] text-faint">{fmtTime(d.start_time)}</span>
-            <p className="font-display font-semibold leading-tight text-content">
-              {faultLabel(t, d.fault_name)}
-            </p>
-            <p className="mt-0.5 text-xs text-muted">
-              {t("feedback.phaseTag", { phase: phaseLabel(t, d.phase) })}
-            </p>
-          </div>
-          <span
-            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ${SEV_CHIP[level]}`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${SEV_DOT[level]}`} />
-            {severityText(t, d.severity)}
-          </span>
-        </div>
+      {evidence && (
+        <span className="mt-2 inline-block rounded-md bg-content/5 px-2 py-1 font-mono text-[11px] text-muted">
+          {evidence}
+        </span>
+      )}
 
-        {evidence && (
-          <div className="mt-2.5 px-4">
-            <span className="inline-block rounded-md bg-content/5 px-2 py-1 font-mono text-[11px] text-muted">
-              {evidence}
-            </span>
-          </div>
-        )}
+      {/* the causal ladder: cause -> risk -> fix, connected as one chain */}
+      {rungs.length > 0 && (
+        <ol className="mt-3.5">
+          {rungs.map((r, i) => {
+            const notLast = i < rungs.length - 1;
+            if (r.kind === "fix") {
+              return (
+                <li key={r.kind} className="relative flex gap-3">
+                  <span className="relative mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-secondary/15">
+                    <ArrowRight size={10} weight="bold" className="text-secondary" />
+                  </span>
+                  <span className="leading-snug">
+                    <span className="block text-[10px] font-semibold uppercase tracking-wide text-secondary">
+                      {r.label}
+                    </span>
+                    <span className="text-sm font-semibold text-content">{r.text}</span>
+                  </span>
+                </li>
+              );
+            }
+            const dot = r.kind === "cause" ? "bg-primary/70" : "bg-danger/80";
+            const textCls = r.kind === "cause" ? "text-content" : "font-medium text-danger";
+            return (
+              <li key={r.kind} className={`relative flex gap-3 ${notLast ? "pb-3" : ""}`}>
+                {notLast && <span className="absolute left-[3px] top-3 h-full w-px bg-border-dark" />}
+                <span className={`relative mt-1 h-2 w-2 shrink-0 rounded-full ${dot}`} />
+                <span className="text-xs leading-relaxed">
+                  <span className="block text-[10px] font-semibold uppercase tracking-wide text-faint">
+                    {r.label}
+                  </span>
+                  <span className={textCls}>{r.text}</span>
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
 
-        {/* reasoning: cause and risk retrieved from the knowledge graph */}
-        {(causes.length > 0 || risks.length > 0) && (
-          <dl className="mt-3 space-y-2 border-t border-border-dark/70 px-4 pt-3">
-            {causes.length > 0 && (
-              <div className="flex gap-2 text-xs leading-relaxed">
-                <dt className="shrink-0 text-muted">{t("feedback.likelyCause")}</dt>
-                <dd className="font-medium text-primary">{causes.join(", ")}</dd>
-              </div>
-            )}
-            {risks.length > 0 && (
-              <div className="flex gap-2 text-xs leading-relaxed">
-                <dt className="shrink-0 text-muted">{t("feedback.injuryRisk")}</dt>
-                <dd className="font-medium text-danger">{risks.join(", ")}</dd>
-              </div>
-            )}
-          </dl>
-        )}
-
-        {/* the actionable cue carries the most visual weight */}
-        {corrections.length > 0 && (
-          <div className="mx-4 mb-4 mt-3 flex items-start gap-2.5 rounded-lg bg-secondary/10 p-3">
-            <ArrowRight size={16} weight="bold" className="mt-px shrink-0 text-secondary" />
-            <div className="min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-secondary">
-                {t("feedback.cue")}
-              </span>
-              <p className="text-sm font-medium text-content">{corrections.join(" · ")}</p>
-            </div>
-          </div>
-        )}
-
-        {snippet && !corrections.length && (
-          <p className="mx-4 mb-4 mt-3 border-l-2 border-border-dark pl-3 text-[11px] italic leading-relaxed text-muted">
-            {snippet}
-          </p>
-        )}
-
-        {!causes.length && !risks.length && !corrections.length && !snippet && (
-          <div className="px-4 pb-4 pt-2" />
-        )}
-      </button>
-    </div>
+      {snippet && !corrections.length && (
+        <p className="mt-3 border-l-2 border-border-dark pl-3 text-[11px] italic leading-relaxed text-muted">
+          {snippet}
+        </p>
+      )}
+    </button>
   );
 }
