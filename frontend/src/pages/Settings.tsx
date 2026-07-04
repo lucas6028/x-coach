@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CheckCircle,
   ClockCounterClockwise,
+  Sparkle,
   Trash,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -10,6 +11,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
+import { CHAT_MODELS, getStoredModel, setStoredModel } from "../lib/model";
 import { avatarUrl, displayName, initial } from "../lib/profile";
 
 type ClearState =
@@ -26,6 +28,12 @@ export default function Settings() {
   const { user } = useAuth();
   const [imgError, setImgError] = useState(false);
   const [clear, setClear] = useState<ClearState>({ kind: "idle" });
+  const [model, setModel] = useState(getStoredModel);
+
+  const chooseModel = (id: string) => {
+    setStoredModel(id);
+    setModel(id);
+  };
 
   if (!user) return null;
 
@@ -101,6 +109,49 @@ export default function Settings() {
               </div>
             </dl>
           </div>
+        </section>
+
+        {/* Coach model — the LLM that answers follow-up chat, chosen per user (localStorage). */}
+        <section className="mt-10">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-faint">
+            {t("settings.model")}
+          </h2>
+          <p className="mt-1.5 text-sm text-muted">{t("settings.modelDesc")}</p>
+          <fieldset className="mt-3 divide-y divide-border-dark overflow-hidden rounded-2xl border border-border-dark bg-surface-dark">
+            <legend className="sr-only">{t("settings.model")}</legend>
+            {CHAT_MODELS.map((m) => {
+              const selected = m.id === model;
+              return (
+                <label
+                  key={m.id}
+                  className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-content/[0.03]"
+                >
+                  <input
+                    type="radio"
+                    name="coach-model"
+                    value={m.id}
+                    checked={selected}
+                    onChange={() => chooseModel(m.id)}
+                    className="sr-only"
+                  />
+                  <span
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                      selected ? "bg-primary/15 text-primary" : "bg-content/5 text-faint"
+                    }`}
+                  >
+                    <Sparkle size={18} weight={selected ? "fill" : "regular"} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate font-medium text-content">{m.label}</span>
+                    <span className="block truncate font-mono text-xs text-faint">{m.id}</span>
+                  </span>
+                  {selected && (
+                    <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" />
+                  )}
+                </label>
+              );
+            })}
+          </fieldset>
         </section>
 
         {/* Danger zone */}

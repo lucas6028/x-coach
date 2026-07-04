@@ -5,6 +5,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { api, ChatError, type Analysis, type ChatMessage } from "../api";
 import { buildChatContext } from "../lib/grounding";
 import { retrievalByFault } from "../lib/retrieval";
+import { getStoredModel } from "../lib/model";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import FaultCard from "./FaultCard";
@@ -115,18 +116,23 @@ export default function CoachTray({
     let acc = "";
     let inbandError = "";
     try {
-      await api.chatStream(next, buildChatContext(analysis), {
-        onDelta: (tkn) => {
-          acc += tkn;
-          setStreaming(acc);
+      await api.chatStream(
+        next,
+        buildChatContext(analysis),
+        {
+          onDelta: (tkn) => {
+            acc += tkn;
+            setStreaming(acc);
+          },
+          onDone: () => undefined,
+          // An in-band error (OpenRouter connect/mid-stream/empty) isn't thrown — capture it and
+          // rethrow below so success and failure share one rollback path.
+          onError: (detail) => {
+            inbandError = detail;
+          },
         },
-        onDone: () => undefined,
-        // An in-band error (OpenRouter connect/mid-stream/empty) isn't thrown — capture it and
-        // rethrow below so success and failure share one rollback path.
-        onError: (detail) => {
-          inbandError = detail;
-        },
-      });
+        getStoredModel(), // the user's Settings choice; server validates against its allowlist
+      );
       if (inbandError) throw new ChatError(inbandError, 502);
       const thread: ChatMessage[] = [...next, { role: "assistant", content: acc }];
       setMessages(thread);

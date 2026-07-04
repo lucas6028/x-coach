@@ -224,6 +224,26 @@ describe("api.chatStream", () => {
     expect(JSON.parse(init.body as string)).toEqual({ messages, context });
   });
 
+  it("includes the chosen model in the request body when provided", async () => {
+    const spy = mockStream(['event: done\ndata: {"model":"minimax/minimax-m3"}\n\n']);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers, "minimax/minimax-m3");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      messages,
+      context,
+      model: "minimax/minimax-m3",
+    });
+  });
+
+  it("omits model from the body when none is chosen (server default)", async () => {
+    const spy = mockStream(['event: done\ndata: {"model":"x"}\n\n']);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ messages, context });
+  });
+
   it("routes an in-band error frame to onError without throwing", async () => {
     mockStream(['event: error\ndata: {"detail":"OpenRouter request failed: reset"}\n\n']);
     const c = collectHandlers();
