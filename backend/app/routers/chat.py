@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from backend.app.auth import CurrentUser, get_current_user
@@ -62,8 +62,14 @@ class ChatRequest(BaseModel):
 async def chat(
     body: ChatRequest,
     user: CurrentUser = Depends(get_current_user),
-) -> dict:
-    """Return a grounded coaching reply. 503 if the LLM isn't configured, 502 if it errors."""
+) -> StreamingResponse:
+    """Stream a grounded coaching reply as Server-Sent Events (``delta``/``done``/``error``).
+
+    Pre-flight failures return a real HTTP status *before* the stream opens: 401 (no session, via
+    the dependency), 503 (LLM unconfigured), 422 (last turn not the user's). Once the 200 stream
+    starts, any OpenRouter failure or empty completion is an in-band ``error`` event instead — the
+    status is already committed and cannot change.
+    """
     if not get_settings().chat_configured:
         raise HTTPException(
             status_code=503,
@@ -76,8 +82,11 @@ async def chat(
     messages = [m.model_dump() for m in body.messages]
     context = body.context.model_dump()
 
-    # The OpenRouter call is blocking (httpx sync) — run it off the event loop.
-    try:
-        return await run_in_threadpool(chat_service.answer, messages=messages, context=context)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    # The sync generator's blocking httpx calls are iterated off the event loop by StreamingResponse
+    # (Starlette runs a non-async iterator in a threadpool). Disable proxy/browser buffering so
+    # tokens flush as they arrive.
+    return StreamingResponse(
+        chat_service.answer_stream(messages=messages, context=context),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
