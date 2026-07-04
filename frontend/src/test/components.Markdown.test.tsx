@@ -24,6 +24,16 @@ describe("Markdown", () => {
     expect(container.textContent).toContain("click me");
   });
 
+  it("renders italics, ordered lists, and headings (collapsed to a quiet subhead)", () => {
+    const { container } = render(
+      <Markdown>{"# H1\n\n## H2\n\n### H3\n\n_stay tall_\n\n1. first\n2. second"}</Markdown>
+    );
+    expect(container.querySelector("em")?.textContent).toBe("stay tall");
+    expect(container.querySelectorAll("ol > li")).toHaveLength(2);
+    // Every heading level maps to the same quiet <h3> subhead.
+    expect(container.querySelectorAll("h3")).toHaveLength(3);
+  });
+
   it("renders partial/incomplete markdown mid-stream without throwing", () => {
     // A half-streamed answer with an unterminated **bold** must not crash the render.
     expect(() => render(<Markdown>{"Drive your **kne"}</Markdown>)).not.toThrow();
