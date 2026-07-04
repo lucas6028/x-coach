@@ -11,14 +11,14 @@ import type { Analysis } from "../api";
 // `matches: true` to actually take effect.
 const h = vi.hoisted(() => ({
   auth: { configured: true, user: { id: "u1" } as { id: string } | null },
-  chat: vi.fn(),
+  chatStream: vi.fn(),
   health: vi.fn(),
 }));
 
 vi.mock("../lib/auth", () => ({ useAuth: () => h.auth }));
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { ...actual.api, chat: h.chat, health: h.health } };
+  return { ...actual, api: { ...actual.api, chatStream: h.chatStream, health: h.health } };
 });
 
 import CoachTray from "../components/CoachTray";
@@ -46,7 +46,7 @@ function renderTray() {
 describe("CoachTray — prefers-reduced-motion", () => {
   beforeEach(() => {
     h.auth = { configured: true, user: { id: "u1" } };
-    h.chat.mockReset();
+    h.chatStream.mockReset();
     h.health.mockReset();
     h.health.mockResolvedValue({ status: "ok", chat_configured: true });
 
@@ -63,7 +63,16 @@ describe("CoachTray — prefers-reduced-motion", () => {
   });
 
   it("skips the entrance animation for fault cards and chat turns", async () => {
-    h.chat.mockResolvedValue({ reply: "Keep your chest up.", model: "m" });
+    h.chatStream.mockImplementation(
+      async (
+        _m: unknown,
+        _c: unknown,
+        handlers: { onDelta: (t: string) => void; onDone: (m: string) => void }
+      ) => {
+        handlers.onDelta("Keep your chest up.");
+        handlers.onDone("m");
+      }
+    );
     renderTray();
 
     expect(screen.getByText("Knee Valgus")).toBeInTheDocument();

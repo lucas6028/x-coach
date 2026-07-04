@@ -147,9 +147,35 @@ export interface ChatContext {
   faults: ChatFaultContext[];
 }
 
-export interface ChatResponse {
-  reply: string;
-  model: string;
+// Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
+// failure (OpenRouter connect/mid-stream/empty) — the stream already returned 200, so it is not a
+// thrown ChatError. A pre-flight failure (401/422/503) is thrown as a ChatError before any of these
+// fire, so the two failure modes stay distinguishable to the caller.
+export interface ChatStreamHandlers {
+  onDelta: (text: string) => void;
+  onDone: (model: string) => void;
+  onError: (detail: string) => void;
+}
+
+// Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
+// event line, or an unparseable data payload, is ignored (keep-alives / partial writes).
+function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
+  let event = "";
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (!event) return;
+  let data: { text?: string; model?: string; detail?: string };
+  try {
+    data = JSON.parse(dataLines.join("\n"));
+  } catch {
+    return;
+  }
+  if (event === "delta") handlers.onDelta(data.text ?? "");
+  else if (event === "done") handlers.onDone(data.model ?? "");
+  else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
 }
 
 // Carries the HTTP status so the UI can tell an expired session (401) apart from an LLM outage
@@ -225,23 +251,47 @@ export const api = {
     return (await res.json()) as { deleted: number };
   },
 
-  // Grounded follow-up chat about an analysis (requires a signed-in session; 401 otherwise).
-  // `messages` is the conversation so far, oldest first, with the new user turn last; `context`
-  // is the compact grounding blob from buildChatContext(analysis).
-  async chat(messages: ChatMessage[], context: ChatContext): Promise<ChatResponse> {
+  // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
+  // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user
+  // turn last; `context` is the compact grounding blob from buildChatContext(analysis). Deltas,
+  // completion, and in-band errors are delivered via `handlers`; a pre-flight failure (before the
+  // stream opens) throws a ChatError carrying the HTTP status so the caller can tell an expired
+  // session (401) from an LLM outage. `signal` cancels an in-flight stream.
+  async chatStream(
+    messages: ChatMessage[],
+    context: ChatContext,
+    handlers: ChatStreamHandlers,
+    signal?: AbortSignal
+  ): Promise<void> {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
       body: JSON.stringify({ messages, context }),
+      signal,
     });
-    if (!res.ok) {
+    if (!res.ok || !res.body) {
       const detail = await res.json().catch(() => ({}));
       throw new ChatError(
         (detail as { detail?: string }).detail || `Chat failed (${res.status})`,
         res.status
       );
     }
-    return (await res.json()) as ChatResponse;
+
+    // Read the byte stream, splitting on the blank-line frame boundary. A frame can straddle two
+    // chunks, so buffer until a full "\n\n"-terminated frame is available before dispatching.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        dispatchSSE(buffer.slice(0, sep), handlers);
+        buffer = buffer.slice(sep + 2);
+      }
+    }
   },
 
   async analyzeUpload(file: File): Promise<Analysis> {

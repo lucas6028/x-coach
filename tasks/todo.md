@@ -19,7 +19,7 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
     covered; `_build_system_prompt` groundedness tests still pass; `backend/app` coverage ≥ 95%.
   - Files: `backend/app/services/chat.py`, `backend/app/routers/chat.py`, `tests/test_chat_endpoint.py`.
 
-- [ ] **A2 — Frontend: consume the stream**
+- [x] **A2 — Frontend: consume the stream** ✅ api + CoachTray stream tests green (32); `yarn build` passes.
   - Acceptance: `api.chatStream(messages, context, {onDelta,onDone,onError,signal})` throws
     `ChatError(status)` on pre-flight non-200 and routes in-band `error` to `onError`; `CoachTray`
     accumulates deltas into one assistant turn, finalizes on `done`, rolls back the optimistic user
