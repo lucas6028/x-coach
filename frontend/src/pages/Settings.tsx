@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   CheckCircle,
   ClockCounterClockwise,
-  Sparkle,
   Trash,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -13,6 +12,7 @@ import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import { CHAT_MODELS, getStoredModel, setStoredModel } from "../lib/model";
 import { avatarUrl, displayName, initial } from "../lib/profile";
+import ModelIcon from "../components/ModelIcon";
 
 type ClearState =
   | { kind: "idle" }
@@ -136,10 +136,10 @@ export default function Settings() {
                   />
                   <span
                     className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                      selected ? "bg-primary/15 text-primary" : "bg-content/5 text-faint"
+                      selected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-content/5"
                     }`}
                   >
-                    <Sparkle size={18} weight={selected ? "fill" : "regular"} />
+                    <ModelIcon id={m.id} size={20} />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium text-content">{m.label}</span>

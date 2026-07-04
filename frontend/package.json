@@ -12,6 +12,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@lobehub/icons": "^5.10.1",
     "@phosphor-icons/react": "^2.1.10",
     "@supabase/supabase-js": "^2.108.2",
     "motion": "^12.40.0",
