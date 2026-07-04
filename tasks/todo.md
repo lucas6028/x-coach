@@ -32,7 +32,7 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
 
 ## Phase B — Markdown
 
-- [ ] **B1 — Frontend: sanitized markdown render** *(needs dep confirmation — see plan §5)*
+- [x] **B1 — Frontend: sanitized markdown render** ✅ react-markdown@10 + rehype-sanitize@6; 4 render tests green (links dropped, script inert); `yarn build` passes.
   - Acceptance: assistant turns render markdown via `react-markdown` + `rehype-sanitize` (replacing
     the raw `<p>`); `**bold**`→`<strong>`, lists/inline-code render, a `<script>` payload is stripped,
     partial markdown mid-stream renders without throwing; user turns stay plain text.
