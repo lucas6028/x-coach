@@ -52,11 +52,30 @@ export default function CoachTray({
   const [chatOnServer, setChatOnServer] = useState<boolean | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // A new analysis starts a fresh conversation — old turns no longer describe the current rep.
+  // Whether the composer is a live chat (signed in + server-configured). Also gates thread
+  // restore/persist. Declared before the effects that depend on it (avoids a TDZ ref in deps).
+  const isWorking = configured && !!user && chatOnServer !== false;
+  const canSend = !!input.trim() && !loading;
+
+  // A new analysis starts fresh, then restores its saved thread if the session can persist: a
+  // history-replay of a saved analysis brings its conversation back, while a fresh upload (no saved
+  // thread yet) simply stays empty. A failed/absent fetch leaves the empty thread — never blocks.
   useEffect(() => {
     setMessages([]);
     setError("");
-  }, [analysis.video_id]);
+    if (!isWorking) return;
+    let active = true;
+    api
+      .getConversation(analysis.video_id)
+      .then((c) => {
+        if (active && c.messages?.length) setMessages(c.messages);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isWorking gates restore; not identity.
+  }, [analysis.video_id, isWorking]);
 
   // Ask the backend once whether the LLM is configured, so a key-less server shows the disabled
   // affordance rather than a live input that 503s. Only a definitive chat_configured=false disables
@@ -82,9 +101,6 @@ export default function CoachTray({
     const el = scrollRef.current;
     if (el && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight });
   }, [messages, loading, streaming]);
-
-  const isWorking = configured && !!user && chatOnServer !== false;
-  const canSend = !!input.trim() && !loading;
 
   // `textArg` lets a starter-suggestion chip send its prompt directly; otherwise we send the input.
   async function send(textArg?: string) {
@@ -112,7 +128,10 @@ export default function CoachTray({
         },
       });
       if (inbandError) throw new ChatError(inbandError, 502);
-      setMessages((m) => [...m, { role: "assistant", content: acc }]);
+      const thread: ChatMessage[] = [...next, { role: "assistant", content: acc }];
+      setMessages(thread);
+      // Persist the completed turn (fire-and-forget — a save failure must not disrupt the chat).
+      void api.putConversation(analysis.video_id, thread).catch(() => undefined);
     } catch (e) {
       // Roll back the optimistic user turn (the partial assistant text lives in `streaming`, which
       // `finally` clears — nothing to slice) and restore the text so a retry doesn't duplicate it.

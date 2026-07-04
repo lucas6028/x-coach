@@ -157,6 +157,12 @@ export interface ChatStreamHandlers {
   onError: (detail: string) => void;
 }
 
+// A persisted chat thread for one analysed video (one per user+video_id). Restored on history-replay.
+export interface Conversation {
+  video_id: string;
+  messages: ChatMessage[];
+}
+
 // Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
 // event line, or an unparseable data payload, is ignored (keep-alives / partial writes).
 function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
@@ -292,6 +298,22 @@ export const api = {
         buffer = buffer.slice(sep + 2);
       }
     }
+  },
+
+  // Restore the caller's saved chat thread for a video ({messages: []} when none). Requires a
+  // session; the tray only calls it for a signed-in, chat-configured user.
+  getConversation: (videoId: string) =>
+    getJSON<Conversation>(`/api/conversations/${encodeURIComponent(videoId)}`),
+
+  // Save the caller's chat thread for a video (idempotent upsert of the whole thread).
+  async putConversation(videoId: string, messages: ChatMessage[]): Promise<void> {
+    const url = `/api/conversations/${encodeURIComponent(videoId)}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ messages }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   },
 
   async analyzeUpload(file: File): Promise<Analysis> {

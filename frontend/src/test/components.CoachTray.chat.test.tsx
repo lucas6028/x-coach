@@ -10,6 +10,8 @@ const h = vi.hoisted(() => ({
   auth: { configured: true, user: { id: "u1" } as { id: string } | null },
   chatStream: vi.fn(),
   health: vi.fn(),
+  getConversation: vi.fn(),
+  putConversation: vi.fn(),
 }));
 
 vi.mock("../lib/auth", () => ({ useAuth: () => h.auth }));
@@ -17,7 +19,16 @@ vi.mock("../lib/auth", () => ({ useAuth: () => h.auth }));
 // component's `instanceof ChatError` status check exercises the genuine error type.
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { ...actual.api, chatStream: h.chatStream, health: h.health } };
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      chatStream: h.chatStream,
+      health: h.health,
+      getConversation: h.getConversation,
+      putConversation: h.putConversation,
+    },
+  };
 });
 
 // Drive the component's stream handlers with a fixed reply, then complete — the streaming analogue
@@ -69,6 +80,10 @@ describe("CoachTray — follow-up chat", () => {
     h.chatStream.mockReset();
     h.health.mockReset();
     h.health.mockResolvedValue({ status: "ok", chat_configured: true });
+    h.getConversation.mockReset();
+    h.getConversation.mockResolvedValue({ video_id: "v1", messages: [] }); // no saved thread by default
+    h.putConversation.mockReset();
+    h.putConversation.mockResolvedValue(undefined);
   });
 
   it("sends a grounded user turn and renders the streamed coach reply in the same thread", async () => {
@@ -86,6 +101,48 @@ describe("CoachTray — follow-up chat", () => {
     expect(context.faults[0].corrections).toContain("knees out");
 
     expect(await screen.findByText("Drive your knees out over your toes.")).toBeInTheDocument();
+
+    // The completed turn (user + assistant) is persisted for replay.
+    const putCall = h.putConversation.mock.calls[0];
+    expect(putCall[0]).toBe("v1");
+    expect(putCall[1]).toEqual([
+      { role: "user", content: "why did my knees cave?" },
+      { role: "assistant", content: "Drive your knees out over your toes." },
+    ]);
+  });
+
+  it("restores a saved thread on load (history replay)", async () => {
+    h.getConversation.mockResolvedValue({
+      video_id: "v1",
+      messages: [
+        { role: "user", content: "earlier question" },
+        { role: "assistant", content: "earlier answer" },
+      ],
+    });
+    renderTray();
+
+    expect(await screen.findByText("earlier answer")).toBeInTheDocument();
+    expect(screen.getByText("earlier question")).toBeInTheDocument();
+    expect(h.getConversation).toHaveBeenCalledWith("v1");
+  });
+
+  it("does not persist when a turn fails mid-stream", async () => {
+    h.chatStream.mockImplementation(
+      async (
+        _m: unknown,
+        _c: unknown,
+        handlers: { onError: (d: string) => void }
+      ) => {
+        handlers.onError("OpenRouter request failed: reset");
+      }
+    );
+    renderTray();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "why?");
+    await userEvent.keyboard("{Enter}");
+
+    await screen.findByRole("alert");
+    expect(h.putConversation).not.toHaveBeenCalled();
   });
 
   it("sends a starter suggestion directly when its chip is clicked", async () => {

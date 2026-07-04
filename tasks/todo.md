@@ -73,7 +73,7 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
   - Files: `backend/app/routers/conversations.py` (new), `backend/app/main.py`,
     `tests/test_conversations_endpoint.py`.
 
-- [ ] **C4 — Client: restore + save the thread**
+- [x] **C4 — Client: restore + save the thread** ✅ restore-on-load + persist-after-done; no-persist-on-error; 45 tests green; `yarn build` passes.
   - Acceptance: `api.getConversation` / `api.putConversation` + `Conversation` type; `CoachTray`
     seeds `messages` from a GET on `analysis.video_id` (replacing the reset-to-`[]` effect) and PUTs
     the updated thread after a turn reaches `done`; keys on `video_id` only (no replay flag).

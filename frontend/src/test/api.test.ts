@@ -259,3 +259,30 @@ describe("api.chatStream", () => {
     });
   });
 });
+
+describe("api.conversations", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("getConversation GETs the per-video thread and returns it parsed", async () => {
+    const thread = { video_id: "vid", messages: [{ role: "user", content: "hi" }] };
+    const spy = mockFetch(thread);
+    const result = await api.getConversation("vid");
+    expect(result).toEqual(thread);
+    expect(spy.mock.calls[0][0]).toBe("/api/conversations/vid");
+  });
+
+  it("putConversation PUTs the thread body", async () => {
+    const spy = mockFetch({ video_id: "vid", messages: [] });
+    const msgs: ChatMessage[] = [{ role: "user", content: "why?" }];
+    await api.putConversation("vid", msgs);
+    expect(spy.mock.calls[0][0]).toBe("/api/conversations/vid");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ messages: msgs });
+  });
+
+  it("putConversation throws on a non-ok response", async () => {
+    mockFetch({}, false, 500);
+    await expect(api.putConversation("vid", [])).rejects.toThrow(/500/);
+  });
+});
