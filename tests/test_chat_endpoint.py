@@ -226,6 +226,23 @@ class StreamCompletionTests(unittest.TestCase):
         self.assertEqual(kwargs["json"]["model"], "minimax/minimax-m3")  # the passed model is sent
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer sk-or-test")
 
+    def test_stream_ending_without_done_terminator_exhausts_cleanly(self) -> None:
+        # Some upstreams just close the connection instead of sending a final ``data: [DONE]``; the
+        # loop must exit by exhausting iter_lines, yielding everything seen so far.
+        fake_resp = mock.Mock()
+        fake_resp.raise_for_status.return_value = None
+        fake_resp.iter_lines.return_value = iter(
+            ['data: {"choices":[{"delta":{"content":"Hi"}}]}']  # no [DONE]
+        )
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = fake_resp
+        cm.__exit__.return_value = False
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch("httpx.stream", return_value=cm):
+            chunks = list(chat_service._stream_completion([{"role": "user", "content": "hi"}], "m"))
+        self.assertEqual(chunks, ["Hi"])
+
     def test_transport_failure_becomes_runtime_error(self) -> None:
         with mock.patch.object(
             chat_service, "get_settings", return_value=self._settings()

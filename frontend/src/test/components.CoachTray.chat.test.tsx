@@ -111,6 +111,13 @@ describe("CoachTray — follow-up chat", () => {
     ]);
   });
 
+  it("stays usable when restoring a saved thread fails", async () => {
+    h.getConversation.mockRejectedValue(new Error("network"));
+    renderTray();
+    // The restore rejection is swallowed — the composer still renders, no crash, empty thread.
+    expect(await screen.findByPlaceholderText(/Ask a follow-up/i)).toBeInTheDocument();
+  });
+
   it("restores a saved thread on load (history replay)", async () => {
     h.getConversation.mockResolvedValue({
       video_id: "v1",

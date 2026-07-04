@@ -74,6 +74,21 @@ describe("History", () => {
     expect(screen.getAllByRole("link", { name: /Side squat/i })).toHaveLength(3);
   });
 
+  it("labels a single-fault rep and groups an unparseable date under a fallback header", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 2,
+      items: [
+        item({ id: "one", fault_count: 1, created_at: "2026-06-20T12:00:00.000Z" }),
+        item({ id: "bad", fault_count: 3, created_at: "not-a-date" }),
+      ],
+    });
+    renderHistory();
+    expect(await screen.findByText("1 fault")).toBeInTheDocument(); // faultOne branch
+    // The row with an unparseable timestamp still renders (grouped under its own fallback header).
+    expect(screen.getByText("3 faults")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(2);
+  });
+
   it("renders a clean badge for fault-free reps", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({
       total: 1,
