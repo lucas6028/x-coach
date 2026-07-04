@@ -9,6 +9,7 @@ import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import FaultCard from "./FaultCard";
 import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
+import Markdown from "./Markdown";
 
 interface Props {
   analysis: Analysis;
@@ -302,7 +303,7 @@ export default function CoachTray({
                           {t("chat.groundedShort")}
                         </span>
                       </div>
-                      <p className="text-[15px] leading-relaxed text-content">{m.content}</p>
+                      <Markdown>{m.content}</Markdown>
                     </motion.div>
                   ),
                 )}
@@ -322,7 +323,7 @@ export default function CoachTray({
                         {t("chat.groundedShort")}
                       </span>
                     </div>
-                    <p className="text-[15px] leading-relaxed text-content">{streaming}</p>
+                    <Markdown>{streaming}</Markdown>
                   </div>
                 )}
                 {/* Spinner only until the first token lands; then the streaming text carries it. */}
