@@ -1,13 +1,16 @@
 """Tests for the grounded conversational-coaching endpoint (``POST /api/chat``).
 
-The network (OpenRouter) is never hit: service tests patch ``httpx.post`` or the ``_chat_completion``
-seam, and router tests call the coroutine directly with a stub user — mirroring
-``test_analyze_endpoint.py``. They lock in the two things that matter for this feature:
+The network (OpenRouter) is never hit: service tests patch ``httpx.stream`` or the
+``_stream_completion`` seam, and router tests call the coroutine directly with a stub user —
+mirroring ``test_analyze_endpoint.py``. They lock in the things that matter for this feature:
 
 * **groundedness** — the server-built system prompt carries the analysis facts (fault names +
-  retrieved corrections) and the honesty constraint that forbids inventing anything, and
-* the **request contract** — chat is gated + configured (503 without a key), the last turn must
-  be the user's (422 otherwise), and an upstream failure surfaces as a clean 502.
+  retrieved corrections) and the honesty constraint that forbids inventing anything,
+* the **request contract** — chat is gated + configured (503 without a key) and the last turn must
+  be the user's (422 otherwise), both enforced *before* the stream opens, and
+* the **stream contract** (v2) — the endpoint emits SSE ``delta``/``done`` frames on success and an
+  in-band ``error`` frame on any mid-stream failure or empty completion (never a post-stream HTTP
+  code, since the 200 is already committed once the stream starts).
 """
 
 from __future__ import annotations
@@ -54,6 +57,14 @@ def _body(messages, context) -> chat_router.ChatRequest:
     return chat_router.ChatRequest(messages=messages, context=context)
 
 
+async def _collect(resp) -> str:
+    """Drain a StreamingResponse's body into one string (frames are str before encoding)."""
+    out: list[str] = []
+    async for chunk in resp.body_iterator:
+        out.append(chunk.decode() if isinstance(chunk, bytes) else chunk)
+    return "".join(out)
+
+
 # --------------------------------------------------------------------- service: prompt
 
 
@@ -96,36 +107,79 @@ class SystemPromptTests(unittest.TestCase):
         self.assertNotIn("reference:", prompt)  # no rag-snippet line either
 
 
-# --------------------------------------------------------------------- service: answer
+# --------------------------------------------------------------------- service: answer_stream
 
 
-class AnswerTests(unittest.TestCase):
-    def test_prepends_system_prompt_then_history(self) -> None:
+class AnswerStreamTests(unittest.TestCase):
+    def test_yields_deltas_then_done_and_prepends_system_prompt(self) -> None:
         seen: dict[str, list] = {}
 
-        def fake_completion(messages):
+        def fake_stream(messages):
             seen["messages"] = messages
-            return "keep your chest up"
+            yield "Drive "
+            yield "knees out"
 
-        history = [
-            {"role": "user", "content": "why did my knees cave?"},
-        ]
-        with mock.patch.object(chat_service, "_chat_completion", fake_completion), mock.patch.object(
+        history = [{"role": "user", "content": "why did my knees cave?"}]
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream), mock.patch.object(
             chat_service, "get_settings", return_value=types.SimpleNamespace(openrouter_model="m-x")
         ):
-            out = chat_service.answer(messages=history, context=_FAULT_CTX)
+            frames = "".join(chat_service.answer_stream(messages=history, context=_FAULT_CTX))
 
-        self.assertEqual(out, {"reply": "keep your chest up", "model": "m-x"})
+        self.assertIn("event: delta", frames)
+        self.assertIn("Drive ", frames)
+        self.assertIn("knees out", frames)
+        self.assertIn("event: done", frames)
+        self.assertIn("m-x", frames)  # the model rides the done frame
+        self.assertNotIn("event: error", frames)
+        # The grounded system prompt is prepended; the user history follows untouched.
         sent = seen["messages"]
         self.assertEqual(sent[0]["role"], "system")
         self.assertIn("knees_inward", sent[0]["content"])
-        self.assertEqual(sent[1:], history)  # user history follows the system prompt, untouched
+        self.assertEqual(sent[1:], history)
+
+    def test_midstream_failure_yields_error_frame_and_no_done(self) -> None:
+        def fake_stream(messages):
+            yield "partial answer"
+            raise RuntimeError("OpenRouter request failed: connection reset")
+
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream), mock.patch.object(
+            chat_service, "get_settings", return_value=types.SimpleNamespace(openrouter_model="m")
+        ):
+            frames = "".join(
+                chat_service.answer_stream(
+                    messages=[{"role": "user", "content": "hi"}], context=_FAULT_CTX
+                )
+            )
+
+        self.assertIn("partial answer", frames)  # deltas already flushed are kept
+        self.assertIn("event: error", frames)
+        self.assertIn("connection reset", frames)
+        self.assertNotIn("event: done", frames)
+
+    def test_empty_completion_yields_error_not_done(self) -> None:
+        # The v1 empty-completion invariant survives into streaming: a blank accumulation must emit
+        # an error, never a done, so the client never keeps an empty assistant turn.
+        def fake_stream(messages):
+            yield "   "  # whitespace only -> strips to empty
+
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream), mock.patch.object(
+            chat_service, "get_settings", return_value=types.SimpleNamespace(openrouter_model="m")
+        ):
+            frames = "".join(
+                chat_service.answer_stream(
+                    messages=[{"role": "user", "content": "hi"}], context=_CLEAN_CTX
+                )
+            )
+
+        self.assertIn("event: error", frames)
+        self.assertIn("empty", frames.lower())
+        self.assertNotIn("event: done", frames)
 
 
-# --------------------------------------------------------- service: OpenRouter transport
+# --------------------------------------------------------- service: OpenRouter SSE transport
 
 
-class ChatCompletionTests(unittest.TestCase):
+class StreamCompletionTests(unittest.TestCase):
     def _settings(self):
         return types.SimpleNamespace(
             openrouter_api_key="sk-or-test",
@@ -133,47 +187,40 @@ class ChatCompletionTests(unittest.TestCase):
             openrouter_base_url="https://openrouter.ai/api/v1",
         )
 
-    def test_parses_reply_from_openai_shape(self) -> None:
-        resp = mock.Mock()
-        resp.raise_for_status.return_value = None
-        resp.json.return_value = {"choices": [{"message": {"content": "hi there"}}]}
-        with mock.patch.object(chat_service, "get_settings", return_value=self._settings()), mock.patch(
-            "httpx.post", return_value=resp
-        ) as post:
-            reply = chat_service._chat_completion([{"role": "user", "content": "hi"}])
-        self.assertEqual(reply, "hi there")
-        # The model + auth header were sent to the completions URL.
-        _, kwargs = post.call_args
+    def test_parses_content_deltas_from_openai_sse(self) -> None:
+        fake_resp = mock.Mock()
+        fake_resp.raise_for_status.return_value = None
+        fake_resp.iter_lines.return_value = iter(
+            [
+                ": keep-alive ping",  # SSE comment -> skip
+                'data: {"choices":[{"delta":{"content":"Hello"}}]}',
+                "data: not-json",  # malformed -> skip
+                'data: {"choices":[{"delta":{}}]}',  # no content -> skip
+                'data: {"choices":[{"delta":{"content":" there"}}]}',
+                "data: [DONE]",
+                'data: {"choices":[{"delta":{"content":"unreached"}}]}',  # after [DONE] -> not read
+            ]
+        )
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = fake_resp
+        cm.__exit__.return_value = False
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch("httpx.stream", return_value=cm) as stream:
+            chunks = list(chat_service._stream_completion([{"role": "user", "content": "hi"}]))
+
+        self.assertEqual(chunks, ["Hello", " there"])
+        _, kwargs = stream.call_args
+        self.assertIs(kwargs["json"]["stream"], True)
         self.assertEqual(kwargs["json"]["model"], "anthropic/claude-sonnet-5")
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer sk-or-test")
 
-    def test_network_failure_becomes_runtime_error(self) -> None:
-        with mock.patch.object(chat_service, "get_settings", return_value=self._settings()), mock.patch(
-            "httpx.post", side_effect=Exception("connection reset")
-        ):
+    def test_transport_failure_becomes_runtime_error(self) -> None:
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch("httpx.stream", side_effect=Exception("connection reset")):
             with self.assertRaises(RuntimeError):
-                chat_service._chat_completion([{"role": "user", "content": "hi"}])
-
-    def test_empty_content_becomes_runtime_error(self) -> None:
-        # An empty/blank completion must raise (not return "") so no empty assistant turn is stored.
-        resp = mock.Mock()
-        resp.raise_for_status.return_value = None
-        resp.json.return_value = {"choices": [{"message": {"content": "   "}}]}
-        with mock.patch.object(chat_service, "get_settings", return_value=self._settings()), mock.patch(
-            "httpx.post", return_value=resp
-        ):
-            with self.assertRaises(RuntimeError):
-                chat_service._chat_completion([{"role": "user", "content": "hi"}])
-
-    def test_malformed_response_shape_becomes_runtime_error(self) -> None:
-        resp = mock.Mock()
-        resp.raise_for_status.return_value = None
-        resp.json.return_value = {"unexpected": True}  # no "choices"
-        with mock.patch.object(chat_service, "get_settings", return_value=self._settings()), mock.patch(
-            "httpx.post", return_value=resp
-        ):
-            with self.assertRaises(RuntimeError):
-                chat_service._chat_completion([{"role": "user", "content": "hi"}])
+                list(chat_service._stream_completion([{"role": "user", "content": "hi"}]))
 
 
 # --------------------------------------------------------------------- router contract
@@ -207,33 +254,28 @@ class ChatRouterTests(unittest.TestCase):
                 self._run(body)
         self.assertEqual(ctx.exception.status_code, 422)
 
-    def test_delegates_to_service_and_returns_reply(self) -> None:
+    def test_returns_event_stream_delegating_to_service(self) -> None:
         captured: dict = {}
 
-        def fake_answer(*, messages, context):
+        def fake_answer_stream(*, messages, context):
             captured["messages"] = messages
             captured["context"] = context
-            return {"reply": "drive knees out", "model": "m"}
+            yield 'event: delta\ndata: {"text": "drive knees out"}\n\n'
+            yield 'event: done\ndata: {"model": "m"}\n\n'
 
         with mock.patch.object(
             chat_router, "get_settings", return_value=types.SimpleNamespace(chat_configured=True)
-        ), mock.patch.object(chat_service, "answer", fake_answer):
-            out = self._run(_body([{"role": "user", "content": "fix my knees?"}], _FAULT_CTX))
+        ), mock.patch.object(chat_service, "answer_stream", fake_answer_stream):
+            resp = self._run(_body([{"role": "user", "content": "fix my knees?"}], _FAULT_CTX))
+            body = asyncio.run(_collect(resp))
 
-        self.assertEqual(out["reply"], "drive knees out")
+        self.assertEqual(resp.media_type, "text/event-stream")
+        self.assertIn("event: delta", body)
+        self.assertIn("drive knees out", body)
+        self.assertIn("event: done", body)
+        # The service received the conversation + the grounding blob it must build the prompt from.
         self.assertEqual(captured["messages"][-1]["content"], "fix my knees?")
         self.assertEqual(captured["context"]["faults"][0]["fault_name"], "knees_inward")
-
-    def test_service_runtime_error_maps_to_502(self) -> None:
-        def boom(*, messages, context):
-            raise RuntimeError("OpenRouter request failed: timeout")
-
-        with mock.patch.object(
-            chat_router, "get_settings", return_value=types.SimpleNamespace(chat_configured=True)
-        ), mock.patch.object(chat_service, "answer", boom):
-            with self.assertRaises(HTTPException) as ctx:
-                self._run(_body([{"role": "user", "content": "hi"}], _FAULT_CTX))
-        self.assertEqual(ctx.exception.status_code, 502)
 
 
 if __name__ == "__main__":

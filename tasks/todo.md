@@ -10,7 +10,7 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
 
 ## Phase A — Streaming
 
-- [ ] **A1 — Backend: `/api/chat` emits SSE**
+- [x] **A1 — Backend: `/api/chat` emits SSE** ✅ 13 chat tests green; backend/app cov 99.8%.
   - Acceptance: `_stream_completion` sync generator yields text chunks (deferred `httpx.stream`);
     `answer_stream` yields ordered `delta` frames then one `done` on success, an `error` frame on a
     mid-stream `RuntimeError`, and an `error` (never `done`) when the accumulation is blank; router

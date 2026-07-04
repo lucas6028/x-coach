@@ -6,13 +6,20 @@ produced and lets an LLM (served via OpenRouter) explain and answer follow-ups *
 facts**. The system prompt is built here on the server, never by the client, so the grounding
 and honesty constraints can't be tampered with from the browser.
 
-The network call is isolated in ``_chat_completion`` and the ``httpx`` import is deferred into
-it — mirroring how ``services/store`` defers ``supabase`` — so the routers import cheaply and the
-unit tests patch ``_chat_completion`` without touching the network or needing an API key.
+The reply is **streamed** (v2): the network call is isolated in the ``_stream_completion``
+generator and the ``httpx`` import is deferred into it — mirroring how ``services/store`` defers
+``supabase`` — so the routers import cheaply and the unit tests patch ``_stream_completion``
+without touching the network or needing an API key. ``answer_stream`` wraps the token stream in
+Server-Sent Events; because the HTTP 200 is committed the moment streaming starts, *every*
+OpenRouter failure (connect, mid-stream, or an empty completion) surfaces as an in-band ``error``
+event rather than an HTTP status code — the only pre-flight HTTP errors are 503/401/422, raised in
+the router before the stream opens.
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Iterator
 from typing import Any
 
 from backend.app.settings import get_settings
@@ -99,17 +106,25 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _chat_completion(messages: list[dict[str, str]]) -> str:
-    """Call OpenRouter's OpenAI-compatible chat-completions API and return the reply text.
+def _sse(event: str, data: dict[str, Any]) -> str:
+    """Render one Server-Sent Event frame (``event:`` + JSON ``data:``, terminated by a blank line)."""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
-    Isolated (and network-deferred) so tests patch this seam. Raises ``RuntimeError`` on any
-    transport/HTTP failure so the router can map it to a clean 502.
+
+def _stream_completion(messages: list[dict[str, str]]) -> Iterator[str]:
+    """Stream reply-text chunks from OpenRouter's OpenAI-compatible chat-completions API.
+
+    Isolated (and network-deferred) so tests patch this seam. Parses the OpenAI SSE shape
+    (``data: {choices:[{delta:{content}}]}`` lines, ``data: [DONE]`` terminator) and yields each
+    non-empty ``delta.content``. Raises ``RuntimeError`` on any transport/HTTP failure so
+    ``answer_stream`` can turn it into an in-band ``error`` event.
     """
     import httpx  # deferred: only needed on a live request, keeps router import light.
 
     settings = get_settings()
     try:
-        resp = httpx.post(
+        with httpx.stream(
+            "POST",
             f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
             headers={
                 "Authorization": f"Bearer {settings.openrouter_api_key}",
@@ -118,34 +133,47 @@ def _chat_completion(messages: list[dict[str, str]]) -> str:
                 "HTTP-Referer": "https://x-coach.local",
                 "X-Title": "x-coach",
             },
-            json={"model": settings.openrouter_model, "messages": messages},
+            json={"model": settings.openrouter_model, "messages": messages, "stream": True},
             timeout=_REQUEST_TIMEOUT_S,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data:"):
+                    continue  # blank keep-alives and ``:`` comment lines carry no payload.
+                payload = line[len("data:") :].strip()
+                if payload == "[DONE]":
+                    break
+                try:
+                    delta = json.loads(payload)["choices"][0]["delta"].get("content")
+                except (json.JSONDecodeError, KeyError, IndexError, TypeError):
+                    continue  # a partial/keep-alive/unexpected frame — skip, don't abort.
+                if delta:
+                    yield delta
     except Exception as exc:  # noqa: BLE001 — any failure here is an upstream/transport problem.
         raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
 
-    # Extract + validate the reply. An empty/blank or malformed completion (a refusal, a truncated
-    # stream, an unexpected shape) must raise, not return "" — otherwise the caller stores an empty
-    # assistant turn that the request validator (content min_length=1) then rejects on the *next*
-    # send, wedging the whole conversation. Surface it as an error the router maps to 502 instead.
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"OpenRouter returned an unexpected response shape: {exc}") from exc
-    if not content or not content.strip():
-        raise RuntimeError("OpenRouter returned an empty message.")
-    return content
 
+def answer_stream(*, messages: list[dict[str, str]], context: dict[str, Any]) -> Iterator[str]:
+    """Stream a grounded coaching reply for ``messages`` as SSE frames.
 
-def answer(*, messages: list[dict[str, str]], context: dict[str, Any]) -> dict[str, Any]:
-    """Produce a grounded coaching reply for ``messages`` given the analysis ``context``.
-
-    ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last;
-    the backend prepends the grounded system prompt. Chat is stateless/ephemeral in v1 — nothing
-    is persisted.
+    ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last; the
+    backend prepends the grounded system prompt. Yields zero or more ``delta`` frames, then exactly
+    one terminator: ``done`` (carrying the model) on success, or ``error`` on any transport failure
+    or an empty completion. The empty-completion guard preserves the v1 invariant — the client must
+    never keep an empty assistant turn, which the next send's ``content min_length=1`` would reject.
     """
     system = _build_system_prompt(context)
-    reply = _chat_completion([{"role": "system", "content": system}, *messages])
-    return {"reply": reply, "model": get_settings().openrouter_model}
+    parts: list[str] = []
+    try:
+        for chunk in _stream_completion([{"role": "system", "content": system}, *messages]):
+            parts.append(chunk)
+            yield _sse("delta", {"text": chunk})
+    except RuntimeError as exc:
+        yield _sse("error", {"detail": str(exc)})
+        return
+
+    if not "".join(parts).strip():
+        yield _sse("error", {"detail": "OpenRouter returned an empty message."})
+        return
+
+    yield _sse("done", {"model": get_settings().openrouter_model})

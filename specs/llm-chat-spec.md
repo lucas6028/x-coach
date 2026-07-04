@@ -204,9 +204,15 @@ failure is an **in-band** SSE error event.
 | Pre-flight | `chat_configured` false | HTTP **503** (before stream) |
 | Pre-flight | no/expired session | HTTP **401** (before stream) |
 | Pre-flight | last message not `user` / empty body | HTTP **422** (before stream) |
-| Pre-flight | immediate connect failure to OpenRouter | HTTP **502** (before first chunk flushes) |
-| **Mid-stream** | OpenRouter drops/errors after chunks started | **in-band `error` event**, stream closes |
-| **Mid-stream** | completion accumulates to empty/blank | **in-band `error` event**; no assistant turn kept |
+| **In-band** | OpenRouter connect/transport failure (even on the first chunk) | **in-band `error` event**, stream closes |
+| **In-band** | OpenRouter drops/errors after chunks started | **in-band `error` event**, stream closes |
+| **In-band** | completion accumulates to empty/blank | **in-band `error` event**; no assistant turn kept |
+
+> **Refinement (during A1):** there is no pre-flight **502**. `StreamingResponse` commits the HTTP
+> 200 (status + headers) *before* the first generator item is pulled, so an immediate OpenRouter
+> connect failure is already inside a 200 stream — it surfaces as an in-band `error`, same as a
+> mid-stream drop. Pre-flight HTTP is therefore only **503 / 401 / 422**. The client handles in-band
+> errors uniformly (roll back the optimistic turn), so this is simpler *and* more honest.
 
 **SSE event shape** (one event type per line-block; keep it minimal and explicit):
 ```
