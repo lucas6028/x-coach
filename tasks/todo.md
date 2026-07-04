@@ -65,7 +65,7 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
   - Verify: `pytest` store tests (patch `_user_client`) — upsert + restore round-trip; delete clears.
   - Files: `backend/app/services/store.py`, `tests/test_conversations_store.py` (or `test_backend.py`).
 
-- [ ] **C3 — Router: `/api/conversations/{video_id}`**
+- [x] **C3 — Router: `/api/conversations/{video_id}`** ✅ PUT/GET gated (401), wired into main; cov 99.8%.
   - Acceptance: `PUT` upserts the full thread, `GET` restores (`{messages: []}` when none), both
     gated by `get_current_user` (401 without session); wired into `main.py`.
   - Verify: `pytest tests/test_conversations_endpoint.py` — 401 without session, PUT→GET round-trip,
