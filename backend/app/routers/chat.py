@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 from backend.app.auth import CurrentUser, get_current_user
 from backend.app.services import chat as chat_service
-from backend.app.settings import get_settings
+from backend.app.settings import get_settings, resolve_chat_model
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -56,6 +56,9 @@ class ChatRequest(BaseModel):
     # The conversation so far, oldest first; the last entry is the new user turn.
     messages: list[ChatMessage] = Field(..., min_length=1)
     context: ChatContext
+    # The user's chosen model (an OpenRouter slug). Validated against the server allowlist; an
+    # unknown/absent value falls back to the configured default.
+    model: str | None = None
 
 
 @router.post("/chat")
@@ -81,12 +84,13 @@ async def chat(
 
     messages = [m.model_dump() for m in body.messages]
     context = body.context.model_dump()
+    model = resolve_chat_model(body.model)  # allow-list guard: never trust the client's raw choice.
 
     # The sync generator's blocking httpx calls are iterated off the event loop by StreamingResponse
     # (Starlette runs a non-async iterator in a threadpool). Disable proxy/browser buffering so
     # tokens flush as they arrive.
     return StreamingResponse(
-        chat_service.answer_stream(messages=messages, context=context),
+        chat_service.answer_stream(messages=messages, context=context, model=model),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

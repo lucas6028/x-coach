@@ -113,13 +113,14 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_completion(messages: list[dict[str, str]]) -> Iterator[str]:
+def _stream_completion(messages: list[dict[str, str]], model: str) -> Iterator[str]:
     """Stream reply-text chunks from OpenRouter's OpenAI-compatible chat-completions API.
 
     Isolated (and network-deferred) so tests patch this seam. Parses the OpenAI SSE shape
     (``data: {choices:[{delta:{content}}]}`` lines, ``data: [DONE]`` terminator) and yields each
-    non-empty ``delta.content``. Raises ``RuntimeError`` on any transport/HTTP failure so
-    ``answer_stream`` can turn it into an in-band ``error`` event.
+    non-empty ``delta.content``. ``model`` is the already-resolved (allow-listed) OpenRouter slug.
+    Raises ``RuntimeError`` on any transport/HTTP failure so ``answer_stream`` can turn it into an
+    in-band ``error`` event.
     """
     import httpx  # deferred: only needed on a live request, keeps router import light.
 
@@ -135,7 +136,7 @@ def _stream_completion(messages: list[dict[str, str]]) -> Iterator[str]:
                 "HTTP-Referer": "https://x-coach.local",
                 "X-Title": "x-coach",
             },
-            json={"model": settings.openrouter_model, "messages": messages, "stream": True},
+            json={"model": model, "messages": messages, "stream": True},
             timeout=_REQUEST_TIMEOUT_S,
         ) as resp:
             resp.raise_for_status()
@@ -155,19 +156,23 @@ def _stream_completion(messages: list[dict[str, str]]) -> Iterator[str]:
         raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
 
 
-def answer_stream(*, messages: list[dict[str, str]], context: dict[str, Any]) -> Iterator[str]:
+def answer_stream(
+    *, messages: list[dict[str, str]], context: dict[str, Any], model: str
+) -> Iterator[str]:
     """Stream a grounded coaching reply for ``messages`` as SSE frames.
 
     ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last; the
-    backend prepends the grounded system prompt. Yields zero or more ``delta`` frames, then exactly
-    one terminator: ``done`` (carrying the model) on success, or ``error`` on any transport failure
-    or an empty completion. The empty-completion guard preserves the v1 invariant — the client must
-    never keep an empty assistant turn, which the next send's ``content min_length=1`` would reject.
+    backend prepends the grounded system prompt. ``model`` is the already-resolved (allow-listed)
+    OpenRouter slug the caller picked. Yields zero or more ``delta`` frames, then exactly one
+    terminator: ``done`` (carrying the model actually used) on success, or ``error`` on any
+    transport failure or an empty completion. The empty-completion guard preserves the v1 invariant
+    — the client must never keep an empty assistant turn, which the next send's
+    ``content min_length=1`` would reject.
     """
     system = _build_system_prompt(context)
     parts: list[str] = []
     try:
-        for chunk in _stream_completion([{"role": "system", "content": system}, *messages]):
+        for chunk in _stream_completion([{"role": "system", "content": system}, *messages], model):
             parts.append(chunk)
             yield _sse("delta", {"text": chunk})
     except RuntimeError as exc:
@@ -178,4 +183,4 @@ def answer_stream(*, messages: list[dict[str, str]], context: dict[str, Any]) ->
         yield _sse("error", {"detail": "OpenRouter returned an empty message."})
         return
 
-    yield _sse("done", {"model": get_settings().openrouter_model})
+    yield _sse("done", {"model": model})
