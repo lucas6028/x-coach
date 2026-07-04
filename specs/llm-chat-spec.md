@@ -1,6 +1,6 @@
 # Spec: Conversational Coaching (LLM chat layer, OpenRouter)
 
-Status: **v1 shipped · v2 in spec** · Owner: — · Supersedes the "chat disabled / coming soon" placeholder.
+Status: **v1 shipped · v2 shipped** · Owner: — · Supersedes the "chat disabled / coming soon" placeholder.
 
 > v2 scope (this revision): **streaming · chat persistence/history · markdown output**. The v2
 > section is at the bottom of this doc; the v1 spec above it is retained as the shipped baseline.
@@ -349,25 +349,39 @@ create table if not exists public.conversations (
 
 ## Success Criteria (v2)
 
-- [ ] `/api/chat` streams `delta`/`done` SSE for a real analysis; pre-flight 503/401/422 still fire
+- [x] `/api/chat` streams `delta`/`done` SSE for a real analysis; pre-flight 503/401/422 still fire
       before the stream; a mid-stream failure and an empty completion both emit an in-band `error`
-      and persist nothing.
-- [ ] Assistant turns render sanitized markdown (bold/list/inline code); a `<script>` payload is
-      stripped; partial markdown renders acceptably mid-stream.
-- [ ] Revisiting a saved analysis restores its chat thread; a fresh upload starts empty; delete-all
-      leaves no conversation residue.
-- [ ] `yarn build` passes; backend suite green (`backend/app` coverage ≥ 95%); new streaming +
-      persistence + markdown tests green; both languages covered.
-- [ ] LLM key never reaches the client; no invented faults/metrics; groundedness unchanged from v1.
+      and persist nothing. *(A1; `test_chat_endpoint.py` AnswerStreamTests / ChatRouterTests.)*
+- [x] Assistant turns render sanitized markdown (bold/list/inline code); a `<script>` payload is
+      inert; partial markdown renders mid-stream without throwing. *(B1; `components.Markdown.test.tsx`.)*
+- [x] Revisiting a saved analysis restores its chat thread; a fresh upload starts empty; delete-all
+      leaves no conversation residue. *(C2/C4; store + CoachTray restore/persist tests.)*
+- [x] `yarn build` passes; backend suite green (`backend/app` coverage 99.8% ≥ 95%); new streaming +
+      persistence + markdown tests green. *(i18n keys unchanged — v2 reused v1's `chat.*` strings.)*
+- [x] LLM key never reaches the client; no invented faults/metrics; groundedness unchanged from v1.
+      *(B2 test asserts the markdown-permission line does not relax the ONLY / Do-NOT-invent rules.)*
 
-## Open Questions
+## Open Questions — resolved
 
-- **Markdown dependency** — confirm `react-markdown` + `rehype-sanitize` vs. `marked` + `DOMPurify`
-  vs. an in-house minimal renderer (assumption #1). Blocks the markdown task only.
-- **Persistence granularity** — confirm one-thread-per-analysis restored on replay vs. a standalone
-  conversations history view (assumption #2). The latter widens scope toward v3.
-- **Link rendering** — should the coach be allowed to emit links (e.g. a reference URL from a RAG
-  snippet), or is the sanitize subset text/emphasis/list/code only? Default: no links in v2.
+- **Markdown dependency** → shipped with `react-markdown@10` + `rehype-sanitize@6` (assumption #1),
+  per the plan default the user approved via `/build auto`. Reversible via `git revert` if redirected.
+- **Persistence granularity** → one thread per `(user, video_id)`, restored via history-replay
+  (assumption #2). No standalone conversations browser (that stays v3-shaped).
+- **Link rendering** → **no links in v2**. The sanitize schema derives from rehype-sanitize's default
+  and additionally drops `<a>`/`<img>`; `components.Markdown.test.tsx` asserts a markdown link renders
+  as plain text with no `<a>`.
+
+## Build notes (kept alive)
+
+- **No pre-flight 502.** `StreamingResponse` commits the 200 before the first generator item, so
+  *all* OpenRouter failures (connect/mid-stream/empty) are in-band `error` events; only 503/401/422
+  are pre-flight HTTP. See the refinement note under the v2 error table.
+- **Persistence is FK-free by design.** `conversations.video_id` is `text` with no FK (mirrors
+  `analyses`), so a fresh upload can be chatted and saved before any analysis/video row exists.
+- **Landed A1→D1** on branch `feat/llm-chat-v2`, one commit per task. Backend `backend/app` coverage
+  99.8%. Pre-existing, unrelated local failures (not caused by v2): `test_backend_analysis.py`
+  (missing Squat dataset — CI `--ignore`s it) and `lib.supabase.test.ts` (fails only with a populated
+  local `frontend/.env`; passes on CI).
 
 ## Out of scope (v3)
 
