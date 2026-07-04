@@ -158,44 +158,104 @@ describe("api.analyzeUpload", () => {
   });
 });
 
-describe("api.chat", () => {
+describe("api.chatStream", () => {
   afterEach(() => vi.restoreAllMocks());
 
   const messages: ChatMessage[] = [{ role: "user", content: "why did my knees cave?" }];
   const context: ChatContext = { fault_count: 0, quality: {}, faults: [] };
 
-  it("POSTs the messages + context and returns the parsed reply", async () => {
-    const spy = mockFetch({ reply: "Drive your knees out.", model: "m" });
-    const result = await api.chat(messages, context);
-    expect(result).toEqual({ reply: "Drive your knees out.", model: "m" });
+  // Mock fetch with a real ReadableStream body carrying the given (already byte-splittable) chunks,
+  // so the client's frame-reassembly across chunk boundaries is exercised for real.
+  function mockStream(chunks: string[]) {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        for (const c of chunks) controller.enqueue(enc.encode(c));
+        controller.close();
+      },
+    });
+    return vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      body,
+    } as unknown as Response);
+  }
+
+  function collectHandlers() {
+    const deltas: string[] = [];
+    let model = "";
+    let errorDetail = "";
+    return {
+      deltas,
+      get model() {
+        return model;
+      },
+      get errorDetail() {
+        return errorDetail;
+      },
+      handlers: {
+        onDelta: (t: string) => deltas.push(t),
+        onDone: (m: string) => {
+          model = m;
+        },
+        onError: (d: string) => {
+          errorDetail = d;
+        },
+      },
+    };
+  }
+
+  it("POSTs messages + context and streams delta frames then done to the handlers", async () => {
+    // A frame deliberately split across two chunks to prove reassembly.
+    const spy = mockStream([
+      'event: delta\ndata: {"text":"Drive your knees ',
+      'out."}\n\nevent: done\ndata: {"model":"m"}\n\n',
+    ]);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+
+    expect(c.deltas.join("")).toBe("Drive your knees out.");
+    expect(c.model).toBe("m");
+    expect(c.errorDetail).toBe("");
     expect(spy.mock.calls[0][0]).toBe("/api/chat");
     const init = spy.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ messages, context });
   });
 
-  it("throws a ChatError carrying the HTTP status and backend detail on failure", async () => {
+  it("routes an in-band error frame to onError without throwing", async () => {
+    mockStream(['event: error\ndata: {"detail":"OpenRouter request failed: reset"}\n\n']);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+    expect(c.errorDetail).toContain("reset");
+    expect(c.deltas).toHaveLength(0);
+  });
+
+  it("throws a ChatError carrying the HTTP status and backend detail on a pre-flight failure", async () => {
     mockFetch({ detail: "Missing bearer token." }, false, 401);
-    await expect(api.chat(messages, context)).rejects.toMatchObject({
+    const c = collectHandlers();
+    await expect(api.chatStream(messages, context, c.handlers)).rejects.toMatchObject({
       name: "ChatError",
       status: 401,
       message: "Missing bearer token.",
     });
-    await expect(api.chat(messages, context)).rejects.toBeInstanceOf(ChatError);
+    await expect(api.chatStream(messages, context, c.handlers)).rejects.toBeInstanceOf(ChatError);
   });
 
-  it("falls back to a generic message when the error body isn't JSON", async () => {
+  it("falls back to a generic message when the pre-flight error body isn't JSON", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: false,
-      status: 502,
-      statusText: "Bad Gateway",
+      status: 503,
+      statusText: "Service Unavailable",
       json: async () => {
         throw new Error("not json");
       },
     } as unknown as Response);
-    await expect(api.chat(messages, context)).rejects.toMatchObject({
-      status: 502,
-      message: "Chat failed (502)",
+    const c = collectHandlers();
+    await expect(api.chatStream(messages, context, c.handlers)).rejects.toMatchObject({
+      status: 503,
+      message: "Chat failed (503)",
     });
   });
 });

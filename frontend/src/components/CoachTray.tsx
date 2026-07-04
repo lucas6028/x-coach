@@ -42,6 +42,10 @@ export default function CoachTray({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // The in-progress assistant turn, accumulated from streamed deltas. Rendered as a live block
+  // below the committed thread while loading; committed into `messages` on a clean `done`, or
+  // discarded on an error (the optimistic user turn is rolled back alongside it).
+  const [streaming, setStreaming] = useState("");
   // Whether the *server* has an OpenRouter key. Independent of Supabase auth. null = not yet
   // checked (assume available so the common path is instant).
   const [chatOnServer, setChatOnServer] = useState<boolean | null>(null);
@@ -71,11 +75,12 @@ export default function CoachTray({
 
   // Keep the newest turn in view as the conversation grows — but never on the initial render, so
   // the coach's analysis (top of the thread) is what the user sees first. (Guard scrollTo — jsdom.)
+  // `streaming` is a dep so the view tracks the answer as tokens arrive.
   useEffect(() => {
     if (messages.length === 0) return;
     const el = scrollRef.current;
     if (el && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight });
-  }, [messages, loading]);
+  }, [messages, loading, streaming]);
 
   const isWorking = configured && !!user && chatOnServer !== false;
   const canSend = !!input.trim() && !loading;
@@ -89,17 +94,34 @@ export default function CoachTray({
     setInput("");
     setError("");
     setLoading(true);
+    setStreaming("");
+    let acc = "";
+    let inbandError = "";
     try {
-      const { reply } = await api.chat(next, buildChatContext(analysis));
-      setMessages((m) => [...m, { role: "assistant", content: reply }]);
+      await api.chatStream(next, buildChatContext(analysis), {
+        onDelta: (tkn) => {
+          acc += tkn;
+          setStreaming(acc);
+        },
+        onDone: () => undefined,
+        // An in-band error (OpenRouter connect/mid-stream/empty) isn't thrown — capture it and
+        // rethrow below so success and failure share one rollback path.
+        onError: (detail) => {
+          inbandError = detail;
+        },
+      });
+      if (inbandError) throw new ChatError(inbandError, 502);
+      setMessages((m) => [...m, { role: "assistant", content: acc }]);
     } catch (e) {
-      // Roll back the optimistic user turn and restore the text so a retry doesn't duplicate it.
+      // Roll back the optimistic user turn (the partial assistant text lives in `streaming`, which
+      // `finally` clears — nothing to slice) and restore the text so a retry doesn't duplicate it.
       setMessages((m) => m.slice(0, -1));
       setInput(text);
       const expired = e instanceof ChatError && e.status === 401;
       setError(expired ? t("chat.sessionExpired") : t("chat.error"));
     } finally {
       setLoading(false);
+      setStreaming("");
     }
   }
 
@@ -284,7 +306,27 @@ export default function CoachTray({
                     </motion.div>
                   ),
                 )}
-                {loading && (
+                {/* Live assistant turn: the streamed answer as tokens arrive, same styling as a
+                    committed coach turn so it doesn't jump on completion. */}
+                {streaming && (
+                  <div>
+                    <div className="mb-1.5 flex items-center gap-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+                        {t("chat.coach")}
+                      </span>
+                      <span
+                        title={t("chat.grounded")}
+                        className="inline-flex items-center gap-1 text-[10px] font-medium text-secondary"
+                      >
+                        <CheckCircle size={12} weight="fill" />
+                        {t("chat.groundedShort")}
+                      </span>
+                    </div>
+                    <p className="text-[15px] leading-relaxed text-content">{streaming}</p>
+                  </div>
+                )}
+                {/* Spinner only until the first token lands; then the streaming text carries it. */}
+                {loading && !streaming && (
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <CircleNotch size={14} className="animate-spin" />
                     {t("chat.thinking")}

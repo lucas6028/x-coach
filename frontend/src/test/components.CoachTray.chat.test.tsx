@@ -8,7 +8,7 @@ import { ChatError, type Analysis } from "../api";
 // Mutable auth state so tests can flip signed-in / signed-out (hoisted for the vi.mock factory).
 const h = vi.hoisted(() => ({
   auth: { configured: true, user: { id: "u1" } as { id: string } | null },
-  chat: vi.fn(),
+  chatStream: vi.fn(),
   health: vi.fn(),
 }));
 
@@ -17,8 +17,23 @@ vi.mock("../lib/auth", () => ({ useAuth: () => h.auth }));
 // component's `instanceof ChatError` status check exercises the genuine error type.
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { ...actual.api, chat: h.chat, health: h.health } };
+  return { ...actual, api: { ...actual.api, chatStream: h.chatStream, health: h.health } };
 });
+
+// Drive the component's stream handlers with a fixed reply, then complete — the streaming analogue
+// of a resolved `{ reply }`. Deltas are chunked to exercise incremental accumulation.
+function streamReply(reply: string, model = "m") {
+  return async (
+    _messages: unknown,
+    _context: unknown,
+    handlers: { onDelta: (t: string) => void; onDone: (m: string) => void }
+  ) => {
+    const mid = Math.ceil(reply.length / 2);
+    handlers.onDelta(reply.slice(0, mid));
+    handlers.onDelta(reply.slice(mid));
+    handlers.onDone(model);
+  };
+}
 
 import CoachTray from "../components/CoachTray";
 
@@ -51,20 +66,20 @@ function renderTray() {
 describe("CoachTray — follow-up chat", () => {
   beforeEach(() => {
     h.auth = { configured: true, user: { id: "u1" } };
-    h.chat.mockReset();
+    h.chatStream.mockReset();
     h.health.mockReset();
     h.health.mockResolvedValue({ status: "ok", chat_configured: true });
   });
 
-  it("sends a grounded user turn and renders the coach reply in the same thread", async () => {
-    h.chat.mockResolvedValue({ reply: "Drive your knees out over your toes.", model: "m" });
+  it("sends a grounded user turn and renders the streamed coach reply in the same thread", async () => {
+    h.chatStream.mockImplementation(streamReply("Drive your knees out over your toes."));
     renderTray();
 
     await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "why did my knees cave?");
     await userEvent.click(screen.getByLabelText(/Send message/i));
 
-    expect(h.chat).toHaveBeenCalledTimes(1);
-    const [messages, context] = h.chat.mock.calls[0];
+    expect(h.chatStream).toHaveBeenCalledTimes(1);
+    const [messages, context] = h.chatStream.mock.calls[0];
     expect(messages.at(-1)).toEqual({ role: "user", content: "why did my knees cave?" });
     // Grounding blob carries the detected fault + its retrieved corrective cue.
     expect(context.faults[0].fault_name).toBe("knees_inward");
@@ -74,19 +89,19 @@ describe("CoachTray — follow-up chat", () => {
   });
 
   it("sends a starter suggestion directly when its chip is clicked", async () => {
-    h.chat.mockResolvedValue({ reply: "Fix your knees first.", model: "m" });
+    h.chatStream.mockImplementation(streamReply("Fix your knees first."));
     renderTray();
 
     await userEvent.click(screen.getByRole("button", { name: /What should I fix first/i }));
 
-    expect(h.chat).toHaveBeenCalledTimes(1);
-    const [messages] = h.chat.mock.calls[0];
+    expect(h.chatStream).toHaveBeenCalledTimes(1);
+    const [messages] = h.chatStream.mock.calls[0];
     expect(messages.at(-1)).toEqual({ role: "user", content: "What should I fix first?" });
     expect(await screen.findByText("Fix your knees first.")).toBeInTheDocument();
   });
 
   it("shows an error and rolls back the optimistic turn when the coach is unreachable", async () => {
-    h.chat.mockRejectedValue(new Error("network"));
+    h.chatStream.mockRejectedValue(new Error("network"));
     renderTray();
 
     const box = screen.getByPlaceholderText(/Ask a follow-up/i) as HTMLInputElement;
@@ -100,13 +115,39 @@ describe("CoachTray — follow-up chat", () => {
   });
 
   it("tells the user to sign in again on a 401 (expired session)", async () => {
-    h.chat.mockRejectedValue(new ChatError("Missing bearer token.", 401));
+    h.chatStream.mockRejectedValue(new ChatError("Missing bearer token.", 401));
     renderTray();
 
     await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "hi");
     await userEvent.keyboard("{Enter}");
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/sign in again/i);
+  });
+
+  it("rolls back the optimistic turn and shows an error on an in-band stream error", async () => {
+    // The stream opens (200) but OpenRouter fails mid-flight: the client delivers an `error` frame
+    // via onError rather than throwing. The partial turn must be discarded, not left orphaned.
+    h.chatStream.mockImplementation(
+      async (
+        _m: unknown,
+        _c: unknown,
+        handlers: { onDelta: (t: string) => void; onError: (d: string) => void }
+      ) => {
+        handlers.onDelta("Drive your kne");
+        handlers.onError("OpenRouter request failed: reset");
+      }
+    );
+    renderTray();
+
+    const box = screen.getByPlaceholderText(/Ask a follow-up/i) as HTMLInputElement;
+    await userEvent.type(box, "why?");
+    await userEvent.keyboard("{Enter}");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/try again/i);
+    // The partial assistant text is gone and the user turn rolled back; input restored for retry.
+    expect(screen.queryByText("Drive your kne")).not.toBeInTheDocument();
+    expect(screen.queryByText("why?")).not.toBeInTheDocument();
+    expect(box.value).toBe("why?");
   });
 
   it("keeps a working composer when the one-shot health check fails transiently", async () => {
@@ -135,7 +176,7 @@ describe("CoachTray — follow-up chat", () => {
 
     const disabled = await screen.findByPlaceholderText(/Ask the AI Coach/i);
     expect(disabled).toBeDisabled();
-    expect(h.chat).not.toHaveBeenCalled();
+    expect(h.chatStream).not.toHaveBeenCalled();
   });
 
   it("does nothing when Enter is pressed with an empty composer", async () => {
@@ -143,7 +184,7 @@ describe("CoachTray — follow-up chat", () => {
     const box = await screen.findByPlaceholderText(/Ask a follow-up/i);
     box.focus();
     await userEvent.keyboard("{Enter}");
-    expect(h.chat).not.toHaveBeenCalled();
+    expect(h.chatStream).not.toHaveBeenCalled();
   });
 
   it("scrolls the thread into view once a turn is sent, when scrollTo is available", async () => {
@@ -154,7 +195,7 @@ describe("CoachTray — follow-up chat", () => {
       value: scrollTo,
     });
 
-    h.chat.mockResolvedValue({ reply: "Ok.", model: "m" });
+    h.chatStream.mockImplementation(streamReply("Ok."));
     renderTray();
 
     await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "hi");
