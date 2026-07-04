@@ -54,6 +54,26 @@ describe("History", () => {
     expect(screen.getByText("2 faults")).toBeInTheDocument();
   });
 
+  it("groups rows under one date header per day", async () => {
+    // Two rows on the same day + one 10 days earlier -> two day groups. Midday-UTC and a 10-day gap
+    // keep the day boundaries stable across timezones so the header count isn't TZ-dependent.
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 3,
+      items: [
+        item({ id: "a", created_at: "2026-06-20T12:00:00.000Z" }),
+        item({ id: "b", created_at: "2026-06-20T13:00:00.000Z" }),
+        item({ id: "c", created_at: "2026-06-10T12:00:00.000Z" }),
+      ],
+    });
+    renderHistory();
+    await screen.findAllByText("2 faults"); // wait for the ready state (3 rows share the badge)
+
+    // One <h2> date separator per distinct day (the page title is the only <h1>).
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(2);
+    // All three rows still render, each replayable.
+    expect(screen.getAllByRole("link", { name: /Side squat/i })).toHaveLength(3);
+  });
+
   it("renders a clean badge for fault-free reps", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({
       total: 1,

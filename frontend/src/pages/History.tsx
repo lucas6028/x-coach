@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CaretRight,
   FilmSlate,
@@ -43,12 +43,36 @@ export default function History() {
     void load();
   }, [load]);
 
-  const fmtDate = (iso: string) => {
+  // The date now lives in the group header, so each row shows only its time.
+  const fmtTime = (iso: string) => {
     const d = new Date(iso);
-    return Number.isNaN(d.getTime())
-      ? iso
-      : d.toLocaleString(lang, { dateStyle: "medium", timeStyle: "short" });
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString(lang, { timeStyle: "short" });
   };
+
+  // Group the (newest-first) rows into day sections, preserving order — so the list reads as a
+  // reverse-chronological timeline with a date header separating each day. Rows with an unparseable
+  // timestamp fall into one trailing "unknown" group rather than being dropped.
+  const groups = useMemo(() => {
+    const out: { key: string; label: string; items: HistoryItem[] }[] = [];
+    const index = new Map<string, number>();
+    for (const it of items) {
+      const d = new Date(it.created_at);
+      const valid = !Number.isNaN(d.getTime());
+      const key = valid ? d.toDateString() : "unknown";
+      let i = index.get(key);
+      if (i === undefined) {
+        i = out.length;
+        index.set(key, i);
+        out.push({
+          key,
+          label: valid ? d.toLocaleDateString(lang, { dateStyle: "long" }) : it.created_at,
+          items: [],
+        });
+      }
+      out[i].items.push(it);
+    }
+    return out;
+  }, [items, lang]);
 
   return (
     <div className="min-h-[100dvh] bg-background-dark text-content">
@@ -139,46 +163,61 @@ export default function History() {
         )}
 
         {status === "ready" && items.length > 0 && (
-          <ul className="mt-8 flex flex-col gap-2">
-            {items.map((it) => {
-              const clean = it.fault_count === 0;
-              return (
-                <li key={it.id}>
-                  <Link
-                    to={`/app?analysis=${it.id}`}
-                    className="group flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
-                  >
-                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                      <PersonSimpleRun size={22} weight="duotone" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium text-content">
-                        {t("history.rowTitle", { view: viewLabel(t, it.view_type ?? "unknown") })}
-                      </p>
-                      <p className="mt-0.5 font-mono text-xs text-muted">{fmtDate(it.created_at)}</p>
-                    </div>
-                    <span
-                      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-                        clean
-                          ? "bg-secondary/15 text-secondary"
-                          : "bg-[rgb(var(--c-fault))]/15 text-[rgb(var(--c-fault))]"
-                      }`}
-                    >
-                      {clean
-                        ? t("history.clean")
-                        : it.fault_count === 1
-                          ? t("history.faultOne")
-                          : t("history.faultMany", { count: it.fault_count })}
-                    </span>
-                    <CaretRight
-                      size={18}
-                      className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
-                    />
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="mt-8 flex flex-col gap-6">
+            {groups.map((g) => (
+              <section key={g.key}>
+                {/* Date separator: one header per day, above that day's rows. */}
+                <h2 className="mb-2 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-muted">
+                  <span>{g.label}</span>
+                  <span className="h-px flex-1 bg-border-dark" />
+                </h2>
+                <ul className="flex flex-col gap-2">
+                  {g.items.map((it) => {
+                    const clean = it.fault_count === 0;
+                    return (
+                      <li key={it.id}>
+                        <Link
+                          to={`/app?analysis=${it.id}`}
+                          className="group flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
+                        >
+                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <PersonSimpleRun size={22} weight="duotone" />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate font-medium text-content">
+                              {t("history.rowTitle", {
+                                view: viewLabel(t, it.view_type ?? "unknown"),
+                              })}
+                            </p>
+                            <p className="mt-0.5 font-mono text-xs text-muted">
+                              {fmtTime(it.created_at)}
+                            </p>
+                          </div>
+                          <span
+                            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+                              clean
+                                ? "bg-secondary/15 text-secondary"
+                                : "bg-[rgb(var(--c-fault))]/15 text-[rgb(var(--c-fault))]"
+                            }`}
+                          >
+                            {clean
+                              ? t("history.clean")
+                              : it.fault_count === 1
+                                ? t("history.faultOne")
+                                : t("history.faultMany", { count: it.fault_count })}
+                          </span>
+                          <CaretRight
+                            size={18}
+                            className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
+                          />
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ))}
+          </div>
         )}
       </main>
     </div>
