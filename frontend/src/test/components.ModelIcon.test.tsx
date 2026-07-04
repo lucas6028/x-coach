@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
-import ModelIcon from "../components/ModelIcon";
+import ModelIcon, { modelLabel } from "../components/ModelIcon";
+
+describe("modelLabel", () => {
+  it("maps a curated slug to a friendly name and passes an unknown slug through", () => {
+    expect(modelLabel("deepseek/deepseek-v4-flash")).toBe("DeepSeek V4 Flash");
+    expect(modelLabel("some/self-hosted-model")).toBe("some/self-hosted-model");
+  });
+});
 
 describe("ModelIcon", () => {
   it("renders a brand SVG for each known model id", () => {

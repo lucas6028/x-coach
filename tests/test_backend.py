@@ -895,9 +895,9 @@ class MainAppTests(_TempConfigBase):
     def test_health_reports_chat_models_and_default(self) -> None:
         resp = self.client.get("/api/health")
         body = resp.json()
-        ids = [m["id"] for m in body["chat_models"]]
+        ids = body["chat_models"]  # a list of model-id strings
         self.assertTrue(ids)
-        self.assertTrue(all("label" in m for m in body["chat_models"]))
+        self.assertTrue(all(isinstance(m, str) for m in ids))
         # The default is always one of the offered models.
         self.assertIn(body["chat_default"], ids)
 

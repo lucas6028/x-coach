@@ -59,40 +59,24 @@ class Settings(BaseSettings):
         return bool(self.openrouter_api_key)
 
 
-# Display labels for the curated slugs. Any other (self-hoster) slug is shown as its raw id — the
-# backend is the single source of truth for the picker, so the frontend never hard-codes this.
-_MODEL_LABELS: dict[str, str] = {
-    "deepseek/deepseek-v4-flash": "DeepSeek V4 Flash",
-    "xiaomi/mimo-v2.5": "MiMo V2.5",
-    "minimax/minimax-m3": "MiniMax M3",
-    "tencent/hy3-preview": "Hy3 Preview",
-}
-
 # Used only if ``OPENROUTER_MODELS`` is misconfigured to empty, so the picker is never empty.
 _FALLBACK_MODEL = "deepseek/deepseek-v4-flash"
 
 
-def chat_models() -> list[dict[str, str]]:
-    """The selectable chat models as ``[{"id", "label"}]``, parsed from ``OPENROUTER_MODELS``.
+def chat_models() -> list[str]:
+    """The selectable model ids, parsed from ``OPENROUTER_MODELS`` (first = default).
 
-    The first entry is the default. Order is preserved and ids are deduped; an empty/blank setting
-    falls back to a single built-in model so the picker is never empty.
+    Order is preserved and ids are deduped; a blank/empty setting falls back to a single built-in
+    model so the picker is never empty. Display names are a frontend concern — this is purely the
+    authoritative id list.
     """
     raw = [m.strip() for m in get_settings().openrouter_models.split(",") if m.strip()]
-    if not raw:
-        raw = [_FALLBACK_MODEL]
-    out: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for slug in raw:
-        if slug not in seen:
-            seen.add(slug)
-            out.append({"id": slug, "label": _MODEL_LABELS.get(slug, slug)})
-    return out
+    return list(dict.fromkeys(raw)) or [_FALLBACK_MODEL]
 
 
 def default_chat_model() -> str:
     """The model used when the client sends none — the first entry of ``OPENROUTER_MODELS``."""
-    return chat_models()[0]["id"]
+    return chat_models()[0]
 
 
 def resolve_chat_model(requested: str | None) -> str:
@@ -102,9 +86,9 @@ def resolve_chat_model(requested: str | None) -> str:
     controls both the picker and the default via ``OPENROUTER_MODELS`` (first = default).
     """
     models = chat_models()
-    if requested and requested in {m["id"] for m in models}:
+    if requested and requested in set(models):
         return requested
-    return models[0]["id"]
+    return models[0]
 
 
 @lru_cache(maxsize=1)

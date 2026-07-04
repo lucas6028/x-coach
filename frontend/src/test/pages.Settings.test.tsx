@@ -29,10 +29,7 @@ beforeEach(() => {
   // Server-driven model catalog (from /api/health).
   vi.spyOn(api, "health").mockResolvedValue({
     status: "ok",
-    chat_models: [
-      { id: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
-      { id: "minimax/minimax-m3", label: "MiniMax M3" },
-    ],
+    chat_models: ["deepseek/deepseek-v4-flash", "minimax/minimax-m3"],
     chat_default: "deepseek/deepseek-v4-flash",
   });
   mockUseAuth.mockReturnValue({
