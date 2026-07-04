@@ -51,14 +51,14 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
 
 ## Phase C — Persistence
 
-- [ ] **C1 — Schema: `conversations` migration**
+- [x] **C1 — Schema: `conversations` migration** ✅ no-FK video_id, RLS owner-scoped, touch trigger.
   - Acceptance: new migration creates `conversations(id, user_id→auth.users, video_id text NO FK,
     messages jsonb default '[]', created_at, updated_at, unique(user_id,video_id))` + RLS
     `conversations_owner_all` + `touch_updated_at` trigger; mirrors the `analyses` precedent.
   - Verify: SQL reads cleanly; no FK to `videos`/`analyses`; RLS scoped to `auth.uid() = user_id`.
   - Files: `db/migrations/<ts>_conversations.sql`.
 
-- [ ] **C2 — Store: conversation read/write**
+- [x] **C2 — Store: conversation read/write** ✅ upsert/get + delete-all clears conversations; store tests green (18).
   - Acceptance: `upsert_conversation(*,token,user_id,video_id,messages)`,
     `get_conversation(*,token,video_id)->{messages}|None`; `delete_all_analyses` also clears the
     caller's conversations.
