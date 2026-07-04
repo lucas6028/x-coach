@@ -1322,5 +1322,52 @@ class AnalysesRouterTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 401)
 
 
+# ------------------------------------------------------------- routers.conversations
+
+
+class ConversationsRouterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+
+    def test_put_saves_the_thread(self) -> None:
+        msgs = [
+            {"role": "user", "content": "why did my knees cave?"},
+            {"role": "assistant", "content": "drive knees out"},
+        ]
+        with mock.patch.object(store, "upsert_conversation") as up:
+            resp = self.client.put("/api/conversations/vid", json={"messages": msgs})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"video_id": "vid", "messages": msgs})
+        up.assert_called_once_with(token="tok", user_id="u1", video_id="vid", messages=msgs)
+
+    def test_get_restores_the_thread(self) -> None:
+        msgs = [{"role": "user", "content": "hi"}]
+        with mock.patch.object(
+            store, "get_conversation", return_value={"messages": msgs}
+        ) as gc:
+            resp = self.client.get("/api/conversations/vid")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"video_id": "vid", "messages": msgs})
+        gc.assert_called_once_with(token="tok", video_id="vid")
+
+    def test_get_absent_thread_returns_empty(self) -> None:
+        with mock.patch.object(store, "get_conversation", return_value=None):
+            resp = self.client.get("/api/conversations/ghost")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"video_id": "ghost", "messages": []})
+
+    def test_put_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.put("/api/conversations/vid", json={"messages": []})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_get_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.get("/api/conversations/vid")
+        self.assertEqual(resp.status_code, 401)
+
+
 if __name__ == "__main__":
     unittest.main()
