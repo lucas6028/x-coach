@@ -1,17 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import {
-  CHAT_MODELS,
-  DEFAULT_CHAT_MODEL,
-  getStoredModel,
-  setStoredModel,
-} from "../lib/model";
+import { CHAT_MODELS, SERVER_DEFAULT, getStoredModel, setStoredModel } from "../lib/model";
 
 describe("lib/model", () => {
   beforeEach(() => localStorage.clear());
 
-  it("defaults to deepseek-v4-flash when unset", () => {
-    expect(getStoredModel()).toBe(DEFAULT_CHAT_MODEL);
-    expect(DEFAULT_CHAT_MODEL).toBe("deepseek/deepseek-v4-flash");
+  it("defaults to the server default (empty) when unset", () => {
+    expect(getStoredModel()).toBe(SERVER_DEFAULT);
+    expect(SERVER_DEFAULT).toBe("");
   });
 
   it("round-trips a valid selection", () => {
@@ -19,9 +14,9 @@ describe("lib/model", () => {
     expect(getStoredModel()).toBe("minimax/minimax-m3");
   });
 
-  it("falls back to the default for an unrecognized stored value", () => {
+  it("falls back to the server default for an unrecognized stored value", () => {
     localStorage.setItem("chat_model", "evil/expensive-model");
-    expect(getStoredModel()).toBe(DEFAULT_CHAT_MODEL);
+    expect(getStoredModel()).toBe(SERVER_DEFAULT);
   });
 
   it("offers exactly the four allow-listed models, each with a label", () => {

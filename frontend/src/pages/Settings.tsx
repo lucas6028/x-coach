@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CheckCircle,
   ClockCounterClockwise,
+  Faders,
   Trash,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -10,7 +11,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
-import { CHAT_MODELS, getStoredModel, setStoredModel } from "../lib/model";
+import { CHAT_MODELS, SERVER_DEFAULT, getStoredModel, setStoredModel } from "../lib/model";
 import { avatarUrl, displayName, initial } from "../lib/profile";
 import ModelIcon from "../components/ModelIcon";
 
@@ -119,11 +120,13 @@ export default function Settings() {
           <p className="mt-1.5 text-sm text-muted">{t("settings.modelDesc")}</p>
           <fieldset className="mt-3 divide-y divide-border-dark overflow-hidden rounded-2xl border border-border-dark bg-surface-dark">
             <legend className="sr-only">{t("settings.model")}</legend>
-            {CHAT_MODELS.map((m) => {
+            {/* "Server default" (OPENROUTER_MODEL) first, then the curated models. */}
+            {[{ id: SERVER_DEFAULT, label: t("settings.modelDefault") }, ...CHAT_MODELS].map((m) => {
               const selected = m.id === model;
+              const isDefault = m.id === SERVER_DEFAULT;
               return (
                 <label
-                  key={m.id}
+                  key={m.id || "server-default"}
                   className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-content/[0.03]"
                 >
                   <input
@@ -139,11 +142,17 @@ export default function Settings() {
                       selected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-content/5"
                     }`}
                   >
-                    <ModelIcon id={m.id} size={20} />
+                    {isDefault ? (
+                      <Faders size={18} className="text-muted" />
+                    ) : (
+                      <ModelIcon id={m.id} size={20} />
+                    )}
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium text-content">{m.label}</span>
-                    <span className="block truncate font-mono text-xs text-faint">{m.id}</span>
+                    <span className="block truncate font-mono text-xs text-faint">
+                      {m.id || "OPENROUTER_MODEL"}
+                    </span>
                   </span>
                   {selected && (
                     <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" />

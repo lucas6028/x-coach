@@ -45,13 +45,14 @@ describe("Settings", () => {
     expect(container.querySelector("img[src='https://x/me.png']")).toBeInTheDocument();
   });
 
-  it("lists the selectable coach models and defaults to DeepSeek V4 Flash", () => {
+  it("offers server-default + the four models, defaulting to server default", () => {
     renderSettings();
     expect(screen.getByRole("heading", { name: "Coach model" })).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /DeepSeek V4 Flash/i })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /MiniMax M3/i })).not.toBeChecked();
-    // All four allow-listed models are offered.
-    expect(screen.getAllByRole("radio")).toHaveLength(4);
+    // Fresh user: "Server default" (= OPENROUTER_MODEL) is selected, not a specific model.
+    expect(screen.getByRole("radio", { name: /Server default/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /DeepSeek V4 Flash/i })).not.toBeChecked();
+    // Server default + the four curated models.
+    expect(screen.getAllByRole("radio")).toHaveLength(5);
   });
 
   it("persists the chosen coach model to localStorage", async () => {
@@ -59,6 +60,15 @@ describe("Settings", () => {
     await userEvent.click(screen.getByRole("radio", { name: /MiniMax M3/i }));
     expect(localStorage.getItem("chat_model")).toBe("minimax/minimax-m3");
     expect(screen.getByRole("radio", { name: /MiniMax M3/i })).toBeChecked();
+  });
+
+  it("can switch back to the server default", async () => {
+    localStorage.setItem("chat_model", "minimax/minimax-m3");
+    renderSettings();
+    expect(screen.getByRole("radio", { name: /MiniMax M3/i })).toBeChecked();
+    await userEvent.click(screen.getByRole("radio", { name: /Server default/i }));
+    expect(localStorage.getItem("chat_model")).toBe("");
+    expect(screen.getByRole("radio", { name: /Server default/i })).toBeChecked();
   });
 
   it("requires confirmation before clearing analyses", async () => {

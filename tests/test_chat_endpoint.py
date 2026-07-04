@@ -327,6 +327,17 @@ class ResolveChatModelTests(unittest.TestCase):
             )
             self.assertEqual(app_settings.resolve_chat_model(None), "deepseek/deepseek-v4-flash")
 
+    def test_operator_configured_model_is_always_honored(self) -> None:
+        # A self-hoster sets OPENROUTER_MODEL to any model; it must be honored even though it isn't
+        # one of the curated four — that's how "clone it and run any model" works.
+        custom = types.SimpleNamespace(openrouter_model="some/self-hosted-model")
+        with mock.patch.object(app_settings, "get_settings", return_value=custom):
+            self.assertEqual(
+                app_settings.resolve_chat_model("some/self-hosted-model"),
+                "some/self-hosted-model",
+            )
+            self.assertEqual(app_settings.resolve_chat_model(None), "some/self-hosted-model")
+
 
 if __name__ == "__main__":
     unittest.main()
