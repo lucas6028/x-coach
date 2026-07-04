@@ -85,14 +85,14 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
 
 ## Phase D — Close-out
 
-- [ ] **D1 — Full regression + spec close**
+- [x] **D1 — Full regression + spec close** ✅ backend 292 passed (CI set), FE build + suite green (1 known env fail), spec criteria ticked.
   - Acceptance: whole backend suite + `yarn build` + `yarn test` green; `backend/app` coverage ≥ 95%.
   - Verify: `.venv/Scripts/python.exe -m pytest tests/` ; `cd frontend && yarn build && yarn test`.
   - Files: `specs/llm-chat-spec.md` (tick v2 criteria, record resolved open questions + build notes).
 
 ---
 
-### Decisions to confirm before A1 (see plan §5)
-- [ ] Markdown dep: `react-markdown` + `rehype-sanitize`
-- [ ] Persistence: one thread per analysis, restored on replay
-- [ ] Links in markdown: off (text/emphasis/list/code only)
+### Decisions (defaults approved via `/build auto`; reversible)
+- [x] Markdown dep: `react-markdown` + `rehype-sanitize`
+- [x] Persistence: one thread per analysis, restored on replay
+- [x] Links in markdown: off (text/emphasis/list/code only)
