@@ -54,11 +54,15 @@ class Settings(BaseSettings):
         return bool(self.openrouter_api_key)
 
 
-# Chat models the client may pick from in Settings (OpenRouter ``vendor/model`` slugs). Kept in
-# sync with ``frontend/src/lib/model.ts``. This is the security boundary: the client sends a chosen
-# model per request and the backend only honours it if it's on this list — the browser must never be
-# able to name an arbitrary (possibly far more expensive) model. Anything else falls back to the
-# configured ``openrouter_model`` default.
+# Chat models a deployed user may pick from in Settings (OpenRouter ``vendor/model`` slugs). Kept in
+# sync with ``frontend/src/lib/model.ts``. This is the security boundary for the *hosted* app: the
+# client sends a chosen model per request and the backend only honours it if it's on this list — the
+# browser must never be able to name an arbitrary (possibly far more expensive) model.
+#
+# It does NOT constrain the operator: whoever runs the server sets ``OPENROUTER_MODEL`` to ANY model
+# they want, and that is always honoured (it's the default and is explicitly allowed below). A
+# self-hoster who clones the repo therefore runs any model by setting one env var — no need to edit
+# this list — while hosted users stay limited to the curated four.
 ALLOWED_CHAT_MODELS: frozenset[str] = frozenset(
     {
         "deepseek/deepseek-v4-flash",
@@ -70,10 +74,17 @@ ALLOWED_CHAT_MODELS: frozenset[str] = frozenset(
 
 
 def resolve_chat_model(requested: str | None) -> str:
-    """Return ``requested`` if it is an allowed selection, else the configured default model."""
-    if requested and requested in ALLOWED_CHAT_MODELS:
+    """Resolve the model to call OpenRouter with.
+
+    ``requested`` (the client's per-chat pick) is honoured only if it's one of the curated
+    ``ALLOWED_CHAT_MODELS`` or it equals the operator-configured default — so the browser can't name
+    an arbitrary model, but the operator's ``OPENROUTER_MODEL`` (any model) always works. Everything
+    else, including a missing request (the "server default" choice), uses the configured default.
+    """
+    default = get_settings().openrouter_model
+    if requested and (requested in ALLOWED_CHAT_MODELS or requested == default):
         return requested
-    return get_settings().openrouter_model
+    return default
 
 
 @lru_cache(maxsize=1)

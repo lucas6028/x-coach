@@ -3,10 +3,8 @@ export interface ChatModel {
   label: string;
 }
 
-// The chat models a user can pick in Settings (OpenRouter "vendor/model" slugs). Kept in sync with
-// backend/app/settings.py ALLOWED_CHAT_MODELS — the backend validates the chosen id and falls back
-// to its default for anything else, so a drift here only ever costs the offered option, never
-// safety. Labels are brand names, not translated.
+// The models a hosted user can pick in Settings (OpenRouter "vendor/model" slugs). Kept in sync with
+// backend/app/settings.py ALLOWED_CHAT_MODELS — the backend validates the chosen id.
 export const CHAT_MODELS: ChatModel[] = [
   { id: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
   { id: "xiaomi/mimo-v2.5", label: "MiMo V2.5" },
@@ -14,14 +12,17 @@ export const CHAT_MODELS: ChatModel[] = [
   { id: "tencent/hy3-preview", label: "Hy3 Preview" },
 ];
 
-export const DEFAULT_CHAT_MODEL = CHAT_MODELS[0].id;
+// "" = use the server's configured OPENROUTER_MODEL. Picking this sends no model, so a self-hoster
+// who sets OPENROUTER_MODEL to ANY model gets it — without touching the curated list above. This is
+// the default (like the theme toggle's "system"), so a fresh user runs whatever the operator set.
+export const SERVER_DEFAULT = "";
 
 const STORAGE_KEY = "chat_model";
 
-// The user's chosen model id, or the default when unset / not a recognized option.
+// The user's chosen model id, or "" (server default) when unset or not one of the offered models.
 export function getStoredModel(): string {
   const m = (typeof localStorage !== "undefined" && localStorage.getItem(STORAGE_KEY)) || "";
-  return CHAT_MODELS.some((x) => x.id === m) ? m : DEFAULT_CHAT_MODEL;
+  return CHAT_MODELS.some((x) => x.id === m) ? m : SERVER_DEFAULT;
 }
 
 export function setStoredModel(id: string): void {
