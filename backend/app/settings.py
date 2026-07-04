@@ -40,11 +40,9 @@ class Settings(BaseSettings):
     # ``vendor/model`` namespace; the default is a cost-effective, capable general model that can
     # be overridden per-deployment without a code change.
     openrouter_api_key: str = ""
-    # The model used by default (the "server default"). A self-hoster sets this to ANY OpenRouter
-    # model and it just works — it is always offered and honoured, never restricted.
-    openrouter_model: str = "deepseek/deepseek-v4-flash"
-    # The comma-separated list of models a hosted user may pick in Settings. Env-configurable, so a
-    # self-hoster changes the whole picker without editing code. The default above is always added.
+    # The comma-separated list of models a user may pick in Settings; the FIRST is the default (used
+    # when the client picks nothing). Env-configurable, so a self-hoster changes the whole picker —
+    # and the default — without editing code. Set it to a single custom slug to run any model.
     openrouter_models: str = (
         "deepseek/deepseek-v4-flash,xiaomi/mimo-v2.5,minimax/minimax-m3,tencent/hy3-preview"
     )
@@ -70,39 +68,43 @@ _MODEL_LABELS: dict[str, str] = {
     "tencent/hy3-preview": "Hy3 Preview",
 }
 
+# Used only if ``OPENROUTER_MODELS`` is misconfigured to empty, so the picker is never empty.
+_FALLBACK_MODEL = "deepseek/deepseek-v4-flash"
+
 
 def chat_models() -> list[dict[str, str]]:
     """The selectable chat models as ``[{"id", "label"}]``, parsed from ``OPENROUTER_MODELS``.
 
-    The configured default (``OPENROUTER_MODEL``) is always included first, so a self-hoster who
-    sets only that env var still gets a working, offered model. Order is preserved; ids are deduped.
+    The first entry is the default. Order is preserved and ids are deduped; an empty/blank setting
+    falls back to a single built-in model so the picker is never empty.
     """
-    s = get_settings()
-    raw = [m.strip() for m in s.openrouter_models.split(",") if m.strip()]
-    ordered = raw if s.openrouter_model in raw else [s.openrouter_model, *raw]
+    raw = [m.strip() for m in get_settings().openrouter_models.split(",") if m.strip()]
+    if not raw:
+        raw = [_FALLBACK_MODEL]
     out: list[dict[str, str]] = []
     seen: set[str] = set()
-    for slug in ordered:
-        if slug and slug not in seen:
+    for slug in raw:
+        if slug not in seen:
             seen.add(slug)
             out.append({"id": slug, "label": _MODEL_LABELS.get(slug, slug)})
     return out
 
 
 def default_chat_model() -> str:
-    """The model used when the client sends none — the configured ``OPENROUTER_MODEL``."""
-    return get_settings().openrouter_model
+    """The model used when the client sends none — the first entry of ``OPENROUTER_MODELS``."""
+    return chat_models()[0]["id"]
 
 
 def resolve_chat_model(requested: str | None) -> str:
     """Honour the client's ``requested`` model only if it's one of the offered models, else default.
 
-    The offered set always contains the configured default, so the browser can't name an arbitrary
-    (possibly far more expensive) model, while the operator's ``OPENROUTER_MODEL`` always works.
+    So the browser can't name an arbitrary (possibly far more expensive) model, while the operator
+    controls both the picker and the default via ``OPENROUTER_MODELS`` (first = default).
     """
-    if requested and requested in {m["id"] for m in chat_models()}:
+    models = chat_models()
+    if requested and requested in {m["id"] for m in models}:
         return requested
-    return default_chat_model()
+    return models[0]["id"]
 
 
 @lru_cache(maxsize=1)
