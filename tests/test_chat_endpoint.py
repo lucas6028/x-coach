@@ -85,6 +85,13 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("ONLY", prompt)
         self.assertIn("Do NOT invent", prompt)
 
+    def test_permits_light_markdown_without_relaxing_grounding(self) -> None:
+        # v2: the coach may format with light markdown, but the grounding/honesty rules must remain.
+        prompt = chat_service._build_system_prompt(_FAULT_CTX)
+        self.assertIn("markdown", prompt.lower())
+        self.assertIn("ONLY", prompt)  # grounding constraint intact
+        self.assertIn("Do NOT invent", prompt)  # honesty constraint intact
+
     def test_clean_rep_has_no_fault_list_but_flags_clean(self) -> None:
         prompt = chat_service._build_system_prompt(_CLEAN_CTX)
         self.assertIn("CLEAN REP", prompt)
