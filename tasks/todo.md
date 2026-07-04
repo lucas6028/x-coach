@@ -40,7 +40,7 @@ frontend `cd frontend && yarn test <file>` / `yarn build`.
   - Files: `frontend/package.json`, `frontend/src/components/Markdown.tsx` (new) +
     `frontend/src/components/CoachTray.tsx`, chat test.
 
-- [ ] **B2 — Backend: permit light markdown in the prompt**
+- [x] **B2 — Backend: permit light markdown in the prompt** ✅ preamble line added; grounding/honesty asserted intact.
   - Acceptance: one line added to `_SYSTEM_PREAMBLE` permitting bold/short-list/inline-code/timecodes
     with no grounding rule relaxed.
   - Verify: `pytest tests/test_chat_endpoint.py` — a `_build_system_prompt` test asserts the

@@ -39,6 +39,8 @@ _SYSTEM_PREAMBLE = (
     "- Base any corrective advice on the retrieved corrections/cues for the detected faults.\n"
     "- Be concise, specific, and encouraging. Reference the timecodes and phases when useful.\n"
     "- Reply in the same language the user writes in.\n"
+    "- You may use light Markdown for readability — bold for key cues, short bulleted lists, and "
+    "inline code for measurements/timecodes. Formatting never loosens the grounding rules above.\n"
 )
 
 
