@@ -190,7 +190,6 @@ class StreamCompletionTests(unittest.TestCase):
     def _settings(self):
         return types.SimpleNamespace(
             openrouter_api_key="sk-or-test",
-            openrouter_model="deepseek/deepseek-v4-flash",
             openrouter_base_url="https://openrouter.ai/api/v1",
         )
 
@@ -313,16 +312,13 @@ class ChatRouterTests(unittest.TestCase):
         self.assertEqual(captured["model"], "minimax/minimax-m3")
 
 
-def _fake_model_settings(model: str, models: str):
-    return types.SimpleNamespace(openrouter_model=model, openrouter_models=models)
+def _fake_models(models: str):
+    return types.SimpleNamespace(openrouter_models=models)
 
 
 class ChatModelsCatalogTests(unittest.TestCase):
     def test_parses_env_list_and_labels_known_slugs(self) -> None:
-        s = _fake_model_settings(
-            "deepseek/deepseek-v4-flash",
-            "deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5 ,minimax/minimax-m3",  # spaces tolerated
-        )
+        s = _fake_models("deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5 ,minimax/minimax-m3")  # spaces ok
         with mock.patch.object(app_settings, "get_settings", return_value=s):
             cat = app_settings.chat_models()
         self.assertEqual(
@@ -331,42 +327,48 @@ class ChatModelsCatalogTests(unittest.TestCase):
         )
         self.assertEqual(cat[0]["label"], "DeepSeek V4 Flash")  # curated label
 
-    def test_default_is_prepended_when_absent_and_ids_deduped(self) -> None:
-        s = _fake_model_settings("custom/model", "custom/model,custom/model,minimax/minimax-m3")
+    def test_dedupes_and_labels_unknown_slug_as_its_id(self) -> None:
+        s = _fake_models("custom/model,custom/model,minimax/minimax-m3")
         with mock.patch.object(app_settings, "get_settings", return_value=s):
             cat = app_settings.chat_models()
         self.assertEqual([m["id"] for m in cat], ["custom/model", "minimax/minimax-m3"])
         self.assertEqual(cat[0]["label"], "custom/model")  # unknown slug -> raw id as label
 
+    def test_blank_list_falls_back_to_one_built_in_model(self) -> None:
+        s = _fake_models("  , , ")  # misconfigured to empty
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
+            cat = app_settings.chat_models()
+        self.assertEqual(len(cat), 1)  # never empty
+        self.assertTrue(cat[0]["id"])
+
 
 class ResolveChatModelTests(unittest.TestCase):
     def test_offered_model_is_returned(self) -> None:
-        s = _fake_model_settings(
-            "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash,minimax/minimax-m3"
-        )
+        s = _fake_models("deepseek/deepseek-v4-flash,minimax/minimax-m3")
         with mock.patch.object(app_settings, "get_settings", return_value=s):
             self.assertEqual(
                 app_settings.resolve_chat_model("minimax/minimax-m3"), "minimax/minimax-m3"
             )
 
-    def test_unknown_or_missing_falls_back_to_the_configured_default(self) -> None:
-        s = _fake_model_settings("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash")
+    def test_unknown_or_missing_falls_back_to_the_first_model(self) -> None:
+        s = _fake_models("deepseek/deepseek-v4-flash,minimax/minimax-m3")
         with mock.patch.object(app_settings, "get_settings", return_value=s):
+            self.assertEqual(app_settings.default_chat_model(), "deepseek/deepseek-v4-flash")
             self.assertEqual(
                 app_settings.resolve_chat_model("evil/expensive-model"),
                 "deepseek/deepseek-v4-flash",
             )
             self.assertEqual(app_settings.resolve_chat_model(None), "deepseek/deepseek-v4-flash")
 
-    def test_operator_default_is_always_offered_and_honored(self) -> None:
-        # Self-hoster sets only OPENROUTER_MODEL to a custom model absent from OPENROUTER_MODELS.
-        s = _fake_model_settings("some/self-hosted", "deepseek/deepseek-v4-flash,minimax/minimax-m3")
+    def test_self_hoster_single_custom_model(self) -> None:
+        # Set OPENROUTER_MODELS to one custom slug -> it's the whole picker AND the default.
+        s = _fake_models("some/self-hosted-model")
         with mock.patch.object(app_settings, "get_settings", return_value=s):
-            self.assertIn("some/self-hosted", [m["id"] for m in app_settings.chat_models()])
+            self.assertEqual(app_settings.default_chat_model(), "some/self-hosted-model")
             self.assertEqual(
-                app_settings.resolve_chat_model("some/self-hosted"), "some/self-hosted"
+                app_settings.resolve_chat_model("some/self-hosted-model"), "some/self-hosted-model"
             )
-            self.assertEqual(app_settings.resolve_chat_model(None), "some/self-hosted")
+            self.assertEqual(app_settings.resolve_chat_model(None), "some/self-hosted-model")
 
 
 if __name__ == "__main__":
