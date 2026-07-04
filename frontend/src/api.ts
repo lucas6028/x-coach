@@ -163,6 +163,21 @@ export interface Conversation {
   messages: ChatMessage[];
 }
 
+// A selectable coach model. The catalog is server-driven (from /api/health), so the frontend never
+// hard-codes it — a self-hoster reconfigures it via env.
+export interface ChatModel {
+  id: string;
+  label: string;
+}
+
+export interface HealthResponse {
+  status: string;
+  auth_configured?: boolean;
+  chat_configured?: boolean;
+  chat_models?: ChatModel[];
+  chat_default?: string;
+}
+
 // Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
 // event line, or an unparseable data payload, is ignored (keep-alives / partial writes).
 function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
@@ -226,10 +241,7 @@ async function getJSON<T>(url: string): Promise<T> {
 }
 
 export const api = {
-  health: () =>
-    getJSON<{ status: string; auth_configured?: boolean; chat_configured?: boolean }>(
-      "/api/health"
-    ),
+  health: () => getJSON<HealthResponse>("/api/health"),
 
   listVideos: (limit = 50, offset = 0, fault?: string) =>
     getJSON<LibraryPage>(

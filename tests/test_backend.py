@@ -892,6 +892,15 @@ class MainAppTests(_TempConfigBase):
         ):
             self.assertIn(expected, paths)
 
+    def test_health_reports_chat_models_and_default(self) -> None:
+        resp = self.client.get("/api/health")
+        body = resp.json()
+        ids = [m["id"] for m in body["chat_models"]]
+        self.assertTrue(ids)
+        self.assertTrue(all("label" in m for m in body["chat_models"]))
+        # The default is always one of the offered models.
+        self.assertIn(body["chat_default"], ids)
+
     def test_health_reports_auth_configured_true(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",

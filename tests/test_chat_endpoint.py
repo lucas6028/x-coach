@@ -313,30 +313,60 @@ class ChatRouterTests(unittest.TestCase):
         self.assertEqual(captured["model"], "minimax/minimax-m3")
 
 
+def _fake_model_settings(model: str, models: str):
+    return types.SimpleNamespace(openrouter_model=model, openrouter_models=models)
+
+
+class ChatModelsCatalogTests(unittest.TestCase):
+    def test_parses_env_list_and_labels_known_slugs(self) -> None:
+        s = _fake_model_settings(
+            "deepseek/deepseek-v4-flash",
+            "deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5 ,minimax/minimax-m3",  # spaces tolerated
+        )
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
+            cat = app_settings.chat_models()
+        self.assertEqual(
+            [m["id"] for m in cat],
+            ["deepseek/deepseek-v4-flash", "xiaomi/mimo-v2.5", "minimax/minimax-m3"],
+        )
+        self.assertEqual(cat[0]["label"], "DeepSeek V4 Flash")  # curated label
+
+    def test_default_is_prepended_when_absent_and_ids_deduped(self) -> None:
+        s = _fake_model_settings("custom/model", "custom/model,custom/model,minimax/minimax-m3")
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
+            cat = app_settings.chat_models()
+        self.assertEqual([m["id"] for m in cat], ["custom/model", "minimax/minimax-m3"])
+        self.assertEqual(cat[0]["label"], "custom/model")  # unknown slug -> raw id as label
+
+
 class ResolveChatModelTests(unittest.TestCase):
-    def test_allowed_model_is_returned(self) -> None:
-        for allowed in ("deepseek/deepseek-v4-flash", "xiaomi/mimo-v2.5", "tencent/hy3-preview"):
-            self.assertEqual(app_settings.resolve_chat_model(allowed), allowed)
+    def test_offered_model_is_returned(self) -> None:
+        s = _fake_model_settings(
+            "deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash,minimax/minimax-m3"
+        )
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
+            self.assertEqual(
+                app_settings.resolve_chat_model("minimax/minimax-m3"), "minimax/minimax-m3"
+            )
 
     def test_unknown_or_missing_falls_back_to_the_configured_default(self) -> None:
-        default = types.SimpleNamespace(openrouter_model="deepseek/deepseek-v4-flash")
-        with mock.patch.object(app_settings, "get_settings", return_value=default):
+        s = _fake_model_settings("deepseek/deepseek-v4-flash", "deepseek/deepseek-v4-flash")
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
             self.assertEqual(
                 app_settings.resolve_chat_model("evil/expensive-model"),
                 "deepseek/deepseek-v4-flash",
             )
             self.assertEqual(app_settings.resolve_chat_model(None), "deepseek/deepseek-v4-flash")
 
-    def test_operator_configured_model_is_always_honored(self) -> None:
-        # A self-hoster sets OPENROUTER_MODEL to any model; it must be honored even though it isn't
-        # one of the curated four — that's how "clone it and run any model" works.
-        custom = types.SimpleNamespace(openrouter_model="some/self-hosted-model")
-        with mock.patch.object(app_settings, "get_settings", return_value=custom):
+    def test_operator_default_is_always_offered_and_honored(self) -> None:
+        # Self-hoster sets only OPENROUTER_MODEL to a custom model absent from OPENROUTER_MODELS.
+        s = _fake_model_settings("some/self-hosted", "deepseek/deepseek-v4-flash,minimax/minimax-m3")
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
+            self.assertIn("some/self-hosted", [m["id"] for m in app_settings.chat_models()])
             self.assertEqual(
-                app_settings.resolve_chat_model("some/self-hosted-model"),
-                "some/self-hosted-model",
+                app_settings.resolve_chat_model("some/self-hosted"), "some/self-hosted"
             )
-            self.assertEqual(app_settings.resolve_chat_model(None), "some/self-hosted-model")
+            self.assertEqual(app_settings.resolve_chat_model(None), "some/self-hosted")
 
 
 if __name__ == "__main__":

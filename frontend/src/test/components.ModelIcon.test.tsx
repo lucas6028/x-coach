@@ -15,8 +15,9 @@ describe("ModelIcon", () => {
     }
   });
 
-  it("renders nothing for an unknown id", () => {
+  it("renders a generic fallback icon for an unknown (self-hosted) id", () => {
     const { container } = render(<ModelIcon id="who/knows" />);
-    expect(container.querySelector("svg")).toBeNull();
+    // Not null: a self-hoster's custom slug still gets a chip icon rather than an empty badge.
+    expect(container.querySelector("svg")).not.toBeNull();
   });
 });
