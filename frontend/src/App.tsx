@@ -32,8 +32,11 @@ export default function App() {
   const [feedbackWidth, setFeedbackWidth] = useState(384);
   const [resizing, setResizing] = useState(false);
 
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
+  // The analysis id we just reflected into the URL after an upload — so the replay effect below can
+  // skip re-fetching an analysis we already hold in state.
+  const skipReloadId = useRef<string | null>(null);
 
   const seek = useCallback((t: number) => {
     const v = videoRef.current;
@@ -67,13 +70,21 @@ export default function App() {
     try {
       const data = await api.analyzeUpload(file);
       setAnalysis(data);
+      // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
+      // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;
+      // an anonymous upload has nothing durable to link to, so the URL stays put. Guard the replay
+      // effect from re-fetching the analysis we already hold.
+      if (data.analysis_id) {
+        skipReloadId.current = data.analysis_id;
+        setSearchParams({ analysis: data.analysis_id }, { replace: true });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t]);
+  }, [t, setSearchParams]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -94,7 +105,14 @@ export default function App() {
 
   const storedId = searchParams.get("analysis");
   useEffect(() => {
-    if (storedId) void loadStored(storedId);
+    if (!storedId) return;
+    // A just-uploaded analysis is already in state — skip the redundant re-fetch (consume the guard
+    // once, so a later manual navigation back to the same id still reloads).
+    if (storedId === skipReloadId.current) {
+      skipReloadId.current = null;
+      return;
+    }
+    void loadStored(storedId);
     // Re-run only when the requested id changes (not on unrelated re-renders).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedId]);

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import { AuthProvider } from "../lib/auth";
 import App from "../App";
@@ -17,6 +17,33 @@ function renderApp() {
       </AuthProvider>
     </MemoryRouter>
   );
+}
+
+// Exposes the current location.search so a test can assert the URL the app navigated to.
+function LocationProbe() {
+  const loc = useLocation();
+  return <div data-testid="loc-search">{loc.search}</div>;
+}
+
+function renderAppWithLocation() {
+  return render(
+    <MemoryRouter initialEntries={["/app"]}>
+      <AuthProvider>
+        <I18nProvider>
+          <App />
+          <LocationProbe />
+        </I18nProvider>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+}
+
+function uploadAClip() {
+  const input = document.querySelector("input[type=file]") as HTMLInputElement | null;
+  expect(input).not.toBeNull();
+  fireEvent.change(input!, {
+    target: { files: [new File(["data"], "squat.mp4", { type: "video/mp4" })] },
+  });
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -117,6 +144,44 @@ describe("App — analysis loaded", () => {
     );
     // The backend's detail message is surfaced to the user.
     expect(screen.getByText("Server error")).toBeInTheDocument();
+  });
+});
+
+describe("App — upload reflects the analysis in the URL", () => {
+  it("updates the URL to ?analysis=<id> after a persisted upload, without re-fetching", async () => {
+    // A signed-in upload comes back with a persisted analysis_id.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...mockAnalysis, analysis_id: "bb718ecf" }),
+    } as Response);
+
+    renderAppWithLocation();
+    uploadAClip();
+
+    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    // The URL now carries the id (shareable + refresh-survivable). Poll it: the router's location
+    // update can settle a tick after the analysis render.
+    await waitFor(() =>
+      expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
+    );
+    // The replay effect is guarded, so the analysis is NOT re-fetched — if it were, GET
+    // /api/analyses/<id> would return this same (result-less) shape and drop "ANALYSIS COMPLETE".
+    expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument();
+  });
+
+  it("leaves the URL untouched for an anonymous upload (no analysis_id)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockAnalysis, // anonymous: nothing persisted, no analysis_id
+    } as Response);
+
+    renderAppWithLocation();
+    uploadAClip();
+
+    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    expect(screen.getByTestId("loc-search").textContent).toBe("");
   });
 });
 
