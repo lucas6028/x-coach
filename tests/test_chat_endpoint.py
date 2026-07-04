@@ -317,29 +317,25 @@ def _fake_models(models: str):
 
 
 class ChatModelsCatalogTests(unittest.TestCase):
-    def test_parses_env_list_and_labels_known_slugs(self) -> None:
+    def test_parses_env_list_preserving_order(self) -> None:
         s = _fake_models("deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5 ,minimax/minimax-m3")  # spaces ok
         with mock.patch.object(app_settings, "get_settings", return_value=s):
-            cat = app_settings.chat_models()
-        self.assertEqual(
-            [m["id"] for m in cat],
-            ["deepseek/deepseek-v4-flash", "xiaomi/mimo-v2.5", "minimax/minimax-m3"],
-        )
-        self.assertEqual(cat[0]["label"], "DeepSeek V4 Flash")  # curated label
+            self.assertEqual(
+                app_settings.chat_models(),
+                ["deepseek/deepseek-v4-flash", "xiaomi/mimo-v2.5", "minimax/minimax-m3"],
+            )
 
-    def test_dedupes_and_labels_unknown_slug_as_its_id(self) -> None:
+    def test_dedupes_preserving_order(self) -> None:
         s = _fake_models("custom/model,custom/model,minimax/minimax-m3")
         with mock.patch.object(app_settings, "get_settings", return_value=s):
-            cat = app_settings.chat_models()
-        self.assertEqual([m["id"] for m in cat], ["custom/model", "minimax/minimax-m3"])
-        self.assertEqual(cat[0]["label"], "custom/model")  # unknown slug -> raw id as label
+            self.assertEqual(app_settings.chat_models(), ["custom/model", "minimax/minimax-m3"])
 
     def test_blank_list_falls_back_to_one_built_in_model(self) -> None:
         s = _fake_models("  , , ")  # misconfigured to empty
         with mock.patch.object(app_settings, "get_settings", return_value=s):
             cat = app_settings.chat_models()
         self.assertEqual(len(cat), 1)  # never empty
-        self.assertTrue(cat[0]["id"])
+        self.assertTrue(cat[0])
 
 
 class ResolveChatModelTests(unittest.TestCase):

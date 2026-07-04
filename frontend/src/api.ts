@@ -163,18 +163,13 @@ export interface Conversation {
   messages: ChatMessage[];
 }
 
-// A selectable coach model. The catalog is server-driven (from /api/health), so the frontend never
-// hard-codes it — a self-hoster reconfigures it via env.
-export interface ChatModel {
-  id: string;
-  label: string;
-}
-
+// The coach-model picker is server-driven (from /api/health): the authoritative list of selectable
+// model ids + which is the default. Display names/logos are a frontend concern (see ModelIcon).
 export interface HealthResponse {
   status: string;
   auth_configured?: boolean;
   chat_configured?: boolean;
-  chat_models?: ChatModel[];
+  chat_models?: string[];
   chat_default?: string;
 }
 

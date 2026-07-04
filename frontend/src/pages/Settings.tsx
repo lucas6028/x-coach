@@ -7,12 +7,12 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import { api, type ChatModel } from "../api";
+import { api } from "../api";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import { getStoredModel, setStoredModel } from "../lib/model";
 import { avatarUrl, displayName, initial } from "../lib/profile";
-import ModelIcon from "../components/ModelIcon";
+import ModelIcon, { modelLabel } from "../components/ModelIcon";
 
 type ClearState =
   | { kind: "idle" }
@@ -31,7 +31,7 @@ export default function Settings() {
   // Model picker: the catalog + default are server-driven (env-configurable), fetched from health;
   // `model` is the user's pinned choice ("" = follow the server default).
   const [model, setModel] = useState(getStoredModel);
-  const [models, setModels] = useState<ChatModel[]>([]);
+  const [models, setModels] = useState<string[]>([]);
   const [chatDefault, setChatDefault] = useState("");
 
   useEffect(() => {
@@ -143,20 +143,21 @@ export default function Settings() {
             {models.length === 0 ? (
               <p className="p-4 text-sm text-muted">{t("settings.modelLoading")}</p>
             ) : (
-              models.map((m) => {
-                const selected = m.id === selectedModel;
-                const isDefault = m.id === chatDefault;
+              models.map((id) => {
+                const selected = id === selectedModel;
+                const isDefault = id === chatDefault;
+                const label = modelLabel(id);
                 return (
                   <label
-                    key={m.id}
+                    key={id}
                     className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-content/[0.03]"
                   >
                     <input
                       type="radio"
                       name="coach-model"
-                      value={m.id}
+                      value={id}
                       checked={selected}
-                      onChange={() => chooseModel(m.id)}
+                      onChange={() => chooseModel(id)}
                       className="sr-only"
                     />
                     <span
@@ -164,18 +165,21 @@ export default function Settings() {
                         selected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-content/5"
                       }`}
                     >
-                      <ModelIcon id={m.id} size={20} />
+                      <ModelIcon id={id} size={20} />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
-                        <span className="truncate font-medium text-content">{m.label}</span>
+                        <span className="truncate font-medium text-content">{label}</span>
                         {isDefault && (
                           <span className="shrink-0 rounded-full bg-content/5 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-faint">
                             {t("settings.modelDefault")}
                           </span>
                         )}
                       </span>
-                      <span className="block truncate font-mono text-xs text-faint">{m.id}</span>
+                      {/* Show the raw slug only when it differs from the friendly label. */}
+                      {label !== id && (
+                        <span className="block truncate font-mono text-xs text-faint">{id}</span>
+                      )}
                     </span>
                     {selected && (
                       <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" />
