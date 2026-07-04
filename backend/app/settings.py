@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     # ``vendor/model`` namespace; the default is a cost-effective, capable general model that can
     # be overridden per-deployment without a code change.
     openrouter_api_key: str = ""
-    openrouter_model: str = "anthropic/claude-sonnet-5"
+    openrouter_model: str = "deepseek/deepseek-v4-flash"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     @property
@@ -52,6 +52,28 @@ class Settings(BaseSettings):
     def chat_configured(self) -> bool:
         """True when an OpenRouter API key is present (the chat endpoint is otherwise 503)."""
         return bool(self.openrouter_api_key)
+
+
+# Chat models the client may pick from in Settings (OpenRouter ``vendor/model`` slugs). Kept in
+# sync with ``frontend/src/lib/model.ts``. This is the security boundary: the client sends a chosen
+# model per request and the backend only honours it if it's on this list — the browser must never be
+# able to name an arbitrary (possibly far more expensive) model. Anything else falls back to the
+# configured ``openrouter_model`` default.
+ALLOWED_CHAT_MODELS: frozenset[str] = frozenset(
+    {
+        "deepseek/deepseek-v4-flash",
+        "xiaomi/mimo-v2.5",
+        "minimax/minimax-m3",
+        "tencent/hy3-preview",
+    }
+)
+
+
+def resolve_chat_model(requested: str | None) -> str:
+    """Return ``requested`` if it is an allowed selection, else the configured default model."""
+    if requested and requested in ALLOWED_CHAT_MODELS:
+        return requested
+    return get_settings().openrouter_model
 
 
 @lru_cache(maxsize=1)
