@@ -262,18 +262,19 @@ export const api = {
   // turn last; `context` is the compact grounding blob from buildChatContext(analysis). Deltas,
   // completion, and in-band errors are delivered via `handlers`; a pre-flight failure (before the
   // stream opens) throws a ChatError carrying the HTTP status so the caller can tell an expired
-  // session (401) from an LLM outage. `signal` cancels an in-flight stream.
+  // session (401) from an LLM outage. `model` is the user's chosen OpenRouter slug (validated
+  // server-side); omit it to use the server default.
   async chatStream(
     messages: ChatMessage[],
     context: ChatContext,
     handlers: ChatStreamHandlers,
-    signal?: AbortSignal
+    model?: string
   ): Promise<void> {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
-      body: JSON.stringify({ messages, context }),
-      signal,
+      // The server validates `model` against its allowlist; omit it to use the server default.
+      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
     });
     if (!res.ok || !res.body) {
       const detail = await res.json().catch(() => ({}));
