@@ -269,5 +269,7 @@
 ## Demo
 - [ ] Line ChatBot
 - [ ] QR Code demo, real time interaction
+- [ ] 語音回饋
 
 - [ ] 動作偵測、分類
+- [ ] LLM follow up questions (options)
