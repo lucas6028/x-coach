@@ -111,8 +111,9 @@ def delete_all_analyses(*, token: str, user_id: str) -> int:
     """
     client = _user_client(token)
     resp = client.table("analyses").delete().eq("user_id", user_id).execute()
-    # Drop the (now orphaned) source video rows too, so a "clear" leaves no residue.
+    # Drop the (now orphaned) source video rows and chat threads too, so a "clear" leaves no residue.
     client.table("videos").delete().eq("user_id", user_id).execute()
+    client.table("conversations").delete().eq("user_id", user_id).execute()
     return len(resp.data or [])
 
 
@@ -128,3 +129,38 @@ def get_analysis(*, token: str, analysis_id: str) -> dict[str, Any] | None:
     )
     rows = resp.data or []
     return rows[0] if rows else None
+
+
+def upsert_conversation(
+    *, token: str, user_id: str, video_id: str, messages: list[dict[str, Any]]
+) -> None:
+    """Save the caller's chat thread for ``video_id`` (one row per ``(user_id, video_id)``).
+
+    The whole message array is written each turn — coaching threads are short, so a full-array
+    upsert is simpler than an append and keeps the row self-contained for replay.
+    """
+    client = _user_client(token)
+    client.table("conversations").upsert(
+        {"user_id": user_id, "video_id": video_id, "messages": messages},
+        on_conflict="user_id,video_id",
+    ).execute()
+
+
+def get_conversation(*, token: str, video_id: str) -> dict[str, Any] | None:
+    """Return the caller's saved thread for ``video_id`` as ``{"messages": [...]}``, or ``None``.
+
+    ``None`` means no thread has been saved yet (a fresh upload). A saved-but-empty thread returns
+    ``{"messages": []}`` so the caller can tell "no thread" from "an empty thread".
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("conversations")
+        .select("messages")
+        .eq("video_id", video_id)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    if not rows:
+        return None
+    return {"messages": rows[0].get("messages") or []}

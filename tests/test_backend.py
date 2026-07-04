@@ -1214,10 +1214,11 @@ class StoreDeleteTests(unittest.TestCase):
             n = store.delete_all_analyses(token="t", user_id="u1")
         self.assertEqual(n, 2)
         self.assertTrue(query.deleted)
-        # Both the analyses and the source video rows are cleared.
-        self.assertEqual(client.table.call_count, 2)
+        # The analyses, source video, and conversation rows are all cleared.
+        self.assertEqual(client.table.call_count, 3)
         client.table.assert_any_call("analyses")
         client.table.assert_any_call("videos")
+        client.table.assert_any_call("conversations")
 
     def test_delete_all_handles_empty(self) -> None:
         client, _ = _fake_client(_Resp(data=None))
@@ -1236,6 +1237,39 @@ class StoreGetTests(unittest.TestCase):
         client, _ = _fake_client(_Resp(data=[]))
         with mock.patch.object(store, "_user_client", return_value=client):
             self.assertIsNone(store.get_analysis(token="t", analysis_id="ghost"))
+
+
+class StoreConversationTests(unittest.TestCase):
+    def test_upsert_conversation_writes_the_thread(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "c1"}]))
+        msgs = [{"role": "user", "content": "why did my knees cave?"}]
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.upsert_conversation(token="t", user_id="u1", video_id="vid", messages=msgs)
+        self.assertEqual(query.upserted["user_id"], "u1")
+        self.assertEqual(query.upserted["video_id"], "vid")
+        self.assertEqual(query.upserted["messages"], msgs)
+        client.table.assert_called_with("conversations")
+
+    def test_get_conversation_returns_messages(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "drive knees out"},
+        ]
+        client, _ = _fake_client(_Resp(data=[{"messages": msgs}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            out = store.get_conversation(token="t", video_id="vid")
+        self.assertEqual(out, {"messages": msgs})
+
+    def test_get_conversation_none_when_no_thread(self) -> None:
+        client, _ = _fake_client(_Resp(data=[]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertIsNone(store.get_conversation(token="t", video_id="ghost"))
+
+    def test_get_conversation_defaults_null_messages_to_empty_list(self) -> None:
+        # A saved-but-empty thread must read back as {"messages": []}, distinct from None.
+        client, _ = _fake_client(_Resp(data=[{"messages": None}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertEqual(store.get_conversation(token="t", video_id="vid"), {"messages": []})
 
 
 # ---------------------------------------------------------------- routers.analyses
