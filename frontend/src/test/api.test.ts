@@ -252,6 +252,21 @@ describe("api.chatStream", () => {
     expect(c.deltas).toHaveLength(0);
   });
 
+  it("ignores malformed/eventless frames and defaults missing fields", async () => {
+    mockStream([
+      ": keep-alive comment\n\n", // no event line -> ignored
+      "event: delta\ndata: {not valid json}\n\n", // unparseable -> ignored
+      "event: delta\ndata: {}\n\n", // missing text -> ""
+      "event: done\ndata: {}\n\n", // missing model -> ""
+      "event: error\ndata: {}\n\n", // missing detail -> generic message
+    ]);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+    expect(c.deltas).toEqual([""]); // only the `{}` delta reached a handler, defaulted to ""
+    expect(c.model).toBe(""); // missing model -> ""
+    expect(c.errorDetail).toBe("Chat failed"); // missing detail -> generic fallback
+  });
+
   it("throws a ChatError carrying the HTTP status and backend detail on a pre-flight failure", async () => {
     mockFetch({ detail: "Missing bearer token." }, false, 401);
     const c = collectHandlers();
