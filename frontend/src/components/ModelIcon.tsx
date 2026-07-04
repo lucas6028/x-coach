@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { Cpu } from "@phosphor-icons/react";
 // Deep-import only the plain logo marks (Color / Mono). The package's Avatar/Combine variants pull
 // in antd-style; importing the leaf SVG components keeps that whole dependency out of the bundle.
 // Xiaomi MiMo ships only a monochrome mark; the others use their colour logo.
@@ -17,8 +18,9 @@ const ICONS: Record<string, BrandIcon> = {
   "tencent/hy3-preview": Hunyuan as BrandIcon,
 };
 
-// The brand logo for a coach model, or null for an unknown id.
+// The brand logo for a coach model. Since the catalog is server-driven, a self-hoster's custom slug
+// may not have a known logo — those fall back to a generic chip icon rather than rendering nothing.
 export default function ModelIcon({ id, size = 20 }: { id: string; size?: number }) {
   const Icon = ICONS[id];
-  return Icon ? <Icon size={size} /> : null;
+  return Icon ? <Icon size={size} /> : <Cpu size={size} className="text-muted" />;
 }

@@ -26,6 +26,15 @@ function renderSettings() {
 
 beforeEach(() => {
   localStorage.clear();
+  // Server-driven model catalog (from /api/health).
+  vi.spyOn(api, "health").mockResolvedValue({
+    status: "ok",
+    chat_models: [
+      { id: "deepseek/deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+      { id: "minimax/minimax-m3", label: "MiniMax M3" },
+    ],
+    chat_default: "deepseek/deepseek-v4-flash",
+  });
   mockUseAuth.mockReturnValue({
     user: {
       email: "ada@x.com",
@@ -45,30 +54,21 @@ describe("Settings", () => {
     expect(container.querySelector("img[src='https://x/me.png']")).toBeInTheDocument();
   });
 
-  it("offers server-default + the four models, defaulting to server default", () => {
+  it("renders the server-driven catalog and pre-selects the server default", async () => {
     renderSettings();
     expect(screen.getByRole("heading", { name: "Coach model" })).toBeInTheDocument();
-    // Fresh user: "Server default" (= OPENROUTER_MODEL) is selected, not a specific model.
-    expect(screen.getByRole("radio", { name: /Server default/i })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /DeepSeek V4 Flash/i })).not.toBeChecked();
-    // Server default + the four curated models.
-    expect(screen.getAllByRole("radio")).toHaveLength(5);
+    // Radios appear once the catalog loads from /api/health.
+    const deepseek = await screen.findByRole("radio", { name: /DeepSeek V4 Flash/i });
+    expect(deepseek).toBeChecked(); // fresh user -> server default (chat_default) pre-selected
+    expect(screen.getByRole("radio", { name: /MiniMax M3/i })).not.toBeChecked();
+    expect(screen.getAllByRole("radio")).toHaveLength(2); // exactly what the server offered
   });
 
   it("persists the chosen coach model to localStorage", async () => {
     renderSettings();
-    await userEvent.click(screen.getByRole("radio", { name: /MiniMax M3/i }));
+    await userEvent.click(await screen.findByRole("radio", { name: /MiniMax M3/i }));
     expect(localStorage.getItem("chat_model")).toBe("minimax/minimax-m3");
     expect(screen.getByRole("radio", { name: /MiniMax M3/i })).toBeChecked();
-  });
-
-  it("can switch back to the server default", async () => {
-    localStorage.setItem("chat_model", "minimax/minimax-m3");
-    renderSettings();
-    expect(screen.getByRole("radio", { name: /MiniMax M3/i })).toBeChecked();
-    await userEvent.click(screen.getByRole("radio", { name: /Server default/i }));
-    expect(localStorage.getItem("chat_model")).toBe("");
-    expect(screen.getByRole("radio", { name: /Server default/i })).toBeChecked();
   });
 
   it("requires confirmation before clearing analyses", async () => {

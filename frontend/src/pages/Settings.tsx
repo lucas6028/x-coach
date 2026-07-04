@@ -1,17 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle,
   ClockCounterClockwise,
-  Faders,
   Trash,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { api, type ChatModel } from "../api";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
-import { CHAT_MODELS, SERVER_DEFAULT, getStoredModel, setStoredModel } from "../lib/model";
+import { getStoredModel, setStoredModel } from "../lib/model";
 import { avatarUrl, displayName, initial } from "../lib/profile";
 import ModelIcon from "../components/ModelIcon";
 
@@ -29,12 +28,33 @@ export default function Settings() {
   const { user } = useAuth();
   const [imgError, setImgError] = useState(false);
   const [clear, setClear] = useState<ClearState>({ kind: "idle" });
+  // Model picker: the catalog + default are server-driven (env-configurable), fetched from health;
+  // `model` is the user's pinned choice ("" = follow the server default).
   const [model, setModel] = useState(getStoredModel);
+  const [models, setModels] = useState<ChatModel[]>([]);
+  const [chatDefault, setChatDefault] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    api
+      .health()
+      .then((h) => {
+        if (!active) return;
+        setModels(h.chat_models ?? []);
+        setChatDefault(h.chat_default ?? "");
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const chooseModel = (id: string) => {
     setStoredModel(id);
     setModel(id);
   };
+  // What's shown as selected: the user's pin, or the server default when they haven't pinned one.
+  const selectedModel = model || chatDefault;
 
   if (!user) return null;
 
@@ -120,46 +140,50 @@ export default function Settings() {
           <p className="mt-1.5 text-sm text-muted">{t("settings.modelDesc")}</p>
           <fieldset className="mt-3 divide-y divide-border-dark overflow-hidden rounded-2xl border border-border-dark bg-surface-dark">
             <legend className="sr-only">{t("settings.model")}</legend>
-            {/* "Server default" (OPENROUTER_MODEL) first, then the curated models. */}
-            {[{ id: SERVER_DEFAULT, label: t("settings.modelDefault") }, ...CHAT_MODELS].map((m) => {
-              const selected = m.id === model;
-              const isDefault = m.id === SERVER_DEFAULT;
-              return (
-                <label
-                  key={m.id || "server-default"}
-                  className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-content/[0.03]"
-                >
-                  <input
-                    type="radio"
-                    name="coach-model"
-                    value={m.id}
-                    checked={selected}
-                    onChange={() => chooseModel(m.id)}
-                    className="sr-only"
-                  />
-                  <span
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
-                      selected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-content/5"
-                    }`}
+            {models.length === 0 ? (
+              <p className="p-4 text-sm text-muted">{t("settings.modelLoading")}</p>
+            ) : (
+              models.map((m) => {
+                const selected = m.id === selectedModel;
+                const isDefault = m.id === chatDefault;
+                return (
+                  <label
+                    key={m.id}
+                    className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-content/[0.03]"
                   >
-                    {isDefault ? (
-                      <Faders size={18} className="text-muted" />
-                    ) : (
+                    <input
+                      type="radio"
+                      name="coach-model"
+                      value={m.id}
+                      checked={selected}
+                      onChange={() => chooseModel(m.id)}
+                      className="sr-only"
+                    />
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                        selected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-content/5"
+                      }`}
+                    >
                       <ModelIcon id={m.id} size={20} />
-                    )}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium text-content">{m.label}</span>
-                    <span className="block truncate font-mono text-xs text-faint">
-                      {m.id || "OPENROUTER_MODEL"}
                     </span>
-                  </span>
-                  {selected && (
-                    <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" />
-                  )}
-                </label>
-              );
-            })}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate font-medium text-content">{m.label}</span>
+                        {isDefault && (
+                          <span className="shrink-0 rounded-full bg-content/5 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-faint">
+                            {t("settings.modelDefault")}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block truncate font-mono text-xs text-faint">{m.id}</span>
+                    </span>
+                    {selected && (
+                      <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" />
+                    )}
+                  </label>
+                );
+              })
+            )}
           </fieldset>
         </section>
 
