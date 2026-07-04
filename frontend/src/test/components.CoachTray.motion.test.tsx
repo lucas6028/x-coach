@@ -13,12 +13,23 @@ const h = vi.hoisted(() => ({
   auth: { configured: true, user: { id: "u1" } as { id: string } | null },
   chatStream: vi.fn(),
   health: vi.fn(),
+  getConversation: vi.fn(),
+  putConversation: vi.fn(),
 }));
 
 vi.mock("../lib/auth", () => ({ useAuth: () => h.auth }));
 vi.mock("../api", async (importActual) => {
   const actual = await importActual<typeof import("../api")>();
-  return { ...actual, api: { ...actual.api, chatStream: h.chatStream, health: h.health } };
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      chatStream: h.chatStream,
+      health: h.health,
+      getConversation: h.getConversation,
+      putConversation: h.putConversation,
+    },
+  };
 });
 
 import CoachTray from "../components/CoachTray";
@@ -49,6 +60,10 @@ describe("CoachTray — prefers-reduced-motion", () => {
     h.chatStream.mockReset();
     h.health.mockReset();
     h.health.mockResolvedValue({ status: "ok", chat_configured: true });
+    h.getConversation.mockReset();
+    h.getConversation.mockResolvedValue({ video_id: "v1", messages: [] });
+    h.putConversation.mockReset();
+    h.putConversation.mockResolvedValue(undefined);
 
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
       matches: true,
