@@ -182,6 +182,108 @@ class AnswerStreamTests(unittest.TestCase):
         self.assertIn("empty", frames.lower())
         self.assertNotIn("event: done", frames)
 
+    def test_answer_stream_carries_no_followups(self) -> None:
+        # Follow-ups are a SEPARATE endpoint now (suggest_followups); the answer stream must stay the
+        # clean delta/done contract and never carry a followups frame.
+        def fake_stream(messages, model):
+            yield "Drive knees out."
+
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+            frames = "".join(
+                chat_service.answer_stream(
+                    messages=[{"role": "user", "content": "why?"}], context=_FAULT_CTX, model="m"
+                )
+            )
+
+        self.assertIn("Drive knees out.", frames)
+        self.assertNotIn("event: followups", frames)
+        self.assertIn("event: done", frames)
+
+
+# --------------------------------------------------------------- service: follow-up parsing
+
+
+class ParseFollowupsTests(unittest.TestCase):
+    def test_plain_json_array(self) -> None:
+        self.assertEqual(chat_service._parse_followups('["a?", "b?"]'), ["a?", "b?"])
+
+    def test_tolerates_code_fences_and_prose(self) -> None:
+        raw = 'Sure! Here are two:\n```json\n["a?", "b?"]\n```'
+        self.assertEqual(chat_service._parse_followups(raw), ["a?", "b?"])
+
+    def test_non_list_payload_yields_empty(self) -> None:
+        self.assertEqual(chat_service._parse_followups('{"q": "a?"}'), [])
+
+    def test_unparseable_payload_yields_empty(self) -> None:
+        self.assertEqual(chat_service._parse_followups("no json here at all"), [])
+
+    def test_drops_blanks_and_truncates_to_two(self) -> None:
+        self.assertEqual(
+            chat_service._parse_followups('["a?", "", "  ", "b?", "c?"]'), ["a?", "b?"]
+        )
+
+
+class SuggestFollowupsTests(unittest.TestCase):
+    def test_returns_grounded_questions_and_uses_tight_timeout(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_stream(messages, model, timeout=None, extra_body=None):
+            captured["messages"] = messages
+            captured["timeout"] = timeout
+            captured["extra_body"] = extra_body
+            yield '["How do I '
+            yield 'fix my depth?", "Why does valgus matter?"]'
+
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+            qs = chat_service.suggest_followups(
+                messages=[
+                    {"role": "user", "content": "why?"},
+                    {"role": "assistant", "content": "Drive knees out."},
+                ],
+                context=_FAULT_CTX,
+                model="m",
+            )
+
+        self.assertEqual(qs, ["How do I fix my depth?", "Why does valgus matter?"])
+        # Follow-up requests carry the low-latency provider routing (the fix for the chip-latency
+        # variance), passed through to the transport as extra request body.
+        self.assertEqual(captured["extra_body"], chat_service._FOLLOWUP_ROUTING)
+        # Groundedness survives into the follow-up prompt: the analysis facts + honesty rule precede
+        # the follow-up task, so a suggestion can't reference a fault outside the analysis.
+        system = captured["messages"][0]
+        self.assertEqual(system["role"], "system")
+        self.assertIn("knees_inward", system["content"])
+        self.assertIn("Do NOT invent", system["content"])
+        self.assertIn("FOLLOW-UP TASK", system["content"])
+        # The assistant answer rides in the middle; a trailing user nudge closes the array so the
+        # request isn't left open on the assistant turn.
+        self.assertEqual(
+            captured["messages"][-1], {"role": "user", "content": chat_service._FOLLOWUP_NUDGE}
+        )
+        # The tight follow-up budget is used, not the full answer timeout.
+        self.assertEqual(captured["timeout"], chat_service._FOLLOWUP_TIMEOUT_S)
+
+    def test_malformed_reply_yields_no_suggestions(self) -> None:
+        def fake_stream(messages, model, timeout=None, extra_body=None):
+            yield "sorry, I can't do that"
+
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+            qs = chat_service.suggest_followups(
+                messages=[{"role": "user", "content": "why?"}], context=_FAULT_CTX, model="m"
+            )
+        self.assertEqual(qs, [])
+
+    def test_transport_failure_yields_no_suggestions(self) -> None:
+        def fake_stream(messages, model, timeout=None, extra_body=None):
+            raise RuntimeError("OpenRouter request failed: reset")
+            yield ""  # pragma: no cover — unreachable, keeps this a generator
+
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+            qs = chat_service.suggest_followups(
+                messages=[{"role": "user", "content": "why?"}], context=_FAULT_CTX, model="m"
+            )
+        self.assertEqual(qs, [])
+
 
 # --------------------------------------------------------- service: OpenRouter SSE transport
 
@@ -224,6 +326,27 @@ class StreamCompletionTests(unittest.TestCase):
         self.assertIs(kwargs["json"]["stream"], True)
         self.assertEqual(kwargs["json"]["model"], "minimax/minimax-m3")  # the passed model is sent
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer sk-or-test")
+
+    def test_extra_body_merges_into_the_request(self) -> None:
+        # The follow-up call passes provider-routing preferences via extra_body; they must land in the
+        # JSON request alongside model/messages/stream.
+        fake_resp = mock.Mock()
+        fake_resp.raise_for_status.return_value = None
+        fake_resp.iter_lines.return_value = iter(["data: [DONE]"])
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = fake_resp
+        cm.__exit__.return_value = False
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch("httpx.stream", return_value=cm) as stream:
+            list(
+                chat_service._stream_completion(
+                    [{"role": "user", "content": "hi"}], "m", extra_body={"provider": {"sort": "latency"}}
+                )
+            )
+        _, kwargs = stream.call_args
+        self.assertEqual(kwargs["json"]["provider"], {"sort": "latency"})
+        self.assertIs(kwargs["json"]["stream"], True)  # base fields still present
 
     def test_stream_ending_without_done_terminator_exhausts_cleanly(self) -> None:
         # Some upstreams just close the connection instead of sending a final ``data: [DONE]``; the
@@ -311,9 +434,63 @@ class ChatRouterTests(unittest.TestCase):
         self.assertEqual(captured["context"]["faults"][0]["fault_name"], "knees_inward")
         self.assertEqual(captured["model"], "minimax/minimax-m3")
 
+    @staticmethod
+    def _run_followups(body):
+        return asyncio.run(chat_router.chat_followups(body, user=_USER))
 
-def _fake_models(models: str):
-    return types.SimpleNamespace(openrouter_models=models)
+    def test_followups_503_when_chat_not_configured(self) -> None:
+        with mock.patch.object(
+            chat_router, "get_settings", return_value=types.SimpleNamespace(chat_configured=False)
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                self._run_followups(_body([{"role": "user", "content": "hi"}], _FAULT_CTX))
+        self.assertEqual(ctx.exception.status_code, 503)
+
+    def test_followups_returns_questions_using_the_pinned_fast_model(self) -> None:
+        # The endpoint accepts a thread ending on the assistant turn (no last-must-be-user check) and
+        # uses the server-pinned fast follow-up model — NOT the client's answer model.
+        captured: dict = {}
+
+        def fake_suggest(*, messages, context, model):
+            captured["messages"] = messages
+            captured["model"] = model
+            return ["Widen my stance?", "Go lower next rep?"]
+
+        body = chat_router.ChatRequest(
+            messages=[
+                {"role": "user", "content": "why did my knees cave?"},
+                {"role": "assistant", "content": "Drive your knees out."},
+            ],
+            context=_FAULT_CTX,
+            model="minimax/minimax-m3",  # the (slow) answer model — must be ignored for followups
+        )
+        with mock.patch.object(
+            chat_router, "get_settings", return_value=types.SimpleNamespace(chat_configured=True)
+        ), mock.patch.object(
+            chat_router, "followup_chat_model", return_value="openai/gpt-oss-120b"
+        ), mock.patch.object(chat_service, "suggest_followups", fake_suggest):
+            resp = self._run_followups(body)
+
+        self.assertEqual(resp.questions, ["Widen my stance?", "Go lower next rep?"])
+        self.assertEqual(captured["messages"][-1]["role"], "assistant")  # thread ends on the answer
+        self.assertEqual(captured["model"], "openai/gpt-oss-120b")  # pinned, not "minimax/minimax-m3"
+
+
+def _fake_models(models: str, followup: str = "openai/gpt-oss-120b"):
+    return types.SimpleNamespace(openrouter_models=models, openrouter_followup_model=followup)
+
+
+class FollowupModelTests(unittest.TestCase):
+    def test_returns_the_pinned_fast_model(self) -> None:
+        s = _fake_models("deepseek/deepseek-v4-flash", followup="openai/gpt-oss-120b")
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
+            self.assertEqual(app_settings.followup_chat_model(), "openai/gpt-oss-120b")
+
+    def test_blank_falls_back_to_the_default_answer_model(self) -> None:
+        # A self-hoster who blanks OPENROUTER_FOLLOWUP_MODEL reuses the default answer model.
+        s = _fake_models("deepseek/deepseek-v4-flash,minimax/minimax-m3", followup="  ")
+        with mock.patch.object(app_settings, "get_settings", return_value=s):
+            self.assertEqual(app_settings.followup_chat_model(), "deepseek/deepseek-v4-flash")
 
 
 class ChatModelsCatalogTests(unittest.TestCase):

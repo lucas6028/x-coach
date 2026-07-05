@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
@@ -9,6 +9,7 @@ import { ChatError, type Analysis } from "../api";
 const h = vi.hoisted(() => ({
   auth: { configured: true, user: { id: "u1" } as { id: string } | null },
   chatStream: vi.fn(),
+  chatFollowups: vi.fn(),
   health: vi.fn(),
   getConversation: vi.fn(),
   putConversation: vi.fn(),
@@ -24,6 +25,7 @@ vi.mock("../api", async (importActual) => {
     api: {
       ...actual.api,
       chatStream: h.chatStream,
+      chatFollowups: h.chatFollowups,
       health: h.health,
       getConversation: h.getConversation,
       putConversation: h.putConversation,
@@ -78,6 +80,8 @@ describe("CoachTray — follow-up chat", () => {
   beforeEach(() => {
     h.auth = { configured: true, user: { id: "u1" } };
     h.chatStream.mockReset();
+    h.chatFollowups.mockReset();
+    h.chatFollowups.mockResolvedValue([]); // no follow-up chips by default
     h.health.mockReset();
     h.health.mockResolvedValue({ status: "ok", chat_configured: true });
     h.getConversation.mockReset();
@@ -109,6 +113,35 @@ describe("CoachTray — follow-up chat", () => {
       { role: "user", content: "why did my knees cave?" },
       { role: "assistant", content: "Drive your knees out over your toes." },
     ]);
+  });
+
+  it("fetches follow-up chips after an answer (fire-and-forget) and sends one when clicked", async () => {
+    h.chatStream
+      .mockImplementationOnce(streamReply("Drive your knees out."))
+      .mockImplementationOnce(streamReply("Aim for hip crease below the knee."));
+    // The follow-up chips come from a SEPARATE request fired after the answer commits.
+    h.chatFollowups.mockResolvedValueOnce(["Should I widen my stance?", "How low should I go?"]);
+    renderTray();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "why did my knees cave?");
+    await userEvent.click(screen.getByLabelText(/Send message/i));
+
+    // The answer renders immediately; the chips arrive a beat later from chatFollowups.
+    expect(await screen.findByText("Drive your knees out.")).toBeInTheDocument();
+    const chip = await screen.findByRole("button", { name: /Should I widen my stance/i });
+    expect(screen.getByRole("button", { name: /How low should I go/i })).toBeInTheDocument();
+    // The follow-up request received the committed thread (ending on the assistant answer).
+    const [fuMessages] = h.chatFollowups.mock.calls[0];
+    expect(fuMessages.at(-1)).toEqual({ role: "assistant", content: "Drive your knees out." });
+
+    // Clicking a suggestion sends it as the next user turn (same behaviour as a starter chip).
+    await userEvent.click(chip);
+    expect(h.chatStream).toHaveBeenCalledTimes(2);
+    const [messages] = h.chatStream.mock.calls[1];
+    expect(messages.at(-1)).toEqual({ role: "user", content: "Should I widen my stance?" });
+    expect(await screen.findByText("Aim for hip crease below the knee.")).toBeInTheDocument();
+    // The previous answer's chips are cleared once the new turn is sent.
+    expect(screen.queryByRole("button", { name: /How low should I go/i })).not.toBeInTheDocument();
   });
 
   it("stays usable when restoring a saved thread fails", async () => {
@@ -267,6 +300,74 @@ describe("CoachTray — follow-up chat", () => {
     await screen.findByText("Ok.");
 
     expect(scrollTo).toHaveBeenCalledWith({ top: expect.any(Number) });
+
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+  });
+
+  it("scrolls again when the follow-up chips land (they arrive after the answer commits)", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollTo,
+    });
+
+    // Defer the follow-up result so we can measure the scroll count *before* the chips render, then
+    // resolve it and assert the chips landing triggered a further scroll (not folded below the view).
+    let resolveFollowups!: (qs: string[]) => void;
+    h.chatFollowups.mockReturnValueOnce(
+      new Promise<string[]>((res) => {
+        resolveFollowups = res;
+      })
+    );
+    h.chatStream.mockImplementation(streamReply("Ok."));
+    renderTray();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "hi");
+    await userEvent.click(screen.getByLabelText(/Send message/i));
+    await screen.findByText("Ok.");
+    const beforeChips = scrollTo.mock.calls.length;
+
+    resolveFollowups(["Chip one?", "Chip two?"]);
+    await screen.findByRole("button", { name: /Chip one/i });
+    expect(scrollTo.mock.calls.length).toBeGreaterThan(beforeChips);
+
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+  });
+
+  it("does not auto-scroll when the user has scrolled up to read earlier messages", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+      configurable: true,
+      writable: true,
+      value: scrollTo,
+    });
+
+    let resolveFollowups!: (qs: string[]) => void;
+    h.chatFollowups.mockReturnValueOnce(
+      new Promise<string[]>((res) => {
+        resolveFollowups = res;
+      })
+    );
+    h.chatStream.mockImplementation(streamReply("Ok."));
+    const { container } = renderTray();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "hi");
+    await userEvent.click(screen.getByLabelText(/Send message/i));
+    await screen.findByText("Ok.");
+
+    // Simulate the user scrolling up, away from the foot (distance-from-bottom well past threshold).
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLElement;
+    Object.defineProperty(scroller, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(scroller, "clientHeight", { configurable: true, value: 300 });
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+
+    const beforeChips = scrollTo.mock.calls.length;
+    resolveFollowups(["Chip one?", "Chip two?"]);
+    await screen.findByRole("button", { name: /Chip one/i });
+    // The chips rendered, but the view stayed where the user was reading — no forced scroll.
+    expect(scrollTo.mock.calls.length).toBe(beforeChips);
 
     Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
   });

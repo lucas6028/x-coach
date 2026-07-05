@@ -47,6 +47,10 @@ class Settings(BaseSettings):
         "deepseek/deepseek-v4-flash,xiaomi/mimo-v2.5,minimax/minimax-m3,tencent/hy3-preview"
     )
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Follow-up chips are a separate, latency-sensitive call (see services/chat.suggest_followups):
+    # pinned to a fast model independent of the answer model, so a slow/reasoning answer model doesn't
+    # make the chips crawl. Env-overridable; blank it to reuse the default answer model instead.
+    openrouter_followup_model: str = "openai/gpt-oss-120b"
 
     @property
     def auth_configured(self) -> bool:
@@ -77,6 +81,13 @@ def chat_models() -> list[str]:
 def default_chat_model() -> str:
     """The model used when the client sends none — the first entry of ``OPENROUTER_MODELS``."""
     return chat_models()[0]
+
+
+def followup_chat_model() -> str:
+    """The model for follow-up suggestions — a fast one pinned server-side, independent of the answer
+    model the user picked. Falls back to the default answer model if ``OPENROUTER_FOLLOWUP_MODEL`` is
+    blanked (a self-hoster whose account lacks the pinned model). Not client-selectable by design."""
+    return get_settings().openrouter_followup_model.strip() or default_chat_model()
 
 
 def resolve_chat_model(requested: str | None) -> str:

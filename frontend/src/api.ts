@@ -308,6 +308,26 @@ export const api = {
     }
   },
 
+  // Two grounded next-question suggestions for a completed turn (a separate, best-effort call the
+  // client fires *after* the answer renders — fire-and-forget, so it never blocks the answer).
+  // `messages` is the thread ending on the assistant answer; `context` is the same grounding blob.
+  // Resolves to the questions (or `[]` on any non-ok response, since a missing chip isn't worth
+  // surfacing an error). `model` is the user's chosen slug (validated server-side); omit for default.
+  async chatFollowups(
+    messages: ChatMessage[],
+    context: ChatContext,
+    model?: string
+  ): Promise<string[]> {
+    const res = await fetch("/api/chat/followups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => ({}))) as { questions?: string[] };
+    return data.questions ?? [];
+  },
+
   // Restore the caller's saved chat thread for a video ({messages: []} when none). Requires a
   // session; the tray only calls it for a signed-in, chat-configured user.
   getConversation: (videoId: string) =>

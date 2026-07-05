@@ -48,15 +48,30 @@ export default function CoachTray({
   // below the committed thread while loading; committed into `messages` on a clean `done`, or
   // discarded on an error (the optimistic user turn is rolled back alongside it).
   const [streaming, setStreaming] = useState("");
+  // Two grounded next-question suggestions the coach offers after an answer (from the `followups`
+  // SSE frame). Ephemeral — captured per answer, not persisted; cleared on a new send / analysis.
+  const [followups, setFollowups] = useState<string[]>([]);
   // Whether the *server* has an OpenRouter key. Independent of Supabase auth. null = not yet
   // checked (assume available so the common path is instant).
   const [chatOnServer, setChatOnServer] = useState<boolean | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Monotonic token for the fire-and-forget follow-up fetch: a suggestion only lands if its turn is
+  // still the latest (guards against a slow fetch resolving under a newer turn or a switched analysis).
+  const followupSeq = useRef(0);
+  // Sticky-scroll intent: true while the user sits at/near the bottom (auto-follow new content), flips
+  // to false the moment they scroll up to read earlier messages (so streaming/chips don't yank them
+  // back down). A fresh send re-engages it. Default true = follow until the user says otherwise.
+  const stickToBottom = useRef(true);
 
   // Whether the composer is a live chat (signed in + server-configured). Also gates thread
   // restore/persist. Declared before the effects that depend on it (avoids a TDZ ref in deps).
   const isWorking = configured && !!user && chatOnServer !== false;
   const canSend = !!input.trim() && !loading;
+
+  // Suggestion-chip styling, shared by the empty-state starters and the per-answer follow-ups so the
+  // two read as the same affordance ("和一開始的選項一樣").
+  const chipClass =
+    "flex items-center justify-between gap-2 rounded-2xl border border-border-dark bg-surface px-3.5 py-2.5 text-left text-[13px] text-content transition-colors hover:bg-content/[0.03]";
 
   // A new analysis starts fresh, then restores its saved thread if the session can persist: a
   // history-replay of a saved analysis brings its conversation back, while a fresh upload (no saved
@@ -64,6 +79,8 @@ export default function CoachTray({
   useEffect(() => {
     setMessages([]);
     setError("");
+    setFollowups([]);
+    followupSeq.current++; // invalidate any in-flight suggestion from the previous analysis
     if (!isWorking) return;
     let active = true;
     api
@@ -94,14 +111,25 @@ export default function CoachTray({
     };
   }, [configured, user]);
 
-  // Keep the newest turn in view as the conversation grows — but never on the initial render, so
-  // the coach's analysis (top of the thread) is what the user sees first. (Guard scrollTo — jsdom.)
-  // `streaming` is a dep so the view tracks the answer as tokens arrive.
+  // Keep the newest turn in view as the conversation grows — but only while the user is following the
+  // bottom (see `stickToBottom`), and never on the initial render, so the coach's analysis (top of the
+  // thread) is what the user sees first. (Guard scrollTo — jsdom.) `streaming` tracks the answer as
+  // tokens arrive; `followups` follows the chips down when they land (they arrive async, after the turn
+  // commits, so without this dep they'd render below the fold).
   useEffect(() => {
     if (messages.length === 0) return;
     const el = scrollRef.current;
-    if (el && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight });
-  }, [messages, loading, streaming]);
+    if (stickToBottom.current && el && typeof el.scrollTo === "function")
+      el.scrollTo({ top: el.scrollHeight });
+  }, [messages, loading, streaming, followups]);
+
+  // Track whether the user is following the bottom: within a small threshold of the foot ⇒ keep
+  // auto-scrolling; scrolled up ⇒ stop, and stay put until they return to the bottom (or send again).
+  function onThreadScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 80;
+  }
 
   // `textArg` lets a starter-suggestion chip send its prompt directly; otherwise we send the input.
   async function send(textArg?: string) {
@@ -113,6 +141,9 @@ export default function CoachTray({
     setError("");
     setLoading(true);
     setStreaming("");
+    setFollowups([]); // drop the previous answer's suggestions while this one streams
+    stickToBottom.current = true; // a fresh send re-engages auto-follow (user is acting at the foot)
+    const mySeq = ++followupSeq.current; // this turn owns the next suggestion result
     let acc = "";
     let inbandError = "";
     try {
@@ -138,6 +169,15 @@ export default function CoachTray({
       setMessages(thread);
       // Persist the completed turn (fire-and-forget — a save failure must not disrupt the chat).
       void api.putConversation(analysis.video_id, thread).catch(() => undefined);
+      // Fire-and-forget the follow-up chips: the answer is already on screen, so we fetch two grounded
+      // next-questions in the background and drop them in when they arrive — unless a newer turn or a
+      // switched analysis has since bumped `followupSeq`, in which case this stale result is ignored.
+      void api
+        .chatFollowups(thread, buildChatContext(analysis), getStoredModel())
+        .then((qs) => {
+          if (mySeq === followupSeq.current) setFollowups(qs);
+        })
+        .catch(() => undefined);
     } catch (e) {
       // Roll back the optimistic user turn (the partial assistant text lives in `streaming`, which
       // `finally` clears — nothing to slice) and restore the text so a retry doesn't duplicate it.
@@ -231,7 +271,11 @@ export default function CoachTray({
       </div>
 
       {/* One scroll thread: the grounded analysis first, then the conversation. */}
-      <div ref={scrollRef} className="scrollbar-thin flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        onScroll={onThreadScroll}
+        className="scrollbar-thin flex-1 overflow-y-auto"
+      >
         {detections.length === 0 ? (
           // Clean rep — a compact, warm banner, with the KG card flush below it (same stack).
           <div className="space-y-4 p-4">
@@ -286,7 +330,7 @@ export default function CoachTray({
                       key={key}
                       type="button"
                       onClick={() => void send(t(key))}
-                      className="flex items-center justify-between gap-2 rounded-2xl border border-border-dark bg-surface px-3.5 py-2.5 text-left text-[13px] text-content transition-colors hover:bg-content/[0.03]"
+                      className={chipClass}
                     >
                       <span>{t(key)}</span>
                       <ArrowRight size={15} className="shrink-0 text-faint" />
@@ -356,6 +400,18 @@ export default function CoachTray({
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <CircleNotch size={14} className="animate-spin" />
                     {t("chat.thinking")}
+                  </div>
+                )}
+                {/* Grounded next-question suggestions under the latest answer — same chips as the
+                    opening starters, but generated from this answer. Hidden while a turn is in flight. */}
+                {!loading && !streaming && followups.length > 0 && (
+                  <div className="flex flex-col gap-2">
+                    {followups.map((q, i) => (
+                      <button key={i} type="button" onClick={() => void send(q)} className={chipClass}>
+                        <span>{q}</span>
+                        <ArrowRight size={15} className="shrink-0 text-faint" />
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
