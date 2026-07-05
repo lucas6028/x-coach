@@ -116,11 +116,13 @@ describe("History", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it("signs out from the header", async () => {
+  it("signs out from the account menu in the shared navbar", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 0, items: [] });
     renderHistory();
     await screen.findByText("No saved analyses yet.");
-    await userEvent.click(screen.getByRole("button", { name: /Sign out/i }));
+    // Sign-out now lives in the unified navbar's account menu, not a page-local header button.
+    await userEvent.click(screen.getByRole("button", { name: /Account menu/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Sign out/i }));
     await waitFor(() => expect(signOut).toHaveBeenCalled());
   });
 });

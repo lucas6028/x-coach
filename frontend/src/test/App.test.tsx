@@ -185,6 +185,34 @@ describe("App — upload reflects the analysis in the URL", () => {
   });
 });
 
+describe("App — new analysis reset", () => {
+  it("clears a loaded analysis and the ?analysis= param when 'New analysis' is clicked", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...mockAnalysis, analysis_id: "bb718ecf" }),
+    } as Response);
+
+    const user = userEvent.setup();
+    renderAppWithLocation();
+    uploadAClip();
+
+    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
+    );
+
+    // The sidebar CTA resets the studio in place (two sidebars render; the first is the desktop rail).
+    await user.click(screen.getAllByRole("button", { name: /New analysis/i })[0]);
+
+    // Back to the empty studio, and the shareable id is dropped from the URL.
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Analyze a squat in about 20 seconds."
+    );
+    await waitFor(() => expect(screen.getByTestId("loc-search").textContent).toBe(""));
+  });
+});
+
 describe("App — sidebar toggle", () => {
   it("expands the desktop sidebar when the toggle button is clicked", async () => {
     const user = userEvent.setup();

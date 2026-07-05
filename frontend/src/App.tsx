@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, type Analysis } from "./api";
-import Sidebar from "./components/Sidebar";
-import Header from "./components/Header";
+import AppLayout from "./components/AppLayout";
 import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
 import LibraryPicker from "./components/LibraryPicker";
@@ -12,8 +11,6 @@ import { useI18n } from "./lib/i18n";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-const SIDEBAR_MIN = 160;
-const SIDEBAR_MAX = 480;
 const FEEDBACK_MIN = 280;
 const FEEDBACK_MAX = 640;
 
@@ -26,11 +23,7 @@ export default function App() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [mobileNav, setMobileNav] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(240);
   const [feedbackWidth, setFeedbackWidth] = useState(384);
-  const [resizing, setResizing] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -103,6 +96,17 @@ export default function App() {
     }
   }, [t]);
 
+  // Reset the studio to a fresh upload state — clears the loaded analysis, any transient
+  // status/error, the picker, and the shareable ?analysis= param so the URL matches the empty view.
+  const newAnalysis = useCallback(() => {
+    setAnalysis(null);
+    setError("");
+    setStatusMsg("");
+    setPickerOpen(false);
+    skipReloadId.current = null;
+    if (searchParams.get("analysis")) setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const storedId = searchParams.get("analysis");
   useEffect(() => {
     if (!storedId) return;
@@ -126,98 +130,55 @@ export default function App() {
   const hasResult = !!analysis;
 
   return (
-    <div className="h-[100dvh] w-full flex bg-background-dark text-content overflow-hidden">
-      {/* Desktop: inline, resizable sidebar */}
-      <div className="hidden lg:flex shrink-0">
-        <Sidebar
-          open={sidebarOpen}
-          width={sidebarOpen ? sidebarWidth : 64}
-          animate={!resizing}
-          onToggle={() => setSidebarOpen((v) => !v)}
+    <AppLayout
+      analysis={analysis}
+      loading={loading}
+      onOpenLibrary={() => setPickerOpen(true)}
+      onNewAnalysis={newAnalysis}
+    >
+      {!hasResult ? (
+        <DemoIntro
+          onFile={runUpload}
           onOpenLibrary={() => setPickerOpen(true)}
+          loading={loading}
+          statusMsg={statusMsg}
+          error={error}
         />
-        {sidebarOpen && (
-          <ResizeHandle
-            onResize={(d) => setSidebarWidth((w) => clamp(w + d, SIDEBAR_MIN, SIDEBAR_MAX))}
-            onResizeStart={() => setResizing(true)}
-            onResizeEnd={() => setResizing(false)}
-          />
-        )}
-      </div>
-
-      {/* Mobile: off-canvas drawer + backdrop */}
-      {mobileNav && (
-        <div
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
-          onClick={() => setMobileNav(false)}
-        />
-      )}
-      <div
-        className={`fixed inset-y-0 left-0 z-40 w-[270px] max-w-[80vw] transition-transform duration-200 ease-in-out lg:hidden ${
-          mobileNav ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <Sidebar
-          open
-          width={270}
-          animate={false}
-          onToggle={() => setMobileNav(false)}
-          onOpenLibrary={() => {
-            setMobileNav(false);
-            setPickerOpen(true);
-          }}
-        />
-      </div>
-
-      <main className="flex-1 flex flex-col min-w-0 min-h-0">
-        <Header analysis={analysis} loading={loading} onMenu={() => setMobileNav(true)} />
-
-        {!hasResult ? (
-          <DemoIntro
-            onFile={runUpload}
-            onOpenLibrary={() => setPickerOpen(true)}
-            loading={loading}
-            statusMsg={statusMsg}
-            error={error}
-          />
-        ) : (
-          <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden scrollbar-thin">
-            {/* Left: video (with overlaid metrics HUD) + timeline. Mobile scrolls
-                with the page; desktop is a bounded, independently-scrolling column. */}
-            <div className="min-w-0 flex flex-col gap-4 p-4 bg-content/[0.03] lg:flex-1 lg:min-h-0 lg:overflow-hidden">
-              <VideoPanel
-                analysis={analysis!}
-                videoRef={videoRef}
-                onTimeUpdate={setCurrentTime}
-                onActiveFault={setActiveFaultId}
-                onSeek={seek}
-              />
-            </div>
-
-            {/* Drag to resize video vs. feedback (desktop only — panes stack on mobile). */}
-            <ResizeHandle
-              className="hidden lg:block"
-              onResize={(d) => setFeedbackWidth((w) => clamp(w - d, FEEDBACK_MIN, FEEDBACK_MAX))}
-              onResizeStart={() => setResizing(true)}
-              onResizeEnd={() => setResizing(false)}
+      ) : (
+        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden scrollbar-thin">
+          {/* Left: video (with overlaid metrics HUD) + timeline. Mobile scrolls
+              with the page; desktop is a bounded, independently-scrolling column. */}
+          <div className="min-w-0 flex flex-col gap-4 p-4 bg-content/[0.03] lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+            <VideoPanel
+              analysis={analysis!}
+              videoRef={videoRef}
+              onTimeUpdate={setCurrentTime}
+              onActiveFault={setActiveFaultId}
+              onSeek={seek}
             />
-
-            {/* Right: one unified "coach chat" tray — the grounded fault-card analysis, the
-                knowledge graph below it, and the follow-up conversation, all in one thread. */}
-            <aside
-              style={{ ["--fbw" as string]: `${feedbackWidth}px` }}
-              className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
-            >
-              <CoachTray
-                analysis={analysis!}
-                currentTime={currentTime}
-                onSeek={seek}
-                activeFaultId={activeFaultId}
-              />
-            </aside>
           </div>
-        )}
-      </main>
+
+          {/* Drag to resize video vs. feedback (desktop only — panes stack on mobile). */}
+          <ResizeHandle
+            className="hidden lg:block"
+            onResize={(d) => setFeedbackWidth((w) => clamp(w - d, FEEDBACK_MIN, FEEDBACK_MAX))}
+          />
+
+          {/* Right: one unified "coach chat" tray — the grounded fault-card analysis, the
+              knowledge graph below it, and the follow-up conversation, all in one thread. */}
+          <aside
+            style={{ ["--fbw" as string]: `${feedbackWidth}px` }}
+            className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
+          >
+            <CoachTray
+              analysis={analysis!}
+              currentTime={currentTime}
+              onSeek={seek}
+              activeFaultId={activeFaultId}
+            />
+          </aside>
+        </div>
+      )}
 
       {pickerOpen && (
         <LibraryPicker
@@ -228,6 +189,6 @@ export default function App() {
           }}
         />
       )}
-    </div>
+    </AppLayout>
   );
 }

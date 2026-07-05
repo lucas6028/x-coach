@@ -1,5 +1,5 @@
-import { ClockCounterClockwise, Folders, List, VideoCamera } from "@phosphor-icons/react";
-import { Link } from "react-router-dom";
+import { ClockCounterClockwise, Folders, List, Plus, VideoCamera } from "@phosphor-icons/react";
+import { Link, useLocation } from "react-router-dom";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -9,14 +9,24 @@ interface Props {
   animate: boolean;
   onToggle: () => void;
   onOpenLibrary: () => void;
+  // Start a fresh studio session (clears the current analysis / routes into the studio).
+  onNewAnalysis: () => void;
 }
 
 // Labelled bar when `open`, slim icon rail when collapsed — mirrors demo/index.html.
 // The menu toggle lives in the top row so it stays reachable in either state.
 // Width is driven from the parent so it can be dragged to resize.
 // Account, language and theme controls live in the top-right Header, not here.
-export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary }: Props) {
+export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary, onNewAnalysis }: Props) {
   const { t } = useI18n();
+  const { pathname } = useLocation();
+  // Shared shell: highlight whichever destination the current route matches.
+  const onStudio = pathname === "/app";
+  const onHistory = pathname === "/history";
+  const navBase =
+    "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors";
+  const navActive = "bg-primary/10 text-primary border border-primary/20";
+  const navIdle = "text-muted hover:bg-content/5 hover:text-content";
   return (
     <aside
       style={{ width }}
@@ -42,20 +52,28 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
           )}
         </div>
         <nav className="flex flex-col gap-1 p-2">
-          <a
-            className={`flex items-center gap-3 px-3 py-3 rounded-lg bg-primary/10 text-primary border border-primary/20 ${
+          {/* Primary CTA: start a fresh analysis from anywhere in the app. */}
+          <button
+            onClick={onNewAnalysis}
+            title={t("nav.newAnalysis")}
+            className={`${navBase} mb-1 bg-primary text-primary-content font-medium hover:bg-primary/90 active:scale-[0.99] ${
               open ? "" : "justify-center"
             }`}
-            href="#"
+          >
+            <Plus size={22} weight="bold" />
+            {open && <span className="text-sm">{t("nav.newAnalysis")}</span>}
+          </button>
+          <Link
+            to="/app"
+            title={t("nav.analyse")}
+            className={`${navBase} ${onStudio ? navActive : navIdle} ${open ? "" : "justify-center"}`}
           >
             <VideoCamera size={22} weight="duotone" />
             {open && <span className="text-sm font-medium">{t("nav.analyse")}</span>}
-          </a>
+          </Link>
           <button
             onClick={onOpenLibrary}
-            className={`flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors ${
-              open ? "" : "justify-center"
-            }`}
+            className={`${navBase} ${navIdle} ${open ? "" : "justify-center"}`}
           >
             <Folders size={22} weight="duotone" />
             {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
@@ -63,9 +81,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary 
           <Link
             to="/history"
             title={t("nav.history")}
-            className={`flex items-center gap-3 px-3 py-3 rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors ${
-              open ? "" : "justify-center"
-            }`}
+            className={`${navBase} ${onHistory ? navActive : navIdle} ${open ? "" : "justify-center"}`}
           >
             <ClockCounterClockwise size={22} weight="duotone" />
             {open && <span className="text-sm font-medium">{t("nav.history")}</span>}

@@ -2,14 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CaretRight,
   FilmSlate,
-  Plus,
   PersonSimpleRun,
-  SignOut,
   VideoCamera,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
+import AppLayout from "../components/AppLayout";
 import { useAuth } from "../lib/auth";
 import { useI18n, viewLabel } from "../lib/i18n";
 
@@ -19,8 +18,7 @@ type Status = "loading" | "ready" | "error";
 // /app?analysis=<id>. Product UI — kept in the app's token system, with loading/empty/error states.
 export default function History() {
   const { t, lang } = useI18n();
-  const { user, signOut } = useAuth();
-  const navigate = useNavigate();
+  const { user } = useAuth();
 
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [status, setStatus] = useState<Status>("loading");
@@ -75,40 +73,12 @@ export default function History() {
   }, [items, lang]);
 
   return (
-    <div className="min-h-[100dvh] bg-background-dark text-content">
-      <header className="sticky top-0 z-10 border-b border-border-dark bg-background-dark/95 px-4 backdrop-blur lg:px-6">
-        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between gap-3">
-          <Link to="/app" className="flex items-center gap-2.5">
-            <img src="/icon.svg" alt="" className="h-8 w-8 rounded" />
-            <span className="font-display font-bold tracking-tight">X-Coach</span>
-          </Link>
-          <div className="flex items-center gap-2">
-            <Link
-              to="/app"
-              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
-            >
-              <Plus size={18} />
-              <span className="hidden sm:inline">{t("history.newAnalysis")}</span>
-            </Link>
-            <button
-              onClick={async () => {
-                await signOut();
-                navigate("/");
-              }}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
-            >
-              <SignOut size={18} />
-              <span className="hidden sm:inline">{t("account.signout")}</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
-        <h1 className="font-display text-2xl font-bold tracking-tight">{t("history.title")}</h1>
-        <p className="mt-1.5 text-sm text-muted">
-          {user?.email ? t("history.subtitle", { email: user.email }) : t("history.subtitleAnon")}
-        </p>
+    <AppLayout title={t("history.title")}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
+          <p className="text-sm text-muted">
+            {user?.email ? t("history.subtitle", { email: user.email }) : t("history.subtitleAnon")}
+          </p>
 
         {status === "loading" && (
           <ul className="mt-8 flex flex-col gap-2" aria-hidden="true">
@@ -219,7 +189,8 @@ export default function History() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+        </main>
+      </div>
+    </AppLayout>
   );
 }

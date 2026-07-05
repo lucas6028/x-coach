@@ -16,6 +16,7 @@ type Dict = Record<string, string>;
 // English is the source/fallback dictionary; every key here should have a zh-Hant counterpart.
 const en: Dict = {
   // Sidebar
+  "nav.newAnalysis": "New analysis",
   "nav.analyse": "Analyse",
   "nav.library": "Library",
   "nav.hide": "Hide navigation",
@@ -378,6 +379,7 @@ const en: Dict = {
 
 const zhHant: Dict = {
   // Sidebar
+  "nav.newAnalysis": "新增分析",
   "nav.analyse": "分析",
   "nav.library": "資料庫",
   "nav.hide": "隱藏導覽列",

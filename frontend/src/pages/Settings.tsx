@@ -1,13 +1,7 @@
 import { useEffect, useState } from "react";
-import {
-  ArrowLeft,
-  CheckCircle,
-  ClockCounterClockwise,
-  Trash,
-  WarningCircle,
-} from "@phosphor-icons/react";
-import { Link } from "react-router-dom";
+import { CheckCircle, ClockCounterClockwise, Trash, WarningCircle } from "@phosphor-icons/react";
 import { api } from "../api";
+import AppLayout from "../components/AppLayout";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import { getStoredModel, setStoredModel } from "../lib/model";
@@ -75,26 +69,10 @@ export default function Settings() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-background-dark text-content">
-      <header className="sticky top-0 z-10 border-b border-border-dark bg-background-dark/95 px-4 backdrop-blur lg:px-6">
-        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between gap-3">
-          <Link to="/app" className="flex items-center gap-2.5">
-            <img src="/icon.svg" alt="" className="h-8 w-8 rounded" />
-            <span className="font-display font-bold tracking-tight">X-Coach</span>
-          </Link>
-          <Link
-            to="/app"
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
-          >
-            <ArrowLeft size={18} />
-            <span className="hidden sm:inline">{t("settings.backToStudio")}</span>
-          </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
-        <h1 className="font-display text-2xl font-bold tracking-tight">{t("settings.title")}</h1>
-        <p className="mt-1.5 text-sm text-muted">{t("settings.subtitle")}</p>
+    <AppLayout title={t("settings.title")}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
+          <p className="text-sm text-muted">{t("settings.subtitle")}</p>
 
         {/* Profile */}
         <section className="mt-8">
@@ -264,7 +242,8 @@ export default function Settings() {
             </div>
           </div>
         </section>
-      </main>
-    </div>
+        </main>
+      </div>
+    </AppLayout>
   );
 }
