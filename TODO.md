@@ -273,3 +273,4 @@
 
 - [ ] 動作偵測、分類
 - [ ] LLM follow up questions (options)
+- [ ] 健身菜單客製化，可用 LLM 進行修改
