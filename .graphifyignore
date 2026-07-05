@@ -1,0 +1,8 @@
+# graphify scope: x-coach proper only.
+# These directories are tracked (not gitignored) but are vendored / third-party
+# and were deliberately excluded from the knowledge graph. Without this file,
+# `graphify update` re-detects all of them as "new" on every run.
+.agents/
+.obsidian/
+.claude/
+open-slide/
