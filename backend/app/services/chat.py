@@ -14,6 +14,12 @@ Server-Sent Events; because the HTTP 200 is committed the moment streaming start
 OpenRouter failure (connect, mid-stream, or an empty completion) surfaces as an in-band ``error``
 event rather than an HTTP status code — the only pre-flight HTTP errors are 503/401/422, raised in
 the router before the stream opens.
+
+Follow-up suggestions (v2.1) are a **separate, fire-and-forget** step (``suggest_followups`` +
+``POST /api/chat/followups``), not part of the answer stream: the client renders the answer the moment
+it completes, then asks for two grounded next-question chips in the background and drops them in when
+they arrive. Keeping them off the answer path means a slow or failed suggestion can never delay or
+corrupt the answer — and the answer stream stays the clean ``delta``/``done``/``error`` contract.
 """
 
 from __future__ import annotations
@@ -27,6 +33,11 @@ from backend.app.settings import get_settings
 # OpenRouter round-trip budget (seconds). Generous enough for a reasoning model, bounded so a
 # hung upstream can't pin a worker thread indefinitely.
 _REQUEST_TIMEOUT_S = 60.0
+
+# The follow-up call is a separate, best-effort background request; bound it tightly so a slow/hung
+# suggestion never leaves the chips "loading" — a miss just means no chips, and the answer is already
+# on screen regardless.
+_FOLLOWUP_TIMEOUT_S = 15.0
 
 _SYSTEM_PREAMBLE = (
     "You are the x-coach squat coach. You explain an ALREADY-COMPUTED analysis of one squat "
@@ -42,6 +53,28 @@ _SYSTEM_PREAMBLE = (
     "- You may use light Markdown for readability — bold for key cues, short bulleted lists, and "
     "inline code for measurements/timecodes. Formatting never loosens the grounding rules above.\n"
 )
+
+# Appended to the grounded system prompt for the follow-up call. The full analysis grounding precedes
+# it, so a suggested question can never reference a fault, cue, or measurement outside the analysis —
+# the same honesty bar the answer holds.
+_FOLLOWUP_INSTRUCTION = (
+    "FOLLOW-UP TASK: The user has just read your answer. Propose EXACTLY TWO short follow-up "
+    "questions the user might naturally ask you next about THIS squat. Each is from the user's point "
+    "of view (addressed to you, the coach), grounded ONLY in the analysis facts above (never a "
+    "fault/cue/measurement not listed), at most ~12 words, in the user's language. Output ONLY a "
+    'compact JSON array of exactly two strings and nothing else — e.g. ["...", "..."].'
+)
+
+# A short trailing *user* turn for the follow-up call. Without it the request array would end on the
+# assistant answer, which several OpenRouter-routed models continue (more prose) rather than treat as
+# a cue to run the task — so the ask is restated as the final user turn (the conventional "do X over
+# this conversation" shape); the grounding + detailed instruction still live in the system prompt.
+_FOLLOWUP_NUDGE = "Now output ONLY the JSON array of exactly two follow-up questions."
+
+# Extra OpenRouter body for the follow-up call: route to the lowest-latency provider for the pinned
+# model. Measured to be the real fix for the 3–10s chip-latency variance — without it, OpenRouter can
+# route the same model to a cold/slow provider (2s one call, 9s the next); with it, ~1.5s consistently.
+_FOLLOWUP_ROUTING = {"provider": {"sort": "latency"}}
 
 
 def _fmt_list(items: Any) -> str:
@@ -113,18 +146,28 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_completion(messages: list[dict[str, str]], model: str) -> Iterator[str]:
+def _stream_completion(
+    messages: list[dict[str, str]],
+    model: str,
+    timeout: float = _REQUEST_TIMEOUT_S,
+    extra_body: dict[str, Any] | None = None,
+) -> Iterator[str]:
     """Stream reply-text chunks from OpenRouter's OpenAI-compatible chat-completions API.
 
     Isolated (and network-deferred) so tests patch this seam. Parses the OpenAI SSE shape
     (``data: {choices:[{delta:{content}}]}`` lines, ``data: [DONE]`` terminator) and yields each
-    non-empty ``delta.content``. ``model`` is the already-resolved (allow-listed) OpenRouter slug.
-    Raises ``RuntimeError`` on any transport/HTTP failure so ``answer_stream`` can turn it into an
-    in-band ``error`` event.
+    non-empty ``delta.content``. ``model`` is the already-resolved OpenRouter slug; ``timeout`` is the
+    per-request budget (the follow-up call passes a tighter one); ``extra_body`` merges extra request
+    fields (the follow-up call passes provider-routing preferences). Raises ``RuntimeError`` on any
+    transport/HTTP failure so the caller can surface it (an in-band ``error`` for the answer stream, or
+    an empty suggestion list for the best-effort follow-up call).
     """
     import httpx  # deferred: only needed on a live request, keeps router import light.
 
     settings = get_settings()
+    body: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+    if extra_body:
+        body.update(extra_body)
     try:
         with httpx.stream(
             "POST",
@@ -136,8 +179,8 @@ def _stream_completion(messages: list[dict[str, str]], model: str) -> Iterator[s
                 "HTTP-Referer": "https://x-coach.local",
                 "X-Title": "x-coach",
             },
-            json={"model": model, "messages": messages, "stream": True},
-            timeout=_REQUEST_TIMEOUT_S,
+            json=body,
+            timeout=timeout,
         ) as resp:
             resp.raise_for_status()
             for line in resp.iter_lines():
@@ -156,6 +199,55 @@ def _stream_completion(messages: list[dict[str, str]], model: str) -> Iterator[s
         raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
 
 
+def _parse_followups(text: str) -> list[str]:
+    """Extract up to two follow-up questions from the model's JSON-array reply.
+
+    Tolerant of a model that wraps the array in code fences or stray prose: the outer ``[...]`` is
+    sliced out before parsing. Any non-list / unparseable payload (or fewer than the questions asked
+    for) yields whatever *did* parse — ``[]`` in the worst case — so a malformed suggestion never
+    breaks a good answer; the caller simply omits the followups frame.
+    """
+    text = text.strip()
+    if "[" in text and "]" in text:  # slice to the outer array — tolerates ```json fences / prose.
+        text = text[text.index("[") : text.rindex("]") + 1]
+    try:
+        data = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out = [str(q).strip() for q in data if str(q).strip()]
+    return out[:2]
+
+
+def suggest_followups(
+    *, messages: list[dict[str, str]], context: dict[str, Any], model: str
+) -> list[str]:
+    """Two grounded next-question suggestions for a completed turn — best-effort, never raises.
+
+    Called by ``POST /api/chat/followups`` *after* the answer has already rendered, so it is fully
+    off the answer's critical path: any transport failure, timeout, or unparseable reply just returns
+    ``[]`` (no chips). ``messages`` is the conversation ending on the assistant answer the questions
+    follow from; the grounded system prompt (same honesty rules as the answer) precedes the follow-up
+    instruction, and a trailing user nudge keeps the request from ending on the assistant turn.
+    """
+    system = _build_system_prompt(context) + "\n\n" + _FOLLOWUP_INSTRUCTION
+    convo = [
+        {"role": "system", "content": system},
+        *messages,  # the conversation, ending on the assistant answer these questions follow from
+        {"role": "user", "content": _FOLLOWUP_NUDGE},  # restate the ask so the array isn't left open
+    ]
+    parts: list[str] = []
+    try:
+        for chunk in _stream_completion(
+            convo, model, timeout=_FOLLOWUP_TIMEOUT_S, extra_body=_FOLLOWUP_ROUTING
+        ):
+            parts.append(chunk)
+    except RuntimeError:
+        return []
+    return _parse_followups("".join(parts))
+
+
 def answer_stream(
     *, messages: list[dict[str, str]], context: dict[str, Any], model: str
 ) -> Iterator[str]:
@@ -163,11 +255,12 @@ def answer_stream(
 
     ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last; the
     backend prepends the grounded system prompt. ``model`` is the already-resolved (allow-listed)
-    OpenRouter slug the caller picked. Yields zero or more ``delta`` frames, then exactly one
-    terminator: ``done`` (carrying the model actually used) on success, or ``error`` on any
-    transport failure or an empty completion. The empty-completion guard preserves the v1 invariant
-    — the client must never keep an empty assistant turn, which the next send's
-    ``content min_length=1`` would reject.
+    OpenRouter slug. Yields zero or more ``delta`` frames, then exactly one terminator: ``done``
+    (carrying the model actually used) on success, or ``error`` on any transport failure or an empty
+    completion. The empty-completion guard preserves the v1 invariant — the client must never keep an
+    empty assistant turn, which the next send's ``content min_length=1`` would reject. Follow-up
+    suggestions are intentionally NOT part of this stream (see ``suggest_followups``): the answer path
+    stays clean and closes the moment the answer is done, so nothing delays it.
     """
     system = _build_system_prompt(context)
     parts: list[str] = []

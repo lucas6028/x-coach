@@ -383,6 +383,55 @@ create table if not exists public.conversations (
   (missing Squat dataset — CI `--ignore`s it) and `lib.supabase.test.ts` (fails only with a populated
   local `frontend/.env`; passes on CI).
 
+---
+
+# v2.1: Per-answer follow-up suggestions
+
+Status: **shipped**. After each coach answer, the tray offers **two grounded next-question chips**
+— dynamically generated from that answer (like the opening starter chips, but contextual), matching
+the request "在每次 LLM 回答後，加入 2 個 follow up questions, 和一開始的選項一樣".
+
+> **Design history.** This shipped in three iterations: (1) a blocking second call after the answer;
+> (2) a single-request *sentinel split* (answer→`===FOLLOWUPS===`→JSON array in one stream) to kill the
+> second round-trip; then (3) the **fire-and-forget** design below, after the sentinel's worst-case
+> (a model emitting the array *without* the sentinel would stream raw `["…"]` into the answer, un-retractable)
+> was judged too fragile. Fire-and-forget keeps the low perceived latency without that failure mode.
+
+- **Generation — separate, fire-and-forget request.** `POST /api/chat` streams **only** the answer
+  (`delta`/`done`/`error`, the clean v2 contract, closes the instant the answer is done). Follow-ups
+  are a distinct endpoint, `POST /api/chat/followups` → `{questions: [...]}`, backed by
+  `chat.py:suggest_followups` (grounded system prompt + `_FOLLOWUP_INSTRUCTION` + a trailing user
+  `_FOLLOWUP_NUDGE`, tight `_FOLLOWUP_TIMEOUT_S`). Grounding unchanged — same analysis facts +
+  "Do NOT invent" rule, so a suggestion can't reference a fault outside the analysis.
+- **Client (`CoachTray`).** The answer commits and the composer re-enables the moment the stream
+  ends (unchanged commit/rollback path). Immediately after committing, the client fires
+  `api.chatFollowups(thread, context, model)` **without awaiting it** and drops the chips in when it
+  resolves. A `followupSeq` ref guards the race: a slow result is applied only if its turn is still
+  the latest (a newer send or a switched analysis bumps the seq and the stale result is ignored).
+  `followups` state is ephemeral (not persisted); chips render via the shared `chipClass`.
+- **Why this over the sentinel:** robustness. The answer path is a clean stream again (no delimiter
+  to leak), a slow/failed suggestion can't delay or corrupt the answer (it's off the critical path),
+  and `suggest_followups` swallows everything to `[]`. Cost: a second HTTP request + round-trip — but
+  the user never waits on it, so perceived latency matches the sentinel version. The one real downside
+  vs sentinel: `/api/chat/followups` re-sends the grounding blob and makes a second model call (mitigable
+  later with prompt caching). Verified live (fault + clean-rep) — deepseek/minimax/xiaomi all return two
+  grounded questions.
+- **Latency tuning (chip snappiness).** The chips were measured at 3–10s wall-clock — traced to two
+  causes: (1) OpenRouter's *provider routing* swinging the **same** model 2s→9s call-to-call, and (2)
+  *reasoning* answer models (minimax) spending 6s "thinking" before emitting the tiny array; output
+  length is not the bottleneck (TTFT is). Fix: the follow-up call is pinned to a fast model
+  (`OPENROUTER_FOLLOWUP_MODEL`, default `openai/gpt-oss-120b`) via `settings.followup_chat_model` —
+  **independent of the answer model the user picked** (the `/chat/followups` router ignores `body.model`)
+  — and sends `provider: {sort: "latency"}` (`chat._FOLLOWUP_ROUTING`, merged via `_stream_completion`'s
+  `extra_body`). Measured effect: a consistent **~1.5s** end-to-end (was 3–10s), verified over the live
+  endpoint. `max_tokens` was tried and rejected — gpt-oss is a reasoning model and the cap gets consumed
+  by hidden reasoning tokens, yielding empty content.
+- **Tests**: `backend/app/services/chat.py` + `routers/chat.py` coverage 100% (`SuggestFollowupsTests`,
+  `ParseFollowupsTests`, `ChatRouterTests` cover the endpoint's 503 + resolved-model + thread-ending-on-
+  assistant; `AnswerStreamTests` locks that the answer stream carries no followups); frontend
+  `api.test.ts` (`chatFollowups`) + `components.CoachTray.chat.test.tsx` (fire-and-forget chips render +
+  click-to-send + clear-on-send). No new i18n — question text is model-generated.
+
 ## Out of scope (v3)
 
 Tool-calling live RAG, anonymous chat, multi-analysis / cross-thread memory.

@@ -295,6 +295,47 @@ describe("api.chatStream", () => {
   });
 });
 
+describe("api.chatFollowups", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const messages: ChatMessage[] = [
+    { role: "user", content: "why did my knees cave?" },
+    { role: "assistant", content: "Drive your knees out." },
+  ];
+  const context: ChatContext = { fault_count: 0, quality: {}, faults: [] };
+
+  it("POSTs the thread + context and returns the questions", async () => {
+    const spy = mockFetch({ questions: ["Widen my stance?", "Go lower?"] });
+    const qs = await api.chatFollowups(messages, context);
+    expect(qs).toEqual(["Widen my stance?", "Go lower?"]);
+    expect(spy.mock.calls[0][0]).toBe("/api/chat/followups");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ messages, context });
+  });
+
+  it("includes the chosen model when provided", async () => {
+    const spy = mockFetch({ questions: [] });
+    await api.chatFollowups(messages, context, "minimax/minimax-m3");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      messages,
+      context,
+      model: "minimax/minimax-m3",
+    });
+  });
+
+  it("returns [] on a non-ok response (best-effort, never throws)", async () => {
+    mockFetch({}, false, 503);
+    await expect(api.chatFollowups(messages, context)).resolves.toEqual([]);
+  });
+
+  it("defaults to [] when the body has no questions field", async () => {
+    mockFetch({});
+    await expect(api.chatFollowups(messages, context)).resolves.toEqual([]);
+  });
+});
+
 describe("api.conversations", () => {
   afterEach(() => vi.restoreAllMocks());
 
