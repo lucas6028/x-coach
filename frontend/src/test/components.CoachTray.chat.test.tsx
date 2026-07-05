@@ -335,6 +335,53 @@ describe("CoachTray — follow-up chat", () => {
     Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
   });
 
+  it("swallows a follow-up fetch failure without disrupting the committed answer", async () => {
+    h.chatStream.mockImplementation(streamReply("Drive your knees out."));
+    // The background suggestion fetch rejects — fire-and-forget, so it must not surface an error.
+    h.chatFollowups.mockRejectedValueOnce(new Error("network"));
+    renderTray();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "why?");
+    await userEvent.click(screen.getByLabelText(/Send message/i));
+
+    // The answer is on screen and the failed suggestion fetch is silently ignored — no chips, no alert.
+    expect(await screen.findByText("Drive your knees out.")).toBeInTheDocument();
+    expect(h.chatFollowups).toHaveBeenCalledTimes(1);
+    await Promise.resolve(); // let the rejection settle through the .catch
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("drops stale follow-ups once a newer turn has superseded them", async () => {
+    h.chatStream
+      .mockImplementationOnce(streamReply("First answer."))
+      .mockImplementationOnce(streamReply("Second answer."));
+    // Defer the FIRST turn's suggestions so they resolve only after a second turn has been sent.
+    let resolveStale!: (qs: string[]) => void;
+    h.chatFollowups
+      .mockReturnValueOnce(
+        new Promise<string[]>((res) => {
+          resolveStale = res;
+        })
+      )
+      .mockResolvedValueOnce([]); // the second turn yields no chips
+    renderTray();
+
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "first?");
+    await userEvent.click(screen.getByLabelText(/Send message/i));
+    await screen.findByText("First answer.");
+
+    // A second send bumps the follow-up sequence token before the first fetch resolves.
+    await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), "second?");
+    await userEvent.click(screen.getByLabelText(/Send message/i));
+    await screen.findByText("Second answer.");
+
+    // The first turn's suggestions finally arrive — but they belong to a superseded turn, so the
+    // sequence guard drops them rather than flashing chips under the newer answer.
+    resolveStale(["Stale chip?"]);
+    await new Promise((r) => setTimeout(r, 0)); // flush the resolved .then through the guard
+    expect(screen.queryByRole("button", { name: /Stale chip/i })).not.toBeInTheDocument();
+  });
+
   it("does not auto-scroll when the user has scrolled up to read earlier messages", async () => {
     const scrollTo = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", {
