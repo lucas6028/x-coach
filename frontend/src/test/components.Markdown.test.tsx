@@ -57,4 +57,44 @@ describe("Markdown", () => {
     expect(container.querySelector("a")).toBeNull();
     expect(container.textContent).toContain("evil.example");
   });
+
+  it("renders a fenced code block inside <pre> without the inline pill", () => {
+    const { container } = render(<Markdown>{"```\nconst x = 1\nreturn x\n```"}</Markdown>);
+    const code = container.querySelector("pre code");
+    expect(code).not.toBeNull();
+    expect(code?.textContent).toContain("const x = 1");
+    // Block code must not carry the inline pill background.
+    expect(code?.className).not.toContain("bg-content");
+    // Inline code still gets the pill.
+    const { container: inline } = render(<Markdown>{"use `tempo` here"}</Markdown>);
+    expect(inline.querySelector("code")?.className).toContain("bg-content");
+    expect(inline.querySelector("pre")).toBeNull();
+  });
+
+  it("renders blockquotes and horizontal rules", () => {
+    const { container } = render(<Markdown>{"> stay tall\n\n---\n\ndone"}</Markdown>);
+    expect(container.querySelector("blockquote")?.textContent).toContain("stay tall");
+    expect(container.querySelector("hr")).not.toBeNull();
+  });
+
+  it("renders strikethrough and collapses h4–h6 to the quiet subhead", () => {
+    const { container } = render(
+      <Markdown>{"~~old cue~~\n\n#### H4\n\n##### H5\n\n###### H6"}</Markdown>
+    );
+    expect(container.querySelector("del")?.textContent).toBe("old cue");
+    // Every heading level (incl. 4–6) maps to <h3>; none leak an <h4>/<h5>/<h6>.
+    expect(container.querySelectorAll("h3")).toHaveLength(3);
+    expect(container.querySelector("h4, h5, h6")).toBeNull();
+  });
+
+  it("renders a gfm task list with disabled checkboxes and no disc bullet", () => {
+    const { container } = render(<Markdown>{"- [x] done\n- [ ] todo"}</Markdown>);
+    const boxes = container.querySelectorAll('input[type="checkbox"]');
+    expect(boxes).toHaveLength(2);
+    // Checkboxes are inert (the coach's text, not an interactive control).
+    expect((boxes[0] as HTMLInputElement).disabled).toBe(true);
+    expect((boxes[0] as HTMLInputElement).checked).toBe(true);
+    // The task-list <ul> drops the disc bullet.
+    expect(container.querySelector("ul")?.className).toContain("list-none");
+  });
 });
