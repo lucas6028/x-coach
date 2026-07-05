@@ -1,4 +1,5 @@
 import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 
 // The coach's answer is LLM text rendered as HTML, so it MUST be sanitized. We derive from
@@ -6,7 +7,8 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 // javascript: URLs — and additionally drop <a>/<img>: the coach speaks only from the analysis and
 // has no reason to emit links or images, so removing them keeps the rendered surface minimal.
 // (react-markdown already escapes raw HTML by default since rehype-raw is not enabled; the sanitize
-// pass is defence-in-depth and is what actually enforces the no-links rule on real markdown links.)
+// pass is defence-in-depth and is what actually enforces the no-links rule on real markdown links —
+// including the bare URLs that remark-gfm auto-links, whose <a> is stripped the same way.)
 const schema = {
   ...defaultSchema,
   tagNames: (defaultSchema.tagNames ?? []).filter((t) => t !== "a" && t !== "img"),
@@ -40,13 +42,33 @@ const components: Components = {
   h1: ({ node: _n, ...props }) => <h3 className="mt-3 text-sm font-semibold text-content" {...props} />,
   h2: ({ node: _n, ...props }) => <h3 className="mt-3 text-sm font-semibold text-content" {...props} />,
   h3: ({ node: _n, ...props }) => <h3 className="mt-3 text-sm font-semibold text-content" {...props} />,
+  // GFM tables (via remark-gfm). The table scrolls inside its own container so a wide table never
+  // pushes the chat column horizontally.
+  table: ({ node: _n, ...props }) => (
+    <div className="mt-2 overflow-x-auto">
+      <table className="w-full border-collapse text-[14px] text-content" {...props} />
+    </div>
+  ),
+  th: ({ node: _n, ...props }) => (
+    <th
+      className="border border-content/10 px-2 py-1 text-left font-semibold text-content"
+      {...props}
+    />
+  ),
+  td: ({ node: _n, ...props }) => (
+    <td className="border border-content/10 px-2 py-1 align-top" {...props} />
+  ),
 };
 
 // Render a coach message as sanitized markdown. Tolerant of partial input mid-stream (unterminated
 // emphasis just renders as text).
 export default function Markdown({ children }: { children: string }) {
   return (
-    <ReactMarkdown rehypePlugins={[[rehypeSanitize, schema]]} components={components}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[[rehypeSanitize, schema]]}
+      components={components}
+    >
       {children}
     </ReactMarkdown>
   );

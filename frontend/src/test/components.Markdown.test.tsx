@@ -38,4 +38,23 @@ describe("Markdown", () => {
     // A half-streamed answer with an unterminated **bold** must not crash the render.
     expect(() => render(<Markdown>{"Drive your **kne"}</Markdown>)).not.toThrow();
   });
+
+  it("renders GFM pipe tables into a real <table> with header and body cells", () => {
+    const md = ["| Fault | Cue |", "| --- | --- |", "| Knees in | Drive knees out |"].join("\n");
+    const { container } = render(<Markdown>{md}</Markdown>);
+    const table = container.querySelector("table");
+    expect(table).not.toBeNull();
+    expect(container.querySelectorAll("th")).toHaveLength(2);
+    expect(container.querySelector("th")?.textContent).toBe("Fault");
+    expect(container.querySelectorAll("tbody td")).toHaveLength(2);
+    expect(container.querySelector("tbody td")?.textContent).toBe("Knees in");
+  });
+
+  it("still strips links inside a table cell, keeping the visible text", () => {
+    // remark-gfm turns a bare URL into an auto-link; the sanitize schema must drop its <a>.
+    const md = ["| Ref |", "| --- |", "| See https://evil.example now |"].join("\n");
+    const { container } = render(<Markdown>{md}</Markdown>);
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain("evil.example");
+  });
 });
