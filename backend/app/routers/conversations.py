@@ -28,6 +28,9 @@ class ConversationBody(BaseModel):
     # The full thread, oldest first. Empty is allowed (a cleared thread); the client normally PUTs
     # after a completed turn, so it is non-empty in practice.
     messages: list[ConversationMessage] = Field(default_factory=list)
+    # The latest answer's grounded follow-up chips. Optional — a PUT that omits it (or sends [])
+    # clears the stored chips, matching the client's "clear on new send" behaviour.
+    followups: list[str] = Field(default_factory=list)
 
 
 @router.put("/conversations/{video_id}")
@@ -39,9 +42,13 @@ def save_conversation(
     """Upsert the caller's chat thread for ``video_id`` (idempotent; the whole thread is stored)."""
     messages = [m.model_dump() for m in body.messages]
     store.upsert_conversation(
-        token=user.token, user_id=user.id, video_id=video_id, messages=messages
+        token=user.token,
+        user_id=user.id,
+        video_id=video_id,
+        messages=messages,
+        followups=body.followups,
     )
-    return {"video_id": video_id, "messages": messages}
+    return {"video_id": video_id, "messages": messages, "followups": body.followups}
 
 
 @router.get("/conversations/{video_id}")
@@ -49,6 +56,10 @@ def load_conversation(
     video_id: str,
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
-    """Return the caller's saved thread for ``video_id``; ``{"messages": []}`` when none exists."""
-    row = store.get_conversation(token=user.token, video_id=video_id)
-    return {"video_id": video_id, "messages": (row or {}).get("messages", [])}
+    """Return the caller's saved thread for ``video_id``; empty lists when none exists."""
+    row = store.get_conversation(token=user.token, video_id=video_id) or {}
+    return {
+        "video_id": video_id,
+        "messages": row.get("messages", []),
+        "followups": row.get("followups", []),
+    }

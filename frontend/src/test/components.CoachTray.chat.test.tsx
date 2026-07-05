@@ -134,6 +134,14 @@ describe("CoachTray — follow-up chat", () => {
     const [fuMessages] = h.chatFollowups.mock.calls[0];
     expect(fuMessages.at(-1)).toEqual({ role: "assistant", content: "Drive your knees out." });
 
+    // Once the chips land they're re-persisted with the thread, so a reload restores them too. The
+    // first PUT (on `done`) clears the previous answer's chips; the second carries this answer's.
+    await vi.waitFor(() => expect(h.putConversation).toHaveBeenCalledTimes(2));
+    expect(h.putConversation.mock.calls[1][2]).toEqual([
+      "Should I widen my stance?",
+      "How low should I go?",
+    ]);
+
     // Clicking a suggestion sends it as the next user turn (same behaviour as a starter chip).
     await userEvent.click(chip);
     expect(h.chatStream).toHaveBeenCalledTimes(2);
@@ -164,6 +172,26 @@ describe("CoachTray — follow-up chat", () => {
     expect(await screen.findByText("earlier answer")).toBeInTheDocument();
     expect(screen.getByText("earlier question")).toBeInTheDocument();
     expect(h.getConversation).toHaveBeenCalledWith("v1");
+  });
+
+  it("restores the saved follow-up chips on load (not just the answer)", async () => {
+    h.getConversation.mockResolvedValue({
+      video_id: "v1",
+      messages: [
+        { role: "user", content: "why did my knees cave?" },
+        { role: "assistant", content: "Drive your knees out." },
+      ],
+      followups: ["Should I widen my stance?", "How low should I go?"],
+    });
+    renderTray();
+
+    // The persisted chips come back as clickable suggestions under the restored answer — the whole
+    // point of persisting them (a reload used to leave the response with no chips).
+    expect(await screen.findByText("Drive your knees out.")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Should I widen my stance/i })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /How low should I go/i })).toBeInTheDocument();
   });
 
   it("does not persist when a turn fails mid-stream", async () => {

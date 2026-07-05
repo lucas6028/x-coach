@@ -347,14 +347,23 @@ describe("api.conversations", () => {
     expect(spy.mock.calls[0][0]).toBe("/api/conversations/vid");
   });
 
-  it("putConversation PUTs the thread body", async () => {
+  it("putConversation PUTs the thread body (chips default to empty when omitted)", async () => {
     const spy = mockFetch({ video_id: "vid", messages: [] });
     const msgs: ChatMessage[] = [{ role: "user", content: "why?" }];
     await api.putConversation("vid", msgs);
     expect(spy.mock.calls[0][0]).toBe("/api/conversations/vid");
     const init = spy.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe("PUT");
-    expect(JSON.parse(init.body as string)).toEqual({ messages: msgs });
+    expect(JSON.parse(init.body as string)).toEqual({ messages: msgs, followups: [] });
+  });
+
+  it("putConversation PUTs the followup chips when passed", async () => {
+    const spy = mockFetch({ video_id: "vid", messages: [] });
+    const msgs: ChatMessage[] = [{ role: "user", content: "why?" }];
+    const fups = ["Should I widen my stance?", "How low should I go?"];
+    await api.putConversation("vid", msgs, fups);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ messages: msgs, followups: fups });
   });
 
   it("putConversation throws on a non-ok response", async () => {

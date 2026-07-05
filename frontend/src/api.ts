@@ -158,9 +158,12 @@ export interface ChatStreamHandlers {
 }
 
 // A persisted chat thread for one analysed video (one per user+video_id). Restored on history-replay.
+// `followups` is the latest answer's grounded next-question chips, persisted so a reload restores the
+// chips too (not just the answer). Optional — absent/empty for pre-followups rows or a cleared thread.
 export interface Conversation {
   video_id: string;
   messages: ChatMessage[];
+  followups?: string[];
 }
 
 // The coach-model picker is server-driven (from /api/health): the authoritative list of selectable
@@ -333,13 +336,18 @@ export const api = {
   getConversation: (videoId: string) =>
     getJSON<Conversation>(`/api/conversations/${encodeURIComponent(videoId)}`),
 
-  // Save the caller's chat thread for a video (idempotent upsert of the whole thread).
-  async putConversation(videoId: string, messages: ChatMessage[]): Promise<void> {
+  // Save the caller's chat thread for a video (idempotent upsert of the whole thread). `followups`
+  // is the latest answer's chips; omit (or []) to clear them — matching the "clear on new send" flow.
+  async putConversation(
+    videoId: string,
+    messages: ChatMessage[],
+    followups: string[] = []
+  ): Promise<void> {
     const url = `/api/conversations/${encodeURIComponent(videoId)}`;
     const res = await fetch(url, {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
-      body: JSON.stringify({ messages }),
+      body: JSON.stringify({ messages, followups }),
     });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   },

@@ -48,8 +48,9 @@ export default function CoachTray({
   // below the committed thread while loading; committed into `messages` on a clean `done`, or
   // discarded on an error (the optimistic user turn is rolled back alongside it).
   const [streaming, setStreaming] = useState("");
-  // Two grounded next-question suggestions the coach offers after an answer (from the `followups`
-  // SSE frame). Ephemeral — captured per answer, not persisted; cleared on a new send / analysis.
+  // Two grounded next-question suggestions the coach offers after an answer. Captured per answer and
+  // persisted alongside the thread (only the latest set), so a reload restores the chips, not just
+  // the response; cleared on a new send / analysis.
   const [followups, setFollowups] = useState<string[]>([]);
   // Whether the *server* has an OpenRouter key. Independent of Supabase auth. null = not yet
   // checked (assume available so the common path is instant).
@@ -86,7 +87,11 @@ export default function CoachTray({
     api
       .getConversation(analysis.video_id)
       .then((c) => {
-        if (active && c.messages?.length) setMessages(c.messages);
+        if (!active || !c.messages?.length) return;
+        setMessages(c.messages);
+        // Restore the latest answer's chips too, so a reload brings the suggestions back — not just
+        // the response. Empty for pre-followups threads (they simply restore without chips).
+        if (c.followups?.length) setFollowups(c.followups);
       })
       .catch(() => undefined);
     return () => {
@@ -167,15 +172,22 @@ export default function CoachTray({
       if (inbandError) throw new ChatError(inbandError, 502);
       const thread: ChatMessage[] = [...next, { role: "assistant", content: acc }];
       setMessages(thread);
-      // Persist the completed turn (fire-and-forget — a save failure must not disrupt the chat).
+      // Persist the completed turn (fire-and-forget — a save failure must not disrupt the chat). Chips
+      // are written empty here (clearing the previous answer's), then re-persisted below once this
+      // turn's chips land — so the message survives even if the follow-up fetch fails or hangs.
       void api.putConversation(analysis.video_id, thread).catch(() => undefined);
       // Fire-and-forget the follow-up chips: the answer is already on screen, so we fetch two grounded
       // next-questions in the background and drop them in when they arrive — unless a newer turn or a
       // switched analysis has since bumped `followupSeq`, in which case this stale result is ignored.
+      // When they land for the still-latest turn, re-persist the thread *with* the chips so a reload
+      // restores them (persist the captured `thread`, not the `messages` state — no stale closure).
       void api
         .chatFollowups(thread, buildChatContext(analysis), getStoredModel())
         .then((qs) => {
-          if (mySeq === followupSeq.current) setFollowups(qs);
+          if (mySeq !== followupSeq.current) return;
+          setFollowups(qs);
+          if (qs.length)
+            void api.putConversation(analysis.video_id, thread, qs).catch(() => undefined);
         })
         .catch(() => undefined);
     } catch (e) {
