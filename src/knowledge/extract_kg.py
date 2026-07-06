@@ -173,6 +173,13 @@ def normalize_kg(kg: KnowledgeGraph) -> KnowledgeGraph:
     seen_edges: set[tuple[str, str, str]] = set()
 
     for edge in kg.edges:
+        # Guard against a recurring LLM error where the `target` and `type` fields are
+        # swapped: the relationship keyword lands in `target` and the real target node
+        # name lands in `type` (e.g. target="CAUSED_BY", type="Weak Hip Abductors").
+        # Detect via the canonical edge-type table and swap them back before normalizing.
+        if (compact_key(edge.type) not in CANONICAL_EDGE_TYPES
+                and compact_key(edge.target) in CANONICAL_EDGE_TYPES):
+            edge.source, edge.target, edge.type = edge.source, edge.type, edge.target
         source_label = original_labels.get(edge.source, "Action")
         target_label = original_labels.get(edge.target, "Fault")
         normalized_source = original_to_canonical.get(edge.source, normalize_node_id(edge.source, source_label))
@@ -275,6 +282,10 @@ def main():
     parser.add_argument("--graph-file", type=str, default=DEFAULT_GRAPH_FILE, help="Path to the output GraphML file")
     parser.add_argument("--movement", type=str, default="Squat",
                         help="Movement this document is about; scoped nodes are namespaced under it (e.g. Squat, Lunge, Push-up).")
+    parser.add_argument("--model", type=str, default=os.environ.get("OPENROUTER_KG_MODEL", "openrouter/auto"),
+                        help="OpenRouter model id (default: $OPENROUTER_KG_MODEL or 'openrouter/auto'). "
+                             "'openrouter/auto' may route to a slow reasoning model (e.g. DeepSeek R1); "
+                             "pin a fast tool-calling model like 'google/gemini-2.5-flash' for structured extraction.")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -284,9 +295,9 @@ def main():
         print("Please set it before running.")
         return
 
-    print("Initializing LLM pipeline (OpenRouter)...")
+    print(f"Initializing LLM pipeline (OpenRouter, model={args.model})...")
     llm = ChatOpenRouter(
-        model="openrouter/auto",
+        model=args.model,
         api_key=api_key,
         temperature=0
     )
