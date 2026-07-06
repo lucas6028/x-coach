@@ -1,19 +1,28 @@
 # TODO
 
+> **2026-07-07 全面盤點**：已對照 repo 實際程式碼逐項核實（非憑印象）。
+> 現況：規則式深蹲教練 + GraphRAG + grounded LLM chat 已全部上線；
+> VideoMAE / pose 分類器完成 research baseline（未接入 app）；
+> contrastive learning、fusion、3D 路由尚未開始。
+> 總路線圖見文末「Pipeline 與 Agent Harness 路線圖」，
+> 設計細節見 `docs/ai-coach-pipeline-and-agent-harness.md`。
+
 ## 目標定義
 
-- [ ] 明確定義目前 `Squat` 任務主軸為：
+- [x] 明確定義目前 `Squat` 任務主軸為（`研究計畫.md` Phase 1 已載明）：
   - `error detection`
   - `error classification`
   - `temporal localization`
   - `contrastive representation learning`
-- [ ] 避免將目前資料描述成完整 `AQA score regression`
-- [ ] 將計畫書中的敘述微調為：
+- [ ] 避免將目前資料描述成完整 `AQA score regression`（計畫書措辭需再檢查一輪）
+- [x] 將計畫書中的敘述微調為（`研究計畫.md` 已含）：
   - 使用預訓練 `VideoMAE V2` 作為時空特徵提取器
   - 搭配對比學習強化正常動作與錯誤動作的表徵可分性
   - 融合 `MediaPipe` 幾何特徵提升可解釋性
 
 ## 資料集現況整理
+
+> `notes/dataset-summary.md` 只有質性描述；下列數字尚未正式記錄進 notes/docs。
 
 - [ ] 確認已可直接使用的標註與切分：
   - `data/Squat/Labeled_Dataset/Splits/train_keys.json`
@@ -50,21 +59,15 @@
 
 ## 模型設計
 
-### Stage 1: VideoMAE V2 特徵提取
+### Stage 1: VideoMAE V2 特徵提取 — ✅ 大致完成（research，見 `notes/videomae_classifier_experiment_summary.md`）
 
-- [ ] 決定使用預訓練 `VideoMAE V2` 作為 backbone
-- [ ] 決定先採用：
-  - frozen backbone
-  - 或 partial fine-tuning
-- [ ] 決定 clip 長度：
-  - `16 frames`
-  - 或 `32 frames`
-- [ ] 決定特徵輸出方式：
-  - CLS token
-  - temporal average pooling
-  - spatiotemporal pooled feature
+- [x] 決定使用預訓練 `VideoMAE V2` 作為 backbone
+- [x] 決定先採用：
+  - frozen backbone（特徵提取路線，見 `src/video/`）
+- [ ] 決定 clip 長度（`16` vs `32 frames`）— 實驗設定需回寫成正式決策
+- [x] 決定特徵輸出方式：CLS token（rehab24 分支同款）
 
-### Stage 2: Contrastive Learning
+### Stage 2: Contrastive Learning — ⏸ 未開始（2026-07-07 盤點：repo 無任何 contrastive 實作）
 
 - [ ] 使用 `Unlabeled_Dataset/videos` 做 domain adaptation
 - [ ] 設計正樣本對：
@@ -78,33 +81,31 @@
   - `Supervised Contrastive Loss`
   - `classification loss + contrastive loss`
 
-### Stage 3: Supervised Downstream Task
+### Stage 3: Supervised Downstream Task — ✅ 完成（video-level，`src/video/video_level_error_classification.py`）
 
-- [ ] 建立影片級 / clip 級任務：
+- [x] 建立影片級 / clip 級任務：
   - `knees_forward`
   - `knees_inward`
   - `shallow_depth`
-- [ ] 決定任務形式：
-  - binary classification
-  - multi-label classification
-  - temporal localization
-- [ ] 建立 classification head
-- [ ] 建立 threshold tuning 流程
+- [x] 決定任務形式：binary classification（video-level；temporal localization 未做，見 Stage 3.5）
+- [x] 建立 classification head
+- [x] 建立 threshold tuning 流程（`find_best_threshold()` 在 val set 上掃描，非固定 0.5）
+- [ ] （新增）Stage 3.5：temporal localization —— VideoMAE 路線尚無 segment IoU / frame-level 定位；目前時間定位只靠規則偵測器
 
-### Stage 4: Pose / Geometry Fusion
+### Stage 4: Pose / Geometry Fusion — 🔶 一半（pose-only baseline 已做，fusion 未跑）
 
-- [ ] 保留 `MediaPipe` 或 pose estimation 模組
-- [ ] 計算幾何特徵：
+- [x] 保留 `MediaPipe` 或 pose estimation 模組（production 規則偵測器即是）
+- [x] 計算幾何特徵（規則偵測器已算）：
   - 膝角
   - 髖角
   - 軀幹傾角
   - 膝蓋與腳尖相對偏移
-- [ ] 設計融合方式：
+- [ ] 設計融合方式（`notes/pose_only_classifier_experiment_summary.md` 明列為 next step，未執行）：
   - late fusion
   - feature concatenation + MLP
-- [ ] 將幾何特徵用於可解釋輸出與結果驗證
+- [x] 將幾何特徵用於可解釋輸出與結果驗證（FaultCard 的 evidence 欄位）
 
-## 即時性規劃
+## 即時性規劃 — ⏸ 未開始（設計文件 §2.4 已納入「即時 webcam 模式」為遠期項）
 
 - [ ] 明確區分兩種系統模式：
   - 離線分析模式
@@ -121,25 +122,23 @@
 
 ## 如何辨識 VideoMAE 的結果
 
-- [ ] 明確區分 `VideoMAE` 原始輸出是特徵向量，不是人類可讀文字
-- [ ] 決定下游辨識方式：
-  - 接 classification head
-  - 用 embedding distance / prototype classifier
-  - 用滑動視窗做時間片段辨識
-- [ ] 建立輸出格式：
+- [x] 明確區分 `VideoMAE` 原始輸出是特徵向量，不是人類可讀文字
+- [x] 決定下游辨識方式：接 classification head（已實作）
+- [ ] 滑動視窗做時間片段辨識（未做，同 Stage 3.5）
+- [x] 建立輸出格式（由規則 pipeline 產出，VideoMAE 路線尚未接入）：
   - 錯誤類型
   - 發生時間點
   - 信心分數
   - 對應建議
-- [ ] 加入特徵空間視覺化：
+- [ ] 加入特徵空間視覺化（未做）：
   - `t-SNE`
   - `UMAP`
 
 ## 驗證指標
 
-### 影片級二元分類
+### 影片級二元分類 — ✅ 已在 baseline 實驗回報
 
-- [ ] 計算：
+- [x] 計算：
   - `Accuracy = (TP + TN) / (TP + TN + FP + FN)`
   - `Precision = TP / (TP + FP)`
   - `Recall = TP / (TP + FN)`
@@ -156,7 +155,7 @@
   - `micro F1`
   - `macro F1`
 
-### 時間片段定位
+### 時間片段定位 — ⏸ 未開始（VideoMAE 路線）
 
 - [ ] 若做 temporal localization，計算：
   - `segment IoU`
@@ -171,16 +170,16 @@
   - `Recall`
   - `F1`
   - `PR-AUC` 或 `ROC-AUC`
-- [ ] 在 validation set 上調整 threshold，而不是固定 `0.5`
+- [x] 在 validation set 上調整 threshold，而不是固定 `0.5`
 
 ## 實驗設計
 
 - [ ] 設計 baseline：
-  - only `VideoMAE`
-  - only pose / geometry
-  - `VideoMAE + contrastive`
-  - `VideoMAE + pose`
-  - `VideoMAE + pose + contrastive`
+  - [x] only `VideoMAE`（`notes/videomae_classifier_experiment_summary.md`）
+  - [x] only pose / geometry（`notes/pose_only_classifier_experiment_summary.md`，已互相對照）
+  - [ ] `VideoMAE + contrastive`
+  - [ ] `VideoMAE + pose`
+  - [ ] `VideoMAE + pose + contrastive`
 - [ ] 設計 ablation study：
   - 是否使用 unlabeled pretraining
   - 是否使用 supervised contrastive loss
@@ -188,31 +187,31 @@
   - 不同 fusion 方法
 - [ ] 規劃最終 test set 僅用於最後一次評估
 
-## 最終成果形式
+## 最終成果形式 — ✅ v1 完成（規則式；VideoMAE 版尚未接入 app）
 
-- [ ] 完成一個可輸入深蹲影片的模型
-- [ ] 輸出內容至少包含：
+- [x] 完成一個可輸入深蹲影片的模型（規則偵測器 5 faults + KG/RAG）
+- [x] 輸出內容至少包含：
   - 錯誤類型
   - 錯誤發生時間區段
   - 信心分數
   - 結構化回饋
-- [ ] 規劃 demo 介面：
+- [x] 規劃 demo 介面（Studio 已上線）：
   - 左側影片 / 骨架顯示
   - 時間軸錯誤標記
   - 右側顯示觀察 / 原因 / 建議
-- [ ] 若結合 RAG，產出：
+- [x] 結合 RAG 產出（FaultCard cause→risk→fix 因果階梯 + grounded chat）：
   - 觀察
   - 生物力學原因
   - 可執行糾正建議
 
 ## 建議先做的最小可行版本
 
-- [ ] 第一步先完成 `Squat` 的 `knees_inward` 二元分類
-- [ ] 第二步加入 `knees_forward`
-- [ ] 第三步加入 `shallow_depth`
+- [x] 第一步先完成 `Squat` 的 `knees_inward` 二元分類
+- [x] 第二步加入 `knees_forward`
+- [x] 第三步加入 `shallow_depth`
 - [ ] 第四步加入 contrastive learning
 - [ ] 第五步加入 pose fusion
-- [ ] 第六步再考慮 RAG 與教練式文字回饋
+- [x] 第六步再考慮 RAG 與教練式文字回饋（GraphRAG + SSE chat + followup chips 已上線）
 
 ## 系統與部署：使用者登入 + 歷史紀錄
 
@@ -228,20 +227,21 @@
 - [x] `analysis.py` 延後載入 `src.pose`（MediaPipe/torch）→ web 啟動不載 ML、API 層可在無 ML 環境測試
 - [x] 新增 `tests/test_analyze_endpoint.py`（契約不變 / 跑在 worker thread / 併發有上限）；本機 6 passed
 
-### P1：核心功能（登入 + 歷史地基）
+### P1：核心功能（登入 + 歷史地基）— ✅ 大致完成（Supabase 路線）
 
-- [ ] 認證選型並落地（建議 Supabase Auth；或自管 `fastapi-users` + JWT）
-  - [ ] access JWT + refresh token 放 httpOnly cookie（不要 localStorage）
-- [ ] PostgreSQL schema + Alembic migration：
-  - [ ] `users`
-  - [ ] `videos`（`storage_key`、`status` pending/processing/done/failed、fps/duration…）
-  - [ ] `analyses`（`result JSONB` 存整包；提升 `view_type`/`fault_count` 為欄位 + GIN index）
-- [ ] 分析結果落地：`/api/analyze` 算完寫入 DB（目前算完即丟）
-- [ ] 前端：React Router + Auth context + 受保護路由 + 「我的紀錄」儀表板頁
-- [ ] 前端資料層改用 TanStack Query（快取 + 輪詢）
-- [ ] 設定改用 pydantic-settings + env（金鑰不進 repo）
+- [x] 認證選型並落地：**Supabase Auth**（取代自管 fastapi-users）
+  - [ ] ~~access JWT + refresh token 放 httpOnly cookie~~ → 現況為 supabase-js 預設 localStorage（`frontend/src/lib/supabase.ts`）；換 httpOnly cookie 需自訂 storage，列為後續強化
+- [x] PostgreSQL schema（Supabase migration，取代 Alembic）：
+  - [x] `users`（Supabase auth 內建）
+  - [x] `videos`（`storage_key`、`status`，upsert on user_id+video_id）
+  - [x] `analyses`（`result JSONB` 整包 + 提升 `view_type`/`fault_count` 為欄位）
+  - [x] `conversations`（chat 訊息 JSONB + followups，計畫外新增）
+- [x] 分析結果落地：`/api/analyze` 算完寫入 DB（登入者 best-effort persist）
+- [x] 前端：React Router + Auth context + 受保護路由 +「我的紀錄」（History 頁）
+- [ ] 前端資料層改用 TanStack Query（未採用；現況 supabase-js + 自製 fetch，運作正常，視痛點再決定）
+- [x] 設定改用 pydantic-settings + env（`backend/app/settings.py`）
 
-### P2：非同步化 + 儲存
+### P2：非同步化 + 儲存 — ⏸ 未開始（= 新設計文件的 P0「非同步分析佇列」，優先級提高）
 
 - [ ] 物件儲存（建議 Cloudflare R2）：原始影片、pose JSON、縮圖
 - [ ] presigned URL 直傳：影片不經過 FastAPI（解掉 `await file.read()` 整支進 RAM）
@@ -249,10 +249,10 @@
 - [ ] job 狀態機：queued/processing/done/failed、重試退避、dead-letter、timeout
 - [ ] 去重：影片 hash，同人同片回快取、不重算
 
-### P3：規模化 + 維運
+### P3：規模化 + 維運 — ⏸ 未開始
 
 - [ ] 拆 web / worker 部署（Docker；先 Railway/Render/Fly.io，之後 ECS/GKE）
-- [ ] GPU 用 serverless（Modal/Replicate/RunPod，可縮到 0），VideoMAE 在此跑
+- [ ] GPU 用 serverless（Modal/Replicate/RunPod，可縮到 0），VideoMAE / direct-3D 在此跑
 - [ ] worker 依佇列長度自動擴縮（KEDA）；CPU/GPU 分池
 - [ ] CDN + 簽名 URL 提供影片
 - [ ] DB 連線池（PgBouncer）、`(user_id, created_at)` 索引、必要時讀副本
@@ -261,16 +261,53 @@
 
 ### 橫切議題（越早處理越省事）
 
-- [ ] 隱私 / 個資（PDPA・GDPR）：影片屬敏感個資 — 靜態加密、每筆綁 `user_id`、簽名 URL、刪帳號連物件儲存一起清、log 不記影片內容/URL
+- [ ] 隱私 / 個資（PDPA・GDPR）：影片屬敏感個資 — 靜態加密、每筆綁 `user_id`、簽名 URL、刪帳號連物件儲存一起清、log 不記影片內容/URL（帳號刪除目前是 Settings 頁 stub，未接線）
 - [ ] 檔案驗證：驗真實 MIME/codec（別只信副檔名）、限大小/長度、ffmpeg 正規化方向與格式
-- [ ] 可重現性：每筆分析存 pipeline 版本 + 當時規則閾值（detector 閾值可調）
+- [x] 可重現性（一半）：每筆分析已存 `pipeline_version`
+  - [ ] 補存當時規則閾值 snapshot（detector 閾值可調）
 - [ ] 重構 repo-root / `sys.path` 耦合 → 儲存抽象層（dev 用本機、prod 用 R2/S3）
 
 ## Demo
+
 - [ ] Line ChatBot
 - [ ] QR Code demo, real time interaction
-- [ ] 語音回饋
+- [ ] 語音回饋（composer 已預留 UI 槽位，功能未做）
+- [ ] 動作偵測、分類（= 多動作 movement ID，見路線圖 P2）
+- [x] LLM follow up questions (options)（followup chips 已上線，pinned 快速模型）
+- [ ] 健身菜單客製化，可用 LLM 進行修改（= 路線圖 P2 的 `make_drill_plan` 工具）
 
-- [ ] 動作偵測、分類
-- [ ] LLM follow up questions (options)
-- [ ] 健身菜單客製化，可用 LLM 進行修改
+## Pipeline 與 Agent Harness 路線圖（2026-07-06 設計，詳見 `docs/ai-coach-pipeline-and-agent-harness.md`）
+
+> 產品主線改依此路線推進；上面各節屬研究支線或被此路線圖涵蓋。
+
+### P0：地基
+
+- [ ] KG 切換 `squat_kg_v2` → `sports_kg_v3` + movement-aware 檢索參數（backend `config.py` 改指向 + 回歸測試）
+- [ ] Rep 切分 + per-rep metrics（膝/髖角度極值切 rep；決定 frame_metrics 保留策略——建議存 per-rep 摘要）
+- [ ] 非同步分析佇列（= 上方系統 P2 的 Celery/Redis 項）
+
+### P1：Agent 最小可用
+
+- [ ] chat 升級為 tool-calling 迴圈（OpenRouter function calling；先 3 個工具：`get_analysis` / `kg_query` / `rag_search`）
+- [ ] Critic-lite：回答送出前做 grounding 檢查（FAIL → 重生成一次 → 降級為 FaultCard 模板直出）
+- [ ] SSE 加 `tool_start` / `tool_result` 事件，前端顯示「正在查知識圖譜…」
+- [ ] 工具呼叫 trace 存進 conversations JSONB（可重播、可稽核）
+
+### P2：多動作 + 記憶
+
+- [ ] Lunge rule pack（RAG 文件已備；KG 抽取待跑——需 API key）
+- [ ] `compare_analyses` / `list_user_history` 工具 + 進步追蹤（跨分析記憶）
+- [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
+- [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
+
+### P3：感知升級
+
+- [ ] 深度類 cue 的 direct-3D 路由（NLF 類模型，GPU；先做「深入分析」按鈕的非同步重分析）
+- [ ] RAG 換神經 embedding（hash-BoW → sentence-transformer 類本地模型，介面不變）
+- [ ] VideoMAE 融合分類器接入 app（補規則抓不到的「順不順」缺陷）
+
+### 評估迴路（隨 P1 起步）
+
+- [ ] golden-set 規則回歸（已標註影片，CI 跑 rule pack diff）
+- [ ] RAGAS-style faithfulness 離線抽樣評估
+- [ ] Critic grounding score 線上入庫
