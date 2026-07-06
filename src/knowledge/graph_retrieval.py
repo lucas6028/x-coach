@@ -10,9 +10,10 @@ from typing import Any
 
 import networkx as nx
 
+from src.knowledge.kg_schema import DEFAULT_GRAPH_FILE, is_scoped_for
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_GRAPH_FILE = PROJECT_ROOT / "data" / "kg" / "squat_kg_v2.graphml"
 
 EDGE_BUCKETS = {
     "HAS_PHASE": "phases",
@@ -106,13 +107,30 @@ def build_lookup(graph: nx.MultiDiGraph) -> dict[str, set[str]]:
         lookup[compact_key(normalize_query(node_text))].add(node_text)
         lookup[compact_key(label)].add(node_text)
         lookup[compact_key(f"{node_text} {label}")].add(node_text)
+        # Index the unprefixed name too, so "knee valgus" resolves the scoped id
+        # "Squat:Knee Valgus" (the movement filter then picks the right movement).
+        name = str(attrs.get("name", "")).strip()
+        if name:
+            lookup[compact_key(name)].add(node_text)
+            lookup[compact_key(normalize_query(name))].add(node_text)
     return lookup
 
 
-def resolve_nodes(graph: nx.MultiDiGraph, query: str, *, limit: int = 10) -> list[str]:
+def _movement_ok(graph: nx.MultiDiGraph, node_id: str, movement: str | None) -> bool:
+    if not movement:
+        return True
+    return is_scoped_for(graph.nodes[node_id], movement)
+
+
+def resolve_nodes(
+    graph: nx.MultiDiGraph, query: str, *, limit: int = 10, movement: str | None = None
+) -> list[str]:
+    """Resolve a query to seed node ids. When `movement` is set, seeds are restricted to
+    that movement's scoped nodes plus shared nodes (traversal from those seeds is still free,
+    so a 2-hop query can intentionally cross into other movements via the shared layer)."""
     normalized = normalize_query(query)
     lookup = build_lookup(graph)
-    exact = rank_nodes(graph, lookup.get(compact_key(normalized), set()))
+    exact = rank_nodes(graph, {n for n in lookup.get(compact_key(normalized), set()) if _movement_ok(graph, n, movement)})
     if exact:
         return exact[:limit]
 
@@ -121,7 +139,7 @@ def resolve_nodes(graph: nx.MultiDiGraph, query: str, *, limit: int = 10) -> lis
     for node_id in graph.nodes():
         node_text = str(node_id)
         node_key = compact_key(node_text)
-        if query_key and (query_key in node_key or node_key in query_key):
+        if query_key and (query_key in node_key or node_key in query_key) and _movement_ok(graph, node_text, movement):
             partial_matches.append(node_text)
     return rank_nodes(graph, set(partial_matches))[:limit]
 
@@ -247,9 +265,10 @@ def retrieve_graph_context(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     hops: int = 1,
     max_seeds: int = 5,
+    movement: str | None = None,
 ) -> dict[str, Any]:
     graph = load_graph(graph_file)
-    matched_nodes = resolve_nodes(graph, query, limit=max_seeds)
+    matched_nodes = resolve_nodes(graph, query, limit=max_seeds, movement=movement)
 
     results: list[dict[str, Any]] = []
     subgraph_nodes: set[str] = set()
@@ -274,6 +293,7 @@ def retrieve_graph_context(
     return {
         "query": query,
         "normalized_query": normalize_query(query),
+        "movement": movement,
         "graph_file": str(graph_file),
         "matched_nodes": matched_nodes,
         "results": results,
@@ -285,11 +305,13 @@ def retrieve_graph_context(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Retrieve graph context from the squat knowledge graph.")
+    parser = argparse.ArgumentParser(description="Retrieve graph context from the multi-movement sports knowledge graph.")
     parser.add_argument("query", type=str, help="Node or concept to retrieve from the knowledge graph.")
     parser.add_argument("--graph-file", type=Path, default=DEFAULT_GRAPH_FILE)
     parser.add_argument("--hops", type=int, default=1, choices=[1, 2])
     parser.add_argument("--max-seeds", type=int, default=5)
+    parser.add_argument("--movement", type=str, default=None,
+                        help="Restrict seeds to this movement's scoped nodes + shared nodes (e.g. Squat, Lunge).")
     return parser.parse_args()
 
 
@@ -300,6 +322,7 @@ def main() -> None:
         graph_file=args.graph_file,
         hops=args.hops,
         max_seeds=args.max_seeds,
+        movement=args.movement,
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))
 
