@@ -56,7 +56,7 @@ class ChatRequest(BaseModel):
     # The conversation so far, oldest first; the last entry is the new user turn.
     messages: list[ChatMessage] = Field(..., min_length=1)
     context: ChatContext
-    # The user's chosen model (an OpenRouter slug). Validated against the server allowlist; an
+    # The user's chosen model (a provider model slug). Validated against the server allowlist; an
     # unknown/absent value falls back to the configured default.
     model: str | None = None
 
@@ -70,7 +70,7 @@ async def chat(
 
     Pre-flight failures return a real HTTP status *before* the stream opens: 401 (no session, via
     the dependency), 503 (LLM unconfigured), 422 (last turn not the user's). Once the 200 stream
-    starts, any OpenRouter failure or empty completion is an in-band ``error`` event instead — the
+    starts, any upstream LLM failure or empty completion is an in-band ``error`` event instead — the
     status is already committed and cannot change.
     """
     if not get_settings().chat_configured:

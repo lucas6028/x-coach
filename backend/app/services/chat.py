@@ -2,16 +2,17 @@
 
 The product's credibility is its *groundedness* — so this service is deliberately narrow: it
 takes the faults + retrieved knowledge (causes / risks / corrections) the pipeline already
-produced and lets an LLM (served via OpenRouter) explain and answer follow-ups **only from those
-facts**. The system prompt is built here on the server, never by the client, so the grounding
-and honesty constraints can't be tampered with from the browser.
+produced and lets an LLM (served via a configurable OpenAI-compatible provider — OpenRouter by
+default, or any peer such as NVIDIA NIM) explain and answer follow-ups **only from those facts**.
+The system prompt is built here on the server, never by the client, so the grounding and honesty
+constraints can't be tampered with from the browser.
 
 The reply is **streamed** (v2): the network call is isolated in the ``_stream_completion``
 generator and the ``httpx`` import is deferred into it — mirroring how ``services/store`` defers
 ``supabase`` — so the routers import cheaply and the unit tests patch ``_stream_completion``
 without touching the network or needing an API key. ``answer_stream`` wraps the token stream in
 Server-Sent Events; because the HTTP 200 is committed the moment streaming starts, *every*
-OpenRouter failure (connect, mid-stream, or an empty completion) surfaces as an in-band ``error``
+upstream failure (connect, mid-stream, or an empty completion) surfaces as an in-band ``error``
 event rather than an HTTP status code — the only pre-flight HTTP errors are 503/401/422, raised in
 the router before the stream opens.
 
@@ -30,7 +31,7 @@ from typing import Any
 
 from backend.app.settings import get_settings
 
-# OpenRouter round-trip budget (seconds). Generous enough for a reasoning model, bounded so a
+# LLM round-trip budget (seconds). Generous enough for a reasoning model, bounded so a
 # hung upstream can't pin a worker thread indefinitely.
 _REQUEST_TIMEOUT_S = 60.0
 
@@ -74,7 +75,21 @@ _FOLLOWUP_NUDGE = "Now output ONLY the JSON array of exactly two follow-up quest
 # Extra OpenRouter body for the follow-up call: route to the lowest-latency provider for the pinned
 # model. Measured to be the real fix for the 3–10s chip-latency variance — without it, OpenRouter can
 # route the same model to a cold/slow provider (2s one call, 9s the next); with it, ~1.5s consistently.
+# ``provider`` is an OpenRouter-only body field; it is sent only when the base URL is OpenRouter's (see
+# ``_is_openrouter``) so an OpenAI-compatible peer like NVIDIA NIM isn't handed a field it may 400 on.
 _FOLLOWUP_ROUTING = {"provider": {"sort": "latency"}}
+
+
+def _is_openrouter(base_url: str) -> bool:
+    """True when the configured LLM base URL is OpenRouter's.
+
+    The transport speaks the plain OpenAI-compatible chat-completions dialect, so any peer that also
+    speaks it (NVIDIA NIM at ``integrate.api.nvidia.com``, a self-hosted vLLM, …) works by only
+    swapping ``LLM_BASE_URL`` + key + model ids. A couple of extras are OpenRouter-specific,
+    though — the attribution headers and the ``provider`` routing body — and a stricter peer can reject
+    an unknown body field. This gate keeps those extras on the OpenRouter path only.
+    """
+    return "openrouter.ai" in base_url
 
 
 def _fmt_list(items: Any) -> str:
@@ -152,11 +167,11 @@ def _stream_completion(
     timeout: float = _REQUEST_TIMEOUT_S,
     extra_body: dict[str, Any] | None = None,
 ) -> Iterator[str]:
-    """Stream reply-text chunks from OpenRouter's OpenAI-compatible chat-completions API.
+    """Stream reply-text chunks from the configured provider's OpenAI-compatible chat-completions API.
 
     Isolated (and network-deferred) so tests patch this seam. Parses the OpenAI SSE shape
     (``data: {choices:[{delta:{content}}]}`` lines, ``data: [DONE]`` terminator) and yields each
-    non-empty ``delta.content``. ``model`` is the already-resolved OpenRouter slug; ``timeout`` is the
+    non-empty ``delta.content``. ``model`` is the already-resolved provider slug; ``timeout`` is the
     per-request budget (the follow-up call passes a tighter one); ``extra_body`` merges extra request
     fields (the follow-up call passes provider-routing preferences). Raises ``RuntimeError`` on any
     transport/HTTP failure so the caller can surface it (an in-band ``error`` for the answer stream, or
@@ -168,17 +183,20 @@ def _stream_completion(
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
     if extra_body:
         body.update(extra_body)
+    headers = {
+        "Authorization": f"Bearer {settings.llm_api_key}",
+        "Content-Type": "application/json",
+    }
+    if _is_openrouter(settings.llm_base_url):
+        # OpenRouter attribution headers (optional but recommended); other OpenAI-compatible peers
+        # (e.g. NVIDIA NIM) don't use them, so keep them off those requests.
+        headers["HTTP-Referer"] = "https://x-coach.local"
+        headers["X-Title"] = "x-coach"
     try:
         with httpx.stream(
             "POST",
-            f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {settings.openrouter_api_key}",
-                "Content-Type": "application/json",
-                # OpenRouter attribution headers (optional but recommended).
-                "HTTP-Referer": "https://x-coach.local",
-                "X-Title": "x-coach",
-            },
+            f"{settings.llm_base_url.rstrip('/')}/chat/completions",
+            headers=headers,
             json=body,
             timeout=timeout,
         ) as resp:
@@ -196,7 +214,7 @@ def _stream_completion(
                 if delta:
                     yield delta
     except Exception as exc:  # noqa: BLE001 — any failure here is an upstream/transport problem.
-        raise RuntimeError(f"OpenRouter request failed: {exc}") from exc
+        raise RuntimeError(f"LLM request failed: {exc}") from exc
 
 
 def _parse_followups(text: str) -> list[str]:
@@ -237,10 +255,12 @@ def suggest_followups(
         *messages,  # the conversation, ending on the assistant answer these questions follow from
         {"role": "user", "content": _FOLLOWUP_NUDGE},  # restate the ask so the array isn't left open
     ]
+    # The latency routing is OpenRouter-only; on any other OpenAI-compatible peer send no extra body.
+    routing = _FOLLOWUP_ROUTING if _is_openrouter(get_settings().llm_base_url) else None
     parts: list[str] = []
     try:
         for chunk in _stream_completion(
-            convo, model, timeout=_FOLLOWUP_TIMEOUT_S, extra_body=_FOLLOWUP_ROUTING
+            convo, model, timeout=_FOLLOWUP_TIMEOUT_S, extra_body=routing
         ):
             parts.append(chunk)
     except RuntimeError:
@@ -255,7 +275,7 @@ def answer_stream(
 
     ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last; the
     backend prepends the grounded system prompt. ``model`` is the already-resolved (allow-listed)
-    OpenRouter slug. Yields zero or more ``delta`` frames, then exactly one terminator: ``done``
+    provider slug. Yields zero or more ``delta`` frames, then exactly one terminator: ``done``
     (carrying the model actually used) on success, or ``error`` on any transport failure or an empty
     completion. The empty-completion guard preserves the v1 invariant — the client must never keep an
     empty assistant turn, which the next send's ``content min_length=1`` would reject. Follow-up
@@ -273,7 +293,7 @@ def answer_stream(
         return
 
     if not "".join(parts).strip():
-        yield _sse("error", {"detail": "OpenRouter returned an empty message."})
+        yield _sse("error", {"detail": "The LLM returned an empty message."})
         return
 
     yield _sse("done", {"model": model})

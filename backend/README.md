@@ -26,6 +26,47 @@ Supabase Auth and sends `Authorization: Bearer <access_token>`; the backend veri
 (HS256) and forwards it to Postgres so **RLS** scopes every row to its owner. Apply the schema
 first — see `db/migrations/` (and its README for why migrations don't live under `supabase/`).
 
+## Conversational coaching (LLM)
+
+`/api/chat` is the one endpoint that calls an LLM (the analysis pipeline itself is fully offline).
+It answers **only** from the analysis's detected faults + retrieved KG/RAG knowledge — grounding is
+enforced in the server-built system prompt — and the key never reaches the browser. Without
+`LLM_API_KEY` the endpoint returns 503 and the frontend shows a disabled chat.
+
+The transport speaks the plain **OpenAI-compatible** chat-completions dialect, so four env vars
+(named `LLM_*` rather than after any one provider) point it at any compatible provider — no code
+change. OpenRouter-only request extras (attribution headers, latency provider-routing for the
+follow-up chips) are auto-suppressed when the base URL isn't OpenRouter's.
+
+| Var | Purpose |
+|-----|---------|
+| `LLM_API_KEY` | provider key; unset ⇒ `/api/chat` disabled (503) |
+| `LLM_MODELS` | comma-separated picker shown in Settings; **first = default** |
+| `LLM_BASE_URL` | provider endpoint (default OpenRouter) |
+| `LLM_FOLLOWUP_MODEL` | fast model for the follow-up chips (a separate call); blank ⇒ reuse default |
+
+**OpenRouter (default)** — key at <https://openrouter.ai/keys>, `vendor/model` slugs:
+
+```
+LLM_MODELS=deepseek/deepseek-v4-flash,xiaomi/mimo-v2.5,minimax/minimax-m3,tencent/hy3-preview
+```
+
+**NVIDIA NIM (build.nvidia.com)** — OpenAI-compatible, so switching is a pure `.env` change; key
+(prefix `nvapi-`) at <https://build.nvidia.com>:
+
+```
+LLM_API_KEY=nvapi-...
+LLM_BASE_URL=https://integrate.api.nvidia.com/v1
+LLM_MODELS=deepseek-ai/deepseek-v3.2,meta/llama-3.3-70b-instruct,qwen/qwen3-235b-a22b,nvidia/llama-3.3-nemotron-super-49b-v1
+LLM_FOLLOWUP_MODEL=openai/gpt-oss-120b
+```
+
+NIM caveats: the free tier is a dev/trial tier (~40 req/min, credit-capped, no throughput SLA) —
+fine for a research prototype/demo, not open public traffic. Prefer **instruct** models — a
+reasoning model that emits its chain-of-thought in `reasoning_content` (not `delta.content`) reads
+as a long silence before the answer streams. If replies get truncated, NIM's default `max_tokens`
+can be low; there's no env for it yet, so add one if you hit it.
+
 ## Endpoints
 
 | Method | Path | Auth | Purpose |
@@ -40,7 +81,7 @@ first — see `db/migrations/` (and its README for why migrations don't live und
 | GET  | `/api/video-file/{video_id}` | — | stream the source mp4 (supports HTTP Range / seeking) |
 | GET  | `/api/knowledge/graph?query=` | — | knowledge-graph subgraph for the KG widget |
 | GET  | `/api/knowledge/rag?query=` | — | ranked RAG snippets |
-| POST | `/api/chat` | required | grounded LLM follow-up chat over an analysis (503 if `OPENROUTER_API_KEY` unset, 502 on upstream error) |
+| POST | `/api/chat` | required | grounded LLM follow-up chat over an analysis (503 if `LLM_API_KEY` unset, 502 on upstream error) |
 
 Interactive docs: <http://localhost:8000/docs>.
 
@@ -111,7 +152,4 @@ and data-dependent (`test_backend_analysis`) modules are skipped there.
 - The analysis response is the `detect_pose_rules_from_json` dict with `frame_metrics` dropped and
   a compact `pose` block (x, y, visibility only) attached for the skeleton overlay.
 - The analysis pipeline is fully offline (no API key needed). The **conversational-coaching**
-  layer (`/api/chat`) is the one exception: it calls OpenRouter, so it needs `OPENROUTER_API_KEY`
-  in `.env` — without it the endpoint returns 503 and the frontend shows a disabled "coming soon"
-  chat. The chat answers only from the analysis's detected faults + retrieved KG/RAG knowledge
-  (grounding is enforced server-side); the key never reaches the browser.
+  layer (`/api/chat`) is the one exception — it calls an LLM provider; see § Conversational coaching.

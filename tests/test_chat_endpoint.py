@@ -234,7 +234,11 @@ class SuggestFollowupsTests(unittest.TestCase):
             yield '["How do I '
             yield 'fix my depth?", "Why does valgus matter?"]'
 
-        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream), mock.patch.object(
+            chat_service,
+            "get_settings",
+            return_value=types.SimpleNamespace(openrouter_base_url="https://openrouter.ai/api/v1"),
+        ):
             qs = chat_service.suggest_followups(
                 messages=[
                     {"role": "user", "content": "why?"},
@@ -246,7 +250,7 @@ class SuggestFollowupsTests(unittest.TestCase):
 
         self.assertEqual(qs, ["How do I fix my depth?", "Why does valgus matter?"])
         # Follow-up requests carry the low-latency provider routing (the fix for the chip-latency
-        # variance), passed through to the transport as extra request body.
+        # variance), passed through to the transport as extra request body — on OpenRouter.
         self.assertEqual(captured["extra_body"], chat_service._FOLLOWUP_ROUTING)
         # Groundedness survives into the follow-up prompt: the analysis facts + honesty rule precede
         # the follow-up task, so a suggestion can't reference a fault outside the analysis.
@@ -262,6 +266,29 @@ class SuggestFollowupsTests(unittest.TestCase):
         )
         # The tight follow-up budget is used, not the full answer timeout.
         self.assertEqual(captured["timeout"], chat_service._FOLLOWUP_TIMEOUT_S)
+
+    def test_non_openrouter_base_url_sends_no_provider_routing(self) -> None:
+        # Against any OpenAI-compatible peer that isn't OpenRouter (e.g. NVIDIA NIM), the OpenRouter-
+        # only ``provider`` routing body must be omitted so a stricter peer can't 400 on it.
+        captured: dict[str, object] = {}
+
+        def fake_stream(messages, model, timeout=None, extra_body=None):
+            captured["extra_body"] = extra_body
+            yield '["a?", "b?"]'
+
+        with mock.patch.object(chat_service, "_stream_completion", fake_stream), mock.patch.object(
+            chat_service,
+            "get_settings",
+            return_value=types.SimpleNamespace(
+                openrouter_base_url="https://integrate.api.nvidia.com/v1"
+            ),
+        ):
+            qs = chat_service.suggest_followups(
+                messages=[{"role": "user", "content": "why?"}], context=_FAULT_CTX, model="m"
+            )
+
+        self.assertEqual(qs, ["a?", "b?"])  # parsing still works
+        self.assertIsNone(captured["extra_body"])  # no OpenRouter-only routing body
 
     def test_malformed_reply_yields_no_suggestions(self) -> None:
         def fake_stream(messages, model, timeout=None, extra_body=None):
@@ -291,8 +318,8 @@ class SuggestFollowupsTests(unittest.TestCase):
 class StreamCompletionTests(unittest.TestCase):
     def _settings(self):
         return types.SimpleNamespace(
-            openrouter_api_key="sk-or-test",
-            openrouter_base_url="https://openrouter.ai/api/v1",
+            llm_api_key="sk-or-test",
+            llm_base_url="https://openrouter.ai/api/v1",
         )
 
     def test_parses_content_deltas_from_openai_sse(self) -> None:
@@ -326,6 +353,33 @@ class StreamCompletionTests(unittest.TestCase):
         self.assertIs(kwargs["json"]["stream"], True)
         self.assertEqual(kwargs["json"]["model"], "minimax/minimax-m3")  # the passed model is sent
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer sk-or-test")
+        self.assertEqual(kwargs["headers"]["X-Title"], "x-coach")  # OpenRouter attribution on-path
+
+    def test_non_openrouter_base_url_omits_attribution_headers(self) -> None:
+        # Against a non-OpenRouter OpenAI-compatible peer (NVIDIA NIM), the OpenRouter attribution
+        # headers are dropped; only Authorization + Content-Type are sent.
+        settings = types.SimpleNamespace(
+            openrouter_api_key="nvapi-test",
+            openrouter_base_url="https://integrate.api.nvidia.com/v1",
+        )
+        fake_resp = mock.Mock()
+        fake_resp.raise_for_status.return_value = None
+        fake_resp.iter_lines.return_value = iter(["data: [DONE]"])
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = fake_resp
+        cm.__exit__.return_value = False
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=settings
+        ), mock.patch("httpx.stream", return_value=cm) as stream:
+            list(chat_service._stream_completion([{"role": "user", "content": "hi"}], "meta/llama-3.3-70b-instruct"))
+
+        _, kwargs = stream.call_args
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer nvapi-test")
+        self.assertNotIn("HTTP-Referer", kwargs["headers"])
+        self.assertNotIn("X-Title", kwargs["headers"])
+        # The request URL points at the configured (NIM) base.
+        args, _ = stream.call_args
+        self.assertEqual(args[1], "https://integrate.api.nvidia.com/v1/chat/completions")
 
     def test_extra_body_merges_into_the_request(self) -> None:
         # The follow-up call passes provider-routing preferences via extra_body; they must land in the
