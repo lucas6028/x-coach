@@ -1,6 +1,6 @@
 """Tests for the grounded conversational-coaching endpoint (``POST /api/chat``).
 
-The network (OpenRouter) is never hit: service tests patch ``httpx.stream`` or the
+The network (the LLM provider) is never hit: service tests patch ``httpx.stream`` or the
 ``_stream_completion`` seam, and router tests call the coroutine directly with a stub user —
 mirroring ``test_analyze_endpoint.py``. They lock in the things that matter for this feature:
 
@@ -151,7 +151,7 @@ class AnswerStreamTests(unittest.TestCase):
     def test_midstream_failure_yields_error_frame_and_no_done(self) -> None:
         def fake_stream(messages, model):
             yield "partial answer"
-            raise RuntimeError("OpenRouter request failed: connection reset")
+            raise RuntimeError("LLM request failed: connection reset")
 
         with mock.patch.object(chat_service, "_stream_completion", fake_stream):
             frames = "".join(
@@ -237,7 +237,7 @@ class SuggestFollowupsTests(unittest.TestCase):
         with mock.patch.object(chat_service, "_stream_completion", fake_stream), mock.patch.object(
             chat_service,
             "get_settings",
-            return_value=types.SimpleNamespace(openrouter_base_url="https://openrouter.ai/api/v1"),
+            return_value=types.SimpleNamespace(llm_base_url="https://openrouter.ai/api/v1"),
         ):
             qs = chat_service.suggest_followups(
                 messages=[
@@ -280,7 +280,7 @@ class SuggestFollowupsTests(unittest.TestCase):
             chat_service,
             "get_settings",
             return_value=types.SimpleNamespace(
-                openrouter_base_url="https://integrate.api.nvidia.com/v1"
+                llm_base_url="https://integrate.api.nvidia.com/v1"
             ),
         ):
             qs = chat_service.suggest_followups(
@@ -302,7 +302,7 @@ class SuggestFollowupsTests(unittest.TestCase):
 
     def test_transport_failure_yields_no_suggestions(self) -> None:
         def fake_stream(messages, model, timeout=None, extra_body=None):
-            raise RuntimeError("OpenRouter request failed: reset")
+            raise RuntimeError("LLM request failed: reset")
             yield ""  # pragma: no cover — unreachable, keeps this a generator
 
         with mock.patch.object(chat_service, "_stream_completion", fake_stream):
@@ -312,7 +312,7 @@ class SuggestFollowupsTests(unittest.TestCase):
         self.assertEqual(qs, [])
 
 
-# --------------------------------------------------------- service: OpenRouter SSE transport
+# ----------------------------------------------------- service: provider (OpenAI-compatible) SSE
 
 
 class StreamCompletionTests(unittest.TestCase):
@@ -359,8 +359,8 @@ class StreamCompletionTests(unittest.TestCase):
         # Against a non-OpenRouter OpenAI-compatible peer (NVIDIA NIM), the OpenRouter attribution
         # headers are dropped; only Authorization + Content-Type are sent.
         settings = types.SimpleNamespace(
-            openrouter_api_key="nvapi-test",
-            openrouter_base_url="https://integrate.api.nvidia.com/v1",
+            llm_api_key="nvapi-test",
+            llm_base_url="https://integrate.api.nvidia.com/v1",
         )
         fake_resp = mock.Mock()
         fake_resp.raise_for_status.return_value = None
@@ -531,7 +531,7 @@ class ChatRouterTests(unittest.TestCase):
 
 
 def _fake_models(models: str, followup: str = "openai/gpt-oss-120b"):
-    return types.SimpleNamespace(openrouter_models=models, openrouter_followup_model=followup)
+    return types.SimpleNamespace(llm_models=models, llm_followup_model=followup)
 
 
 class FollowupModelTests(unittest.TestCase):
@@ -541,7 +541,7 @@ class FollowupModelTests(unittest.TestCase):
             self.assertEqual(app_settings.followup_chat_model(), "openai/gpt-oss-120b")
 
     def test_blank_falls_back_to_the_default_answer_model(self) -> None:
-        # A self-hoster who blanks OPENROUTER_FOLLOWUP_MODEL reuses the default answer model.
+        # A self-hoster who blanks LLM_FOLLOWUP_MODEL reuses the default answer model.
         s = _fake_models("deepseek/deepseek-v4-flash,minimax/minimax-m3", followup="  ")
         with mock.patch.object(app_settings, "get_settings", return_value=s):
             self.assertEqual(app_settings.followup_chat_model(), "deepseek/deepseek-v4-flash")
@@ -588,7 +588,7 @@ class ResolveChatModelTests(unittest.TestCase):
             self.assertEqual(app_settings.resolve_chat_model(None), "deepseek/deepseek-v4-flash")
 
     def test_self_hoster_single_custom_model(self) -> None:
-        # Set OPENROUTER_MODELS to one custom slug -> it's the whole picker AND the default.
+        # Set LLM_MODELS to one custom slug -> it's the whole picker AND the default.
         s = _fake_models("some/self-hosted-model")
         with mock.patch.object(app_settings, "get_settings", return_value=s):
             self.assertEqual(app_settings.default_chat_model(), "some/self-hosted-model")

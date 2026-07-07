@@ -245,7 +245,7 @@ describe("api.chatStream", () => {
   });
 
   it("routes an in-band error frame to onError without throwing", async () => {
-    mockStream(['event: error\ndata: {"detail":"OpenRouter request failed: reset"}\n\n']);
+    mockStream(['event: error\ndata: {"detail":"LLM request failed: reset"}\n\n']);
     const c = collectHandlers();
     await api.chatStream(messages, context, c.handlers);
     expect(c.errorDetail).toContain("reset");

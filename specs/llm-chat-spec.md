@@ -1,4 +1,4 @@
-# Spec: Conversational Coaching (LLM chat layer, OpenRouter)
+# Spec: Conversational Coaching (LLM chat layer)
 
 Status: **v1 shipped · v2 shipped** · Owner: — · Supersedes the "chat disabled / coming soon" placeholder.
 
@@ -10,7 +10,8 @@ Status: **v1 shipped · v2 shipped** · Owner: — · Supersedes the "chat disab
 
 Add the deferred **LLM conversation layer**: after an analysis, a signed-in user can ask
 follow-up questions ("why is my depth shallow?", "how do I fix the knee valgus?") and get a
-coaching answer from an LLM served via **OpenRouter**.
+coaching answer from an LLM served via a **configurable OpenAI-compatible provider** (OpenRouter by
+default via `LLM_BASE_URL`; any peer such as NVIDIA NIM works by swapping base URL + key + model ids).
 
 The non-negotiable product constraint (from `frontend/APP_REDESIGN_PROMPT.md` §1, §10): **the
 credibility of x-coach is its groundedness.** The chat must speak *only* from the analysis we
@@ -39,12 +40,12 @@ only the detected faults and retrieved knowledge, with the LLM key never exposed
 ## Project Structure (touch points)
 
 ```
-backend/app/settings.py              + openrouter_api_key / _model / _base_url + chat_configured
-backend/app/services/chat.py         NEW: build grounding → call OpenRouter (deferred httpx import)
+backend/app/settings.py              + llm_api_key / _models / _base_url / _followup_model + chat_configured
+backend/app/services/chat.py         NEW: build grounding → call LLM provider (deferred httpx import)
 backend/app/routers/chat.py          NEW: POST /api/chat (get_current_user, 503 if unconfigured)
 backend/app/main.py                  wire chat router
 tests/test_chat_endpoint.py          NEW: contract + grounding + mocked network
-.env.example                         + OPENROUTER_* keys (documented)
+.env.example                         + LLM_* keys (documented)
 requirements.txt                     pin httpx
 
 frontend/src/api.ts                  + chat() client method + ChatMessage/ChatContext types
@@ -79,7 +80,7 @@ each turn (backend is stateless, chat is ephemeral / client-held — no DB persi
 ```
 Response: `{ "reply": "…", "model": "anthropic/claude-sonnet-5" }`
 
-Errors: 401 (no session) · 503 (`OPENROUTER_API_KEY` unset) · 502 (OpenRouter unreachable/errored)
+Errors: 401 (no session) · 503 (`LLM_API_KEY` unset) · 502 (LLM provider unreachable/errored)
 · 422 (bad body / empty messages).
 
 ## Grounding & honesty (the core requirement)
@@ -99,7 +100,7 @@ Backend mirrors `services/store.py`: deferred heavy import, small patchable seam
 def answer(*, messages: list[dict], context: dict) -> dict:
     system = _build_system_prompt(context)
     reply = _chat_completion([{"role": "system", "content": system}, *messages])  # patched in tests
-    return {"reply": reply, "model": get_settings().openrouter_model}
+    return {"reply": reply, "model": default_chat_model()}
 ```
 
 ## Testing Strategy
@@ -119,7 +120,7 @@ def answer(*, messages: list[dict], context: dict) -> dict:
   through `t()` in both dictionaries; only semantic Tailwind tokens; keep the LLM key server-side.
 - **Ask first**: adding chat persistence (a Supabase migration), streaming/SSE, tool-calling
   retrieval, allowing anonymous chat, changing the default model tier.
-- **Never**: expose `OPENROUTER_API_KEY` to the browser; let the LLM answer from anything but the
+- **Never**: expose `LLM_API_KEY` to the browser; let the LLM answer from anything but the
   provided analysis context; fake a working chat when the key/session is absent.
 
 ## Success Criteria
@@ -134,7 +135,7 @@ def answer(*, messages: list[dict], context: dict) -> dict:
 
 Chat availability depends on **two independent** flags: Supabase auth (`auth_configured`) *and*
 the server's OpenRouter key (`chat_configured`). `/api/health` now exposes both; `ChatInput`
-reads `chat_configured` so a signed-in user whose backend lacks `OPENROUTER_API_KEY` gets the
+reads `chat_configured` so a signed-in user whose backend lacks `LLM_API_KEY` gets the
 honest disabled state, not a live input that 503s on every send. Pre-existing local test
 `lib.supabase.test.ts` fails only when a populated `frontend/.env` is present (passes on CI where
 `.env` is absent) — unrelated to this feature.
@@ -223,7 +224,7 @@ event: done                        // exactly one on success
 data: {"model": "anthropic/claude-sonnet-5"}
 
 event: error                       // instead of `done` on mid-stream failure
-data: {"detail": "OpenRouter request failed: …"}
+data: {"detail": "LLM request failed: …"}
 ```
 
 ### Service seam (redesign for the coverage gate)
@@ -243,8 +244,8 @@ def answer_stream(*, messages, context):          # generator the router wraps i
     except RuntimeError as exc:
         yield _sse("error", {"detail": str(exc)}); return
     if not "".join(acc).strip():                    # v1 empty-completion invariant, preserved
-        yield _sse("error", {"detail": "OpenRouter returned an empty message."}); return
-    yield _sse("done", {"model": get_settings().openrouter_model})
+        yield _sse("error", {"detail": "The LLM returned an empty message."}); return
+    yield _sse("done", {"model": default_chat_model()})
 ```
 The empty-completion invariant (v1 `chat.py:129-139`) **must survive**: a blank completion emits an
 `error`, never a `done`, so the client never stores an empty assistant turn that the next send's
@@ -343,7 +344,7 @@ create table if not exists public.conversations (
 - **Ask first** (explicit confirmations this revision needs): **adding `react-markdown` +
   `rehype-sanitize`** (new deps); **the `conversations` Supabase migration** (schema change);
   switching the default model tier.
-- **Never**: expose `OPENROUTER_API_KEY` to the browser; let the LLM answer from anything but the
+- **Never**: expose `LLM_API_KEY` to the browser; let the LLM answer from anything but the
   provided analysis context; render unsanitized LLM HTML; persist an empty assistant turn; return a
   post-stream HTTP error code once the stream has started (must be in-band).
 
@@ -420,7 +421,7 @@ the request "在每次 LLM 回答後，加入 2 個 follow up questions, 和一�
   causes: (1) OpenRouter's *provider routing* swinging the **same** model 2s→9s call-to-call, and (2)
   *reasoning* answer models (minimax) spending 6s "thinking" before emitting the tiny array; output
   length is not the bottleneck (TTFT is). Fix: the follow-up call is pinned to a fast model
-  (`OPENROUTER_FOLLOWUP_MODEL`, default `openai/gpt-oss-120b`) via `settings.followup_chat_model` —
+  (`LLM_FOLLOWUP_MODEL`, default `openai/gpt-oss-120b`) via `settings.followup_chat_model` —
   **independent of the answer model the user picked** (the `/chat/followups` router ignores `body.model`)
   — and sends `provider: {sort: "latency"}` (`chat._FOLLOWUP_ROUTING`, merged via `_stream_completion`'s
   `extra_body`). Measured effect: a consistent **~1.5s** end-to-end (was 3–10s), verified over the live

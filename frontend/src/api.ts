@@ -148,7 +148,7 @@ export interface ChatContext {
 }
 
 // Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
-// failure (OpenRouter connect/mid-stream/empty) — the stream already returned 200, so it is not a
+// failure (LLM provider connect/mid-stream/empty) — the stream already returned 200, so it is not a
 // thrown ChatError. A pre-flight failure (401/422/503) is thrown as a ChatError before any of these
 // fire, so the two failure modes stay distinguishable to the caller.
 export interface ChatStreamHandlers {
@@ -272,7 +272,7 @@ export const api = {
   // turn last; `context` is the compact grounding blob from buildChatContext(analysis). Deltas,
   // completion, and in-band errors are delivered via `handlers`; a pre-flight failure (before the
   // stream opens) throws a ChatError carrying the HTTP status so the caller can tell an expired
-  // session (401) from an LLM outage. `model` is the user's chosen OpenRouter slug (validated
+  // session (401) from an LLM outage. `model` is the user's chosen model slug (validated
   // server-side); omit it to use the server default.
   async chatStream(
     messages: ChatMessage[],

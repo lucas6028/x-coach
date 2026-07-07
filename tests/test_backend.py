@@ -940,9 +940,9 @@ class SettingsTests(unittest.TestCase):
         )
         self.assertFalse(s.auth_configured)
 
-    def test_chat_configured_tracks_openrouter_key(self) -> None:
-        self.assertTrue(app_settings.Settings(openrouter_api_key="sk-or-123").chat_configured)
-        self.assertFalse(app_settings.Settings(openrouter_api_key="").chat_configured)
+    def test_chat_configured_tracks_llm_key(self) -> None:
+        self.assertTrue(app_settings.Settings(llm_api_key="sk-or-123").chat_configured)
+        self.assertFalse(app_settings.Settings(llm_api_key="").chat_configured)
 
     def test_get_settings_is_cached(self) -> None:
         app_settings.get_settings.cache_clear()

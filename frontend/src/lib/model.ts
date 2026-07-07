@@ -1,6 +1,6 @@
 // The user's chat-model preference. The list of *selectable* models is server-driven (fetched from
 // /api/health), so this module only persists the chosen id. An empty string means "follow the
-// server default" — the client then sends no model and the backend uses OPENROUTER_MODEL.
+// server default" — the client then sends no model and the backend uses LLM_MODELS' first entry.
 
 const STORAGE_KEY = "chat_model";
 

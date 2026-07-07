@@ -201,7 +201,7 @@ describe("CoachTray — follow-up chat", () => {
         _c: unknown,
         handlers: { onError: (d: string) => void }
       ) => {
-        handlers.onError("OpenRouter request failed: reset");
+        handlers.onError("LLM request failed: reset");
       }
     );
     renderTray();
@@ -250,7 +250,7 @@ describe("CoachTray — follow-up chat", () => {
   });
 
   it("rolls back the optimistic turn and shows an error on an in-band stream error", async () => {
-    // The stream opens (200) but OpenRouter fails mid-flight: the client delivers an `error` frame
+    // The stream opens (200) but the LLM provider fails mid-flight: the client delivers an `error` frame
     // via onError rather than throwing. The partial turn must be discarded, not left orphaned.
     h.chatStream.mockImplementation(
       async (
@@ -259,7 +259,7 @@ describe("CoachTray — follow-up chat", () => {
         handlers: { onDelta: (t: string) => void; onError: (d: string) => void }
       ) => {
         handlers.onDelta("Drive your kne");
-        handlers.onError("OpenRouter request failed: reset");
+        handlers.onError("LLM request failed: reset");
       }
     );
     renderTray();

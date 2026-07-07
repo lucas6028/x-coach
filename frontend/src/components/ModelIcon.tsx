@@ -10,7 +10,7 @@ import XiaomiMiMo from "@lobehub/icons/es/XiaomiMiMo/components/Mono";
 
 type BrandIcon = ComponentType<{ size?: number | string }>;
 
-// Curated brand presentation for known model ids (OpenRouter slugs): logo + display name. The
+// Curated brand presentation for known model ids (provider slugs): logo + display name. The
 // server owns the authoritative list; these are purely cosmetic, so an unknown (self-hosted) slug
 // falls back to a generic chip icon and its raw id as the label. Tencent's Hy3 is the Hunyuan family.
 const ICONS: Record<string, BrandIcon> = {

@@ -26,7 +26,7 @@ interface Props {
 // scroll thread below it, with a single composer pinned at the foot. The feedback always renders
 // (the client already holds the analysis); only the composer adapts to the three honest states —
 // working chat (signed in + server-configured), a sign-in invite, or the disabled "coming soon"
-// affordance when auth or the OpenRouter key is absent.
+// affordance when auth or the LLM provider key is absent.
 export default function CoachTray({
   analysis,
   currentTime,
@@ -52,7 +52,7 @@ export default function CoachTray({
   // persisted alongside the thread (only the latest set), so a reload restores the chips, not just
   // the response; cleared on a new send / analysis.
   const [followups, setFollowups] = useState<string[]>([]);
-  // Whether the *server* has an OpenRouter key. Independent of Supabase auth. null = not yet
+  // Whether the *server* has an LLM provider key. Independent of Supabase auth. null = not yet
   // checked (assume available so the common path is instant).
   const [chatOnServer, setChatOnServer] = useState<boolean | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -161,7 +161,7 @@ export default function CoachTray({
             setStreaming(acc);
           },
           onDone: () => undefined,
-          // An in-band error (OpenRouter connect/mid-stream/empty) isn't thrown — capture it and
+          // An in-band error (LLM provider connect/mid-stream/empty) isn't thrown — capture it and
           // rethrow below so success and failure share one rollback path.
           onError: (detail) => {
             inbandError = detail;
