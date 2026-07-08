@@ -6,16 +6,9 @@ import DuelOverScreen, { type DuelResult } from "../components/duel/DuelOverScre
 import { useI18n } from "../lib/i18n";
 import { assignPlayers } from "../lib/duel/assign";
 import { poseSignature } from "../lib/duel/angles";
-import { poseById, pickPose, scorePose, POSES } from "../lib/duel/poses";
-import {
-  advanceHold,
-  roundWinner,
-  matchWinner,
-  HOLD_MS,
-  MATCH_THRESHOLD,
-  ROUND_BREAK_MS,
-  type Side,
-} from "../lib/duel/match";
+import { poseById, scorePose, POSES } from "../lib/duel/poses";
+import { HOLD_MS, MATCH_THRESHOLD, type Side } from "../lib/duel/match";
+import { stepRound, createRoundState, type RoundState } from "../lib/duel/round";
 import { loadResults, saveResult, type DuelEntry } from "../lib/duel/leaderboard";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene } from "../components/duel/duelDetector";
@@ -55,19 +48,22 @@ export default function PoseDuel() {
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
 
-  // Mutable game state the loop mutates without re-rendering.
+  // Loop bookkeeping the rAF callback mutates without re-rendering; `round` holds the pure
+  // round/match state advanced by stepRound.
   const g = useRef({
     running: false,
     last: 0,
     lastVideoTime: -1,
     lastUi: 0,
-    poseId: POSES[0].id,
-    winsA: 0,
-    winsB: 0,
-    holdA: 0, // ms toward HOLD_MS
-    holdB: 0,
-    breakUntil: 0, // scoring frozen while now < breakUntil
-    roundFlash: null as Side | null,
+    round: {
+      poseId: POSES[0].id,
+      winsA: 0,
+      winsB: 0,
+      holdA: 0,
+      holdB: 0,
+      breakUntil: 0,
+      roundFlash: null,
+    } as RoundState,
   });
 
   const teardown = useCallback(() => {
@@ -81,16 +77,18 @@ export default function PoseDuel() {
 
   useEffect(() => teardown, [teardown]);
 
-  const endMatch = useCallback(() => {
-    const s = g.current;
-    const winner = matchWinner(s.winsA, s.winsB) ?? "a";
-    teardown();
-    setResult({ winner, aWins: s.winsA, bWins: s.winsB });
-    setResults(loadResults());
-    setSubmitted(false);
-    setSavedTs(null);
-    setPhase("over");
-  }, [teardown]);
+  const endMatch = useCallback(
+    (winner: Side) => {
+      const r = g.current.round;
+      teardown();
+      setResult({ winner, aWins: r.winsA, bWins: r.winsB });
+      setResults(loadResults());
+      setSubmitted(false);
+      setSavedTs(null);
+      setPhase("over");
+    },
+    [teardown]
+  );
 
   const tick = useCallback(() => {
     const s = g.current;
@@ -105,7 +103,8 @@ export default function PoseDuel() {
     const now = performance.now();
     const dtMs = s.last ? now - s.last : 16;
     s.last = now;
-    const inBreak = now < s.breakUntil;
+    const r = s.round;
+    const inBreak = now < r.breakUntil;
 
     // Detect (up to two bodies) only on a fresh camera frame.
     let poses: ReturnType<PoseLandmarker["detectForVideo"]>["landmarks"] = [];
@@ -115,32 +114,24 @@ export default function PoseDuel() {
     }
     const { a: la, b: lb } = assignPlayers(poses);
 
+    // Score each visible player against the current target (pure, tested helpers).
     let matchedA = false;
     let matchedB = false;
     if (!inBreak) {
-      const pose = poseById(s.poseId) ?? POSES[0];
+      const pose = poseById(r.poseId) ?? POSES[0];
       if (la) matchedA = scorePose(poseSignature(la), pose).score >= MATCH_THRESHOLD;
       if (lb) matchedB = scorePose(poseSignature(lb), pose).score >= MATCH_THRESHOLD;
-      s.holdA = advanceHold(s.holdA, matchedA, dtMs);
-      s.holdB = advanceHold(s.holdB, matchedB, dtMs);
-
-      const w = roundWinner(s.holdA, s.holdB);
-      if (w) {
-        if (w === "a") s.winsA += 1;
-        else s.winsB += 1;
-        s.holdA = 0;
-        s.holdB = 0;
-        s.roundFlash = w;
-        if (matchWinner(s.winsA, s.winsB)) {
-          endMatch();
-          return;
-        }
-        s.poseId = pickPose(s.poseId, Math.random()).id;
-        s.breakUntil = now + ROUND_BREAK_MS;
-      }
     }
 
-    const showFlash = now < s.breakUntil ? s.roundFlash : null;
+    // Advance the round/match with one pure step.
+    const stepped = stepRound(r, { matchedA, matchedB, dtMs, now, rng: Math.random });
+    s.round = stepped.state;
+    if (stepped.matchOver) {
+      endMatch(stepped.matchOver);
+      return;
+    }
+    const rs = stepped.state;
+    const showFlash = now < rs.breakUntil ? rs.roundFlash : null;
 
     // Render both skeletons + hold rings.
     const ctx = canvas.getContext("2d");
@@ -153,8 +144,8 @@ export default function PoseDuel() {
         ctx,
         {
           players: { a: la, b: lb },
-          a: { hold: s.holdA / HOLD_MS, matched: matchedA },
-          b: { hold: s.holdB / HOLD_MS, matched: matchedB },
+          a: { hold: rs.holdA / HOLD_MS, matched: matchedA },
+          b: { hold: rs.holdB / HOLD_MS, matched: matchedB },
         },
         canvas.width,
         canvas.height
@@ -164,13 +155,13 @@ export default function PoseDuel() {
     // Throttle React updates to ~20/s.
     if (now - s.lastUi > 50) {
       s.lastUi = now;
-      const pose = poseById(s.poseId) ?? POSES[0];
+      const pose = poseById(rs.poseId) ?? POSES[0];
       setPoseEmoji(pose.emoji);
       setPoseNameKey(pose.nameKey);
-      setAWins(s.winsA);
-      setBWins(s.winsB);
-      setAHold(s.holdA / HOLD_MS);
-      setBHold(s.holdB / HOLD_MS);
+      setAWins(rs.winsA);
+      setBWins(rs.winsB);
+      setAHold(rs.holdA / HOLD_MS);
+      setBHold(rs.holdB / HOLD_MS);
       setAPresent(!!la);
       setBPresent(!!lb);
       setRoundFlash(showFlash);
@@ -186,18 +177,13 @@ export default function PoseDuel() {
       if (n <= 0) {
         clearInterval(iv);
         const s = g.current;
-        const first = pickPose(null, Math.random());
+        const round = createRoundState(Math.random);
         s.running = true;
         s.last = 0;
         s.lastVideoTime = -1;
         s.lastUi = 0;
-        s.poseId = first.id;
-        s.winsA = 0;
-        s.winsB = 0;
-        s.holdA = 0;
-        s.holdB = 0;
-        s.breakUntil = 0;
-        s.roundFlash = null;
+        s.round = round;
+        const first = poseById(round.poseId) ?? POSES[0];
         setPoseEmoji(first.emoji);
         setPoseNameKey(first.nameKey);
         setAWins(0);
