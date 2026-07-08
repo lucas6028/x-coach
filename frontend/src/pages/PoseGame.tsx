@@ -5,15 +5,9 @@ import GameHud from "../components/game/GameHud";
 import GameOverScreen, { type RoundResult } from "../components/game/GameOverScreen";
 import { useI18n } from "../lib/i18n";
 import { poseSignature } from "../lib/game/angles";
-import { POSES, scorePose, type GamePose } from "../lib/game/poses";
-import {
-  gradeFor,
-  hitPoints,
-  HIT_THRESHOLD,
-  HOLD_MS,
-  ROUND_SECONDS,
-  type Grade,
-} from "../lib/game/scoring";
+import { POSES, scorePose, poseById, type GamePose } from "../lib/game/poses";
+import { HIT_THRESHOLD, HOLD_MS, ROUND_SECONDS, type Grade } from "../lib/game/scoring";
+import { createGameState, stepGame, type GameState } from "../lib/game/engine";
 import {
   loadLeaderboard,
   saveScore,
@@ -24,20 +18,10 @@ import { createPoseLandmarker, drawSkeleton } from "../components/game/poseDetec
 
 type Phase = "intro" | "countdown" | "playing" | "over";
 
-// Pick a random pose that isn't the one just shown, so the target visibly changes.
-function nextPose(current: GamePose | null): GamePose {
-  if (POSES.length === 1) return POSES[0];
-  let p = POSES[Math.floor(Math.random() * POSES.length)];
-  while (current && p.id === current.id) {
-    p = POSES[Math.floor(Math.random() * POSES.length)];
-  }
-  return p;
-}
-
 // Pose Match Rush — the live camera mini-game. React state drives the UI; a ref-backed
 // rAF loop drives detection + scoring so the hot path never waits on re-renders. All the
-// scoring/leaderboard reasoning lives in lib/game/* (unit-tested); this file wires it to
-// the camera, canvas, and MediaPipe.
+// scoring/leaderboard reasoning lives in lib/game/* (unit-tested) — this file wires it to
+// the camera, canvas, and MediaPipe, and owns only those impure edges.
 export default function PoseGame() {
   const { t } = useI18n();
 
@@ -66,19 +50,14 @@ export default function PoseGame() {
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
 
-  // Mutable game state read/written by the loop without triggering re-renders.
+  // Loop bookkeeping the rAF callback mutates without re-rendering; `game` holds the pure
+  // scoring state advanced by stepGame.
   const loop = useRef({
     running: false,
     roundEnd: 0,
-    holdStart: 0,
     lastVideoTime: -1,
-    score: 0,
-    combo: 0,
-    bestCombo: 0,
-    poses: 0,
-    target: POSES[0],
-    gradeUntil: 0,
     lastUi: 0,
+    game: createGameState() as GameState,
   });
 
   const teardown = useCallback(() => {
@@ -94,9 +73,9 @@ export default function PoseGame() {
   useEffect(() => teardown, [teardown]);
 
   const endRound = useCallback(() => {
-    const g = loop.current;
+    const game = loop.current.game;
     teardown();
-    setResult({ score: g.score, poses: g.poses, bestCombo: g.bestCombo });
+    setResult({ score: game.score, poses: game.poses, bestCombo: game.bestCombo });
     setLeaderboard(loadLeaderboard());
     setSubmitted(false);
     setRank(null);
@@ -117,7 +96,6 @@ export default function PoseGame() {
     const secLeft = Math.max(0, Math.ceil((g.roundEnd - now) / 1000));
 
     let liveQuality = 0;
-    let matching = false;
     // Only run detection on a fresh camera frame (MediaPipe needs rising timestamps).
     if (video.currentTime !== g.lastVideoTime) {
       g.lastVideoTime = video.currentTime;
@@ -133,46 +111,37 @@ export default function PoseGame() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
 
+      const target = poseById(g.game.targetId) ?? POSES[0];
       if (lm) {
-        const sig = poseSignature(lm);
-        liveQuality = scorePose(sig, g.target).score;
-        matching = liveQuality >= HIT_THRESHOLD;
-        if (ctx) drawSkeleton(ctx, lm, canvas.width, canvas.height, matching);
+        liveQuality = scorePose(poseSignature(lm), target).score;
+        if (ctx) drawSkeleton(ctx, lm, canvas.width, canvas.height, liveQuality >= HIT_THRESHOLD);
+      }
 
-        if (matching) {
-          if (g.holdStart === 0) g.holdStart = now;
-          if (now - g.holdStart >= HOLD_MS) {
-            // Lock the pose in.
-            g.combo += 1;
-            g.bestCombo = Math.max(g.bestCombo, g.combo);
-            g.poses += 1;
-            g.score += hitPoints(liveQuality, g.combo);
-            g.gradeUntil = now + 850;
-            setLastGrade(gradeFor(liveQuality));
-            g.holdStart = 0;
-            g.target = nextPose(g.target);
-            setTarget(g.target);
-          }
-        } else {
-          // Dropping the pose mid-hold resets the streak.
-          if (g.holdStart !== 0 && liveQuality < HIT_THRESHOLD * 0.6) g.combo = 0;
-          g.holdStart = 0;
-        }
-      } else {
-        g.holdStart = 0;
+      // Advance scoring with one pure step; a returned grade means a pose just locked in.
+      const { state, grade } = stepGame(g.game, {
+        quality: liveQuality,
+        hasLandmarks: !!lm,
+        now,
+        rng: Math.random,
+      });
+      g.game = state;
+      if (grade) {
+        setLastGrade(grade);
+        setTarget(poseById(state.targetId) ?? POSES[0]);
       }
     }
 
     // Throttle React updates to ~15/s; the loop itself runs at display rate.
     if (now - g.lastUi > 66) {
       g.lastUi = now;
-      setScore(g.score);
-      setCombo(g.combo);
+      const game = g.game;
+      setScore(game.score);
+      setCombo(game.combo);
       setTimeLeft(secLeft);
       setQuality(liveQuality);
-      setHoldProgress(g.holdStart ? Math.min(1, (now - g.holdStart) / HOLD_MS) : 0);
-      if (g.gradeUntil && now > g.gradeUntil) {
-        g.gradeUntil = 0;
+      setHoldProgress(game.holdStart ? Math.min(1, (now - game.holdStart) / HOLD_MS) : 0);
+      if (game.gradeUntil && now > game.gradeUntil) {
+        g.game = { ...game, gradeUntil: 0 };
         setLastGrade(null);
       }
     }
@@ -191,14 +160,9 @@ export default function PoseGame() {
         const g = loop.current;
         g.running = true;
         g.roundEnd = performance.now() + ROUND_SECONDS * 1000;
-        g.holdStart = 0;
         g.lastVideoTime = -1;
-        g.score = 0;
-        g.combo = 0;
-        g.bestCombo = 0;
-        g.poses = 0;
-        g.target = POSES[0];
         g.lastUi = 0;
+        g.game = createGameState();
         setScore(0);
         setCombo(0);
         setTimeLeft(ROUND_SECONDS);
