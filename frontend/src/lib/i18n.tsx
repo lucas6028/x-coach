@@ -375,6 +375,52 @@ const en: Dict = {
   "history.clean": "clean rep",
   "history.faultOne": "1 fault",
   "history.faultMany": "{count} faults",
+
+  // Pose Duel (mini-game) — two players, one camera
+  "nav.duel": "Pose Duel",
+  "duel.title": "Pose Duel",
+  "duel.badge": "2-Player · one camera",
+  "duel.heading": "Strike the pose. Beat your rival.",
+  "duel.sub":
+    "Two players, one camera. Each round flashes a target pose — race your opponent to strike it and hold. It's the same joint geometry x-coach reads in a squat, turned into a head-to-head.",
+  "duel.how1": "Both players stand side by side, framed head-to-knee.",
+  "duel.how2": "Match the target pose and hold it steady to fill your ring.",
+  "duel.how3": "First to hold wins the round — first to {n} rounds wins the match.",
+  "duel.playerA": "Player A",
+  "duel.playerB": "Player B",
+  "duel.startBtn": "Enable camera & duel",
+  "duel.starting": "Starting camera…",
+  "duel.cameraNote": "Runs on-device. Two people share one front camera.",
+  "duel.posesTitle": "Pose deck",
+  "duel.getReady": "Both players, get set!",
+  "duel.error": "Couldn't start the camera.",
+
+  // Pose names
+  "duelPose.t_pose": "T-Pose",
+  "duelPose.cactus": "Cactus Arms",
+  "duelPose.cheer": "Big Cheer",
+  "duelPose.flex": "Double Flex",
+  "duelPose.star": "Star Jump",
+  "duelPose.sumo": "Sumo Stance",
+
+  // In-round HUD
+  "duel.hud.match": "Match this",
+  "duel.hud.hold": "Hold it!",
+  "duel.hud.roundWin": "{p} takes the round!",
+
+  // Over screen
+  "duel.over.title": "Match over",
+  "duel.over.wins": "{p} wins!",
+  "duel.over.winnerName": "Winner's name",
+  "duel.over.loserName": "Challenger's name",
+  "duel.over.save": "Log this duel",
+  "duel.over.saved": "Logged to recent duels.",
+  "duel.over.rematch": "Rematch",
+
+  // Recent-duels board
+  "duel.board.title": "Recent duels",
+  "duel.board.empty": "No duels yet — throw down!",
+  "duel.board.beat": "beat",
 };
 
 const zhHant: Dict = {
@@ -736,6 +782,52 @@ const zhHant: Dict = {
   "history.clean": "標準動作",
   "history.faultOne": "1 個錯誤",
   "history.faultMany": "{count} 個錯誤",
+
+  // Pose Duel（小遊戲）— 雙人同鏡對戰
+  "nav.duel": "體感對決",
+  "duel.title": "體感對決",
+  "duel.badge": "雙人 · 同一鏡頭",
+  "duel.heading": "擺出姿勢，擊敗對手。",
+  "duel.sub":
+    "兩位玩家、一台鏡頭。每回合閃現一個目標姿勢——比對手更快擺出並穩住。這用的正是 x-coach 分析深蹲的同一套關節幾何，變成一場面對面對決。",
+  "duel.how1": "兩位玩家並排站好，讓鏡頭涵蓋頭到膝蓋。",
+  "duel.how2": "擺出目標姿勢並穩穩維持，填滿你的計量環。",
+  "duel.how3": "先維持完成者贏得該回合——先贏 {n} 回合者奪得勝利。",
+  "duel.playerA": "玩家 A",
+  "duel.playerB": "玩家 B",
+  "duel.startBtn": "開啟鏡頭並對決",
+  "duel.starting": "啟動鏡頭中…",
+  "duel.cameraNote": "全程裝置端運算。兩人共用一台前鏡頭。",
+  "duel.posesTitle": "姿勢牌組",
+  "duel.getReady": "兩位玩家，準備！",
+  "duel.error": "無法啟動鏡頭。",
+
+  // 姿勢名稱
+  "duelPose.t_pose": "T 字站姿",
+  "duelPose.cactus": "仙人掌手",
+  "duelPose.cheer": "振臂歡呼",
+  "duelPose.flex": "雙臂秀肌",
+  "duelPose.star": "大字跳",
+  "duelPose.sumo": "相撲馬步",
+
+  // 回合中 HUD
+  "duel.hud.match": "擺出這個",
+  "duel.hud.hold": "維持住！",
+  "duel.hud.roundWin": "{p} 拿下這回合！",
+
+  // 結算畫面
+  "duel.over.title": "對決結束",
+  "duel.over.wins": "{p} 獲勝！",
+  "duel.over.winnerName": "勝方名稱",
+  "duel.over.loserName": "挑戰者名稱",
+  "duel.over.save": "記錄這場對決",
+  "duel.over.saved": "已記錄到最近對戰。",
+  "duel.over.rematch": "再戰一場",
+
+  // 最近對戰紀錄
+  "duel.board.title": "最近對戰",
+  "duel.board.empty": "還沒有對戰——來場對決吧！",
+  "duel.board.beat": "擊敗",
 };
 
 const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };

@@ -21,7 +21,10 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/main.tsx", "src/test/**"],
+      // duelDetector.ts is the MediaPipe/WASM/WebGL/canvas boundary — it needs a real
+      // camera and GPU, neither of which exist under jsdom, so it can't be meaningfully
+      // unit-tested. The game's logic lives in src/lib/duel/* and is fully covered there.
+      exclude: ["src/main.tsx", "src/test/**", "src/components/duel/duelDetector.ts"],
       thresholds: {
         lines: 70,
         functions: 70,
