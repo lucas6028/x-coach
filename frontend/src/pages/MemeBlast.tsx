@@ -5,33 +5,19 @@ import BlastHud from "../components/blast/BlastHud";
 import BlastOverScreen, { type BlastResult } from "../components/blast/BlastOverScreen";
 import { useI18n } from "../lib/i18n";
 import { handState } from "../lib/blast/gestures";
-import {
-  stepCharge,
-  initialCharge,
-  DECAY_MS,
-  type ChargeState,
-} from "../lib/blast/charger";
-import {
-  advanceTargets,
-  beamHits,
-  makeTarget,
-  MEME_EMOJIS,
-  type Target,
-} from "../lib/blast/targets";
-import { blastPoints, difficulty, ROUND_SECONDS } from "../lib/blast/scoring";
+import { ROUND_SECONDS } from "../lib/blast/scoring";
+import { createGameState, stepFrame, BEAM_MS, type GameState } from "../lib/blast/engine";
 import { loadLeaderboard, saveScore, type BlastEntry } from "../lib/blast/leaderboard";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene } from "../components/blast/blastDetector";
 
 type Phase = "intro" | "countdown" | "playing" | "over";
 
-const BEAM_MS = 220;
-const FLASH_MS = 700;
-
 // Meme Blaster — charge a "Kamehameha" by bringing your hands together, then throw your
 // arms apart to fire an energy beam that wipes out drifting meme orbs. React state drives
 // the UI; a ref-backed rAF loop drives detection, physics, and scoring. All the mechanic
-// reasoning lives in lib/blast/* (unit-tested); this file wires it to the camera.
+// reasoning lives in lib/blast/* (unit-tested) — this file wires it to the camera and owns
+// only the impure edges: reading the frame, drawing the canvas, and throttling React state.
 export default function MemeBlast() {
   const { t } = useI18n();
 
@@ -58,25 +44,15 @@ export default function MemeBlast() {
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
 
-  // Mutable game state the loop mutates without re-rendering.
+  // Loop bookkeeping the rAF callback mutates without re-rendering; `engine` holds all the
+  // pure game state advanced by stepFrame.
   const g = useRef({
     running: false,
-    roundStart: 0,
     roundEnd: 0,
     last: 0,
     lastVideoTime: -1,
     lastUi: 0,
-    charge: initialCharge as ChargeState,
-    targets: [] as Target[],
-    nextId: 1,
-    spawnAt: 0,
-    score: 0,
-    combo: 0,
-    bestCombo: 0,
-    hits: 0,
-    beam: null as { y: number; until: number } | null,
-    flash: null as { hits: number; points: number } | null,
-    flashUntil: 0,
+    engine: createGameState(0) as GameState,
   });
 
   const teardown = useCallback(() => {
@@ -91,9 +67,9 @@ export default function MemeBlast() {
   useEffect(() => teardown, [teardown]);
 
   const endRound = useCallback(() => {
-    const s = g.current;
+    const e = g.current.engine;
     teardown();
-    setResult({ score: s.score, hits: s.hits, bestCombo: s.bestCombo });
+    setResult({ score: e.score, hits: e.hits, bestCombo: e.bestCombo });
     setLeaderboard(loadLeaderboard());
     setSubmitted(false);
     setRank(null);
@@ -112,7 +88,6 @@ export default function MemeBlast() {
 
     const now = performance.now();
     const dtMs = s.last ? now - s.last : 16;
-    const dt = dtMs / 1000;
     s.last = now;
     const secLeft = Math.max(0, Math.ceil((s.roundEnd - now) / 1000));
 
@@ -123,44 +98,10 @@ export default function MemeBlast() {
       landmarks = landmarker.detectForVideo(video, now).landmarks?.[0] ?? null;
     }
 
-    // Charge / fire.
-    const hs = landmarks ? handState(landmarks) : { valid: false, gap: 0, aimY: 0.5 };
-    if (hs.valid) {
-      const stepped = stepCharge(s.charge, hs.gap, dtMs);
-      s.charge = stepped.state;
-      if (stepped.fired) {
-        const { hit, remaining } = beamHits(s.targets, hs.aimY);
-        if (hit.length > 0) {
-          s.combo += 1;
-          s.bestCombo = Math.max(s.bestCombo, s.combo);
-          s.hits += hit.length;
-          const pts = blastPoints(hit.length, s.combo);
-          s.score += pts;
-          s.targets = remaining;
-          s.flash = { hits: hit.length, points: pts };
-        } else {
-          s.combo = 0;
-          s.flash = { hits: 0, points: 0 };
-        }
-        s.beam = { y: hs.aimY, until: now + BEAM_MS };
-        s.flashUntil = now + FLASH_MS;
-      }
-    } else {
-      s.charge = { charge: Math.max(0, s.charge.charge - dtMs / DECAY_MS) };
-    }
-
-    // Spawn + advance orbs, ramping with round progress.
-    const frac = (now - s.roundStart) / (ROUND_SECONDS * 1000);
-    const diff = difficulty(frac);
-    if (now >= s.spawnAt) {
-      const y = 0.15 + Math.random() * 0.7;
-      const emoji = MEME_EMOJIS[Math.floor(Math.random() * MEME_EMOJIS.length)];
-      s.targets.push(makeTarget(s.nextId++, y, diff.speed, emoji));
-      s.spawnAt = now + diff.spawnMs;
-    }
-    s.targets = advanceTargets(s.targets, dt).targets;
-
-    if (s.beam && now >= s.beam.until) s.beam = null;
+    // Advance all game state with one pure step.
+    const hand = landmarks ? handState(landmarks) : { valid: false, gap: 0, aimY: 0.5 };
+    s.engine = stepFrame(s.engine, { hand, dtMs, now, rng: Math.random });
+    const e = s.engine;
 
     // Render.
     const ctx = canvas.getContext("2d");
@@ -173,10 +114,10 @@ export default function MemeBlast() {
         ctx,
         {
           landmarks,
-          targets: s.targets,
-          charge: s.charge.charge,
-          armed: s.charge.charge >= 1,
-          beam: s.beam ? { y: s.beam.y, life: (s.beam.until - now) / BEAM_MS } : null,
+          targets: e.targets,
+          charge: e.charge.charge,
+          armed: e.charge.charge >= 1,
+          beam: e.beam ? { y: e.beam.y, life: (e.beam.until - now) / BEAM_MS } : null,
         },
         canvas.width,
         canvas.height
@@ -186,12 +127,12 @@ export default function MemeBlast() {
     // Throttle React updates to ~20/s.
     if (now - s.lastUi > 50) {
       s.lastUi = now;
-      setScore(s.score);
-      setCombo(s.combo);
+      setScore(e.score);
+      setCombo(e.combo);
       setTimeLeft(secLeft);
-      setCharge(s.charge.charge);
-      setArmed(s.charge.charge >= 1);
-      setFlash(s.flashUntil && now < s.flashUntil ? s.flash : null);
+      setCharge(e.charge.charge);
+      setArmed(e.charge.charge >= 1);
+      setFlash(e.flash);
     }
 
     if (secLeft <= 0) endRound();
@@ -208,22 +149,11 @@ export default function MemeBlast() {
         const now = performance.now();
         const s = g.current;
         s.running = true;
-        s.roundStart = now;
         s.roundEnd = now + ROUND_SECONDS * 1000;
         s.last = 0;
         s.lastVideoTime = -1;
         s.lastUi = 0;
-        s.charge = initialCharge;
-        s.targets = [];
-        s.nextId = 1;
-        s.spawnAt = now;
-        s.score = 0;
-        s.combo = 0;
-        s.bestCombo = 0;
-        s.hits = 0;
-        s.beam = null;
-        s.flash = null;
-        s.flashUntil = 0;
+        s.engine = createGameState(now);
         setScore(0);
         setCombo(0);
         setTimeLeft(ROUND_SECONDS);

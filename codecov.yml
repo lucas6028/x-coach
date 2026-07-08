@@ -1,0 +1,25 @@
+# Codecov configuration.
+#
+# The gameplay logic lives in fully unit-tested pure modules (src/lib/blast/*, including the
+# per-frame engine). What remains uncovered is the unavoidable impure boundary: the MediaPipe/
+# WASM/WebGL/canvas wrapper and the thin camera + requestAnimationFrame page shell, none of
+# which can run under jsdom. Those are ignored here (mirroring the vitest coverage `exclude`)
+# so patch coverage reflects code that can actually be tested.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 75%
+        threshold: 5%
+
+ignore:
+  - "frontend/src/main.tsx"
+  - "frontend/src/test"
+  # MediaPipe / camera / canvas boundary — needs a real camera + GPU.
+  - "frontend/src/components/**/*Detector.ts"
+  # Camera + rAF page shells: impure edges only; their logic is unit-tested in src/lib/*.
+  - "frontend/src/pages/MemeBlast.tsx"
