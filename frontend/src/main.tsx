@@ -1,4 +1,4 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import App from "./App";
@@ -6,6 +6,8 @@ import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
+// Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens /play.
+const PoseGame = lazy(() => import("./pages/PoseGame"));
 import RequireAuth from "./components/RequireAuth";
 import { I18nProvider } from "./lib/i18n";
 import { AuthProvider } from "./lib/auth";
@@ -19,6 +21,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/app" element={<App />} />
+            <Route
+              path="/play"
+              element={
+                <Suspense fallback={null}>
+                  <PoseGame />
+                </Suspense>
+              }
+            />
             <Route path="/login" element={<Login />} />
             <Route
               path="/history"
