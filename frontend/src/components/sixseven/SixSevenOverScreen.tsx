@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowCounterClockwise, Confetti } from "@phosphor-icons/react";
 import { useI18n } from "../../lib/i18n";
@@ -33,8 +33,13 @@ export default function SixSevenOverScreen({
   const { t } = useI18n();
   const reduce = useReducedMotion();
   const [name, setName] = useState("");
+  // Enter auto-repeat / double-click can fire several times before the submitted-state
+  // re-render unmounts the input; guard so a score is only written once.
+  const submittedRef = useRef(false);
 
   const handleSubmit = () => {
+    if (submittedRef.current) return;
+    submittedRef.current = true;
     onSubmit(name.trim().slice(0, NAME_MAX) || t("six.over.anon"));
   };
 

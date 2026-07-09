@@ -17,14 +17,11 @@ export type Lead = "left" | "right" | "neutral";
 export type HandsState = {
   valid: boolean;
   lead: Lead;
-  // Raw wrist heights (0 top .. 1 bottom) for the overlay.
-  leftY: number;
-  rightY: number;
   // Signed height gap in shoulder-widths (positive → left hand higher).
   diff: number;
 };
 
-const INVALID: HandsState = { valid: false, lead: "neutral", leftY: 0, rightY: 0, diff: 0 };
+const INVALID: HandsState = { valid: false, lead: "neutral", diff: 0 };
 
 // A landmark counts as present when MediaPipe is at least MIN_VIS confident (absent visibility
 // → assume 1). Shared with the canvas overlay so the counter and the on-screen dot agree about
@@ -54,5 +51,5 @@ export function handLead(landmarks: (Point | null | undefined)[]): HandsState {
   let lead: Lead = "neutral";
   if (diff > LEAD_THRESHOLD) lead = "left";
   else if (diff < -LEAD_THRESHOLD) lead = "right";
-  return { valid: true, lead, leftY: lw.y, rightY: rw.y, diff };
+  return { valid: true, lead, diff };
 }

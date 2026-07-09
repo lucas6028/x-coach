@@ -39,6 +39,7 @@ export default function SixSeven() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const landmarkerRef = useRef<PoseLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
@@ -117,7 +118,8 @@ export default function SixSeven() {
         s.popUntil = now + POP_MS;
       }
 
-      const ctx = canvas.getContext("2d");
+      // Cache the context once — it never changes for a given canvas, and this runs every frame.
+      const ctx = (ctxRef.current ??= canvas.getContext("2d"));
       if (ctx) {
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth || 640;
@@ -209,7 +211,9 @@ export default function SixSeven() {
     } catch (e) {
       teardown();
       setStarting(false);
-      setError(e instanceof Error ? e.message : t("six.error"));
+      // Show the localized message; keep the raw DOMException in the console for debugging.
+      console.error("six-seven: failed to start", e);
+      setError(t("six.error"));
     }
   }, [beginCountdown, teardown, t]);
 

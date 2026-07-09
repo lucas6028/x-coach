@@ -24,13 +24,19 @@ describe("SixSeven", () => {
     expect(screen.getByText("Champ")).toBeInTheDocument();
   });
 
-  it("surfaces a camera error when access is denied", async () => {
+  it("surfaces a localized camera error when access is denied", async () => {
+    // Raw DOMExceptions are localized away — the user sees the translated string, not
+    // the browser's English "Permission denied".
+    vi.spyOn(console, "error").mockImplementation(() => {});
     Object.defineProperty(navigator, "mediaDevices", {
       configurable: true,
       value: { getUserMedia: vi.fn().mockRejectedValue(new Error("Permission denied")) },
     });
     renderWithProviders(<SixSeven />);
     fireEvent.click(screen.getByRole("button", { name: /Enable camera & go/i }));
-    await waitFor(() => expect(screen.getByText("Permission denied")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("Couldn't start the camera.")).toBeInTheDocument()
+    );
+    expect(screen.queryByText("Permission denied")).not.toBeInTheDocument();
   });
 });
