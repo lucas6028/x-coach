@@ -14,6 +14,25 @@ type Phase = "intro" | "countdown" | "playing" | "over";
 
 const POP_MS = 350;
 
+// Resolve once the <video> has a decoded frame MediaPipe can read (readyState >= HAVE_CURRENT_DATA).
+// On mobile `video.play()` resolving does NOT guarantee a decoded frame, so we wait for `loadeddata`,
+// with a timeout so a stalled camera never wedges the loading phase.
+function waitForVideoFrame(video: HTMLVideoElement, timeoutMs = 3000): Promise<void> {
+  if (video.readyState >= 2) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      video.removeEventListener("loadeddata", done);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    video.addEventListener("loadeddata", done);
+  });
+}
+
 // 67 — the brainrot mini-game. Do the "6-7" bob (alternate raising each hand) and every switch
 // counts one 67; keep the rhythm for a combo. React state drives the UI; a ref-backed rAF loop
 // drives detection + counting. The gesture + counter logic lives in lib/sixseven/* (unit-tested)
@@ -183,13 +202,19 @@ export default function SixSeven() {
     setError("");
     setStarting(true);
     try {
+      // The model download (WASM + .task, the bulk of the wait on mobile) doesn't depend on the
+      // camera — kick it off in parallel with the getUserMedia permission/stream so the two waits
+      // overlap instead of stacking.
+      const landmarkerPromise = createPoseLandmarker();
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: 640, height: 480 },
         audio: false,
       });
-      // getUserMedia resolved after an unmount — stop the orphaned track and bail.
+      // getUserMedia resolved after an unmount — stop the orphaned track and bail. Also close the
+      // model once its download settles so it doesn't leak.
       if (!mountedRef.current) {
         stream.getTracks().forEach((tr) => tr.stop());
+        landmarkerPromise.then((l) => l.close()).catch(() => {});
         return;
       }
       streamRef.current = stream;
@@ -198,7 +223,7 @@ export default function SixSeven() {
         video.srcObject = stream;
         await video.play();
       }
-      const landmarker = await createPoseLandmarker();
+      const landmarker = await landmarkerPromise;
       // Unmounted while loading the model — close it and release the stream teardown owns.
       if (!mountedRef.current) {
         landmarker.close();
@@ -206,6 +231,27 @@ export default function SixSeven() {
         return;
       }
       landmarkerRef.current = landmarker;
+
+      // Warm up the GPU delegate NOW, while the loading spinner is still up. The first
+      // detectForVideo compiles shaders and can freeze the main thread for tens of seconds on
+      // mobile; run it here so that stall hides in the load the user is already waiting on rather
+      // than freezing the 2.4s countdown (where it can't possibly fit). Needs a decoded frame, and
+      // a warmup that throws must not abort the game.
+      if (video) {
+        await waitForVideoFrame(video);
+        if (!mountedRef.current) {
+          teardown();
+          return;
+        }
+        if (video.readyState >= 2) {
+          try {
+            landmarker.detectForVideo(video, performance.now());
+          } catch (e) {
+            console.error("six-seven: warmup inference failed", e);
+          }
+        }
+      }
+
       setStarting(false);
       beginCountdown();
     } catch (e) {
