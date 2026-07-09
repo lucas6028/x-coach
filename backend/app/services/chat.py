@@ -268,6 +268,29 @@ def suggest_followups(
     return _parse_followups("".join(parts))
 
 
+# LINE text messages are capped at 5000 characters by the Messaging API; stay comfortably under it
+# so a reply is never rejected. Coaching answers are short, so this only guards a pathological case.
+_LINE_MAX_CHARS = 4900
+
+
+def answer_once(
+    *, messages: list[dict[str, str]], context: dict[str, Any], model: str, max_chars: int = _LINE_MAX_CHARS
+) -> str:
+    """Return one grounded coaching reply as a plain string (no SSE) — the non-streaming sibling of
+    ``answer_stream``, used by the LINE webhook where a reply is a single pushed message.
+
+    Reuses the same grounded system prompt and the tested ``_stream_completion`` transport, simply
+    joining the token chunks. Raises ``RuntimeError`` on any transport failure (propagated from
+    ``_stream_completion``) or an empty completion, so the caller can reply with a graceful fallback
+    instead of pushing a blank message. The result is truncated to ``max_chars`` for LINE's limit.
+    """
+    system = _build_system_prompt(context)
+    text = "".join(_stream_completion([{"role": "system", "content": system}, *messages], model)).strip()
+    if not text:
+        raise RuntimeError("The LLM returned an empty message.")
+    return text[:max_chars]
+
+
 def answer_stream(
     *, messages: list[dict[str, str]], context: dict[str, Any], model: str
 ) -> Iterator[str]:

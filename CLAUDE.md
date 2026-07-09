@@ -13,8 +13,9 @@ a working web app on top of the research pipelines:
 - **ML/perception library** in `src/` (pose, video, knowledge, rehab24, fit3d, egoexo)
   with thin CLI entry points in `scripts/` — the research foundation.
 - **Backend** in `backend/` — FastAPI app (`backend/app/main.py`); routers: analyze,
-  analyses, chat, conversations, knowledge, videos; Supabase for auth/history;
-  chat via OpenRouter (spec: `specs/llm-chat-spec.md`).
+  analyses, chat, conversations, knowledge, videos, line; Supabase for auth/history;
+  chat via OpenRouter (spec: `specs/llm-chat-spec.md`). LINE OA bot ("continue a web
+  analysis on LINE") setup: `docs/line-oa-setup.md`.
 - **Frontend** in `frontend/` — React 18 + Vite + TypeScript + Tailwind, Supabase client.
 
 Research framing: `project-overview.md` / `研究計畫.md`. Experiment results: `notes/`.

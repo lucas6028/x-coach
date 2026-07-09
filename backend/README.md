@@ -67,11 +67,32 @@ reasoning model that emits its chain-of-thought in `reasoning_content` (not `del
 as a long silence before the answer streams. If replies get truncated, NIM's default `max_tokens`
 can be low; there's no env for it yet, so add one if you hit it.
 
+## LINE bot ("continue a web analysis on LINE")
+
+A LINE Official Account lets a signed-in web user keep asking the **same grounded coach** about a
+web analysis from LINE chat. The flow: the web app mints a one-time **link code**
+(`POST /api/line/link-code`, auth-gated), the user types it to the LINE bot, and the bot binds that
+LINE account to the analysis — every later message is answered by the same server-built grounded
+prompt (`chat_service.answer_once`, the non-streaming sibling of `/api/chat`).
+
+Unlike the rest of the backend, the webhook is called by LINE with **no user JWT**, so its two
+tables (`line_link_codes`, `line_bindings`) are read/written with the Supabase **service_role** key
+(`services/line_store`). Those tables have RLS enabled with **no anon/authenticated policy** — only
+service_role reaches them, and the store never touches `analyses`/`conversations` (the grounding is
+snapshotted into the binding at link time). Authenticity of the webhook itself comes from the
+`X-Line-Signature` HMAC, verified over the raw body before anything is processed.
+
+Set `LINE_CHANNEL_SECRET`, `LINE_CHANNEL_ACCESS_TOKEN`, `SUPABASE_SERVICE_ROLE_KEY` (all server-side
+only) to turn it on — otherwise the webhook no-ops and `/api/line/link-code` is 503. Full
+step-by-step (LINE Developer Console channel, webhook URL, migration, testing): **`docs/line-oa-setup.md`**.
+
 ## Endpoints
 
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
-| GET  | `/api/health` | — | liveness + which data stores are present + `auth_configured` |
+| GET  | `/api/health` | — | liveness + data stores present + `auth_configured` / `chat_configured` / `line_configured` |
+| POST | `/api/line/webhook` | signature | LINE Messaging API webhook (verifies `X-Line-Signature`, acks fast, replies in the background) |
+| POST | `/api/line/link-code` | required | mint a one-time code binding the caller's analysis to whichever LINE account redeems it |
 | POST | `/api/analyze` | optional | upload a squat video → extract → rule detection (+retrieval); persists + returns `analysis_id` when authenticated |
 | GET  | `/api/analyses?limit=&offset=` | required | the caller's analysis history (newest first) |
 | GET  | `/api/analyses/{analysis_id}` | required | one of the caller's analyses (full `result`) |

@@ -28,5 +28,10 @@ psql "$SUPABASE_DB_URL" -f db/migrations/20260620000000_init_videos_analyses.sql
 | File | What it does |
 |------|--------------|
 | `20260620000000_init_videos_analyses.sql` | `videos` + `analyses` tables, owner-scoped RLS, indexes. `users` is Supabase's `auth.users`. |
+| `20260704000000_conversations.sql` | `conversations` table (one grounded thread per `user, video_id`), owner-scoped RLS. |
+| `20260705000000_conversation_followups.sql` | Adds the `followups` column to `conversations`. |
+| `20260709000000_line_bindings.sql` | `line_link_codes` + `line_bindings` tables for the LINE bot. RLS is **enabled with no anon/authenticated policy** — only the `service_role` key touches them (backend-owned bot state). See `docs/line-oa-setup.md`. |
 
-After applying, confirm in Table Editor that `videos` and `analyses` exist with RLS enabled.
+After applying, confirm in Table Editor that `videos` and `analyses` exist with RLS enabled. The
+`line_*` tables should also show RLS enabled but with **zero policies** — that is intended (only
+`service_role` reaches them).

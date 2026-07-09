@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app import config
-from backend.app.routers import analyses, analyze, chat, conversations, knowledge, videos
+from backend.app.routers import analyses, analyze, chat, conversations, knowledge, line, videos
 from backend.app.settings import chat_models, default_chat_model, get_settings
 
 app = FastAPI(
@@ -35,6 +35,7 @@ app.include_router(videos.router)
 app.include_router(knowledge.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
+app.include_router(line.router)
 
 
 @app.get("/api/health", tags=["meta"])
@@ -45,6 +46,7 @@ def health() -> dict:
         "status": "ok",
         "auth_configured": settings.auth_configured,
         "chat_configured": settings.chat_configured,
+        "line_configured": settings.line_configured,
         # The Settings picker is server-driven: the selectable models + which is the default both
         # come from here (env-configurable), so the frontend never hard-codes the list.
         "chat_models": chat_models(),

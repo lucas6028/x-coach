@@ -56,6 +56,18 @@ class Settings(BaseSettings):
     # make the chips crawl. Env-overridable; blank it to reuse the default answer model instead.
     llm_followup_model: str = "openai/gpt-oss-120b"
 
+    # LINE Messaging API integration (backend/app/routers/line.py). The bot lets a signed-in web user
+    # *continue* asking about a web analysis from LINE chat. It is a SERVER-TO-SERVER integration:
+    # LINE calls our webhook with no user JWT, so the LINE-only tables (link codes + bindings) are
+    # read/written with the Supabase **service_role** key — NOT the user-JWT/RLS path the rest of the
+    # backend uses. The blast radius is kept narrow by discipline: ``services/line_store`` only ever
+    # touches the two ``line_*`` tables; the analysis grounding is snapshotted into the binding at
+    # link time by the authenticated user, so the webhook never reads ``analyses``/``conversations``.
+    # All three vars are server-side only. Unset -> the LINE endpoints 503 and the webhook no-ops.
+    line_channel_secret: str = ""  # verifies the X-Line-Signature HMAC on every webhook request
+    line_channel_access_token: str = ""  # long-lived token for the LINE reply/push Messaging API
+    supabase_service_role_key: str = ""  # service-role key for line_store (bypasses RLS; keep secret)
+
     @property
     def auth_configured(self) -> bool:
         """True when the Supabase project URL and anon key are both present."""
@@ -65,6 +77,23 @@ class Settings(BaseSettings):
     def chat_configured(self) -> bool:
         """True when an LLM API key is present (the chat endpoint is otherwise 503)."""
         return bool(self.llm_api_key)
+
+    @property
+    def line_configured(self) -> bool:
+        """True when the LINE bot can run end-to-end: signature secret, reply token, an LLM to
+        answer with, and the service-role key its store needs (the webhook has no user JWT).
+
+        A missing piece leaves the whole integration off (webhook no-ops, ``/api/line/link-code``
+        503) rather than half-working — e.g. a bot that can verify and reply but can't reach the LLM,
+        or can reach the LLM but can't persist a binding, is worse than an honest 503.
+        """
+        return bool(
+            self.line_channel_secret
+            and self.line_channel_access_token
+            and self.supabase_url
+            and self.supabase_service_role_key
+            and self.chat_configured
+        )
 
 
 # Used only if ``LLM_MODELS`` is misconfigured to empty, so the picker is never empty.
