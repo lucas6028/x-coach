@@ -45,6 +45,8 @@ def health() -> dict:
         "status": "ok",
         "auth_configured": settings.auth_configured,
         "chat_configured": settings.chat_configured,
+        # True when user videos go to R2 object storage; False keeps them on the local runtime disk.
+        "storage_configured": settings.storage_configured,
         # The Settings picker is server-driven: the selectable models + which is the default both
         # come from here (env-configurable), so the frontend never hard-codes the list.
         "chat_models": chat_models(),

@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { CircleNotch, UploadSimple } from "@phosphor-icons/react";
 import { useI18n } from "../lib/i18n";
+import { uploadLimitVars } from "../lib/upload";
 
 interface Props {
   onFile: (file: File) => void;
@@ -50,7 +51,9 @@ export default function UploadDropzone({ onFile, loading, statusMsg }: Props) {
       <p className="text-content font-medium">
         {loading ? t("upload.analysing") : t("upload.prompt")}
       </p>
-      <p className="mt-1.5 font-mono text-[11px] text-muted">{loading ? statusMsg : t("upload.hint")}</p>
+      <p className="mt-1.5 font-mono text-[11px] text-muted">
+        {loading ? statusMsg : t("upload.hint", uploadLimitVars)}
+      </p>
       <input
         ref={inputRef}
         type="file"

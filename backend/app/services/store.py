@@ -44,11 +44,14 @@ def persist_analysis(
     source: str,
     result: dict[str, Any],
     filename: str | None = None,
+    size_bytes: int = 0,
+    storage_key: str | None = None,
 ) -> str:
     """Upsert the video row and insert the analysis; return the new analysis id.
 
-    The ``videos`` row carries the (currently trivial) status machine and the storage key,
-    which P2 will repoint at object storage. ``result`` is stored verbatim as JSONB so history
+    The ``videos`` row carries the (currently trivial) status machine, the byte size (for the
+    per-user storage quota), and the storage key — the R2 object key when the upload was pushed to
+    object storage, else the local runtime path. ``result`` is stored verbatim as JSONB so history
     replay is self-contained.
     """
     client = _user_client(token)
@@ -58,7 +61,8 @@ def persist_analysis(
             "user_id": user_id,
             "video_id": video_id,
             "filename": filename,
-            "storage_key": f"runtime/uploads/{video_id}",
+            "storage_key": storage_key or f"runtime/uploads/{video_id}",
+            "size_bytes": size_bytes,
             "status": "done",
         },
         on_conflict="user_id,video_id",
@@ -82,6 +86,20 @@ def persist_analysis(
     )
     rows = resp.data or []
     return str(rows[0]["id"]) if rows else ""
+
+
+def get_usage(*, token: str) -> dict[str, int]:
+    """Return the caller's current storage usage as ``{"count", "bytes"}`` for the quota check.
+
+    Sums ``size_bytes`` over the caller's own (RLS-scoped) video rows. A user keeps a handful of
+    short clips, so summing client-side is cheaper than a PostgREST aggregate and avoids its quirks.
+    """
+    client = _user_client(token)
+    resp = client.table("videos").select("size_bytes", count="exact").execute()
+    rows = resp.data or []
+    total = sum(int(row.get("size_bytes") or 0) for row in rows)
+    count = resp.count if resp.count is not None else len(rows)
+    return {"count": count, "bytes": total}
 
 
 def list_analyses(*, token: str, limit: int = 50, offset: int = 0) -> dict[str, Any]:
@@ -111,6 +129,17 @@ def delete_all_analyses(*, token: str, user_id: str) -> int:
     """
     client = _user_client(token)
     resp = client.table("analyses").delete().eq("user_id", user_id).execute()
+    # Purge the source videos from object storage before dropping their rows, so a "clear" leaves no
+    # residue in R2 either. Best-effort per object: a storage hiccup must not abort the DB cleanup.
+    from backend.app.services import object_store
+
+    if object_store.is_configured():
+        vids = client.table("videos").select("video_id").eq("user_id", user_id).execute()
+        for row in vids.data or []:
+            try:
+                object_store.delete_video(row["video_id"])
+            except Exception:  # noqa: BLE001 — never let a storage error strand the DB delete
+                pass
     # Drop the (now orphaned) source video rows and chat threads too, so a "clear" leaves no residue.
     client.table("videos").delete().eq("user_id", user_id).execute()
     client.table("conversations").delete().eq("user_id", user_id).execute()

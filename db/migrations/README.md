@@ -28,5 +28,8 @@ psql "$SUPABASE_DB_URL" -f db/migrations/20260620000000_init_videos_analyses.sql
 | File | What it does |
 |------|--------------|
 | `20260620000000_init_videos_analyses.sql` | `videos` + `analyses` tables, owner-scoped RLS, indexes. `users` is Supabase's `auth.users`. |
+| `20260704000000_conversations.sql` | `conversations` table (one saved chat thread per `(user_id, video_id)`), owner-scoped RLS. |
+| `20260705000000_conversation_followups.sql` | Adds `conversations.followups` for the persisted next-question chips. |
+| `20260709000000_video_size_bytes.sql` | Adds `videos.size_bytes` for the per-user storage quota (object storage on R2). |
 
 After applying, confirm in Table Editor that `videos` and `analyses` exist with RLS enabled.

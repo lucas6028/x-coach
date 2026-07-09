@@ -39,7 +39,7 @@ from backend.app import auth, config
 from backend.app import settings as app_settings
 from backend.app.auth import CurrentUser, get_current_user, get_optional_user
 from backend.app.main import app
-from backend.app.services import analysis, knowledge, library, store
+from backend.app.services import analysis, knowledge, library, object_store, store
 
 
 # --------------------------------------------------------------------------- helpers
@@ -904,22 +904,28 @@ class MainAppTests(_TempConfigBase):
     def test_health_reports_auth_configured_true(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=True, chat_configured=True),
+            return_value=types.SimpleNamespace(
+                auth_configured=True, chat_configured=True, storage_configured=True
+            ),
         ):
             resp = self.client.get("/api/health")
         body = resp.json()
         self.assertTrue(body["auth_configured"])
         self.assertTrue(body["chat_configured"])
+        self.assertTrue(body["storage_configured"])
 
     def test_health_reports_auth_not_configured(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=False, chat_configured=False),
+            return_value=types.SimpleNamespace(
+                auth_configured=False, chat_configured=False, storage_configured=False
+            ),
         ):
             resp = self.client.get("/api/health")
         body = resp.json()
         self.assertFalse(body["auth_configured"])
         self.assertFalse(body["chat_configured"])
+        self.assertFalse(body["storage_configured"])
 
 
 # ------------------------------------------------------------------------- settings
@@ -1234,6 +1240,23 @@ class StoreDeleteTests(unittest.TestCase):
         with mock.patch.object(store, "_user_client", return_value=client):
             self.assertEqual(store.delete_all_analyses(token="t", user_id="u1"), 0)
 
+    def test_delete_all_purges_r2_objects_when_configured(self) -> None:
+        client, _ = _fake_client(_Resp(data=[{"video_id": "v1"}, {"video_id": "v2"}]))
+        with mock.patch.object(store, "_user_client", return_value=client), \
+            mock.patch.object(object_store, "is_configured", return_value=True), \
+            mock.patch.object(object_store, "delete_video") as dv:
+            store.delete_all_analyses(token="t", user_id="u1")
+        dv.assert_any_call("v1")
+        dv.assert_any_call("v2")
+
+    def test_delete_all_swallows_r2_delete_error(self) -> None:
+        client, _ = _fake_client(_Resp(data=[{"video_id": "v1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client), \
+            mock.patch.object(object_store, "is_configured", return_value=True), \
+            mock.patch.object(object_store, "delete_video", side_effect=RuntimeError("r2 down")):
+            # A storage hiccup must not abort the DB cleanup.
+            self.assertEqual(store.delete_all_analyses(token="t", user_id="u1"), 1)
+
 
 class StoreGetTests(unittest.TestCase):
     def test_get_returns_row(self) -> None:
@@ -1407,6 +1430,340 @@ class ConversationsRouterTests(unittest.TestCase):
         app.dependency_overrides.clear()  # drop the override -> real dependency runs
         resp = self.client.get("/api/conversations/vid")
         self.assertEqual(resp.status_code, 401)
+
+
+# ---------------------------------------------------------------------- services.object_store
+
+
+def _fake_botocore_exceptions() -> tuple[dict, type]:
+    """Fake ``botocore.exceptions`` module with a ``ClientError`` (botocore isn't a test dep)."""
+    exc_mod = types.ModuleType("botocore.exceptions")
+
+    class ClientError(Exception):
+        pass
+
+    exc_mod.ClientError = ClientError  # type: ignore[attr-defined]
+    botocore_mod = sys.modules.get("botocore") or types.ModuleType("botocore")
+    return {"botocore": botocore_mod, "botocore.exceptions": exc_mod}, ClientError
+
+
+class ObjectStoreTests(unittest.TestCase):
+    def test_object_key_is_suffixless_and_id_scoped(self) -> None:
+        self.assertEqual(object_store.object_key("upload_abc123"), "uploads/upload_abc123")
+
+    def test_content_type_for_known_and_unknown(self) -> None:
+        self.assertEqual(object_store.content_type_for(".MOV"), "video/quicktime")
+        self.assertEqual(object_store.content_type_for(".webm"), "video/webm")
+        self.assertEqual(object_store.content_type_for(".xyz"), "video/mp4")
+
+    def test_is_configured_reflects_settings(self) -> None:
+        with mock.patch(
+            "backend.app.settings.get_settings",
+            return_value=types.SimpleNamespace(storage_configured=True),
+        ):
+            self.assertTrue(object_store.is_configured())
+
+    def test_client_builds_s3_with_r2_endpoint(self) -> None:
+        captured: dict = {}
+        fake_boto3 = types.ModuleType("boto3")
+
+        def fake_client(service, **kwargs):
+            captured["service"] = service
+            captured["kwargs"] = kwargs
+            return mock.Mock()
+
+        fake_boto3.client = fake_client  # type: ignore[attr-defined]
+        fake_botocore = types.ModuleType("botocore")
+        fake_config_mod = types.ModuleType("botocore.config")
+
+        class FakeConfig:
+            def __init__(self, **kw) -> None:
+                self.kw = kw
+
+        fake_config_mod.Config = FakeConfig  # type: ignore[attr-defined]
+        fake_settings = types.SimpleNamespace(
+            r2_resolved_endpoint="https://acct.r2.cloudflarestorage.com",
+            r2_access_key_id="ak",
+            r2_secret_access_key="sk",
+        )
+        mods = {"boto3": fake_boto3, "botocore": fake_botocore, "botocore.config": fake_config_mod}
+        with mock.patch.dict(sys.modules, mods), mock.patch(
+            "backend.app.settings.get_settings", return_value=fake_settings
+        ):
+            object_store._client()
+        self.assertEqual(captured["service"], "s3")
+        self.assertEqual(captured["kwargs"]["endpoint_url"], "https://acct.r2.cloudflarestorage.com")
+        self.assertEqual(captured["kwargs"]["aws_access_key_id"], "ak")
+        self.assertEqual(captured["kwargs"]["region_name"], "auto")
+
+    def test_upload_video_file_puts_object_and_returns_key(self) -> None:
+        tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        tmp.write(b"videobytes")
+        tmp.close()
+        client = mock.Mock()
+        with mock.patch.object(object_store, "_client", return_value=client), mock.patch(
+            "backend.app.settings.get_settings",
+            return_value=types.SimpleNamespace(r2_bucket="bkt"),
+        ):
+            key = object_store.upload_video_file("upload_abc", Path(tmp.name), ".mp4")
+        self.assertEqual(key, "uploads/upload_abc")
+        kwargs = client.put_object.call_args.kwargs
+        self.assertEqual(kwargs["Bucket"], "bkt")
+        self.assertEqual(kwargs["Key"], "uploads/upload_abc")
+        self.assertEqual(kwargs["ContentType"], "video/mp4")
+        os.unlink(tmp.name)
+
+    def test_presigned_get_url_uses_ttl_and_key(self) -> None:
+        client = mock.Mock()
+        client.generate_presigned_url.return_value = "https://signed"
+        with mock.patch.object(object_store, "_client", return_value=client), mock.patch(
+            "backend.app.settings.get_settings",
+            return_value=types.SimpleNamespace(r2_bucket="bkt", r2_url_ttl_s=120),
+        ):
+            url = object_store.presigned_get_url("upload_abc")
+        self.assertEqual(url, "https://signed")
+        kwargs = client.generate_presigned_url.call_args.kwargs
+        self.assertEqual(kwargs["Params"], {"Bucket": "bkt", "Key": "uploads/upload_abc"})
+        self.assertEqual(kwargs["ExpiresIn"], 120)
+
+    def test_video_exists_true_and_false(self) -> None:
+        mods, ClientError = _fake_botocore_exceptions()
+        settings_ns = types.SimpleNamespace(r2_bucket="bkt")
+        present = mock.Mock()
+        with mock.patch.dict(sys.modules, mods), mock.patch.object(
+            object_store, "_client", return_value=present
+        ), mock.patch("backend.app.settings.get_settings", return_value=settings_ns):
+            self.assertTrue(object_store.video_exists("upload_abc"))
+
+        missing = mock.Mock()
+        missing.head_object.side_effect = ClientError("404")
+        with mock.patch.dict(sys.modules, mods), mock.patch.object(
+            object_store, "_client", return_value=missing
+        ), mock.patch("backend.app.settings.get_settings", return_value=settings_ns):
+            self.assertFalse(object_store.video_exists("ghost"))
+
+    def test_delete_video_swallows_client_error(self) -> None:
+        mods, ClientError = _fake_botocore_exceptions()
+        client = mock.Mock()
+        client.delete_object.side_effect = ClientError("gone")
+        with mock.patch.dict(sys.modules, mods), mock.patch.object(
+            object_store, "_client", return_value=client
+        ), mock.patch(
+            "backend.app.settings.get_settings",
+            return_value=types.SimpleNamespace(r2_bucket="bkt"),
+        ):
+            object_store.delete_video("upload_abc")  # must not raise
+        client.delete_object.assert_called_once()
+
+
+class StoreGetUsageTests(unittest.TestCase):
+    def test_sums_bytes_and_counts(self) -> None:
+        client, query = _fake_client(
+            _Resp(data=[{"size_bytes": 100}, {"size_bytes": 250}], count=2)
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            usage = store.get_usage(token="t")
+        self.assertEqual(usage, {"count": 2, "bytes": 350})
+
+    def test_handles_null_sizes_and_missing_count(self) -> None:
+        client, _ = _fake_client(_Resp(data=[{"size_bytes": None}, {}], count=None))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            usage = store.get_usage(token="t")
+        self.assertEqual(usage, {"count": 2, "bytes": 0})
+
+
+class StorePersistStorageKeyTests(unittest.TestCase):
+    def test_persist_writes_size_and_r2_key(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "a1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.persist_analysis(
+                token="t",
+                user_id="u1",
+                video_id="vid",
+                source="upload",
+                result={"detections": []},
+                size_bytes=4096,
+                storage_key="uploads/vid",
+            )
+        self.assertEqual(query.upserted["size_bytes"], 4096)
+        self.assertEqual(query.upserted["storage_key"], "uploads/vid")
+
+    def test_persist_defaults_storage_key_to_runtime_path(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "a1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.persist_analysis(
+                token="t", user_id="u1", video_id="vid", source="upload", result={}
+            )
+        self.assertEqual(query.upserted["storage_key"], "runtime/uploads/vid")
+        self.assertEqual(query.upserted["size_bytes"], 0)
+
+
+class AnalyzeLimitsAndQuotaTests(_TempConfigBase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.client = TestClient(app)
+
+    def _auth(self) -> None:
+        app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+
+    def test_oversize_file_is_413(self) -> None:
+        with mock.patch.object(config, "MAX_UPLOAD_BYTES", 4):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"toolong", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 413)
+        self.assertIn("too large", resp.json()["detail"].lower())
+
+    def test_over_quota_is_507_before_analysis(self) -> None:
+        self._auth()
+        with mock.patch.object(config, "USER_VIDEO_QUOTA_COUNT", 2), mock.patch.object(
+            store, "get_usage", return_value={"count": 2, "bytes": 0}
+        ), mock.patch.object(analysis, "analyze_video_file") as az:
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 507)
+        az.assert_not_called()
+
+    def test_over_byte_quota_is_507(self) -> None:
+        self._auth()
+        with mock.patch.object(config, "USER_STORAGE_QUOTA_BYTES", 10), mock.patch.object(
+            store, "get_usage", return_value={"count": 0, "bytes": 8}
+        ):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 507)
+
+    def test_usage_lookup_failure_fails_open(self) -> None:
+        self._auth()
+        fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
+        with mock.patch.object(store, "get_usage", side_effect=RuntimeError("db down")), \
+            mock.patch.object(
+                analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            ), mock.patch.object(
+                analysis, "analyze_video_file", return_value=fake_result
+            ), mock.patch.object(object_store, "is_configured", return_value=False), \
+            mock.patch.object(store, "persist_analysis", return_value="a1"):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 200)
+
+    def test_too_long_clip_is_422(self) -> None:
+        long_pose = {"fps": 30.0, "frames": [{"i": i} for i in range(30 * 61)]}
+        fake_result = {"detections": [], "source": "upload", "pose": long_pose}
+        with mock.patch.object(
+            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+        ), mock.patch.object(analysis, "analyze_video_file", return_value=fake_result):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 422)
+        self.assertIn("too long", resp.json()["detail"].lower())
+
+    def test_authenticated_upload_pushes_to_r2_and_persists_key(self) -> None:
+        self._auth()
+        fake_result = {"detections": [], "source": "upload", "pose": {"fps": 30.0, "frames": []}}
+        with mock.patch.object(store, "get_usage", return_value={"count": 0, "bytes": 0}), \
+            mock.patch.object(
+                analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            ), mock.patch.object(
+                analysis, "analyze_video_file", return_value=fake_result
+            ), mock.patch.object(object_store, "is_configured", return_value=True), \
+            mock.patch.object(
+                object_store, "upload_video_file", return_value="uploads/upload_abc"
+            ) as up, mock.patch.object(
+                store, "persist_analysis", return_value="a1"
+            ) as persist:
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 200)
+        up.assert_called_once()
+        kwargs = persist.call_args.kwargs
+        self.assertEqual(kwargs["storage_key"], "uploads/upload_abc")
+        self.assertEqual(kwargs["size_bytes"], 4)
+
+    def test_r2_upload_failure_still_persists_without_key(self) -> None:
+        self._auth()
+        fake_result = {"detections": [], "source": "upload", "pose": {"fps": 30.0, "frames": []}}
+        with mock.patch.object(store, "get_usage", return_value={"count": 0, "bytes": 0}), \
+            mock.patch.object(
+                analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+            ), mock.patch.object(
+                analysis, "analyze_video_file", return_value=fake_result
+            ), mock.patch.object(object_store, "is_configured", return_value=True), \
+            mock.patch.object(
+                object_store, "upload_video_file", side_effect=RuntimeError("r2 down")
+            ), mock.patch.object(store, "persist_analysis", return_value="a1") as persist:
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(persist.call_args.kwargs["storage_key"])
+
+
+class VideoFileR2Tests(_TempConfigBase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.client = TestClient(app)
+
+    def test_redirects_to_presigned_url_when_not_local(self) -> None:
+        with mock.patch.object(object_store, "is_configured", return_value=True), \
+            mock.patch.object(object_store, "video_exists", return_value=True), \
+            mock.patch.object(object_store, "presigned_get_url", return_value="https://signed/x"):
+            resp = self.client.get("/api/video-file/upload_abc", follow_redirects=False)
+        self.assertEqual(resp.status_code, 307)
+        self.assertEqual(resp.headers["location"], "https://signed/x")
+
+    def test_404_when_r2_object_absent(self) -> None:
+        with mock.patch.object(object_store, "is_configured", return_value=True), \
+            mock.patch.object(object_store, "video_exists", return_value=False):
+            resp = self.client.get("/api/video-file/upload_ghost")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_404_when_storage_unconfigured_and_not_local(self) -> None:
+        with mock.patch.object(object_store, "is_configured", return_value=False):
+            resp = self.client.get("/api/video-file/upload_ghost")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_local_file_wins_over_r2(self) -> None:
+        self.upload_dir.mkdir(parents=True, exist_ok=True)
+        (self.upload_dir / "upload_local.mp4").write_bytes(b"localbytes")
+        with mock.patch.object(object_store, "is_configured", return_value=True), \
+            mock.patch.object(object_store, "presigned_get_url") as signed:
+            resp = self.client.get("/api/video-file/upload_local")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.content, b"localbytes")
+        signed.assert_not_called()
+
+
+class StorageSettingsTests(unittest.TestCase):
+    def test_endpoint_derived_from_account_id(self) -> None:
+        s = app_settings.Settings(r2_account_id="acct")
+        self.assertEqual(s.r2_resolved_endpoint, "https://acct.r2.cloudflarestorage.com")
+
+    def test_explicit_endpoint_overrides_and_trims_slash(self) -> None:
+        s = app_settings.Settings(r2_account_id="acct", r2_endpoint="https://custom.example/")
+        self.assertEqual(s.r2_resolved_endpoint, "https://custom.example")
+
+    def test_storage_configured_requires_all_fields(self) -> None:
+        self.assertFalse(app_settings.Settings().storage_configured)
+        full = app_settings.Settings(
+            r2_account_id="acct",
+            r2_access_key_id="ak",
+            r2_secret_access_key="sk",
+            r2_bucket="bkt",
+        )
+        self.assertTrue(full.storage_configured)
+
+    def test_storage_not_configured_without_endpoint(self) -> None:
+        s = app_settings.Settings(
+            r2_access_key_id="ak", r2_secret_access_key="sk", r2_bucket="bkt"
+        )
+        self.assertFalse(s.storage_configured)
 
 
 if __name__ == "__main__":

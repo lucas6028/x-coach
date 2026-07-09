@@ -26,6 +26,35 @@ Supabase Auth and sends `Authorization: Bearer <access_token>`; the backend veri
 (HS256) and forwards it to Postgres so **RLS** scopes every row to its owner. Apply the schema
 first — see `db/migrations/` (and its README for why migrations don't live under `supabase/`).
 
+## User-video object storage & quotas (Cloudflare R2)
+
+Uploaded videos need durable storage for a real deployment — the app container's disk is ephemeral,
+so a restart would drop every upload and history replay would 404. When the `R2_*` vars are set, a
+signed-in user's upload is pushed to a **private** R2 bucket (S3-compatible) and streamed back via a
+short-lived **presigned GET** URL (`/api/video-file/{id}` 307-redirects to it); with them unset the
+backend keeps videos on the local runtime disk (fine for dev and the anonymous demo). R2 is chosen
+for **zero egress fees** — video streaming is egress-heavy. `boto3` is the client (lazily imported).
+
+| Var | Purpose |
+|-----|---------|
+| `R2_ACCOUNT_ID` | Cloudflare account id (derives the endpoint) |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | R2 API token (Object Read & Write) |
+| `R2_BUCKET` | private bucket name (do **not** make it public) |
+| `R2_ENDPOINT` | optional explicit endpoint override |
+| `R2_URL_TTL_S` | presigned-URL lifetime, seconds (default 300) |
+
+**Guardrails** (env-overridable; see `config.py`) cap abuse and bound spend for a small deployment —
+single upload **≤ 100 MB / 60 s**, and **≤ 30 videos & 1 GB per user** (a 40-user demo is ≤ 40 GB,
+~$0.60/mo on R2). The frontend pre-checks size/duration before uploading; the backend re-checks both
+(413 for size, 422 for duration, 507 when a user is over quota) — the client checks are UX only.
+
+| Var | Default |
+|-----|---------|
+| `XCOACH_MAX_UPLOAD_BYTES` | `104857600` (100 MB) |
+| `XCOACH_MAX_UPLOAD_DURATION_S` | `60` |
+| `XCOACH_USER_VIDEO_QUOTA_COUNT` | `30` |
+| `XCOACH_USER_STORAGE_QUOTA_BYTES` | `1073741824` (1 GB) |
+
 ## Conversational coaching (LLM)
 
 `/api/chat` is the one endpoint that calls an LLM (the analysis pipeline itself is fully offline).

@@ -35,6 +35,19 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
 
+    # Object storage for user videos (Cloudflare R2, S3-compatible). When these are set the backend
+    # pushes each authenticated upload to the private bucket and streams it back via a short-lived
+    # presigned GET URL; when they're blank it falls back to the local runtime dir (dev / anonymous
+    # demo). R2 is chosen for zero egress fees — video is egress-heavy. The endpoint is derived from
+    # the account id (``https://<account>.r2.cloudflarestorage.com``) unless overridden explicitly.
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = ""
+    r2_endpoint: str = ""
+    # Lifetime (seconds) of the presigned GET URLs handed to the browser for playback.
+    r2_url_ttl_s: int = 300
+
     # LLM conversational-coaching layer, served over an OpenAI-compatible chat-completions API. The
     # provider is deliberately NOT baked into the names: the transport speaks only the plain OpenAI
     # dialect, so these ``LLM_*`` vars point at any compatible endpoint — OpenRouter (the default
@@ -60,6 +73,28 @@ class Settings(BaseSettings):
     def auth_configured(self) -> bool:
         """True when the Supabase project URL and anon key are both present."""
         return bool(self.supabase_url and self.supabase_anon_key)
+
+    @property
+    def r2_resolved_endpoint(self) -> str:
+        """The R2 S3 endpoint — explicit override, else derived from the account id."""
+        if self.r2_endpoint:
+            return self.r2_endpoint.rstrip("/")
+        if self.r2_account_id:
+            return f"https://{self.r2_account_id}.r2.cloudflarestorage.com"
+        return ""
+
+    @property
+    def storage_configured(self) -> bool:
+        """True when R2 credentials + bucket + a resolvable endpoint are all present.
+
+        Blank means the backend keeps videos on the local runtime disk (dev / anonymous demo).
+        """
+        return bool(
+            self.r2_access_key_id
+            and self.r2_secret_access_key
+            and self.r2_bucket
+            and self.r2_resolved_endpoint
+        )
 
     @property
     def chat_configured(self) -> bool:

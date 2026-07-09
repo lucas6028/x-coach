@@ -37,6 +37,20 @@ SPLIT_NAMES = ("train", "val", "test")
 # ``uvicorn --workers N`` the effective ceiling is N * MAX_CONCURRENT_ANALYSES.
 MAX_CONCURRENT_ANALYSES = max(1, int(os.getenv("XCOACH_MAX_CONCURRENT_ANALYSES", "2")))
 
+# ---------------------------------------------------------------------------
+# Upload limits & per-user storage quota (public-deployment guardrails).
+#
+# A squat-coaching clip is a few seconds long; a 1080p phone recording of one is well under
+# 100 MB. Capping single uploads at 100 MB / 60 s keeps a stray 4K/multi-minute file from
+# eating RAM (the file is read whole before the pose pipeline runs) or ballooning object
+# storage, and the per-user quota bounds total spend for a 30–40 person demo:
+#   40 users x 1 GB  = 40 GB worst case (~$0.60/mo on Cloudflare R2, egress free).
+# All four are env-overridable so a bigger deployment can loosen them without a code change.
+MAX_UPLOAD_BYTES = max(1, int(os.getenv("XCOACH_MAX_UPLOAD_BYTES", str(100 * 1024 * 1024))))
+MAX_UPLOAD_DURATION_S = max(1, int(os.getenv("XCOACH_MAX_UPLOAD_DURATION_S", "60")))
+USER_VIDEO_QUOTA_COUNT = max(1, int(os.getenv("XCOACH_USER_VIDEO_QUOTA_COUNT", "30")))
+USER_STORAGE_QUOTA_BYTES = max(1, int(os.getenv("XCOACH_USER_STORAGE_QUOTA_BYTES", str(1024**3))))
+
 # Allowed origins for the Vite dev server.
 CORS_ORIGINS = [
     "http://localhost:5173",

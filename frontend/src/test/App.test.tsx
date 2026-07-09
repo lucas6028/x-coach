@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
@@ -6,6 +6,18 @@ import { I18nProvider } from "../lib/i18n";
 import { AuthProvider } from "../lib/auth";
 import App from "../App";
 import { mockAnalysis } from "./fixtures";
+import { validateUpload } from "../lib/upload";
+
+// The upload pre-check probes a real <video> for duration, which jsdom can't drive. Mock it so the
+// analysis-flow tests below run the happy path; the rejection path is asserted explicitly.
+vi.mock("../lib/upload", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/upload")>();
+  return { ...actual, validateUpload: vi.fn(async () => ({ ok: true })) };
+});
+
+beforeEach(() => {
+  vi.mocked(validateUpload).mockResolvedValue({ ok: true });
+});
 
 function renderApp() {
   return render(
@@ -182,6 +194,18 @@ describe("App — upload reflects the analysis in the URL", () => {
 
     await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
     expect(screen.getByTestId("loc-search").textContent).toBe("");
+  });
+
+  it("rejects an over-limit clip before uploading (no fetch, shows the error)", async () => {
+    vi.mocked(validateUpload).mockResolvedValueOnce({ ok: false, errorKey: "upload.tooLong" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+    renderAppWithLocation();
+    uploadAClip();
+
+    await waitFor(() => expect(screen.getByText(/too long/i)).toBeInTheDocument());
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText("ANALYSIS COMPLETE")).not.toBeInTheDocument();
   });
 });
 

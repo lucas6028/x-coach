@@ -155,7 +155,9 @@ const en: Dict = {
   // Upload dropzone
   "upload.analysing": "Analysing…",
   "upload.prompt": "Drop a squat video or tap to upload",
-  "upload.hint": "MP4 / MOV · single athlete · side or rear view",
+  "upload.hint": "MP4 / MOV · single athlete · side or rear view · ≤ {maxS}s / {maxMb} MB",
+  "upload.tooLarge": "That file is too large — keep it under {maxMb} MB.",
+  "upload.tooLong": "That clip is too long — keep it under {maxS} seconds.",
 
   // Demo onboarding (empty state)
   "demo.heading": "Analyze a squat in about 20 seconds.",
@@ -518,7 +520,9 @@ const zhHant: Dict = {
   // Upload dropzone
   "upload.analysing": "分析中…",
   "upload.prompt": "拖放深蹲影片或點擊上傳",
-  "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
+  "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角 · ≤ {maxS} 秒 / {maxMb} MB",
+  "upload.tooLarge": "檔案太大 —— 請控制在 {maxMb} MB 以內。",
+  "upload.tooLong": "影片太長 —— 請控制在 {maxS} 秒以內。",
 
   // Demo onboarding (empty state)
   "demo.heading": "約 20 秒，分析一段深蹲。",

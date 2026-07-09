@@ -8,6 +8,7 @@ import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
 import { useI18n } from "./lib/i18n";
+import { uploadLimitVars, validateUpload } from "./lib/upload";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -56,8 +57,15 @@ export default function App() {
   }, [t]);
 
   const runUpload = useCallback(async (file: File) => {
-    setLoading(true);
     setError("");
+    // Reject an oversized / over-long clip before the upload + analysis round-trip (the backend
+    // re-checks both). uploadLimitVars fills the {maxMb}/{maxS} placeholders in the message.
+    const check = await validateUpload(file);
+    if (!check.ok) {
+      setError(t(check.errorKey!, uploadLimitVars));
+      return;
+    }
+    setLoading(true);
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
     try {
