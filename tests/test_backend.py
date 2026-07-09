@@ -904,22 +904,28 @@ class MainAppTests(_TempConfigBase):
     def test_health_reports_auth_configured_true(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=True, chat_configured=True),
+            return_value=types.SimpleNamespace(
+                auth_configured=True, chat_configured=True, line_configured=True
+            ),
         ):
             resp = self.client.get("/api/health")
         body = resp.json()
         self.assertTrue(body["auth_configured"])
         self.assertTrue(body["chat_configured"])
+        self.assertTrue(body["line_configured"])
 
     def test_health_reports_auth_not_configured(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=False, chat_configured=False),
+            return_value=types.SimpleNamespace(
+                auth_configured=False, chat_configured=False, line_configured=False
+            ),
         ):
             resp = self.client.get("/api/health")
         body = resp.json()
         self.assertFalse(body["auth_configured"])
         self.assertFalse(body["chat_configured"])
+        self.assertFalse(body["line_configured"])
 
 
 # ------------------------------------------------------------------------- settings
