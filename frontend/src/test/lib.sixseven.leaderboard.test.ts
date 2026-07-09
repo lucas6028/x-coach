@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   loadLeaderboard,
   saveScore,
-  bestCount,
   clearLeaderboard,
   MAX_ENTRIES,
   type SixSevenEntry,
@@ -19,15 +18,13 @@ describe("67 leaderboard", () => {
 
   it("starts empty", () => {
     expect(loadLeaderboard()).toEqual([]);
-    expect(bestCount()).toBe(0);
   });
 
-  it("saves, ranks by count, and reports rank + best", () => {
+  it("saves, ranks by count, and reports rank", () => {
     saveScore(entry({ name: "Low", count: 10 }));
     const { rank } = saveScore(entry({ name: "High", count: 30 }));
     expect(rank).toBe(1);
     expect(loadLeaderboard().map((e) => e.name)).toEqual(["High", "Low"]);
-    expect(bestCount()).toBe(30);
   });
 
   it("breaks ties by best combo", () => {

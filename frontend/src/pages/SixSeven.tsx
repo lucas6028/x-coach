@@ -42,6 +42,8 @@ export default function SixSeven() {
   const landmarkerRef = useRef<PoseLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
 
   // Loop bookkeeping the rAF callback mutates without re-rendering; `counter` holds the pure
   // rep-counting state advanced by stepCount.
@@ -59,13 +61,23 @@ export default function SixSeven() {
   const teardown = useCallback(() => {
     g.current.running = false;
     cancelAnimationFrame(rafRef.current);
+    if (countdownRef.current !== null) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
     landmarkerRef.current?.close();
     landmarkerRef.current = null;
   }, []);
 
-  useEffect(() => teardown, [teardown]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      teardown();
+    };
+  }, [teardown]);
 
   const endRound = useCallback(() => {
     const c = g.current.counter;
@@ -141,6 +153,7 @@ export default function SixSeven() {
       n -= 1;
       if (n <= 0) {
         clearInterval(iv);
+        countdownRef.current = null;
         const s = g.current;
         s.running = true;
         s.roundEnd = performance.now() + ROUND_SECONDS * 1000;
@@ -161,6 +174,7 @@ export default function SixSeven() {
         setCountdown(n);
       }
     }, 800);
+    countdownRef.current = iv;
   }, [tick]);
 
   const start = useCallback(async () => {
@@ -171,13 +185,25 @@ export default function SixSeven() {
         video: { facingMode: "user", width: 640, height: 480 },
         audio: false,
       });
+      // getUserMedia resolved after an unmount — stop the orphaned track and bail.
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((tr) => tr.stop());
+        return;
+      }
       streamRef.current = stream;
       const video = videoRef.current;
       if (video) {
         video.srcObject = stream;
         await video.play();
       }
-      landmarkerRef.current = await createPoseLandmarker();
+      const landmarker = await createPoseLandmarker();
+      // Unmounted while loading the model — close it and release the stream teardown owns.
+      if (!mountedRef.current) {
+        landmarker.close();
+        teardown();
+        return;
+      }
+      landmarkerRef.current = landmarker;
       setStarting(false);
       beginCountdown();
     } catch (e) {

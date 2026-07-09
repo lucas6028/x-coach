@@ -55,11 +55,6 @@ export function saveScore(entry: SixSevenEntry): { board: SixSevenEntry[]; rank:
   return { board, rank: idx === -1 ? -1 : idx + 1 };
 }
 
-export function bestCount(): number {
-  const board = loadLeaderboard();
-  return board.length ? board[0].count : 0;
-}
-
 export function clearLeaderboard(): void {
   try {
     localStorage.removeItem(STORAGE_KEY);

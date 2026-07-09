@@ -21,9 +21,10 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
-      // sixSevenDetector.ts is the MediaPipe/WASM/WebGL/canvas boundary — it needs a real
+      // sixSevenDetector.ts is only the MediaPipe/WASM/WebGL/canvas glue — it needs a real
       // camera and GPU, neither of which exist under jsdom, so it can't be meaningfully
-      // unit-tested. The game's logic lives in src/lib/sixseven/* and is fully covered there.
+      // unit-tested. Every decision branch (visibility gate, gesture reasoning) lives in
+      // src/lib/sixseven/* and is fully covered there.
       exclude: ["src/main.tsx", "src/test/**", "src/components/sixseven/sixSevenDetector.ts"],
       thresholds: {
         lines: 70,

@@ -7,7 +7,7 @@ import {
   type NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
 import { LM } from "../../lib/pose";
-import type { Lead } from "../../lib/sixseven/gesture";
+import { visible, type Lead } from "../../lib/sixseven/gesture";
 
 const VERSION = "0.10.35";
 const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/wasm`;
@@ -39,10 +39,6 @@ const RIGHT_COLOR = "#42d159";
 
 // Mirror horizontally so the selfie view feels natural.
 const mx = (x: number, w: number) => (1 - x) * w;
-
-function vis(p: NormalizedLandmark | null | undefined): boolean {
-  return !!p && (p.visibility ?? 1) >= 0.5;
-}
 
 function drawHand(
   ctx: CanvasRenderingContext2D,
@@ -92,10 +88,10 @@ export function drawScene(
 
   const lw = lm[LM.LEFT_WRIST];
   const rw = lm[LM.RIGHT_WRIST];
-  if (vis(lw)) {
+  if (visible(lw)) {
     drawHand(ctx, lw!, width, height, "6", LEFT_COLOR, scene.lead === "left", scene.lead === "left" ? scene.pop : null);
   }
-  if (vis(rw)) {
+  if (visible(rw)) {
     drawHand(ctx, rw!, width, height, "7", RIGHT_COLOR, scene.lead === "right", scene.lead === "right" ? scene.pop : null);
   }
 }

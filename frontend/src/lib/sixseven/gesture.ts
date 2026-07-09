@@ -26,8 +26,15 @@ export type HandsState = {
 
 const INVALID: HandsState = { valid: false, lead: "neutral", leftY: 0, rightY: 0, diff: 0 };
 
-function seen(p: Point | null | undefined): p is Point {
+// A landmark counts as present when MediaPipe is at least MIN_VIS confident (absent visibility
+// → assume 1). Shared with the canvas overlay so the counter and the on-screen dot agree about
+// whether a wrist is on-frame. Structural param so both Point and MediaPipe's NormalizedLandmark fit.
+export function visible(p: { visibility?: number } | null | undefined): boolean {
   return !!p && (p.visibility ?? 1) >= MIN_VIS;
+}
+
+function seen(p: Point | null | undefined): p is Point {
+  return visible(p);
 }
 
 export function dist(a: Point, b: Point): number {
