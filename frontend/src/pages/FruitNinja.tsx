@@ -6,7 +6,7 @@ import NinjaOverScreen, { type NinjaResult } from "../components/ninja/NinjaOver
 import { useI18n } from "../lib/i18n";
 import { LM } from "../lib/pose";
 import { createGameState, stepGame, type GameState } from "../lib/ninja/engine";
-import { MIN_SLICE_SPEED, type Blade } from "../lib/ninja/slice";
+import { isSwipe, type Blade } from "../lib/ninja/slice";
 import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leaderboard";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene, type Point } from "../components/ninja/ninjaDetector";
@@ -15,6 +15,9 @@ type Phase = "intro" | "countdown" | "playing" | "over";
 
 const WRISTS = [LM.LEFT_WRIST, LM.RIGHT_WRIST];
 const TRAIL_LEN = 7;
+// Exponential smoothing on the wrist position (fraction of the way toward the raw landmark each
+// frame). Damps MediaPipe jitter before it can masquerade as a swipe, without lagging a real one.
+const SMOOTH = 0.6;
 const BOMB_MS = 600;
 // Linger on the frozen board briefly after game over so the last cut / bomb blast reads.
 const OVER_HOLD_MS = 600;
@@ -95,25 +98,32 @@ export default function FruitNinja() {
     if (!video || !canvas || !landmarker || video.readyState < 2) return;
 
     const now = performance.now();
-    const dtMs = s.last ? now - s.last : 16;
-    s.last = now;
 
     if (video.currentTime !== s.lastVideoTime) {
       s.lastVideoTime = video.currentTime;
-      const lm = landmarker.detectForVideo(video, now).landmarks?.[0] ?? null;
+      // dt spans the interval between *detection* frames (camera fps), not rAF ticks. Measuring it
+      // here — where the wrist positions actually update — keeps wrist speed and physics on the
+      // same clock; measuring across rAF inflated speed ~2× and let a still hand's jitter slice.
+      const dtMs = s.last ? now - s.last : 16;
+      s.last = now;
       const dt = dtMs / 1000;
 
-      // Build a blade for each wrist that moved fast enough since last frame; keep a short trail.
+      const lm = landmarker.detectForVideo(video, now).landmarks?.[0] ?? null;
+
+      // Build a blade for each wrist that genuinely swiped since last frame; keep a short trail.
       const blades: Blade[] = [];
       WRISTS.forEach((idx, hand) => {
         const p = lm?.[idx];
-        const cur = p && (p.visibility ?? 1) >= 0.5 ? { x: p.x, y: p.y } : null;
+        const raw = p && (p.visibility ?? 1) >= 0.5 ? { x: p.x, y: p.y } : null;
         const prev = s.prev[hand];
-        if (cur && prev && dt > 0) {
-          const speed = Math.hypot(cur.x - prev.x, cur.y - prev.y) / dt;
-          if (speed >= MIN_SLICE_SPEED) {
-            blades.push({ x1: prev.x, y1: prev.y, x2: cur.x, y2: cur.y });
-          }
+        // Smooth toward the raw landmark to damp jitter before speed/distance are judged.
+        const cur = raw
+          ? prev
+            ? { x: prev.x + SMOOTH * (raw.x - prev.x), y: prev.y + SMOOTH * (raw.y - prev.y) }
+            : raw
+          : null;
+        if (cur && prev && isSwipe(prev, cur, dt)) {
+          blades.push({ x1: prev.x, y1: prev.y, x2: cur.x, y2: cur.y });
         }
         s.prev[hand] = cur;
         if (cur) {

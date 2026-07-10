@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { segmentPointDist, bladeHits, sliceEntities, type Blade } from "../lib/ninja/slice";
+import {
+  segmentPointDist,
+  bladeHits,
+  sliceEntities,
+  isSwipe,
+  MIN_SLICE_DIST,
+  type Blade,
+} from "../lib/ninja/slice";
 import type { Entity } from "../lib/ninja/physics";
 
 function fruit(over: Partial<Entity> = {}): Entity {
@@ -59,5 +66,31 @@ describe("sliceEntities", () => {
     const r = sliceEntities([fruit()], [miss]);
     expect(r.slicedFruits).toHaveLength(0);
     expect(r.remaining).toHaveLength(1);
+  });
+});
+
+describe("isSwipe", () => {
+  const dt = 1 / 30; // one 30fps frame
+
+  it("accepts a fast, far-travelling swipe", () => {
+    expect(isSwipe({ x: 0.2, y: 0.5 }, { x: 0.5, y: 0.5 }, dt)).toBe(true);
+  });
+
+  it("rejects a still hand's jitter (below the distance floor)", () => {
+    // A hand held in place: sub-jitter travel even though dividing by a tiny dt looks 'fast'.
+    expect(isSwipe({ x: 0.5, y: 0.5 }, { x: 0.5 + MIN_SLICE_DIST / 2, y: 0.5 }, 0.001)).toBe(false);
+  });
+
+  it("rejects slow drift that covers ground but isn't fast", () => {
+    // Moves far, but over a long interval — a lazy reposition, not a swipe.
+    expect(isSwipe({ x: 0.2, y: 0.5 }, { x: 0.3, y: 0.5 }, 1)).toBe(false);
+  });
+
+  it("rejects a glitch teleport across the board", () => {
+    expect(isSwipe({ x: 0.05, y: 0.05 }, { x: 0.95, y: 0.95 }, dt)).toBe(false);
+  });
+
+  it("rejects a non-positive dt", () => {
+    expect(isSwipe({ x: 0.2, y: 0.5 }, { x: 0.6, y: 0.5 }, 0)).toBe(false);
   });
 });

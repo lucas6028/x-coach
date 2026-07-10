@@ -7,7 +7,28 @@ export type Blade = { x1: number; y1: number; x2: number; y2: number };
 // A wrist must move at least this fast (normalised units / second) for its segment to cut —
 // so resting a hand on a fruit doesn't slice it, only a real swipe does. The page computes wrist
 // speed and only forwards blades at or above this.
-export const MIN_SLICE_SPEED = 0.9;
+export const MIN_SLICE_SPEED = 1.0;
+// A real swipe also has to *cover ground*: this is the smallest per-frame travel (normalised
+// units) that counts. Landmark jitter on a still hand is tiny, and — unlike a speed derived from a
+// frame-timing-sensitive dt — this displacement floor rejects it regardless of frame rate.
+export const MIN_SLICE_DIST = 0.035;
+// Above this, a single-frame jump is a tracking glitch (the pose snapping), not a swipe — ignore
+// it so a spurious segment can't rake across the whole board and hit a distant bomb.
+export const MAX_SLICE_DIST = 0.5;
+
+// Did the wrist actually swipe between two frames? It must travel a real distance (not jitter, not
+// a glitch teleport) and move fast enough. A resting hand clears none of these, so it never forms
+// a cutting blade — the guard against "I didn't swing but it sliced / it hit a bomb".
+export function isSwipe(
+  prev: { x: number; y: number },
+  cur: { x: number; y: number },
+  dtSec: number
+): boolean {
+  if (dtSec <= 0) return false;
+  const dist = Math.hypot(cur.x - prev.x, cur.y - prev.y);
+  if (dist < MIN_SLICE_DIST || dist > MAX_SLICE_DIST) return false;
+  return dist / dtSec >= MIN_SLICE_SPEED;
+}
 
 // Shortest distance from point C to segment AB.
 export function segmentPointDist(
