@@ -7,14 +7,14 @@ export type Blade = { x1: number; y1: number; x2: number; y2: number };
 // A wrist must move at least this fast (normalised units / second) for its segment to cut —
 // so resting a hand on a fruit doesn't slice it, only a real swipe does. The page computes wrist
 // speed and only forwards blades at or above this.
-export const MIN_SLICE_SPEED = 1.0;
+export const MIN_SLICE_SPEED = 1.1;
 // A real swipe also has to *cover ground*: this is the smallest per-frame travel (normalised
-// units) that counts. Landmark jitter on a still hand is tiny, and — unlike a speed derived from a
-// frame-timing-sensitive dt — this displacement floor rejects it regardless of frame rate.
-export const MIN_SLICE_DIST = 0.035;
+// units) that counts — a floor against near-zero-dt spikes. Jitter rejection is mainly the speed
+// gate's job (now that dt is measured honestly); keep this low so ordinary swipes still register.
+export const MIN_SLICE_DIST = 0.02;
 // Above this, a single-frame jump is a tracking glitch (the pose snapping), not a swipe — ignore
 // it so a spurious segment can't rake across the whole board and hit a distant bomb.
-export const MAX_SLICE_DIST = 0.5;
+export const MAX_SLICE_DIST = 0.6;
 
 // Did the wrist actually swipe between two frames? It must travel a real distance (not jitter, not
 // a glitch teleport) and move fast enough. A resting hand clears none of these, so it never forms

@@ -7,8 +7,8 @@ describe("NinjaHud", () => {
   it("shows the score and lives", () => {
     renderWithProviders(<NinjaHud score={1500} combo={0} lives={2} pop={0} bombFlash={false} />);
     expect(screen.getByText("1,500")).toBeInTheDocument();
-    // 2 of 3 hearts filled.
-    expect(screen.getByText("❤️❤️🖤")).toBeInTheDocument();
+    // 2 of 5 hearts filled.
+    expect(screen.getByText("❤️❤️🖤🖤🖤")).toBeInTheDocument();
   });
 
   it("shows the combo pop from 3", () => {

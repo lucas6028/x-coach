@@ -50,12 +50,14 @@ export function drawScene(
 ): void {
   ctx.clearRect(0, 0, width, height);
 
-  // Fruits + bombs as big emoji (screen space, not mirrored — emoji aren't handed).
+  // Fruits + bombs as big emoji. Mirror the *position* (like the selfie video and the blade
+  // trail) so a fruit lines up with the hand the player sees; the glyph itself isn't flipped, so
+  // it stays readable.
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const e of scene.entities) {
     ctx.font = `${Math.round(e.radius * 2 * height)}px serif`;
-    ctx.fillText(e.emoji, e.x * width, e.y * height);
+    ctx.fillText(e.emoji, mx(e.x, width), e.y * height);
   }
 
   // Sliced-fruit halves: draw the emoji clipped to one side in the piece's spinning, fading frame,
@@ -63,7 +65,7 @@ export function drawScene(
   for (const p of scene.pieces) {
     const size = p.radius * 2 * height;
     ctx.save();
-    ctx.translate(p.x * width, p.y * height);
+    ctx.translate(mx(p.x, width), p.y * height);
     ctx.rotate(p.rot);
     ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
     ctx.beginPath();

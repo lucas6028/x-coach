@@ -20,10 +20,11 @@ export type Entity = {
 // Downward acceleration (per second²) and the y past which a falling entity is gone.
 export const GRAVITY = 1.35;
 export const OFFSCREEN_Y = 1.2;
-export const FRUIT_RADIUS = 0.075;
-export const BOMB_RADIUS = 0.075;
+// Fruits are generous to slice; bombs are a touch smaller so they're easier to steer clear of.
+export const FRUIT_RADIUS = 0.09;
+export const BOMB_RADIUS = 0.07;
 // Fraction of spawns that are bombs.
-export const BOMB_CHANCE = 0.14;
+export const BOMB_CHANCE = 0.1;
 
 export const FRUITS = ["🍉", "🍎", "🍊", "🍋", "🍓", "🍇", "🥝", "🍑", "🍍"];
 

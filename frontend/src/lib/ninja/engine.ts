@@ -8,7 +8,7 @@ import { sliceEntities, type Blade } from "./slice";
 import { START_LIVES, COMBO_WINDOW_MS, sliceScore } from "./scoring";
 
 // Spawn cadence: starts slow, ramps toward the floor as the player racks up cuts.
-export const SPAWN_BASE_MS = 1150;
+export const SPAWN_BASE_MS = 1300;
 export const SPAWN_MIN_MS = 520;
 export const SPAWN_RAMP_MS = 8;
 

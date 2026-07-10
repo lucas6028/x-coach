@@ -2,7 +2,7 @@
 // a bonus for cutting several fruits in one swipe. Pure helpers.
 
 // Fruits you can miss before it's game over.
-export const START_LIVES = 3;
+export const START_LIVES = 5;
 // Base points per fruit before the combo multiplier.
 export const BASE_POINTS = 10;
 // Cut another fruit within this window to keep the combo alive.

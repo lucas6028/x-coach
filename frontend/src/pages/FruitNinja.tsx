@@ -8,6 +8,7 @@ import { LM } from "../lib/pose";
 import { createGameState, stepGame, type GameState } from "../lib/ninja/engine";
 import { isSwipe, type Blade } from "../lib/ninja/slice";
 import { spawnPieces, advancePieces, type Piece } from "../lib/ninja/pieces";
+import { START_LIVES } from "../lib/ninja/scoring";
 import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leaderboard";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene, type Point } from "../components/ninja/ninjaDetector";
@@ -38,7 +39,7 @@ export default function FruitNinja() {
 
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
-  const [lives, setLives] = useState(3);
+  const [lives, setLives] = useState(START_LIVES);
   const [pop, setPop] = useState(0);
   const [bombFlash, setBombFlash] = useState(false);
 
@@ -223,7 +224,7 @@ export default function FruitNinja() {
         s.overAt = 0;
         setScore(0);
         setCombo(0);
-        setLives(3);
+        setLives(START_LIVES);
         setPop(0);
         setBombFlash(false);
         setPhase("playing");

@@ -77,7 +77,8 @@ describe("drawScene", () => {
       640,
       480
     );
-    expect(ctx.fillText).toHaveBeenCalledWith("🍎", 0.3 * 640, 0.4 * 480);
+    // Fruit position is mirrored (selfie space) so it lines up with the hand the player sees.
+    expect(ctx.fillText).toHaveBeenCalledWith("🍎", (1 - 0.3) * 640, 0.4 * 480);
     expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 640, 480);
   });
 });

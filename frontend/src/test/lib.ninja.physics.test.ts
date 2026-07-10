@@ -62,8 +62,8 @@ describe("spawnWave", () => {
   });
 
   it("spawns a bomb when the roll is below the bomb chance", () => {
-    // count→1, isBomb(0.1<0.14→bomb), x, vx, vy
-    const { entities } = spawnWave(1, seq([0, 0.1, 0.5, 0.5, 0.5]));
+    // count→1, isBomb(0.05<0.1→bomb), x, vx, vy
+    const { entities } = spawnWave(1, seq([0, 0.05, 0.5, 0.5, 0.5]));
     expect(entities[0].kind).toBe("bomb");
     expect(entities[0].emoji).toBe("💣");
   });
