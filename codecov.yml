@@ -23,3 +23,4 @@ ignore:
   - "frontend/src/components/**/*Detector.ts"
   # Camera + rAF page shells: impure edges only; their logic is unit-tested in src/lib/*.
   - "frontend/src/pages/SixSeven.tsx"
+  - "frontend/src/pages/FruitNinja.tsx"

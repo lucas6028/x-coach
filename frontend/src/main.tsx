@@ -7,8 +7,9 @@ import Login from "./pages/Login";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import RequireAuth from "./components/RequireAuth";
-// Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens /67.
+// Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
 const SixSeven = lazy(() => import("./pages/SixSeven"));
+const FruitNinja = lazy(() => import("./pages/FruitNinja"));
 import { I18nProvider } from "./lib/i18n";
 import { AuthProvider } from "./lib/auth";
 import "./index.css";
@@ -26,6 +27,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <Suspense fallback={null}>
                   <SixSeven />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/ninja"
+              element={
+                <Suspense fallback={null}>
+                  <FruitNinja />
                 </Suspense>
               }
             />
