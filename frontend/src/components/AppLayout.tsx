@@ -21,6 +21,9 @@ interface Props {
   onOpenLibrary?: () => void;
   // The studio resets its own state for a fresh session; other pages just route into the studio.
   onNewAnalysis?: () => void;
+  // Whether the desktop sidebar starts expanded. Defaults to open; the games opt to start it
+  // collapsed so the camera/play area gets near-full width.
+  initialSidebarOpen?: boolean;
 }
 
 // The shared app shell: collapsible/resizable desktop sidebar, off-canvas mobile drawer, and the
@@ -34,10 +37,11 @@ export default function AppLayout({
   title,
   onOpenLibrary,
   onNewAnalysis,
+  initialSidebarOpen = true,
 }: Props) {
   const navigate = useNavigate();
   // Desktop sidebar starts open but on the narrow side; the user can widen it via the drag handle.
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(200);
   const [resizing, setResizing] = useState(false);
