@@ -50,6 +50,18 @@ describe("stepGame", () => {
     expect(out.state.sliced).toBe(1);
     expect(out.state.entities).toHaveLength(0);
     expect(out.sliceFlash).toBe(1);
+    // The cut fruit is surfaced so the page can burst it into halves.
+    expect(out.slicedFruits.map((e) => e.id)).toEqual([1]);
+  });
+
+  it("reports no cut fruits on an empty swing or a bomb hit", () => {
+    const empty = stepGame(idle(1000, { entities: [fruit()] }), input({ blades: [] }));
+    expect(empty.slicedFruits).toEqual([]);
+    const bomb = stepGame(
+      idle(1000, { entities: [fruit({ kind: "bomb", emoji: "💣" })] }),
+      input({ blades: [through] })
+    );
+    expect(bomb.slicedFruits).toEqual([]);
   });
 
   it("cuts several fruits in one swipe for a multi bonus", () => {

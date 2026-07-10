@@ -56,26 +56,30 @@ export type StepResult = {
   // Fruits cut this frame (drives the "+N" pop), and whether a bomb just went off.
   sliceFlash: number;
   bombFlash: boolean;
+  // The actual fruits cut this frame, so the page can burst each into flying halves.
+  slicedFruits: Entity[];
 };
 
 // Advance the game by one frame. Returns a new state (the input is not mutated).
 export function stepGame(state: GameState, input: FrameInput): StepResult {
   const { blades, dtMs, now, rng } = input;
   const s: GameState = { ...state };
-  if (s.over) return { state: s, sliceFlash: 0, bombFlash: false };
+  if (s.over) return { state: s, sliceFlash: 0, bombFlash: false, slicedFruits: [] };
 
   const dt = dtMs / 1000;
 
   // 1) Slice against current positions.
   let sliceFlash = 0;
+  let cutFruits: Entity[] = [];
   if (blades.length > 0) {
     const { slicedFruits, bombHit, remaining } = sliceEntities(s.entities, blades);
     s.entities = remaining;
     if (bombHit) {
       s.over = true;
-      return { state: s, sliceFlash: 0, bombFlash: true };
+      return { state: s, sliceFlash: 0, bombFlash: true, slicedFruits: [] };
     }
     if (slicedFruits.length > 0) {
+      cutFruits = slicedFruits;
       const n = slicedFruits.length;
       const inRhythm = now - s.lastSliceAt <= COMBO_WINDOW_MS;
       s.combo = (inRhythm ? s.combo : 0) + n;
@@ -108,5 +112,5 @@ export function stepGame(state: GameState, input: FrameInput): StepResult {
     s.spawnAt = now + interval;
   }
 
-  return { state: s, sliceFlash, bombFlash: false };
+  return { state: s, sliceFlash, bombFlash: false, slicedFruits: cutFruits };
 }

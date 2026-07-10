@@ -7,6 +7,7 @@ import {
   type NormalizedLandmark,
 } from "@mediapipe/tasks-vision";
 import type { Entity } from "../../lib/ninja/physics";
+import type { Piece } from "../../lib/ninja/pieces";
 
 const VERSION = "0.10.35";
 const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/wasm`;
@@ -28,6 +29,8 @@ export type Point = { x: number; y: number };
 
 export type Scene = {
   entities: Entity[];
+  // Flying halves of just-sliced fruit.
+  pieces: Piece[];
   // Recent wrist positions per hand (oldest→newest), for the blade trail.
   trails: Point[][];
   // Fleeting bomb flash (0..1 life) when a bomb just went off, or null.
@@ -54,6 +57,25 @@ export function drawScene(
     ctx.font = `${Math.round(e.radius * 2 * height)}px serif`;
     ctx.fillText(e.emoji, e.x * width, e.y * height);
   }
+
+  // Sliced-fruit halves: draw the emoji clipped to one side in the piece's spinning, fading frame,
+  // nudged outward along the cut so the two halves read as pulling apart.
+  for (const p of scene.pieces) {
+    const size = p.radius * 2 * height;
+    ctx.save();
+    ctx.translate(p.x * width, p.y * height);
+    ctx.rotate(p.rot);
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
+    ctx.beginPath();
+    const gap = size * 0.06 * (1 - p.life); // seam opens as the halves drift apart
+    if (p.half === "left") ctx.rect(-size, -size, size - gap, size * 2);
+    else ctx.rect(gap, -size, size, size * 2);
+    ctx.clip();
+    ctx.font = `${Math.round(size)}px serif`;
+    ctx.fillText(p.emoji, 0, 0);
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
 
   // Blade trails: a fading, thickening stroke through each hand's recent positions.
   scene.trails.forEach((trail, i) => {

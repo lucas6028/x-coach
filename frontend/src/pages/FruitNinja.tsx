@@ -7,6 +7,7 @@ import { useI18n } from "../lib/i18n";
 import { LM } from "../lib/pose";
 import { createGameState, stepGame, type GameState } from "../lib/ninja/engine";
 import { isSwipe, type Blade } from "../lib/ninja/slice";
+import { spawnPieces, advancePieces, type Piece } from "../lib/ninja/pieces";
 import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leaderboard";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene, type Point } from "../components/ninja/ninjaDetector";
@@ -60,6 +61,8 @@ export default function FruitNinja() {
     game: createGameState(0) as GameState,
     prev: [null, null] as (Point | null)[],
     trails: [[], []] as Point[][],
+    pieces: [] as Piece[],
+    nextPieceId: 1,
     popCount: 0,
     bombUntil: 0,
     bombed: false,
@@ -138,12 +141,30 @@ export default function FruitNinja() {
         const stepped = stepGame(s.game, { blades, dtMs, now, rng: Math.random });
         s.game = stepped.state;
         if (stepped.sliceFlash > 0) s.popCount += 1;
+        // Burst each cut fruit into two halves flying apart along the swing.
+        if (stepped.slicedFruits.length > 0) {
+          let dx = 0;
+          let dy = 0;
+          blades.forEach((b) => {
+            dx += b.x2 - b.x1;
+            dy += b.y2 - b.y1;
+          });
+          for (const f of stepped.slicedFruits) {
+            const burst = spawnPieces(s.nextPieceId, f, dx, dy, Math.random);
+            s.pieces.push(...burst.pieces);
+            s.nextPieceId = burst.nextId;
+          }
+        }
         if (stepped.bombFlash) {
           s.bombUntil = now + BOMB_MS;
           s.bombed = true;
         }
         if (s.game.over && s.overAt === 0) s.overAt = now;
       }
+
+      // Advance the flying halves every detection frame, regardless of game-over, so the last
+      // slice's pieces finish their arc.
+      s.pieces = advancePieces(s.pieces, dt);
 
       const ctx = canvas.getContext("2d");
       if (ctx) {
@@ -155,6 +176,7 @@ export default function FruitNinja() {
           ctx,
           {
             entities: s.game.entities,
+            pieces: s.pieces,
             trails: s.trails,
             bombFlash: s.bombUntil > now ? (s.bombUntil - now) / BOMB_MS : null,
           },
@@ -193,6 +215,8 @@ export default function FruitNinja() {
         s.game = createGameState(now);
         s.prev = [null, null];
         s.trails = [[], []];
+        s.pieces = [];
+        s.nextPieceId = 1;
         s.popCount = 0;
         s.bombUntil = 0;
         s.bombed = false;
