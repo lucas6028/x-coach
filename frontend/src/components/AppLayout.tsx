@@ -36,9 +36,10 @@ export default function AppLayout({
   onNewAnalysis,
 }: Props) {
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Desktop sidebar starts open but on the narrow side; the user can widen it via the drag handle.
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileNav, setMobileNav] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(240);
+  const [sidebarWidth, setSidebarWidth] = useState(200);
   const [resizing, setResizing] = useState(false);
 
   // Off the studio there is no picker, so "Library" just routes into the studio.
