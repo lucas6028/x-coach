@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Folders, HandWaving, Knife, List, Plus, VideoCamera } from "@phosphor-icons/react";
+import { ClockCounterClockwise, Folders, GameController, List, Plus, VideoCamera } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useI18n } from "../lib/i18n";
 
@@ -23,8 +23,8 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
-  const onSix = pathname === "/67";
-  const onNinja = pathname === "/ninja";
+  // The games hub, plus the individual game routes it links into, all light up the one Games entry.
+  const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
   const navBase =
     "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors";
   const navActive = "bg-primary/10 text-primary border border-primary/20";
@@ -81,20 +81,12 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
             {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
           </button>
           <Link
-            to="/67"
-            title={t("nav.six")}
-            className={`${navBase} ${onSix ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            to="/games"
+            title={t("nav.games")}
+            className={`${navBase} ${onGames ? navActive : navIdle} ${open ? "" : "justify-center"}`}
           >
-            <HandWaving size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.six")}</span>}
-          </Link>
-          <Link
-            to="/ninja"
-            title={t("nav.ninja")}
-            className={`${navBase} ${onNinja ? navActive : navIdle} ${open ? "" : "justify-center"}`}
-          >
-            <Knife size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.ninja")}</span>}
+            <GameController size={22} weight="duotone" />
+            {open && <span className="text-sm font-medium">{t("nav.games")}</span>}
           </Link>
           <Link
             to="/history"
