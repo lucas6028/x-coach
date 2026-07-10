@@ -22,12 +22,13 @@ export default defineConfig({
       reporter: ["text", "html", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
       // Impure edges that can't run under jsdom (kept in sync with codecov.yml `ignore`):
-      // sixSevenDetector.ts is the MediaPipe/WASM/WebGL/canvas glue, and SixSeven.tsx is the
-      // thin camera + requestAnimationFrame page shell. Every decision branch (visibility gate,
-      // gesture reasoning, rep counting) lives in src/lib/sixseven/* and is fully covered there.
+      // the *Detector.ts files are the MediaPipe/WASM/WebGL/canvas glue, and SixSeven.tsx is a
+      // thin camera + requestAnimationFrame page shell. Every decision branch lives in the
+      // matching src/lib/* modules and is fully covered there.
       exclude: [
         "src/main.tsx",
         "src/test/**",
+        "src/components/duel/duelDetector.ts",
         "src/components/sixseven/sixSevenDetector.ts",
         "src/pages/SixSeven.tsx",
       ],

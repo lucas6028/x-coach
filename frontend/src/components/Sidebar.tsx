@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Folders, HandWaving, List, Plus, VideoCamera } from "@phosphor-icons/react";
+import { ClockCounterClockwise, Folders, HandWaving, List, Plus, Sword, VideoCamera } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useI18n } from "../lib/i18n";
 
@@ -23,6 +23,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
+  const onDuel = pathname === "/duel";
   const onSix = pathname === "/67";
   const navBase =
     "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors";
@@ -79,6 +80,14 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
             <Folders size={22} weight="duotone" />
             {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
           </button>
+          <Link
+            to="/duel"
+            title={t("nav.duel")}
+            className={`${navBase} ${onDuel ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+          >
+            <Sword size={22} weight="duotone" />
+            {open && <span className="text-sm font-medium">{t("nav.duel")}</span>}
+          </Link>
           <Link
             to="/67"
             title={t("nav.six")}
