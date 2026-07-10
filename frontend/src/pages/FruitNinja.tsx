@@ -10,6 +10,8 @@ import { isSwipe, type Blade } from "../lib/ninja/slice";
 import { spawnPieces, advancePieces, type Piece } from "../lib/ninja/pieces";
 import { START_LIVES } from "../lib/ninja/scoring";
 import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leaderboard";
+import { estimateKcal, EFFORT } from "../lib/calories";
+import { addCalories } from "../lib/calorieStore";
 import { waitForVideoFrame } from "../lib/videoFrame";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene, type Point } from "../components/ninja/ninjaDetector";
@@ -44,7 +46,7 @@ export default function FruitNinja() {
   const [pop, setPop] = useState(0);
   const [bombFlash, setBombFlash] = useState(false);
 
-  const [result, setResult] = useState<NinjaResult>({ score: 0, bestCombo: 0, bombed: false });
+  const [result, setResult] = useState<NinjaResult>({ score: 0, bestCombo: 0, bombed: false, kcal: 0 });
   const [submitted, setSubmitted] = useState(false);
   const [rank, setRank] = useState<number | null>(null);
 
@@ -71,6 +73,9 @@ export default function FruitNinja() {
     bombUntil: 0,
     bombed: false,
     overAt: 0,
+    // When live play actually began, so the calorie duration excludes the countdown and the
+    // post-game-over linger.
+    playStartAt: 0,
   });
 
   const teardown = useCallback(() => {
@@ -97,7 +102,13 @@ export default function FruitNinja() {
   const endRound = useCallback(() => {
     const s = g.current;
     teardown();
-    setResult({ score: s.game.score, bestCombo: s.game.bestCombo, bombed: s.bombed });
+    // Duration spans live play only (overAt is when the game ended; fall back to now if it somehow
+    // wasn't stamped). Slices are the movement signal. Record the round once, here.
+    const end = s.overAt || performance.now();
+    const durationSec = Math.max(0, (end - s.playStartAt) / 1000);
+    const kcal = estimateKcal({ durationSec, moves: s.popCount, effort: EFFORT.ninja });
+    addCalories("ninja", kcal);
+    setResult({ score: s.game.score, bestCombo: s.game.bestCombo, bombed: s.bombed, kcal });
     setLeaderboard(loadLeaderboard());
     setSubmitted(false);
     setRank(null);
@@ -236,6 +247,7 @@ export default function FruitNinja() {
         s.bombUntil = 0;
         s.bombed = false;
         s.overAt = 0;
+        s.playStartAt = now;
         setScore(0);
         setCombo(0);
         setLives(START_LIVES);
@@ -337,7 +349,7 @@ export default function FruitNinja() {
   const showCamera = phase === "playing" || phase === "countdown";
 
   return (
-    <AppLayout title={t("ninja.title")}>
+    <AppLayout title={t("ninja.title")} initialSidebarOpen={false}>
       {phase === "intro" && (
         <NinjaStartScreen
           leaderboard={leaderboard}

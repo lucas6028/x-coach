@@ -4,12 +4,15 @@ import { ArrowCounterClockwise, Confetti } from "@phosphor-icons/react";
 import { useI18n } from "../../lib/i18n";
 import type { NinjaEntry } from "../../lib/ninja/leaderboard";
 import NinjaLeaderboard from "./NinjaLeaderboard";
+import CalorieBadge from "../games/CalorieBadge";
 
 export type NinjaResult = {
   score: number;
   bestCombo: number;
   // Whether the round ended by hitting a bomb (vs. running out of lives).
   bombed: boolean;
+  // Estimated calories burned this round (see lib/calories.ts).
+  kcal: number;
 };
 
 interface Props {
@@ -60,6 +63,7 @@ export default function NinjaOverScreen({
             {result.score.toLocaleString()}
           </p>
           <p className="mt-1 text-sm text-muted">{t("ninja.over.combo", { n: result.bestCombo })}</p>
+          <CalorieBadge kcal={result.kcal} />
 
           {!submitted ? (
             <div className="mt-6">

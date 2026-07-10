@@ -6,6 +6,7 @@ import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
+import Games from "./pages/Games";
 import RequireAuth from "./components/RequireAuth";
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
 const SixSeven = lazy(() => import("./pages/SixSeven"));
@@ -22,6 +23,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/app" element={<App />} />
+            <Route path="/games" element={<Games />} />
             <Route
               path="/67"
               element={

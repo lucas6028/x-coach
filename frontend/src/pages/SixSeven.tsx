@@ -7,6 +7,8 @@ import { useI18n } from "../lib/i18n";
 import { handLead, type Lead } from "../lib/sixseven/gesture";
 import { stepCount, initialCount, ROUND_SECONDS, type CountState } from "../lib/sixseven/counter";
 import { loadLeaderboard, saveScore, type SixSevenEntry } from "../lib/sixseven/leaderboard";
+import { estimateKcal, EFFORT } from "../lib/calories";
+import { addCalories } from "../lib/calorieStore";
 import { waitForVideoFrame } from "../lib/videoFrame";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene } from "../components/sixseven/sixSevenDetector";
@@ -34,7 +36,7 @@ export default function SixSeven() {
   const [lead, setLead] = useState<Lead>("neutral");
   const [pop, setPop] = useState(0);
 
-  const [result, setResult] = useState<SixSevenResult>({ count: 0, bestCombo: 0 });
+  const [result, setResult] = useState<SixSevenResult>({ count: 0, bestCombo: 0, kcal: 0 });
   const [submitted, setSubmitted] = useState(false);
   const [rank, setRank] = useState<number | null>(null);
 
@@ -84,7 +86,10 @@ export default function SixSeven() {
   const endRound = useCallback(() => {
     const c = g.current.counter;
     teardown();
-    setResult({ count: c.count, bestCombo: c.bestCombo });
+    // The round always runs the full clock; 67s completed are the movement signal. Record once here.
+    const kcal = estimateKcal({ durationSec: ROUND_SECONDS, moves: c.count, effort: EFFORT.sixseven });
+    addCalories("sixseven", kcal);
+    setResult({ count: c.count, bestCombo: c.bestCombo, kcal });
     setLeaderboard(loadLeaderboard());
     setSubmitted(false);
     setRank(null);
@@ -269,7 +274,7 @@ export default function SixSeven() {
   const showCamera = phase === "playing" || phase === "countdown";
 
   return (
-    <AppLayout title={t("six.title")}>
+    <AppLayout title={t("six.title")} initialSidebarOpen={false}>
       {phase === "intro" && (
         <SixSevenStartScreen
           leaderboard={leaderboard}

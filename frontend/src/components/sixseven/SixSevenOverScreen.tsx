@@ -4,10 +4,13 @@ import { ArrowCounterClockwise, Confetti } from "@phosphor-icons/react";
 import { useI18n } from "../../lib/i18n";
 import type { SixSevenEntry } from "../../lib/sixseven/leaderboard";
 import SixSevenLeaderboard from "./SixSevenLeaderboard";
+import CalorieBadge from "../games/CalorieBadge";
 
 export type SixSevenResult = {
   count: number;
   bestCombo: number;
+  // Estimated calories burned this round (see lib/calories.ts).
+  kcal: number;
 };
 
 interface Props {
@@ -62,6 +65,7 @@ export default function SixSevenOverScreen({
           <p className="mt-1 text-sm text-muted">
             {t("six.over.combo", { n: result.bestCombo })}
           </p>
+          <CalorieBadge kcal={result.kcal} />
 
           {!submitted ? (
             <div className="mt-6">
