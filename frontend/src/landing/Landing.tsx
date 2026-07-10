@@ -55,22 +55,40 @@ function LangSwitch() {
   );
 }
 
+// Brand mark — kept in sync with the site favicon/logo (public/icon.svg,
+// public/logo.svg): the full squatting-skeleton figure, minus the rounded
+// background so it sits cleanly on the dark nav.
 function Mark() {
   return (
-    <svg width="26" height="26" viewBox="0 0 124 124" aria-hidden="true">
+    <svg width="26" height="26" viewBox="0 0 128 128" fill="none" aria-hidden="true">
       <defs>
-        <linearGradient id="m" x1="28" y1="20" x2="104" y2="116" gradientUnits="userSpaceOnUse">
+        <linearGradient id="markBone" x1="28" y1="20" x2="104" y2="116" gradientUnits="userSpaceOnUse">
           <stop offset="0" stopColor="#5ffb6f" />
           <stop offset="1" stopColor="#16b8a8" />
         </linearGradient>
       </defs>
-      <g stroke="url(#m)" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" fill="none">
-        <line x1="49" y1="42" x2="42" y2="80" />
-        <line x1="42" y1="80" x2="88" y2="86" />
-        <line x1="88" y1="86" x2="76" y2="112" />
+      {/* ground line */}
+      <line x1="22" y1="110" x2="106" y2="110" stroke="#3a4a4f" strokeWidth="4" strokeLinecap="round" />
+      {/* knee-angle arc: the "explainable" measurement accent */}
+      <path d="M84 84 A 22 22 0 0 1 70 110" fill="none" stroke="#ffd23f" strokeWidth="4" strokeLinecap="round" />
+      {/* skeleton bones: torso, thigh, shin, foot, arm */}
+      <g stroke="url(#markBone)" strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" fill="none">
+        <line x1="47" y1="40" x2="40" y2="78" />
+        <line x1="40" y1="78" x2="86" y2="84" />
+        <line x1="86" y1="84" x2="74" y2="110" />
+        <line x1="60" y1="110" x2="94" y2="110" />
+        <line x1="47" y1="44" x2="92" y2="50" />
       </g>
-      <circle cx="51" cy="28" r="12" fill="url(#m)" />
-      <circle cx="88" cy="86" r="7" fill="#f5b945" />
+      {/* pose keypoints */}
+      <g fill="#eafff0" stroke="#0d1113" strokeWidth="2.5">
+        <circle cx="47" cy="42" r="6" />
+        <circle cx="40" cy="78" r="6" />
+        <circle cx="86" cy="84" r="7.5" />
+        <circle cx="74" cy="110" r="6" />
+        <circle cx="92" cy="50" r="5.5" />
+      </g>
+      {/* head */}
+      <circle cx="49" cy="26" r="12" fill="url(#markBone)" stroke="#eafff0" strokeWidth="3" />
     </svg>
   );
 }
