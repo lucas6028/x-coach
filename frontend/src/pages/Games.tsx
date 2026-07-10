@@ -100,7 +100,9 @@ export default function Games() {
                     <span className="text-lg font-bold text-muted">{t("games.kcalUnit")}</span>
                   </p>
                   <p className="text-xs text-muted">
-                    {t("games.totalSub", { n: totals.sessions })}
+                    {totals.sessions === 1
+                      ? t("games.totalSubOne")
+                      : t("games.totalSub", { n: totals.sessions })}
                   </p>
                 </>
               ) : (

@@ -28,6 +28,12 @@ describe("Games hub", () => {
     expect(screen.getByText("Play a round to start burning.")).toBeInTheDocument();
   });
 
+  it("uses the singular subtitle after exactly one round", () => {
+    addCalories("ninja", 12);
+    renderWithProviders(<Games />);
+    expect(screen.getByText("Estimated across 1 round")).toBeInTheDocument();
+  });
+
   it("shows the cumulative calorie total and per-game best once played", () => {
     addCalories("ninja", 20);
     addCalories("sixseven", 5);
