@@ -19,10 +19,31 @@ const en: Dict = {
   "nav.newAnalysis": "New analysis",
   "nav.analyse": "Analyse",
   "nav.library": "Library",
+  "nav.games": "Games",
   "nav.hide": "Hide navigation",
   "nav.show": "Show navigation",
   "sidebar.version": "Prototype v0.1",
   "sidebar.tagline": "Pose · Rules · GraphRAG",
+
+  // Games hub — the App-Store-style catalog of the pose mini-games
+  "games.title": "Games",
+  "games.badge": "Move to play",
+  "games.heading": "Pose Arcade",
+  "games.sub":
+    "Camera mini-games powered by the same MediaPipe pose engine behind x-coach. Get up and move — we'll estimate the calories you burn.",
+  "games.totalTitle": "Calories burned",
+  "games.kcalUnit": "kcal",
+  "games.totalSub": "Estimated across {n} rounds",
+  "games.totalEmpty": "Play a round to start burning.",
+  "games.play": "Play",
+  "games.stat.bestScore": "best",
+  "games.stat.bestCount": "best 67s",
+  "games.ninja.desc": "Your hands are the blades — slice the flying fruit, dodge the bombs.",
+  "games.six.desc": "Do the 6-7 bob: raise one hand then the other and rack up as many as you can.",
+
+  // Per-round calorie estimate (shown on each game's over screen)
+  "game.kcal.est": "≈ {n} kcal",
+  "game.kcal.note": "estimated",
 
   // Header
   "header.session": "Session: {id}",
@@ -461,10 +482,31 @@ const zhHant: Dict = {
   "nav.newAnalysis": "新增分析",
   "nav.analyse": "分析",
   "nav.library": "資料庫",
+  "nav.games": "小遊戲",
   "nav.hide": "隱藏導覽列",
   "nav.show": "顯示導覽列",
   "sidebar.version": "原型 v0.1",
   "sidebar.tagline": "姿態 · 規則 · GraphRAG",
+
+  // 小遊戲中心 — App Store 風格的姿態小遊戲總覽
+  "games.title": "小遊戲",
+  "games.badge": "動起來就能玩",
+  "games.heading": "姿態遊戲場",
+  "games.sub":
+    "用與 x-coach 同一套 MediaPipe 姿態引擎打造的鏡頭小遊戲。站起來動一動——我們會估算你消耗的卡路里。",
+  "games.totalTitle": "累計消耗",
+  "games.kcalUnit": "大卡",
+  "games.totalSub": "估計自 {n} 場遊戲",
+  "games.totalEmpty": "玩一場開始燃燒吧。",
+  "games.play": "開始遊玩",
+  "games.stat.bestScore": "最高分",
+  "games.stat.bestCount": "最多 67",
+  "games.ninja.desc": "你的雙手就是刀——切開飛來的水果，閃避炸彈。",
+  "games.six.desc": "做「6-7」抖手：一手上一手下輪流擺動，盡量累積次數。",
+
+  // 每回合卡路里估計（顯示於各遊戲的結算畫面）
+  "game.kcal.est": "≈ {n} 大卡",
+  "game.kcal.note": "估計值",
 
   // Header
   "header.session": "工作階段：{id}",

@@ -4,7 +4,7 @@ import { renderWithProviders } from "./renderWithProviders";
 import NinjaOverScreen, { type NinjaResult } from "../components/ninja/NinjaOverScreen";
 import type { NinjaEntry } from "../lib/ninja/leaderboard";
 
-const result: NinjaResult = { score: 1340, bestCombo: 11, bombed: false };
+const result: NinjaResult = { score: 1340, bestCombo: 11, bombed: false, kcal: 24 };
 const board: NinjaEntry[] = [{ name: "Me", score: 1340, bestCombo: 11, ts: 1 }];
 
 function setup(props: Partial<React.ComponentProps<typeof NinjaOverScreen>> = {}) {
