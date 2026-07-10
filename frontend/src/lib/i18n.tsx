@@ -421,6 +421,45 @@ const en: Dict = {
   "duel.board.title": "Recent duels",
   "duel.board.empty": "No duels yet — throw down!",
   "duel.board.beat": "beat",
+
+  // 67 (mini-game) — the "six seven" meme gesture counter
+  "nav.six": "67",
+  "six.title": "67",
+  "six.badge": "Brainrot · one camera",
+  "six.heading": "How many 67s can you hit?",
+  "six.sub":
+    "The 6-7 bob, counted. Hold both hands out and bounce them up and down, one at a time — six… seven… — and rack up as many as you can. Same MediaPipe pose tracking x-coach uses, pointed at the meme.",
+  "six.how1": "Stand back so both hands and shoulders are in frame.",
+  "six.how2": "Raise one hand, then the other — every switch is one 67.",
+  "six.how3": "Keep the rhythm going for a combo. {s} seconds on the clock.",
+  "six.leftHand": "left hand up",
+  "six.rightHand": "right hand up",
+  "six.startBtn": "Enable camera & go",
+  "six.starting": "Starting camera…",
+  "six.cameraNote": "Runs on-device. {s}-second sprint.",
+  "six.error": "Couldn't start the camera.",
+
+  // In-round HUD
+  "six.hud.time": "Time",
+  "six.hud.label": "sixty-sevens",
+  "six.hud.combo": "{n}× rhythm",
+
+  // Over screen
+  "six.over.title": "Time! You hit",
+  "six.over.combo": "Best rhythm streak: {n}",
+  "six.over.nameLabel": "Add your name to the board",
+  "six.over.namePlaceholder": "Your name",
+  "six.over.save": "Save",
+  "six.over.anon": "Anonymous",
+  "six.over.ranked": "You're #{rank} on the local board!",
+  "six.over.notRanked": "Saved — keep bobbing to crack the top 10.",
+  "six.over.replay": "Go again",
+
+  // Leaderboard
+  "six.board.title": "Top 67s",
+  "six.board.empty": "No scores yet — be the first!",
+  "six.board.you": "You",
+  "six.board.count": "{n} × 67",
 };
 
 const zhHant: Dict = {
@@ -828,6 +867,45 @@ const zhHant: Dict = {
   "duel.board.title": "最近對戰",
   "duel.board.empty": "還沒有對戰——來場對決吧！",
   "duel.board.beat": "擊敗",
+
+  // 67（小遊戲）— 「six seven」迷因手勢計數
+  "nav.six": "67",
+  "six.title": "67",
+  "six.badge": "迷因 · 一台鏡頭",
+  "six.heading": "你能做出幾次 67？",
+  "six.sub":
+    "把「6-7」抖手動作變成計數遊戲。雙手往前伸，一上一下輪流擺動——six… seven…——盡量累積次數。用的正是 x-coach 分析姿態的同一套 MediaPipe 追蹤，對準了這個迷因。",
+  "six.how1": "站遠一點，讓雙手與肩膀都進到畫面。",
+  "six.how2": "先舉一隻手，再換另一隻——每次交替算一個 67。",
+  "six.how3": "保持節奏就能累積連擊。限時 {s} 秒。",
+  "six.leftHand": "左手在上",
+  "six.rightHand": "右手在上",
+  "six.startBtn": "開啟鏡頭開始",
+  "six.starting": "啟動鏡頭中…",
+  "six.cameraNote": "全程裝置端運算。{s} 秒衝刺。",
+  "six.error": "無法啟動鏡頭。",
+
+  // 回合中 HUD
+  "six.hud.time": "時間",
+  "six.hud.label": "六七次數",
+  "six.hud.combo": "{n}× 節奏",
+
+  // 結算畫面
+  "six.over.title": "時間到！你完成了",
+  "six.over.combo": "最佳節奏連擊：{n}",
+  "six.over.nameLabel": "把名字加進排行榜",
+  "six.over.namePlaceholder": "你的名字",
+  "six.over.save": "儲存",
+  "six.over.anon": "匿名",
+  "six.over.ranked": "你在本地排行榜第 {rank} 名！",
+  "six.over.notRanked": "已儲存——繼續抖手擠進前 10 名。",
+  "six.over.replay": "再玩一次",
+
+  // 排行榜
+  "six.board.title": "67 排行榜",
+  "six.board.empty": "還沒有紀錄——搶第一個吧！",
+  "six.board.you": "你",
+  "six.board.count": "{n} × 67",
 };
 
 const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };

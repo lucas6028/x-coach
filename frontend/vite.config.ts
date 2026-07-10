@@ -21,10 +21,17 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
-      // duelDetector.ts is the MediaPipe/WASM/WebGL/canvas boundary — it needs a real
-      // camera and GPU, neither of which exist under jsdom, so it can't be meaningfully
-      // unit-tested. The game's logic lives in src/lib/duel/* and is fully covered there.
-      exclude: ["src/main.tsx", "src/test/**", "src/components/duel/duelDetector.ts"],
+      // Impure edges that can't run under jsdom (kept in sync with codecov.yml `ignore`):
+      // the *Detector.ts files are the MediaPipe/WASM/WebGL/canvas glue, and SixSeven.tsx is a
+      // thin camera + requestAnimationFrame page shell. Every decision branch lives in the
+      // matching src/lib/* modules and is fully covered there.
+      exclude: [
+        "src/main.tsx",
+        "src/test/**",
+        "src/components/duel/duelDetector.ts",
+        "src/components/sixseven/sixSevenDetector.ts",
+        "src/pages/SixSeven.tsx",
+      ],
       thresholds: {
         lines: 70,
         functions: 70,

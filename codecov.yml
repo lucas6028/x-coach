@@ -22,6 +22,5 @@ ignore:
   # MediaPipe / camera / canvas boundaries — need a real camera + GPU.
   - "frontend/src/components/**/*Detector.ts"
   # Camera + rAF page shells: impure edges only; their logic is unit-tested in src/lib/*.
-  - "frontend/src/pages/MemeBlast.tsx"
   - "frontend/src/pages/PoseDuel.tsx"
-  - "frontend/src/pages/PoseGame.tsx"
+  - "frontend/src/pages/SixSeven.tsx"

@@ -7,8 +7,9 @@ import Login from "./pages/Login";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import RequireAuth from "./components/RequireAuth";
-// Lazily loaded so the ~800 kB MediaPipe bundle only downloads when players open /duel.
+// Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
 const PoseDuel = lazy(() => import("./pages/PoseDuel"));
+const SixSeven = lazy(() => import("./pages/SixSeven"));
 import { I18nProvider } from "./lib/i18n";
 import { AuthProvider } from "./lib/auth";
 import "./index.css";
@@ -26,6 +27,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <Suspense fallback={null}>
                   <PoseDuel />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/67"
+              element={
+                <Suspense fallback={null}>
+                  <SixSeven />
                 </Suspense>
               }
             />
