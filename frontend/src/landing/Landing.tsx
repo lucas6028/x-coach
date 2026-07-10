@@ -98,9 +98,9 @@ function Nav() {
   return (
     <header className="sticky top-0 z-50 border-b border-white/10 bg-[#0d0f10]/80 backdrop-blur-md">
       <nav className={`${SECTION} flex h-16 items-center justify-between`}>
-        <a href="#top" className="flex items-center gap-2.5">
+        <a href="#top" className="flex shrink-0 items-center gap-2.5">
           <Mark />
-          <span className="font-display text-lg font-bold tracking-tight text-zinc-50">
+          <span className="whitespace-nowrap font-display text-lg font-bold tracking-tight text-zinc-50">
             x-<span className="bg-gradient-to-r from-[#5ffb6f] to-[#16b8a8] bg-clip-text text-transparent">coach</span>
           </span>
         </a>
@@ -109,9 +109,13 @@ function Nav() {
           <a href="#pipeline" className="transition-colors hover:text-zinc-100">{t("landing.nav.pipeline")}</a>
           <a href="#eval" className="transition-colors hover:text-zinc-100">{t("landing.nav.eval")}</a>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           <LangSwitch />
-          <PrimaryCTA className="px-4 py-2" />
+          {/* Redundant with the hero CTA on small screens — hide it there so the
+              nav doesn't overflow / wrap on narrow phones. */}
+          <div className="hidden sm:block">
+            <PrimaryCTA className="px-4 py-2" />
+          </div>
         </div>
       </nav>
     </header>
@@ -131,7 +135,7 @@ function Hero() {
             "radial-gradient(620px 420px at 78% 8%, rgba(22,184,168,0.16), transparent 70%), radial-gradient(520px 360px at 8% 30%, rgba(95,251,111,0.08), transparent 70%)",
         }}
       />
-      <div className={`${SECTION} relative grid items-center gap-14 pb-28 pt-16 lg:grid-cols-12 lg:gap-10 lg:pt-24`}>
+      <div className={`${SECTION} relative grid grid-cols-1 items-center gap-12 pb-20 pt-12 sm:gap-14 sm:pb-28 sm:pt-16 lg:grid-cols-12 lg:gap-10 lg:pt-24`}>
         <div className="lg:col-span-6">
           <motion.h1
             initial={{ opacity: 0, y: 18 }}
@@ -185,7 +189,7 @@ function Hero() {
 function Problem() {
   const { t } = useI18n();
   return (
-    <section className={`${SECTION} border-t border-white/10 py-24`}>
+    <section className={`${SECTION} border-t border-white/10 py-16 sm:py-24`}>
       <Reveal>
         <h2 className="max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
           {t("landing.problem.title")}
@@ -249,7 +253,7 @@ function Pipeline() {
   const reduce = useReducedMotion();
   const { t } = useI18n();
   return (
-    <section id="pipeline" className="border-t border-white/10 bg-white/[0.015] py-24">
+    <section id="pipeline" className="border-t border-white/10 bg-white/[0.015] py-16 sm:py-24">
       <div className={SECTION}>
         <Reveal>
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#3ee07a]">{t("landing.pipeline.kicker")}</p>
@@ -298,7 +302,7 @@ const STEPS = ["observation", "attribution", "prescription"];
 function Diagnosis() {
   const { t } = useI18n();
   return (
-    <section id="how" className={`${SECTION} border-t border-white/10 py-24`}>
+    <section id="how" className={`${SECTION} border-t border-white/10 py-16 sm:py-24`}>
       <Reveal>
         <h2 className="max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
           {t("landing.diagnosis.title")}
@@ -359,7 +363,7 @@ function FrameStrip() {
 function Bento() {
   const { t } = useI18n();
   return (
-    <section className="border-t border-white/10 bg-white/[0.015] py-24">
+    <section className="border-t border-white/10 bg-white/[0.015] py-16 sm:py-24">
       <div className={SECTION}>
         <Reveal>
           <p className="font-mono text-xs uppercase tracking-[0.18em] text-[#3ee07a]">{t("landing.bento.kicker")}</p>
@@ -466,7 +470,7 @@ const METHODS = ["m1", "m2", "m3"];
 function Evaluation() {
   const { t } = useI18n();
   return (
-    <section id="eval" className={`${SECTION} border-t border-white/10 py-24`}>
+    <section id="eval" className={`${SECTION} border-t border-white/10 py-16 sm:py-24`}>
       <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
         <Reveal>
           <h2 className="font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
@@ -494,7 +498,7 @@ function Evaluation() {
 function CTA() {
   const { t } = useI18n();
   return (
-    <section className="relative overflow-hidden border-t border-white/10 py-24">
+    <section className="relative overflow-hidden border-t border-white/10 py-16 sm:py-24">
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
