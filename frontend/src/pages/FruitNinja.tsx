@@ -10,6 +10,7 @@ import { isSwipe, type Blade } from "../lib/ninja/slice";
 import { spawnPieces, advancePieces, type Piece } from "../lib/ninja/pieces";
 import { START_LIVES } from "../lib/ninja/scoring";
 import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leaderboard";
+import { waitForVideoFrame } from "../lib/videoFrame";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene, type Point } from "../components/ninja/ninjaDetector";
 
@@ -52,6 +53,8 @@ export default function FruitNinja() {
   const landmarkerRef = useRef<PoseLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mountedRef = useRef(true);
 
   // Loop bookkeeping the rAF callback mutates without re-rendering; `game` is the pure state.
   const g = useRef({
@@ -73,13 +76,23 @@ export default function FruitNinja() {
   const teardown = useCallback(() => {
     g.current.running = false;
     cancelAnimationFrame(rafRef.current);
+    if (countdownRef.current !== null) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
     streamRef.current?.getTracks().forEach((tr) => tr.stop());
     streamRef.current = null;
     landmarkerRef.current?.close();
     landmarkerRef.current = null;
   }, []);
 
-  useEffect(() => teardown, [teardown]);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      teardown();
+    };
+  }, [teardown]);
 
   const endRound = useCallback(() => {
     const s = g.current;
@@ -207,6 +220,7 @@ export default function FruitNinja() {
       n -= 1;
       if (n <= 0) {
         clearInterval(iv);
+        countdownRef.current = null;
         const now = performance.now();
         const s = g.current;
         s.running = true;
@@ -233,23 +247,63 @@ export default function FruitNinja() {
         setCountdown(n);
       }
     }, 800);
+    countdownRef.current = iv;
   }, [tick]);
 
   const start = useCallback(async () => {
     setError("");
     setStarting(true);
     try {
+      // The model download (WASM + .task, the bulk of the wait on mobile) doesn't depend on the
+      // camera — kick it off in parallel with the getUserMedia permission/stream so the two waits
+      // overlap instead of stacking.
+      const landmarkerPromise = createPoseLandmarker();
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "user", width: 640, height: 480 },
         audio: false,
       });
+      // getUserMedia resolved after an unmount — stop the orphaned track and bail. Also close the
+      // model once its download settles so it doesn't leak.
+      if (!mountedRef.current) {
+        stream.getTracks().forEach((tr) => tr.stop());
+        landmarkerPromise.then((l) => l.close()).catch(() => {});
+        return;
+      }
       streamRef.current = stream;
       const video = videoRef.current;
       if (video) {
         video.srcObject = stream;
         await video.play();
       }
-      landmarkerRef.current = await createPoseLandmarker();
+      const landmarker = await landmarkerPromise;
+      // Unmounted while loading the model — close it and release the stream teardown owns.
+      if (!mountedRef.current) {
+        landmarker.close();
+        teardown();
+        return;
+      }
+      landmarkerRef.current = landmarker;
+
+      // Warm up the GPU delegate NOW, while the loading spinner is still up. The first
+      // detectForVideo compiles shaders and can freeze the main thread for tens of seconds on
+      // mobile; run it here so that stall hides in the load the user is already waiting on rather
+      // than freezing the 2.4s countdown (where it can't possibly fit). Needs a decoded frame, and
+      // a warmup that throws must not abort the game.
+      if (video) {
+        await waitForVideoFrame(video);
+        if (!mountedRef.current) {
+          teardown();
+          return;
+        }
+        if (video.readyState >= 2) {
+          try {
+            landmarker.detectForVideo(video, performance.now());
+          } catch (e) {
+            console.error("fruit ninja: warmup inference failed", e);
+          }
+        }
+      }
+
       setStarting(false);
       beginCountdown();
     } catch (e) {

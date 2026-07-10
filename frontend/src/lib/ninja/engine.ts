@@ -74,10 +74,6 @@ export function stepGame(state: GameState, input: FrameInput): StepResult {
   if (blades.length > 0) {
     const { slicedFruits, bombHit, remaining } = sliceEntities(s.entities, blades);
     s.entities = remaining;
-    if (bombHit) {
-      s.over = true;
-      return { state: s, sliceFlash: 0, bombFlash: true, slicedFruits: [] };
-    }
     if (slicedFruits.length > 0) {
       cutFruits = slicedFruits;
       const n = slicedFruits.length;
@@ -88,6 +84,12 @@ export function stepGame(state: GameState, input: FrameInput): StepResult {
       s.sliced += n;
       s.lastSliceAt = now;
       sliceFlash = n;
+    }
+    // A swipe can cut a bomb and adjacent fruits in the same frame — award/burst those fruits
+    // before ending the round, instead of discarding them.
+    if (bombHit) {
+      s.over = true;
+      return { state: s, sliceFlash, bombFlash: true, slicedFruits: cutFruits };
     }
   }
 

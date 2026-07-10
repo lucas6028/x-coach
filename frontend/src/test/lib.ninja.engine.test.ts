@@ -84,6 +84,19 @@ describe("stepGame", () => {
     expect(out.state.score).toBe(0);
   });
 
+  it("still awards and bursts fruits cut in the same swipe that also hits a bomb", () => {
+    const s = idle(1000, {
+      entities: [fruit({ id: 1, x: 0.45 }), fruit({ id: 2, kind: "bomb", emoji: "💣", x: 0.55 })],
+    });
+    const out = stepGame(s, input({ blades: [through] }));
+    expect(out.state.over).toBe(true);
+    expect(out.bombFlash).toBe(true);
+    expect(out.state.sliced).toBe(1);
+    expect(out.state.score).toBe(sliceScore(1, 1));
+    expect(out.sliceFlash).toBe(1);
+    expect(out.slicedFruits.map((e) => e.id)).toEqual([1]);
+  });
+
   it("loses a life and breaks the combo when a fruit drops", () => {
     const s = idle(1000, { entities: [fruit({ y: 1.15, vy: 1 })], combo: 5, lives: 3 });
     const out = stepGame(s, input({ dtMs: 300 }));

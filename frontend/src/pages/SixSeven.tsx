@@ -7,31 +7,13 @@ import { useI18n } from "../lib/i18n";
 import { handLead, type Lead } from "../lib/sixseven/gesture";
 import { stepCount, initialCount, ROUND_SECONDS, type CountState } from "../lib/sixseven/counter";
 import { loadLeaderboard, saveScore, type SixSevenEntry } from "../lib/sixseven/leaderboard";
+import { waitForVideoFrame } from "../lib/videoFrame";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene } from "../components/sixseven/sixSevenDetector";
 
 type Phase = "intro" | "countdown" | "playing" | "over";
 
 const POP_MS = 350;
-
-// Resolve once the <video> has a decoded frame MediaPipe can read (readyState >= HAVE_CURRENT_DATA).
-// On mobile `video.play()` resolving does NOT guarantee a decoded frame, so we wait for `loadeddata`,
-// with a timeout so a stalled camera never wedges the loading phase.
-function waitForVideoFrame(video: HTMLVideoElement, timeoutMs = 3000): Promise<void> {
-  if (video.readyState >= 2) return Promise.resolve();
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      video.removeEventListener("loadeddata", done);
-      resolve();
-    };
-    const timer = setTimeout(done, timeoutMs);
-    video.addEventListener("loadeddata", done);
-  });
-}
 
 // 67 — the brainrot mini-game. Do the "6-7" bob (alternate raising each hand) and every switch
 // counts one 67; keep the rhythm for a combo. React state drives the UI; a ref-backed rAF loop

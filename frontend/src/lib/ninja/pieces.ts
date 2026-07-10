@@ -49,8 +49,11 @@ export function spawnPieces(
     nx /= len;
     ny /= len;
   }
-  // Seam runs along the blade so the two halves look genuinely cut apart.
-  const rot0 = dirX === 0 && dirY === 0 ? 0 : Math.atan2(-dirX, dirY);
+  // Seam runs along the blade so the two halves look genuinely cut apart. dirX/dirY are in raw
+  // (unmirrored) camera space, but ctx.rotate operates on the mirrored screen position the piece
+  // is translated to, so the angle must be derived without the sign flip a naive atan2(-dirX,
+  // dirY) would apply — that flips the seam across the vertical axis on diagonal swipes.
+  const rot0 = dirX === 0 && dirY === 0 ? 0 : Math.atan2(dirX, dirY);
   const pop = -0.15 - rng() * 0.1;
 
   const halves: Half[] = ["left", "right"];

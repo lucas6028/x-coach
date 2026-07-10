@@ -1,29 +1,12 @@
 // The MediaPipe + canvas boundary for Fruit Ninja. Isolated here (and excluded from coverage)
 // because it needs WASM + WebGL + a real camera, none of which exist under jsdom. All the game
 // reasoning lives in ../../lib/ninja/* and is unit-tested there.
-import {
-  FilesetResolver,
-  PoseLandmarker,
-  type NormalizedLandmark,
-} from "@mediapipe/tasks-vision";
+import { type NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { Entity } from "../../lib/ninja/physics";
 import type { Piece } from "../../lib/ninja/pieces";
 
-const VERSION = "0.10.35";
-const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/wasm`;
-const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
-
 export type { NormalizedLandmark };
-
-export async function createPoseLandmarker(): Promise<PoseLandmarker> {
-  const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
-  return PoseLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
-    runningMode: "VIDEO",
-    numPoses: 1,
-  });
-}
+export { createPoseLandmarker } from "../poseLandmarker";
 
 export type Point = { x: number; y: number };
 
