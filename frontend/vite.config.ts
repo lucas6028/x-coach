@@ -30,6 +30,8 @@ export default defineConfig({
         "src/test/**",
         "src/components/sixseven/sixSevenDetector.ts",
         "src/pages/SixSeven.tsx",
+        "src/components/ninja/ninjaDetector.ts",
+        "src/pages/FruitNinja.tsx",
       ],
       thresholds: {
         lines: 70,

@@ -1,63 +1,76 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import AppLayout from "../components/AppLayout";
-import SixSevenStartScreen from "../components/sixseven/SixSevenStartScreen";
-import SixSevenHud from "../components/sixseven/SixSevenHud";
-import SixSevenOverScreen, { type SixSevenResult } from "../components/sixseven/SixSevenOverScreen";
+import NinjaStartScreen from "../components/ninja/NinjaStartScreen";
+import NinjaHud from "../components/ninja/NinjaHud";
+import NinjaOverScreen, { type NinjaResult } from "../components/ninja/NinjaOverScreen";
 import { useI18n } from "../lib/i18n";
-import { handLead, type Lead } from "../lib/sixseven/gesture";
-import { stepCount, initialCount, ROUND_SECONDS, type CountState } from "../lib/sixseven/counter";
-import { loadLeaderboard, saveScore, type SixSevenEntry } from "../lib/sixseven/leaderboard";
+import { LM } from "../lib/pose";
+import { createGameState, stepGame, type GameState } from "../lib/ninja/engine";
+import { isSwipe, type Blade } from "../lib/ninja/slice";
+import { spawnPieces, advancePieces, type Piece } from "../lib/ninja/pieces";
+import { START_LIVES } from "../lib/ninja/scoring";
+import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leaderboard";
 import { waitForVideoFrame } from "../lib/videoFrame";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
-import { createPoseLandmarker, drawScene } from "../components/sixseven/sixSevenDetector";
+import { createPoseLandmarker, drawScene, type Point } from "../components/ninja/ninjaDetector";
 
 type Phase = "intro" | "countdown" | "playing" | "over";
 
-const POP_MS = 350;
+const WRISTS = [LM.LEFT_WRIST, LM.RIGHT_WRIST];
+const TRAIL_LEN = 7;
+// Exponential smoothing on the wrist position (fraction of the way toward the raw landmark each
+// frame). Damps MediaPipe jitter before it can masquerade as a swipe, without lagging a real one.
+const SMOOTH = 0.6;
+const BOMB_MS = 600;
+// Linger on the frozen board briefly after game over so the last cut / bomb blast reads.
+const OVER_HOLD_MS = 600;
 
-// 67 — the brainrot mini-game. Do the "6-7" bob (alternate raising each hand) and every switch
-// counts one 67; keep the rhythm for a combo. React state drives the UI; a ref-backed rAF loop
-// drives detection + counting. The gesture + counter logic lives in lib/sixseven/* (unit-tested)
-// — this file wires it to the camera and owns only the impure edges.
-export default function SixSeven() {
+// Fruit Ninja — slice flying fruit with your hands via MediaPipe pose (both wrists are blades).
+// Miss three fruits or hit a bomb and it's over. React state drives the UI; a ref-backed rAF loop
+// drives detection, blade building, and physics. All the game reasoning lives in lib/ninja/*
+// (unit-tested); this file wires it to the camera and owns only the impure edges.
+export default function FruitNinja() {
   const { t } = useI18n();
 
   const [phase, setPhase] = useState<Phase>("intro");
-  const [leaderboard, setLeaderboard] = useState<SixSevenEntry[]>(() => loadLeaderboard());
+  const [leaderboard, setLeaderboard] = useState<NinjaEntry[]>(() => loadLeaderboard());
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState("");
   const [countdown, setCountdown] = useState(3);
 
-  const [count, setCount] = useState(0);
+  const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS);
-  const [lead, setLead] = useState<Lead>("neutral");
+  const [lives, setLives] = useState(START_LIVES);
   const [pop, setPop] = useState(0);
+  const [bombFlash, setBombFlash] = useState(false);
 
-  const [result, setResult] = useState<SixSevenResult>({ count: 0, bestCombo: 0 });
+  const [result, setResult] = useState<NinjaResult>({ score: 0, bestCombo: 0, bombed: false });
   const [submitted, setSubmitted] = useState(false);
   const [rank, setRank] = useState<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const landmarkerRef = useRef<PoseLandmarker | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef(0);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
-  // Loop bookkeeping the rAF callback mutates without re-rendering; `counter` holds the pure
-  // rep-counting state advanced by stepCount.
+  // Loop bookkeeping the rAF callback mutates without re-rendering; `game` is the pure state.
   const g = useRef({
     running: false,
-    roundEnd: 0,
+    last: 0,
     lastVideoTime: -1,
     lastUi: 0,
-    counter: initialCount as CountState,
-    lead: "neutral" as Lead,
+    game: createGameState(0) as GameState,
+    prev: [null, null] as (Point | null)[],
+    trails: [[], []] as Point[][],
+    pieces: [] as Piece[],
+    nextPieceId: 1,
     popCount: 0,
-    popUntil: 0,
+    bombUntil: 0,
+    bombed: false,
+    overAt: 0,
   });
 
   const teardown = useCallback(() => {
@@ -82,9 +95,9 @@ export default function SixSeven() {
   }, [teardown]);
 
   const endRound = useCallback(() => {
-    const c = g.current.counter;
+    const s = g.current;
     teardown();
-    setResult({ count: c.count, bestCombo: c.bestCombo });
+    setResult({ score: s.game.score, bestCombo: s.game.bestCombo, bombed: s.bombed });
     setLeaderboard(loadLeaderboard());
     setSubmitted(false);
     setRank(null);
@@ -102,25 +115,72 @@ export default function SixSeven() {
     if (!video || !canvas || !landmarker || video.readyState < 2) return;
 
     const now = performance.now();
-    const secLeft = Math.max(0, Math.ceil((s.roundEnd - now) / 1000));
 
-    // Detection + counting run only on a fresh camera frame (MediaPipe needs rising timestamps).
     if (video.currentTime !== s.lastVideoTime) {
       s.lastVideoTime = video.currentTime;
-      const lm = landmarker.detectForVideo(video, now).landmarks?.[0] ?? null;
-      const hs = lm ? handLead(lm) : null;
-      const lead = hs?.valid ? hs.lead : "neutral";
-      s.lead = lead;
+      // dt spans the interval between *detection* frames (camera fps), not rAF ticks. Measuring it
+      // here — where the wrist positions actually update — keeps wrist speed and physics on the
+      // same clock; measuring across rAF inflated speed ~2× and let a still hand's jitter slice.
+      const dtMs = s.last ? now - s.last : 16;
+      s.last = now;
+      const dt = dtMs / 1000;
 
-      const stepped = stepCount(s.counter, lead, now);
-      s.counter = stepped.state;
-      if (stepped.scored) {
-        s.popCount += 1;
-        s.popUntil = now + POP_MS;
+      const lm = landmarker.detectForVideo(video, now).landmarks?.[0] ?? null;
+
+      // Build a blade for each wrist that genuinely swiped since last frame; keep a short trail.
+      const blades: Blade[] = [];
+      WRISTS.forEach((idx, hand) => {
+        const p = lm?.[idx];
+        const raw = p && (p.visibility ?? 1) >= 0.5 ? { x: p.x, y: p.y } : null;
+        const prev = s.prev[hand];
+        // Smooth toward the raw landmark to damp jitter before speed/distance are judged.
+        const cur = raw
+          ? prev
+            ? { x: prev.x + SMOOTH * (raw.x - prev.x), y: prev.y + SMOOTH * (raw.y - prev.y) }
+            : raw
+          : null;
+        if (cur && prev && isSwipe(prev, cur, dt)) {
+          blades.push({ x1: prev.x, y1: prev.y, x2: cur.x, y2: cur.y });
+        }
+        s.prev[hand] = cur;
+        if (cur) {
+          s.trails[hand].push(cur);
+          if (s.trails[hand].length > TRAIL_LEN) s.trails[hand].shift();
+        } else {
+          s.trails[hand] = [];
+        }
+      });
+
+      if (!s.game.over) {
+        const stepped = stepGame(s.game, { blades, dtMs, now, rng: Math.random });
+        s.game = stepped.state;
+        if (stepped.sliceFlash > 0) s.popCount += 1;
+        // Burst each cut fruit into two halves flying apart along the swing.
+        if (stepped.slicedFruits.length > 0) {
+          let dx = 0;
+          let dy = 0;
+          blades.forEach((b) => {
+            dx += b.x2 - b.x1;
+            dy += b.y2 - b.y1;
+          });
+          for (const f of stepped.slicedFruits) {
+            const burst = spawnPieces(s.nextPieceId, f, dx, dy, Math.random);
+            s.pieces.push(...burst.pieces);
+            s.nextPieceId = burst.nextId;
+          }
+        }
+        if (stepped.bombFlash) {
+          s.bombUntil = now + BOMB_MS;
+          s.bombed = true;
+        }
+        if (s.game.over && s.overAt === 0) s.overAt = now;
       }
 
-      // Cache the context once — it never changes for a given canvas, and this runs every frame.
-      const ctx = (ctxRef.current ??= canvas.getContext("2d"));
+      // Advance the flying halves every detection frame, regardless of game-over, so the last
+      // slice's pieces finish their arc.
+      s.pieces = advancePieces(s.pieces, dt);
+
+      const ctx = canvas.getContext("2d");
       if (ctx) {
         if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
           canvas.width = video.videoWidth || 640;
@@ -128,24 +188,28 @@ export default function SixSeven() {
         }
         drawScene(
           ctx,
-          { landmarks: lm, lead, pop: s.popUntil > now ? (s.popUntil - now) / POP_MS : null },
+          {
+            entities: s.game.entities,
+            pieces: s.pieces,
+            trails: s.trails,
+            bombFlash: s.bombUntil > now ? (s.bombUntil - now) / BOMB_MS : null,
+          },
           canvas.width,
           canvas.height
         );
       }
     }
 
-    // Throttle React updates to ~20/s.
     if (now - s.lastUi > 50) {
       s.lastUi = now;
-      setCount(s.counter.count);
-      setCombo(s.counter.combo);
-      setTimeLeft(secLeft);
-      setLead(s.lead);
+      setScore(s.game.score);
+      setCombo(s.game.combo);
+      setLives(s.game.lives);
       setPop(s.popCount);
+      setBombFlash(s.bombUntil > now);
     }
 
-    if (secLeft <= 0) endRound();
+    if (s.game.over && now - s.overAt >= OVER_HOLD_MS) endRound();
   }, [endRound]);
 
   const beginCountdown = useCallback(() => {
@@ -157,20 +221,26 @@ export default function SixSeven() {
       if (n <= 0) {
         clearInterval(iv);
         countdownRef.current = null;
+        const now = performance.now();
         const s = g.current;
         s.running = true;
-        s.roundEnd = performance.now() + ROUND_SECONDS * 1000;
+        s.last = 0;
         s.lastVideoTime = -1;
         s.lastUi = 0;
-        s.counter = initialCount;
-        s.lead = "neutral";
+        s.game = createGameState(now);
+        s.prev = [null, null];
+        s.trails = [[], []];
+        s.pieces = [];
+        s.nextPieceId = 1;
         s.popCount = 0;
-        s.popUntil = 0;
-        setCount(0);
+        s.bombUntil = 0;
+        s.bombed = false;
+        s.overAt = 0;
+        setScore(0);
         setCombo(0);
-        setTimeLeft(ROUND_SECONDS);
-        setLead("neutral");
+        setLives(START_LIVES);
         setPop(0);
+        setBombFlash(false);
         setPhase("playing");
         rafRef.current = requestAnimationFrame(tick);
       } else {
@@ -229,7 +299,7 @@ export default function SixSeven() {
           try {
             landmarker.detectForVideo(video, performance.now());
           } catch (e) {
-            console.error("six-seven: warmup inference failed", e);
+            console.error("fruit ninja: warmup inference failed", e);
           }
         }
       }
@@ -239,17 +309,15 @@ export default function SixSeven() {
     } catch (e) {
       teardown();
       setStarting(false);
-      // Show the localized message; keep the raw DOMException in the console for debugging.
-      console.error("six-seven: failed to start", e);
-      setError(t("six.error"));
+      setError(e instanceof Error ? e.message : t("ninja.error"));
     }
   }, [beginCountdown, teardown, t]);
 
   const submit = useCallback(
     (name: string) => {
-      const entry: SixSevenEntry = {
+      const entry: NinjaEntry = {
         name,
-        count: result.count,
+        score: result.score,
         bestCombo: result.bestCombo,
         ts: Date.now(),
       };
@@ -269,9 +337,9 @@ export default function SixSeven() {
   const showCamera = phase === "playing" || phase === "countdown";
 
   return (
-    <AppLayout title={t("six.title")}>
+    <AppLayout title={t("ninja.title")}>
       {phase === "intro" && (
-        <SixSevenStartScreen
+        <NinjaStartScreen
           leaderboard={leaderboard}
           onStart={start}
           starting={starting}
@@ -280,7 +348,7 @@ export default function SixSeven() {
       )}
 
       {phase === "over" && (
-        <SixSevenOverScreen
+        <NinjaOverScreen
           result={result}
           leaderboard={leaderboard}
           rank={rank}
@@ -308,7 +376,7 @@ export default function SixSeven() {
         )}
 
         {phase === "playing" && (
-          <SixSevenHud count={count} combo={combo} timeLeft={timeLeft} lead={lead} pop={pop} />
+          <NinjaHud score={score} combo={combo} lives={lives} pop={pop} bombFlash={bombFlash} />
         )}
       </div>
     </AppLayout>

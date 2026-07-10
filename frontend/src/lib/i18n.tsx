@@ -414,6 +414,46 @@ const en: Dict = {
   "six.board.empty": "No scores yet — be the first!",
   "six.board.you": "You",
   "six.board.count": "{n} × 67",
+
+  // Fruit Ninja (mini-game)
+  "nav.ninja": "Fruit Ninja",
+  "ninja.title": "Fruit Ninja",
+  "ninja.badge": "Slice · MediaPipe",
+  "ninja.heading": "Your hands are the blades.",
+  "ninja.sub":
+    "Fruit flies up, you slice it with your bare hands. MediaPipe tracks both wrists in real time — the same pose engine behind x-coach's squat analysis — and turns every swipe into a blade.",
+  "ninja.how1": "Stand back so your hands and shoulders are in frame.",
+  "ninja.how2": "Swipe a hand through the flying fruit to slice it. Fast swipes cut.",
+  "ninja.how3": "Dodge the 💣, and don't drop {lives} fruits — chain cuts for a combo.",
+  "ninja.startBtn": "Enable camera & slice",
+  "ninja.starting": "Starting camera…",
+  "ninja.cameraNote": "Runs on-device. Two-handed play works great.",
+  "ninja.deckTitle": "On the board",
+  "ninja.error": "Couldn't start the camera.",
+
+  // In-round HUD
+  "ninja.hud.score": "Score",
+  "ninja.hud.lives": "Lives",
+  "ninja.hud.combo": "{n} combo!",
+  "ninja.hud.boom": "💥 BOOM",
+  "ninja.hud.slice": "Swipe to slice",
+
+  // Over screen
+  "ninja.over.title": "Round over",
+  "ninja.over.bombed": "You hit a bomb!",
+  "ninja.over.combo": "Best combo: {n}",
+  "ninja.over.nameLabel": "Add your name to the board",
+  "ninja.over.namePlaceholder": "Your name",
+  "ninja.over.save": "Save",
+  "ninja.over.anon": "Anonymous",
+  "ninja.over.ranked": "You're #{rank} on the local board!",
+  "ninja.over.notRanked": "Saved — keep slicing to crack the top 10.",
+  "ninja.over.replay": "Play again",
+
+  // Leaderboard
+  "ninja.board.title": "Top slicers",
+  "ninja.board.empty": "No scores yet — be the first!",
+  "ninja.board.you": "You",
 };
 
 const zhHant: Dict = {
@@ -814,6 +854,46 @@ const zhHant: Dict = {
   "six.board.empty": "還沒有紀錄——搶第一個吧！",
   "six.board.you": "你",
   "six.board.count": "{n} × 67",
+
+  // 水果忍者（小遊戲）
+  "nav.ninja": "水果忍者",
+  "ninja.title": "水果忍者",
+  "ninja.badge": "切水果 · MediaPipe",
+  "ninja.heading": "你的雙手就是刀。",
+  "ninja.sub":
+    "水果往上飛，用你的雙手把它切開。MediaPipe 即時追蹤雙手手腕——與 x-coach 深蹲分析同一套姿態引擎——把每一次揮動變成一把刀。",
+  "ninja.how1": "站遠一點，讓雙手與肩膀都進到畫面。",
+  "ninja.how2": "揮手劃過飛來的水果就能切開，要夠快才切得動。",
+  "ninja.how3": "閃避 💣，別漏接 {lives} 顆水果——連續切開累積連擊。",
+  "ninja.startBtn": "開啟鏡頭開切",
+  "ninja.starting": "啟動鏡頭中…",
+  "ninja.cameraNote": "全程裝置端運算。雙手一起玩最過癮。",
+  "ninja.deckTitle": "會出現的東西",
+  "ninja.error": "無法啟動鏡頭。",
+
+  // 回合中 HUD
+  "ninja.hud.score": "分數",
+  "ninja.hud.lives": "生命",
+  "ninja.hud.combo": "{n} 連擊！",
+  "ninja.hud.boom": "💥 爆炸",
+  "ninja.hud.slice": "揮手切開",
+
+  // 結算畫面
+  "ninja.over.title": "回合結束",
+  "ninja.over.bombed": "你切到炸彈了！",
+  "ninja.over.combo": "最高連擊：{n}",
+  "ninja.over.nameLabel": "把名字加進排行榜",
+  "ninja.over.namePlaceholder": "你的名字",
+  "ninja.over.save": "儲存",
+  "ninja.over.anon": "匿名",
+  "ninja.over.ranked": "你在本地排行榜第 {rank} 名！",
+  "ninja.over.notRanked": "已儲存——繼續切擠進前 10 名。",
+  "ninja.over.replay": "再玩一次",
+
+  // 排行榜
+  "ninja.board.title": "切水果排行榜",
+  "ninja.board.empty": "還沒有紀錄——搶第一個吧！",
+  "ninja.board.you": "你",
 };
 
 const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };
