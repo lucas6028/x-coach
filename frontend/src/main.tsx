@@ -6,6 +6,8 @@ import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
+// Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens /play.
+const PoseGame = lazy(() => import("./pages/PoseGame"));
 import RequireAuth from "./components/RequireAuth";
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens /67.
 const SixSeven = lazy(() => import("./pages/SixSeven"));
@@ -21,6 +23,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <Routes>
             <Route path="/" element={<Landing />} />
             <Route path="/app" element={<App />} />
+            <Route
+              path="/play"
+              element={
+                <Suspense fallback={null}>
+                  <PoseGame />
+                </Suspense>
+              }
+            />
             <Route
               path="/67"
               element={
