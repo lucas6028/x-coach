@@ -1,16 +1,12 @@
-import { useState } from "react";
-import {
-  ArrowLeft,
-  CheckCircle,
-  ClockCounterClockwise,
-  Trash,
-  WarningCircle,
-} from "@phosphor-icons/react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { CheckCircle, ClockCounterClockwise, Trash, WarningCircle } from "@phosphor-icons/react";
 import { api } from "../api";
+import AppLayout from "../components/AppLayout";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
+import { getStoredModel, setStoredModel } from "../lib/model";
 import { avatarUrl, displayName, initial } from "../lib/profile";
+import ModelIcon, { modelLabel } from "../components/ModelIcon";
 
 type ClearState =
   | { kind: "idle" }
@@ -26,6 +22,33 @@ export default function Settings() {
   const { user } = useAuth();
   const [imgError, setImgError] = useState(false);
   const [clear, setClear] = useState<ClearState>({ kind: "idle" });
+  // Model picker: the catalog + default are server-driven (env-configurable), fetched from health;
+  // `model` is the user's pinned choice ("" = follow the server default).
+  const [model, setModel] = useState(getStoredModel);
+  const [models, setModels] = useState<string[]>([]);
+  const [chatDefault, setChatDefault] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    api
+      .health()
+      .then((h) => {
+        if (!active) return;
+        setModels(h.chat_models ?? []);
+        setChatDefault(h.chat_default ?? "");
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const chooseModel = (id: string) => {
+    setStoredModel(id);
+    setModel(id);
+  };
+  // What's shown as selected: the user's pin, or the server default when they haven't pinned one.
+  const selectedModel = model || chatDefault;
 
   if (!user) return null;
 
@@ -46,26 +69,10 @@ export default function Settings() {
   };
 
   return (
-    <div className="min-h-[100dvh] bg-background-dark text-content">
-      <header className="sticky top-0 z-10 border-b border-border-dark bg-background-dark/95 px-4 backdrop-blur lg:px-6">
-        <div className="mx-auto flex h-16 max-w-3xl items-center justify-between gap-3">
-          <Link to="/app" className="flex items-center gap-2.5">
-            <img src="/icon.svg" alt="" className="h-8 w-8 rounded" />
-            <span className="font-display font-bold tracking-tight">X-Coach</span>
-          </Link>
-          <Link
-            to="/app"
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-content/5 hover:text-content"
-          >
-            <ArrowLeft size={18} />
-            <span className="hidden sm:inline">{t("settings.backToStudio")}</span>
-          </Link>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
-        <h1 className="font-display text-2xl font-bold tracking-tight">{t("settings.title")}</h1>
-        <p className="mt-1.5 text-sm text-muted">{t("settings.subtitle")}</p>
+    <AppLayout title={t("settings.title")}>
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
+          <p className="text-sm text-muted">{t("settings.subtitle")}</p>
 
         {/* Profile */}
         <section className="mt-8">
@@ -101,6 +108,65 @@ export default function Settings() {
               </div>
             </dl>
           </div>
+        </section>
+
+        {/* Coach model — the LLM that answers follow-up chat, chosen per user (localStorage). */}
+        <section className="mt-10">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-faint">
+            {t("settings.model")}
+          </h2>
+          <p className="mt-1.5 text-sm text-muted">{t("settings.modelDesc")}</p>
+          <fieldset className="mt-3 divide-y divide-border-dark overflow-hidden rounded-2xl border border-border-dark bg-surface-dark">
+            <legend className="sr-only">{t("settings.model")}</legend>
+            {models.length === 0 ? (
+              <p className="p-4 text-sm text-muted">{t("settings.modelLoading")}</p>
+            ) : (
+              models.map((id) => {
+                const selected = id === selectedModel;
+                const isDefault = id === chatDefault;
+                const label = modelLabel(id);
+                return (
+                  <label
+                    key={id}
+                    className="flex cursor-pointer items-center gap-3 p-4 transition-colors hover:bg-content/[0.03]"
+                  >
+                    <input
+                      type="radio"
+                      name="coach-model"
+                      value={id}
+                      checked={selected}
+                      onChange={() => chooseModel(id)}
+                      className="sr-only"
+                    />
+                    <span
+                      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
+                        selected ? "bg-primary/10 ring-1 ring-primary/30" : "bg-content/5"
+                      }`}
+                    >
+                      <ModelIcon id={id} size={20} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate font-medium text-content">{label}</span>
+                        {isDefault && (
+                          <span className="shrink-0 rounded-full bg-content/5 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-faint">
+                            {t("settings.modelDefault")}
+                          </span>
+                        )}
+                      </span>
+                      {/* Show the raw slug only when it differs from the friendly label. */}
+                      {label !== id && (
+                        <span className="block truncate font-mono text-xs text-faint">{id}</span>
+                      )}
+                    </span>
+                    {selected && (
+                      <CheckCircle size={20} weight="fill" className="shrink-0 text-primary" />
+                    )}
+                  </label>
+                );
+              })
+            )}
+          </fieldset>
         </section>
 
         {/* Danger zone */}
@@ -176,7 +242,8 @@ export default function Settings() {
             </div>
           </div>
         </section>
-      </main>
-    </div>
+        </main>
+      </div>
+    </AppLayout>
   );
 }

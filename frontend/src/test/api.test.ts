@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api } from "../api";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { api, ChatError, type ChatContext, type ChatMessage } from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -155,5 +155,219 @@ describe("api.analyzeUpload", () => {
     } as Response);
     const file = new File(["data"], "bad.mp4", { type: "video/mp4" });
     await expect(api.analyzeUpload(file)).rejects.toThrow("Analyze failed (500)");
+  });
+});
+
+describe("api.chatStream", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const messages: ChatMessage[] = [{ role: "user", content: "why did my knees cave?" }];
+  const context: ChatContext = { fault_count: 0, quality: {}, faults: [] };
+
+  // Mock fetch with a real ReadableStream body carrying the given (already byte-splittable) chunks,
+  // so the client's frame-reassembly across chunk boundaries is exercised for real.
+  function mockStream(chunks: string[]) {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        for (const c of chunks) controller.enqueue(enc.encode(c));
+        controller.close();
+      },
+    });
+    return vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      body,
+    } as unknown as Response);
+  }
+
+  function collectHandlers() {
+    const deltas: string[] = [];
+    let model = "";
+    let errorDetail = "";
+    return {
+      deltas,
+      get model() {
+        return model;
+      },
+      get errorDetail() {
+        return errorDetail;
+      },
+      handlers: {
+        onDelta: (t: string) => deltas.push(t),
+        onDone: (m: string) => {
+          model = m;
+        },
+        onError: (d: string) => {
+          errorDetail = d;
+        },
+      },
+    };
+  }
+
+  it("POSTs messages + context and streams delta frames then done to the handlers", async () => {
+    // A frame deliberately split across two chunks to prove reassembly.
+    const spy = mockStream([
+      'event: delta\ndata: {"text":"Drive your knees ',
+      'out."}\n\nevent: done\ndata: {"model":"m"}\n\n',
+    ]);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+
+    expect(c.deltas.join("")).toBe("Drive your knees out.");
+    expect(c.model).toBe("m");
+    expect(c.errorDetail).toBe("");
+    expect(spy.mock.calls[0][0]).toBe("/api/chat");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ messages, context });
+  });
+
+  it("includes the chosen model in the request body when provided", async () => {
+    const spy = mockStream(['event: done\ndata: {"model":"minimax/minimax-m3"}\n\n']);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers, "minimax/minimax-m3");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      messages,
+      context,
+      model: "minimax/minimax-m3",
+    });
+  });
+
+  it("omits model from the body when none is chosen (server default)", async () => {
+    const spy = mockStream(['event: done\ndata: {"model":"x"}\n\n']);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ messages, context });
+  });
+
+  it("routes an in-band error frame to onError without throwing", async () => {
+    mockStream(['event: error\ndata: {"detail":"LLM request failed: reset"}\n\n']);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+    expect(c.errorDetail).toContain("reset");
+    expect(c.deltas).toHaveLength(0);
+  });
+
+  it("ignores malformed/eventless frames and defaults missing fields", async () => {
+    mockStream([
+      ": keep-alive comment\n\n", // no event line -> ignored
+      "event: delta\ndata: {not valid json}\n\n", // unparseable -> ignored
+      "event: delta\ndata: {}\n\n", // missing text -> ""
+      "event: done\ndata: {}\n\n", // missing model -> ""
+      "event: error\ndata: {}\n\n", // missing detail -> generic message
+    ]);
+    const c = collectHandlers();
+    await api.chatStream(messages, context, c.handlers);
+    expect(c.deltas).toEqual([""]); // only the `{}` delta reached a handler, defaulted to ""
+    expect(c.model).toBe(""); // missing model -> ""
+    expect(c.errorDetail).toBe("Chat failed"); // missing detail -> generic fallback
+  });
+
+  it("throws a ChatError carrying the HTTP status and backend detail on a pre-flight failure", async () => {
+    mockFetch({ detail: "Missing bearer token." }, false, 401);
+    const c = collectHandlers();
+    await expect(api.chatStream(messages, context, c.handlers)).rejects.toMatchObject({
+      name: "ChatError",
+      status: 401,
+      message: "Missing bearer token.",
+    });
+    await expect(api.chatStream(messages, context, c.handlers)).rejects.toBeInstanceOf(ChatError);
+  });
+
+  it("falls back to a generic message when the pre-flight error body isn't JSON", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      json: async () => {
+        throw new Error("not json");
+      },
+    } as unknown as Response);
+    const c = collectHandlers();
+    await expect(api.chatStream(messages, context, c.handlers)).rejects.toMatchObject({
+      status: 503,
+      message: "Chat failed (503)",
+    });
+  });
+});
+
+describe("api.chatFollowups", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const messages: ChatMessage[] = [
+    { role: "user", content: "why did my knees cave?" },
+    { role: "assistant", content: "Drive your knees out." },
+  ];
+  const context: ChatContext = { fault_count: 0, quality: {}, faults: [] };
+
+  it("POSTs the thread + context and returns the questions", async () => {
+    const spy = mockFetch({ questions: ["Widen my stance?", "Go lower?"] });
+    const qs = await api.chatFollowups(messages, context);
+    expect(qs).toEqual(["Widen my stance?", "Go lower?"]);
+    expect(spy.mock.calls[0][0]).toBe("/api/chat/followups");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ messages, context });
+  });
+
+  it("includes the chosen model when provided", async () => {
+    const spy = mockFetch({ questions: [] });
+    await api.chatFollowups(messages, context, "minimax/minimax-m3");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      messages,
+      context,
+      model: "minimax/minimax-m3",
+    });
+  });
+
+  it("returns [] on a non-ok response (best-effort, never throws)", async () => {
+    mockFetch({}, false, 503);
+    await expect(api.chatFollowups(messages, context)).resolves.toEqual([]);
+  });
+
+  it("defaults to [] when the body has no questions field", async () => {
+    mockFetch({});
+    await expect(api.chatFollowups(messages, context)).resolves.toEqual([]);
+  });
+});
+
+describe("api.conversations", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("getConversation GETs the per-video thread and returns it parsed", async () => {
+    const thread = { video_id: "vid", messages: [{ role: "user", content: "hi" }] };
+    const spy = mockFetch(thread);
+    const result = await api.getConversation("vid");
+    expect(result).toEqual(thread);
+    expect(spy.mock.calls[0][0]).toBe("/api/conversations/vid");
+  });
+
+  it("putConversation PUTs the thread body (chips default to empty when omitted)", async () => {
+    const spy = mockFetch({ video_id: "vid", messages: [] });
+    const msgs: ChatMessage[] = [{ role: "user", content: "why?" }];
+    await api.putConversation("vid", msgs);
+    expect(spy.mock.calls[0][0]).toBe("/api/conversations/vid");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ messages: msgs, followups: [] });
+  });
+
+  it("putConversation PUTs the followup chips when passed", async () => {
+    const spy = mockFetch({ video_id: "vid", messages: [] });
+    const msgs: ChatMessage[] = [{ role: "user", content: "why?" }];
+    const fups = ["Should I widen my stance?", "How low should I go?"];
+    await api.putConversation("vid", msgs, fups);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ messages: msgs, followups: fups });
+  });
+
+  it("putConversation throws on a non-ok response", async () => {
+    mockFetch({}, false, 500);
+    await expect(api.putConversation("vid", [])).rejects.toThrow(/500/);
   });
 });

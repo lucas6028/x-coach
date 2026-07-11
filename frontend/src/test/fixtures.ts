@@ -14,7 +14,7 @@ export const mockDetection: Detection = {
   end_frame: 75,
   peak_frame: 50,
   phase: "descent",
-  evidence: { valgus_angle: 0.35 },
+  evidence: { primary_label: "valgus angle", primary_value: 0.35 },
 };
 
 export const mockRetrieval: Retrieval = {

@@ -39,7 +39,7 @@ export default function MovementShowcase() {
   }, [active, paused, reduce]);
 
   return (
-    <section className={`${SECTION} border-t border-white/10 py-24`}>
+    <section className={`${SECTION} border-t border-white/10 py-16 sm:py-24`}>
       <Reveal>
         <h2 className="max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
           {t("landing.showcase.title")}
@@ -47,8 +47,8 @@ export default function MovementShowcase() {
         <p className="mt-4 max-w-xl text-zinc-400">{t("landing.showcase.sub")}</p>
       </Reveal>
 
-      <div className="mt-12 grid items-center gap-8 lg:grid-cols-12 lg:gap-10">
-        <Reveal className="lg:col-span-7" delay={0.05}>
+      <div className="mt-12 grid grid-cols-1 items-center gap-8 lg:grid-cols-12 lg:gap-10">
+        <Reveal className="min-w-0 lg:col-span-7" delay={0.05}>
           <SkeletonStage
             key={clip.id}
             clipId={clip.id}
@@ -63,8 +63,8 @@ export default function MovementShowcase() {
         </Reveal>
 
         {/* Selector: pick a movement, drives the stage */}
-        <div className="lg:col-span-5">
-          <ul className="grid gap-2.5">
+        <div className="min-w-0 lg:col-span-5">
+          <ul className="grid grid-cols-1 gap-2.5">
             {CLIPS.map((c, i) => {
               const isActive = i === active;
               const Ic = c.icon;

@@ -27,7 +27,13 @@ except ImportError:
     from langchain_text_splitters import RecursiveCharacterTextSplitter
     import networkx as nx
 
-DEFAULT_GRAPH_FILE = "data/kg/squat_kg_v2.graphml"
+from src.knowledge.kg_schema import (
+    DEFAULT_GRAPH_FILE as SCHEMA_GRAPH_FILE,
+    canonical_shared_names,
+    resolve_node_id,
+)
+
+DEFAULT_GRAPH_FILE = str(SCHEMA_GRAPH_FILE)
 
 CANONICAL_NODE_LABELS = {
     "action": "Action",
@@ -167,6 +173,13 @@ def normalize_kg(kg: KnowledgeGraph) -> KnowledgeGraph:
     seen_edges: set[tuple[str, str, str]] = set()
 
     for edge in kg.edges:
+        # Guard against a recurring LLM error where the `target` and `type` fields are
+        # swapped: the relationship keyword lands in `target` and the real target node
+        # name lands in `type` (e.g. target="CAUSED_BY", type="Weak Hip Abductors").
+        # Detect via the canonical edge-type table and swap them back before normalizing.
+        if (compact_key(edge.type) not in CANONICAL_EDGE_TYPES
+                and compact_key(edge.target) in CANONICAL_EDGE_TYPES):
+            edge.source, edge.target, edge.type = edge.source, edge.type, edge.target
         source_label = original_labels.get(edge.source, "Action")
         target_label = original_labels.get(edge.target, "Fault")
         normalized_source = original_to_canonical.get(edge.source, normalize_node_id(edge.source, source_label))
@@ -187,8 +200,13 @@ def normalize_kg(kg: KnowledgeGraph) -> KnowledgeGraph:
     return KnowledgeGraph(nodes=list(canonical_nodes.values()), edges=canonical_edges)
 
 
-def update_property_graph(kg: KnowledgeGraph, graph_file=DEFAULT_GRAPH_FILE):
-    """Adds the extracted Knowledge Graph data into a persistent NetworkX GraphML file."""
+def update_property_graph(kg: KnowledgeGraph, graph_file=DEFAULT_GRAPH_FILE, movement: str = "Squat"):
+    """Adds the extracted Knowledge Graph data into a persistent NetworkX GraphML file.
+
+    Node ids are placed in the multi-movement schema (docs/kg-schema-generalization.md):
+    scoped labels become `Movement:Name` (movement=<movement>); shared labels collapse
+    to their canonical vocab name (movement="shared"). See kg_schema.resolve_node_id.
+    """
     kg = normalize_kg(kg)
     if os.path.exists(graph_file):
         G = nx.read_graphml(graph_file)
@@ -201,17 +219,30 @@ def update_property_graph(kg: KnowledgeGraph, graph_file=DEFAULT_GRAPH_FILE):
         G = nx.MultiDiGraph()
         print(f"Created new Labeled Property Graph.")
 
-    # Add Nodes
+    # Map each extracted node id -> schema graph id, and add with movement tags.
+    canon = canonical_shared_names()
+    id_map: dict[str, str] = {}
     for node in kg.nodes:
-        if G.has_node(node.id):
-            G.nodes[node.id]['label'] = node.label
+        graph_id, attrs = resolve_node_id(node.id, node.label, movement)
+        id_map[node.id] = graph_id
+        # Third defense against shared-layer fragmentation (design note 5): a shared node
+        # whose name is neither a canonical vocab entry nor a known alias is genuinely new —
+        # flag it so it can be reviewed into shared_vocab_v1.json instead of silently forking.
+        if attrs.get("movement") == "shared" and attrs["name"] not in set(canon.get(node.label, [])):
+            print(f"  [vocab-review] new shared {node.label}: '{attrs['name']}' (not in shared_vocab_v1.json)")
+        if G.has_node(graph_id):
+            G.nodes[graph_id].update(attrs)
         else:
-            G.add_node(node.id, label=node.label)
+            G.add_node(graph_id, **attrs)
 
-    # Add Edges
+    # Add Edges (endpoints remapped through id_map)
     for edge in kg.edges:
+        source = id_map.get(edge.source, edge.source)
+        target = id_map.get(edge.target, edge.target)
+        if source == target:
+            continue
         edge_exists = False
-        existing_edge_data = G.get_edge_data(edge.source, edge.target)
+        existing_edge_data = G.get_edge_data(source, target)
         if existing_edge_data:
             if G.is_multigraph():
                 for _, edge_data in existing_edge_data.items():
@@ -223,7 +254,7 @@ def update_property_graph(kg: KnowledgeGraph, graph_file=DEFAULT_GRAPH_FILE):
                     edge_exists = True
         
         if not edge_exists:
-            G.add_edge(edge.source, edge.target, type=edge.type)
+            G.add_edge(source, target, type=edge.type)
 
     nx.write_graphml(G, graph_file)
     print(f"Graph updated and saved to {graph_file}")
@@ -249,6 +280,12 @@ def main():
     parser = argparse.ArgumentParser(description="Extract Knowledge Graph from Documents.")
     parser.add_argument("filepath", type=str, nargs='?', help="Path to the document (PDF, HTML, TXT)")
     parser.add_argument("--graph-file", type=str, default=DEFAULT_GRAPH_FILE, help="Path to the output GraphML file")
+    parser.add_argument("--movement", type=str, default="Squat",
+                        help="Movement this document is about; scoped nodes are namespaced under it (e.g. Squat, Lunge, Push-up).")
+    parser.add_argument("--model", type=str, default=os.environ.get("OPENROUTER_KG_MODEL", "openrouter/auto"),
+                        help="OpenRouter model id (default: $OPENROUTER_KG_MODEL or 'openrouter/auto'). "
+                             "'openrouter/auto' may route to a slow reasoning model (e.g. DeepSeek R1); "
+                             "pin a fast tool-calling model like 'google/gemini-2.5-flash' for structured extraction.")
     args = parser.parse_args()
 
     api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -258,23 +295,33 @@ def main():
         print("Please set it before running.")
         return
 
-    print("Initializing LLM pipeline (OpenRouter)...")
+    print(f"Initializing LLM pipeline (OpenRouter, model={args.model})...")
     llm = ChatOpenRouter(
-        model="openrouter/auto",
+        model=args.model,
         api_key=api_key,
         temperature=0
     )
     # llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
     structured_llm = llm.with_structured_output(KnowledgeGraph)
 
+    # Steer the shared layer toward the controlled vocabulary so this movement's Cause/Cue/
+    # Risk/QualityDimension nodes reuse existing shared ids instead of fragmenting them.
+    canon = canonical_shared_names()
+    vocab_lines = "\n".join(
+        f"  {lbl}: {', '.join(names)}" for lbl, names in canon.items() if names
+    )
+
     prompt = ChatPromptTemplate.from_messages([
-        ("system", "You are an expert sports biomechanics researcher building an AQA-ready knowledge graph.\n"
-                   "Extract only structured, high-value biomechanics knowledge that supports Action Quality Assessment.\n"
-                   "Prioritize squat-related fault analysis over broad exercise encyclopedia content.\n"
+        ("system", f"You are an expert sports biomechanics researcher building an AQA-ready knowledge graph.\n"
+                   f"The document concerns the '{args.movement}' movement. Extract only structured, high-value\n"
+                   f"biomechanics knowledge that supports Action Quality Assessment for this movement.\n"
                    "Focus on the chain: Action -> Fault -> Phase -> EvidenceSignal -> Cause -> Risk -> Cue / QualityDimension.\n"
                    "Entities must be exactly one of: Action, Phase, Fault, EvidenceSignal, Cause, Risk, Cue, QualityDimension.\n"
                    "Relationships must be one of: HAS_PHASE, HAS_FAULT, OCCURS_IN_PHASE, INDICATED_BY, CAUSED_BY, INCREASES_RISK_OF, CORRECTED_BY, AFFECTS_QUALITY.\n"
                    "Use concise canonical names, prefer singular concepts, and avoid duplicate casing variants.\n"
+                   "For the SHARED entity types (Cause, Cue, Risk, QualityDimension), PREFER these existing canonical\n"
+                   "names verbatim whenever the concept matches one of them (they are shared across movements):\n"
+                   f"{vocab_lines}\n"
                    "If the text is weakly structured, historical, promotional, or not actionable for AQA, extract only the strongest supported relationships."),
         ("human", "Extract the knowledge graph from the following text:\n\n{text}")
     ])
@@ -297,7 +344,7 @@ def main():
             try:
                 result = chain.invoke({"text": split.page_content})
                 if result and result.nodes:
-                    update_property_graph(result, graph_file=args.graph_file)
+                    update_property_graph(result, graph_file=args.graph_file, movement=args.movement)
                     print(f"Successfully extracted {len(result.nodes)} nodes and {len(result.edges)} edges from chunk {i+1}.")
                 else:
                     print(f"No relationships found in chunk {i+1}.")

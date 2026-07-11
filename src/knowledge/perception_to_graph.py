@@ -295,6 +295,7 @@ def retrieve_from_pose_faults(
                 graph_file=graph_file,
                 hops=hops,
                 max_seeds=3,
+                movement=action,
             )
         retrievals.append(
             {

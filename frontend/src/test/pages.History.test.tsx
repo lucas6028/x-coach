@@ -54,6 +54,41 @@ describe("History", () => {
     expect(screen.getByText("2 faults")).toBeInTheDocument();
   });
 
+  it("groups rows under one date header per day", async () => {
+    // Two rows on the same day + one 10 days earlier -> two day groups. Midday-UTC and a 10-day gap
+    // keep the day boundaries stable across timezones so the header count isn't TZ-dependent.
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 3,
+      items: [
+        item({ id: "a", created_at: "2026-06-20T12:00:00.000Z" }),
+        item({ id: "b", created_at: "2026-06-20T13:00:00.000Z" }),
+        item({ id: "c", created_at: "2026-06-10T12:00:00.000Z" }),
+      ],
+    });
+    renderHistory();
+    await screen.findAllByText("2 faults"); // wait for the ready state (3 rows share the badge)
+
+    // One <h2> date separator per distinct day (the page title is the only <h1>).
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(2);
+    // All three rows still render, each replayable.
+    expect(screen.getAllByRole("link", { name: /Side squat/i })).toHaveLength(3);
+  });
+
+  it("labels a single-fault rep and groups an unparseable date under a fallback header", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 2,
+      items: [
+        item({ id: "one", fault_count: 1, created_at: "2026-06-20T12:00:00.000Z" }),
+        item({ id: "bad", fault_count: 3, created_at: "not-a-date" }),
+      ],
+    });
+    renderHistory();
+    expect(await screen.findByText("1 fault")).toBeInTheDocument(); // faultOne branch
+    // The row with an unparseable timestamp still renders (grouped under its own fallback header).
+    expect(screen.getByText("3 faults")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { level: 2 })).toHaveLength(2);
+  });
+
   it("renders a clean badge for fault-free reps", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({
       total: 1,
@@ -81,11 +116,13 @@ describe("History", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it("signs out from the header", async () => {
+  it("signs out from the account menu in the shared navbar", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 0, items: [] });
     renderHistory();
     await screen.findByText("No saved analyses yet.");
-    await userEvent.click(screen.getByRole("button", { name: /Sign out/i }));
+    // Sign-out now lives in the unified navbar's account menu, not a page-local header button.
+    await userEvent.click(screen.getByRole("button", { name: /Account menu/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /Sign out/i }));
     await waitFor(() => expect(signOut).toHaveBeenCalled());
   });
 });

@@ -5,8 +5,9 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.18
-pydantic-settings==2.14.1
+pydantic-settings==2.14.2
 supabase>=2.0,<3
+httpx>=0.27,<0.29  # OpenRouter (LLM chat) client; also a transitive supabase dep — pinned explicitly here
 
 numpy==2.4.3
 opencv-python==4.13.0.92
@@ -16,11 +17,11 @@ networkx==3.6.1
 pydantic==2.12.5
 langchain==1.2.10
 langchain-core==1.2.28
-langchain-community==0.4.1
+langchain-community==0.4.2
 langchain-google-genai==4.2.1
 langchain-openrouter==0.2.1
 openrouter==0.8.1
-langchain-text-splitters==1.1.1
+langchain-text-splitters==1.1.2
 pypdf==6.8.0
 beautifulsoup4==4.15.0
 torch==2.11.0

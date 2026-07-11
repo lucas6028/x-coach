@@ -887,25 +887,39 @@ class MainAppTests(_TempConfigBase):
             "/api/video-file/{video_id}",
             "/api/knowledge/graph",
             "/api/knowledge/rag",
+            "/api/chat",
             "/api/health",
         ):
             self.assertIn(expected, paths)
 
+    def test_health_reports_chat_models_and_default(self) -> None:
+        resp = self.client.get("/api/health")
+        body = resp.json()
+        ids = body["chat_models"]  # a list of model-id strings
+        self.assertTrue(ids)
+        self.assertTrue(all(isinstance(m, str) for m in ids))
+        # The default is always one of the offered models.
+        self.assertIn(body["chat_default"], ids)
+
     def test_health_reports_auth_configured_true(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=True),
+            return_value=types.SimpleNamespace(auth_configured=True, chat_configured=True),
         ):
             resp = self.client.get("/api/health")
-        self.assertTrue(resp.json()["auth_configured"])
+        body = resp.json()
+        self.assertTrue(body["auth_configured"])
+        self.assertTrue(body["chat_configured"])
 
     def test_health_reports_auth_not_configured(self) -> None:
         with mock.patch(
             "backend.app.main.get_settings",
-            return_value=types.SimpleNamespace(auth_configured=False),
+            return_value=types.SimpleNamespace(auth_configured=False, chat_configured=False),
         ):
             resp = self.client.get("/api/health")
-        self.assertFalse(resp.json()["auth_configured"])
+        body = resp.json()
+        self.assertFalse(body["auth_configured"])
+        self.assertFalse(body["chat_configured"])
 
 
 # ------------------------------------------------------------------------- settings
@@ -925,6 +939,10 @@ class SettingsTests(unittest.TestCase):
             supabase_anon_key="",
         )
         self.assertFalse(s.auth_configured)
+
+    def test_chat_configured_tracks_llm_key(self) -> None:
+        self.assertTrue(app_settings.Settings(llm_api_key="sk-or-123").chat_configured)
+        self.assertFalse(app_settings.Settings(llm_api_key="").chat_configured)
 
     def test_get_settings_is_cached(self) -> None:
         app_settings.get_settings.cache_clear()
@@ -1205,10 +1223,11 @@ class StoreDeleteTests(unittest.TestCase):
             n = store.delete_all_analyses(token="t", user_id="u1")
         self.assertEqual(n, 2)
         self.assertTrue(query.deleted)
-        # Both the analyses and the source video rows are cleared.
-        self.assertEqual(client.table.call_count, 2)
+        # The analyses, source video, and conversation rows are all cleared.
+        self.assertEqual(client.table.call_count, 3)
         client.table.assert_any_call("analyses")
         client.table.assert_any_call("videos")
+        client.table.assert_any_call("conversations")
 
     def test_delete_all_handles_empty(self) -> None:
         client, _ = _fake_client(_Resp(data=None))
@@ -1227,6 +1246,53 @@ class StoreGetTests(unittest.TestCase):
         client, _ = _fake_client(_Resp(data=[]))
         with mock.patch.object(store, "_user_client", return_value=client):
             self.assertIsNone(store.get_analysis(token="t", analysis_id="ghost"))
+
+
+class StoreConversationTests(unittest.TestCase):
+    def test_upsert_conversation_writes_the_thread(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "c1"}]))
+        msgs = [{"role": "user", "content": "why did my knees cave?"}]
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.upsert_conversation(
+                token="t", user_id="u1", video_id="vid", messages=msgs, followups=["widen?"]
+            )
+        self.assertEqual(query.upserted["user_id"], "u1")
+        self.assertEqual(query.upserted["video_id"], "vid")
+        self.assertEqual(query.upserted["messages"], msgs)
+        self.assertEqual(query.upserted["followups"], ["widen?"])
+        client.table.assert_called_with("conversations")
+
+    def test_upsert_conversation_defaults_followups_to_empty(self) -> None:
+        # Omitting followups persists [] (a valid clear of the previous answer's chips).
+        client, query = _fake_client(_Resp(data=[{"id": "c1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.upsert_conversation(token="t", user_id="u1", video_id="vid", messages=[])
+        self.assertEqual(query.upserted["followups"], [])
+
+    def test_get_conversation_returns_messages_and_followups(self) -> None:
+        msgs = [
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "drive knees out"},
+        ]
+        fups = ["Should I widen my stance?", "How low should I go?"]
+        client, _ = _fake_client(_Resp(data=[{"messages": msgs, "followups": fups}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            out = store.get_conversation(token="t", video_id="vid")
+        self.assertEqual(out, {"messages": msgs, "followups": fups})
+
+    def test_get_conversation_none_when_no_thread(self) -> None:
+        client, _ = _fake_client(_Resp(data=[]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertIsNone(store.get_conversation(token="t", video_id="ghost"))
+
+    def test_get_conversation_defaults_null_fields_to_empty_lists(self) -> None:
+        # A saved-but-empty thread (or a pre-followups row) reads back as empty lists, not None.
+        client, _ = _fake_client(_Resp(data=[{"messages": None, "followups": None}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertEqual(
+                store.get_conversation(token="t", video_id="vid"),
+                {"messages": [], "followups": []},
+            )
 
 
 # ---------------------------------------------------------------- routers.analyses
@@ -1276,6 +1342,70 @@ class AnalysesRouterTests(unittest.TestCase):
     def test_requires_auth(self) -> None:
         app.dependency_overrides.clear()  # drop the override -> real dependency runs
         resp = self.client.get("/api/analyses")
+        self.assertEqual(resp.status_code, 401)
+
+
+# ------------------------------------------------------------- routers.conversations
+
+
+class ConversationsRouterTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+
+    def test_put_saves_the_thread_with_followups(self) -> None:
+        msgs = [
+            {"role": "user", "content": "why did my knees cave?"},
+            {"role": "assistant", "content": "drive knees out"},
+        ]
+        fups = ["Should I widen my stance?", "How low should I go?"]
+        with mock.patch.object(store, "upsert_conversation") as up:
+            resp = self.client.put(
+                "/api/conversations/vid", json={"messages": msgs, "followups": fups}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"video_id": "vid", "messages": msgs, "followups": fups})
+        up.assert_called_once_with(
+            token="tok", user_id="u1", video_id="vid", messages=msgs, followups=fups
+        )
+
+    def test_put_defaults_followups_to_empty_when_omitted(self) -> None:
+        # A PUT without `followups` is a valid clear, not a 422.
+        msgs = [{"role": "user", "content": "hi"}]
+        with mock.patch.object(store, "upsert_conversation") as up:
+            resp = self.client.put("/api/conversations/vid", json={"messages": msgs})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["followups"], [])
+        up.assert_called_once_with(
+            token="tok", user_id="u1", video_id="vid", messages=msgs, followups=[]
+        )
+
+    def test_get_restores_the_thread(self) -> None:
+        msgs = [{"role": "user", "content": "hi"}]
+        fups = ["Should I widen my stance?"]
+        with mock.patch.object(
+            store, "get_conversation", return_value={"messages": msgs, "followups": fups}
+        ) as gc:
+            resp = self.client.get("/api/conversations/vid")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"video_id": "vid", "messages": msgs, "followups": fups})
+        gc.assert_called_once_with(token="tok", video_id="vid")
+
+    def test_get_absent_thread_returns_empty(self) -> None:
+        with mock.patch.object(store, "get_conversation", return_value=None):
+            resp = self.client.get("/api/conversations/ghost")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"video_id": "ghost", "messages": [], "followups": []})
+
+    def test_put_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.put("/api/conversations/vid", json={"messages": []})
+        self.assertEqual(resp.status_code, 401)
+
+    def test_get_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.get("/api/conversations/vid")
         self.assertEqual(resp.status_code, 401)
 
 

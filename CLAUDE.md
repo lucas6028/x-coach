@@ -1,50 +1,82 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code in this repository. This file is a ROUTING HUB: core facts
+live here; everything long lives in the linked files. Machine-wide working rules
+(delegation, verification, escalation) live in `~/.claude/harness/` — read
+`~/.claude/harness/README.md` before any task that spans more than 3 steps or 3 files.
 
 ## What this is
 
-x-coach is a research prototype for **explainable exercise coaching feedback**. It links four pipelines so visual signals become grounded, interpretable advice: pose perception, video (VideoMAE) perception, rule-based biomechanics, and knowledge retrieval (RAG + knowledge graph). See `project-overview.md` / `研究計畫.md` for the full research framing (perception → GraphRAG → reasoning/generation → frontend); much of the reasoning/generation and frontend layers are still aspirational — the implemented code is the perception, rules, and retrieval foundation.
+x-coach is a research prototype for **explainable exercise coaching feedback**, now with
+a working web app on top of the research pipelines:
 
-## Environment & commands
+- **ML/perception library** in `src/` (pose, video, knowledge, rehab24, fit3d, egoexo)
+  with thin CLI entry points in `scripts/` — the research foundation.
+- **Backend** in `backend/` — FastAPI app (`backend/app/main.py`); routers: analyze,
+  analyses, chat, conversations, knowledge, videos; Supabase for auth/history;
+  chat via OpenRouter (spec: `specs/llm-chat-spec.md`).
+- **Frontend** in `frontend/` — React 18 + Vite + TypeScript + Tailwind, Supabase client.
 
-- The virtualenv is checked out at `.venv/`. Activate it first: `source .venv/bin/activate`. There is no `python` on PATH otherwise.
-- Install deps: `pip install -r requirements.txt`.
-- Tests are `unittest.TestCase` classes; run them with **pytest scoped to `tests/`** (a bare `pytest` collects the stale root-level `test_metadata.py` and errors out — see Notes):
-  - All tests: `python -m pytest tests/`
-  - Single file: `python -m pytest tests/test_pose_rule_detector.py`
-  - Single case: `python -m pytest tests/test_pose_rule_detector.py::PoseRuleDetectorTests::test_depth_rule_distinguishes_above_and_below_parallel`
-  - `unittest` also works: `python -m unittest discover -s tests -v`
-- `GOOGLE_API_KEY` is only needed for Gemini-backed knowledge-graph extraction (`src/knowledge/extract_kg.py`). Everything else, including RAG, runs fully offline.
+Research framing: `project-overview.md` / `研究計畫.md`. Experiment results: `notes/`.
+KG schema docs: `docs/kg-schema-generalization.md`, `docs/movement-kg-expansion-plan.md`.
+
+## Environment & commands (Windows — this machine has NO `python` on PATH)
+
+- **Python interpreter:** always `.venv\Scripts\python.exe` (from repo root).
+  NEVER `source .venv/bin/activate` (POSIX-only, fails here), never bare `python`/`pip`.
+  Use `.venv\Scripts\python.exe -m pip install ...` for deps.
+  `.venv-mmpose\` is a second venv ONLY for the `--runtime mmpose` pose path.
+- **Backend/ML tests:** `.venv\Scripts\python.exe -m pytest tests/` (always scope to
+  `tests/`; never bare `pytest`).
+  Single case: append `tests/test_x.py::Class::test_name`.
+- **Backend coverage gate (CI enforces 95%):**
+  `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95`
+- **Frontend:** ALL yarn/vitest commands must run with cwd = `frontend/` (the Bash and
+  PowerShell tools share one cwd — a stray `cd` elsewhere mass-fails vitest).
+  `yarn dev` / `yarn test` (vitest run) / `yarn test:coverage` / `yarn build`.
+- **CI** (`.github/workflows/ci.yml`): backend pytest (py 3.11/3.12) + coverage gate;
+  frontend `yarn test:coverage`. Match it locally before claiming tests pass.
+- `GOOGLE_API_KEY` is only needed for Gemini KG extraction (`src/knowledge/extract_kg.py`).
+  Everything else, including RAG, runs fully offline.
+- **Kaggle:** drive the Kaggle CLI via `uv` in the shell. Do NOT use the `kaggle` MCP
+  tools — most are broken vs. the SDK (see memory `kaggle-mcp-buggy-use-cli`).
+- Always launch Claude Code sessions from the repo root (not `frontend/`), otherwise the
+  session gets a separate, empty memory directory.
 
 ## Architecture: scripts vs src
 
-The most important structural convention: **`scripts/` are thin CLI entry points; all logic lives in `src/`.** Each script bootstraps the repo root onto `sys.path` (`PROJECT_ROOT = Path(__file__).resolve().parents[2]`) and then calls a `main()` (or function) in the matching `src/` module. Modules import each other by absolute package path from the repo root (`from src.pose.pose_rule_detector import ...`), so **run everything from the repository root**, not from inside `scripts/`.
+**`scripts/` are thin CLI entry points; all logic lives in `src/`.** Each script
+bootstraps the repo root onto `sys.path` and calls into the matching `src/` module.
+Modules import by absolute package path (`from src.pose... import ...`), so **run
+everything from the repository root**. Workflow commands per area:
+`scripts/{pose,video,knowledge,rehab24,egoexo}/README.md`.
 
-`src/` and `scripts/` mirror each other in four workflow areas:
-
-- **`pose/`** — MediaPipe / RTMPose landmark extraction (`process_videos.py`, `rtmpose_pose_extraction.py` adapts COCO-WholeBody to the MediaPipe 33-landmark layout; defaults to RTMPose/RTMW via `rtmlib`, with an optional `--runtime mmpose` path for OpenMMLab models such as HRNet), pose features, camera-view estimation, and `pose_rule_detector.py` (interpretable squat-fault rules over 33 landmarks with tunable thresholds).
-- **`video/`** — VideoMAE spatio-temporal feature extraction and lightweight video-level error classifiers (`videomae_video_classifier.py`), plus experiment grids and error analysis.
-- **`knowledge/`** — local RAG (`rag_vector_db.py`) and the squat knowledge graph (`extract_kg.py`, `graph_retrieval.py`, `perception_to_graph.py`). The RAG store uses a built-in offline `HashEmbeddingBackend`, so the vector DB builds/queries with no external API.
-- **`rehab24/`** — REHAB24-6 dataset pipeline: repetition-level manifest + subject-wise splits, skeleton features (local), VideoMAE features (GPU/Colab), feature fusion, and a correctness classifier.
-- **`fit3d/`** — Fit3D (AIFit) mocap-grade 3D ground truth + 4 calibrated views, used to measure the depth bottleneck *directly*: `dataset.py` (H36M-17-core joint layout + world→camera→image projection), `biomech.py` (squat cues computed identically from 3D truth or 2D projection), `view_dependence.py` (experiment 2: which cues survive single-view 2D — runs locally), `depth_eval.py` (experiment 1: in-plane vs depth error of monocular 3D vs GT — needs GPU predictions).
-
-**Cross-pipeline link:** `pose_rule_detector` can enrich detected faults with retrieved knowledge via `src/knowledge/graph_retrieval.py` (the RAG/KG store under `data/rag/vector_db` and `data/kg`). This retrieval is optional — pass `--no-retrieval` to run rules standalone.
-
-Common workflow commands live in the per-directory READMEs: `scripts/{pose,video,knowledge,rehab24,fit3d}/README.md`.
+Cross-pipeline link: `pose_rule_detector` enriches detected faults with retrieved
+knowledge via `src/knowledge/graph_retrieval.py` (stores under `data/rag/vector_db` and
+`data/kg`); pass `--no-retrieval` to run rules standalone.
 
 ## Data layout
 
-Pipelines read/write under `data/` and paths are resolved relative to the repo root inside each module (`REPO_ROOT = Path(__file__).resolve().parents[2]`):
+Pipelines read/write under `data/`, resolved relative to the repo root:
+`data/Squat/{Unlabeled,Labeled}_Dataset/` (videos, pose JSON, features, splits, labels),
+`data/REHAB24-6/`, `data/kg/` (graphml + canonical mapping), `data/rag/{docs,vector_db}/`.
 
-- `data/Squat/{Unlabeled,Labeled}_Dataset/` — videos, processed pose JSON, pose features, VideoMAE features, `Splits/`, `Labels/`.
-- `data/REHAB24-6/` — REHAB24-6 source data and derived features.
-- `data/Fit3D/{train,test}/<subj>/` — Fit3D `joints3d_25` (world-metre 3D GT), `camera_parameters` (4 views), `videos`, `smplx`, `rep_ann.json`; derived outputs under `data/Fit3D/derived/`.
-- `data/kg/` — knowledge-graph `.graphml` files and canonical mapping JSON under `data/kg/docs/`.
-- `data/rag/{docs,vector_db}/` — RAG source documents and the built index (chunks, hash embeddings, manifest).
+## Style & conventions
 
-## Notes for working here
+- ML modules favor a local-first, dependency-light style (stdlib + numpy/networkx),
+  pure-function helpers unit-tested in isolation.
+- Tests are `unittest.TestCase` classes under `tests/` (backend + ML) and vitest files
+  under `frontend/src/test/` (frontend). New code gets tests in the matching suite.
+- `AGENTS.md` is a pointer to this file — never duplicate content into it.
 
-- Modules favor a local-first, dependency-light style (stdlib + numpy/networkx; pure-function helpers that are unit-tested in isolation — e.g. `compute_frame_metrics`, feature-vector builders, normalization payloads).
-- `test_metadata.py` at the repo root is a stale ad-hoc script (imports the old `src.rag_vector_db` path, which no longer exists). It is not a real test and breaks bare `pytest` collection — scope test runs to `tests/`. Prefer the modules under `src/knowledge/`; don't model new code on it.
-- `notes/` holds experiment summaries and results; `docs/` has longer walkthroughs (KG LLM extraction, MediaPipe processing).
+## graphify
+
+Project knowledge graph at `graphify-out/` (graph.json + GRAPH_REPORT.md; no wiki/).
+
+- Use `graphify query "<question>"` for ARCHITECTURE questions (how subsystems relate,
+  what calls what across files). For a known symbol or string, use Grep directly — it is
+  cheaper and faster.
+- `graphify path "<A>" "<B>"` for relationships; `graphify explain "<concept>"` for one
+  concept; `GRAPH_REPORT.md` only for broad architecture review.
+- After modifying code, run `graphify update .` (AST-only, no API cost). Note the graph
+  is scoped to the project proper (memory `graphify-graph-scoped`).

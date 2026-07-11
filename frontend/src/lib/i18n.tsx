@@ -16,12 +16,35 @@ type Dict = Record<string, string>;
 // English is the source/fallback dictionary; every key here should have a zh-Hant counterpart.
 const en: Dict = {
   // Sidebar
+  "nav.newAnalysis": "New analysis",
   "nav.analyse": "Analyse",
   "nav.library": "Library",
+  "nav.games": "Games",
   "nav.hide": "Hide navigation",
   "nav.show": "Show navigation",
   "sidebar.version": "Prototype v0.1",
   "sidebar.tagline": "Pose · Rules · GraphRAG",
+
+  // Games hub — the App-Store-style catalog of the pose mini-games
+  "games.title": "Games",
+  "games.badge": "Move to play",
+  "games.heading": "Pose Arcade",
+  "games.sub":
+    "Camera mini-games powered by the same MediaPipe pose engine behind x-coach. Get up and move — we'll estimate the calories you burn.",
+  "games.totalTitle": "Calories burned",
+  "games.kcalUnit": "kcal",
+  "games.totalSub": "Estimated across {n} rounds",
+  "games.totalSubOne": "Estimated across 1 round",
+  "games.totalEmpty": "Play a round to start burning.",
+  "games.play": "Play",
+  "games.stat.bestScore": "best",
+  "games.stat.bestCount": "best 67s",
+  "games.ninja.desc": "Your hands are the blades — slice the flying fruit, dodge the bombs.",
+  "games.six.desc": "Do the 6-7 bob: raise one hand then the other and rack up as many as you can.",
+
+  // Per-round calorie estimate (shown on each game's over screen)
+  "game.kcal.est": "≈ {n} kcal",
+  "game.kcal.note": "estimated",
 
   // Header
   "header.session": "Session: {id}",
@@ -62,9 +85,29 @@ const en: Dict = {
   "metric.landmarkConf": "landmark confidence",
   "metric.framesRatio": "{valid}/{total} frames",
 
-  // Chat input
-  "chat.placeholder": "Ask the AI Coach… (LLM layer coming soon)",
+  // Chat input — disabled fallback (auth/LLM not configured) + the working grounded chat.
+  "chat.placeholder": "Ask Lumen… (LLM layer coming soon)",
   "chat.title": "Conversational coaching arrives with the LLM layer.",
+  "chat.heading": "Lumen",
+  "chat.grounded": "grounded in your analysis",
+  "chat.groundedShort": "grounded",
+  "chat.intro": "Ask a follow-up about your squat. Answers stay grounded in the detected faults and retrieved cues.",
+  "chat.suggestFix": "What should I fix first?",
+  "chat.suggestDrill": "Show me a drill for this",
+  "chat.suggestWhy": "Why does this matter?",
+  "chat.placeholderActive": "Ask a follow-up…",
+  "chat.send": "Send message",
+  "chat.thinking": "Lumen is thinking…",
+  "chat.signIn": "Sign in to chat with Lumen about this analysis.",
+  "chat.error": "Couldn't reach Lumen. Please try again.",
+  "chat.sessionExpired": "Your session expired. Please sign in again to keep chatting.",
+  "chat.you": "You",
+  "chat.coach": "Lumen",
+  "coach.followUp": "Follow-up",
+  "loader.aria": "Lumen is working",
+  "loader.step1": "Reading pose",
+  "loader.step2": "Checking mechanics",
+  "loader.step3": "Lighting the why",
 
   // Library picker
   "library.title": "Sample Library",
@@ -84,6 +127,8 @@ const en: Dict = {
   "feedback.graphragContext": "GraphRAG Context",
   "feedback.likelyCause": "Likely cause:",
   "feedback.injuryRisk": "Injury risk:",
+  "feedback.cause": "Cause",
+  "feedback.risk": "Risk",
   "feedback.cue": "Cue",
   "feedback.phaseTag": "during {phase} phase",
 
@@ -323,6 +368,10 @@ const en: Dict = {
   "settings.provider": "Signed in with",
   "settings.provider.google": "Google",
   "settings.provider.email": "Email & password",
+  "settings.model": "Coach model",
+  "settings.modelDesc": "Choose which LLM answers your follow-up questions. Applies to new messages.",
+  "settings.modelDefault": "Default",
+  "settings.modelLoading": "Loading models…",
   "settings.danger": "Danger zone",
   "settings.clearTitle": "Clear saved analyses",
   "settings.clearDesc": "Permanently delete all of your saved analyses. This cannot be undone.",
@@ -352,16 +401,118 @@ const en: Dict = {
   "history.clean": "clean rep",
   "history.faultOne": "1 fault",
   "history.faultMany": "{count} faults",
+
+  // 67 (mini-game) — the "six seven" meme gesture counter
+  "nav.six": "67",
+  "six.title": "67",
+  "six.badge": "Brainrot · one camera",
+  "six.heading": "How many 67s can you hit?",
+  "six.sub":
+    "The 6-7 bob, counted. Hold both hands out and bounce them up and down, one at a time — six… seven… — and rack up as many as you can. Same MediaPipe pose tracking x-coach uses, pointed at the meme.",
+  "six.how1": "Stand back so both hands and shoulders are in frame.",
+  "six.how2": "Raise one hand, then the other — every switch is one 67.",
+  "six.how3": "Keep the rhythm going for a combo. {s} seconds on the clock.",
+  "six.leftHand": "left hand up",
+  "six.rightHand": "right hand up",
+  "six.startBtn": "Enable camera & go",
+  "six.starting": "Starting camera…",
+  "six.cameraNote": "Runs on-device. {s}-second sprint.",
+  "six.error": "Couldn't start the camera.",
+
+  // In-round HUD
+  "six.hud.time": "Time",
+  "six.hud.label": "sixty-sevens",
+  "six.hud.combo": "{n}× rhythm",
+
+  // Over screen
+  "six.over.title": "Time! You hit",
+  "six.over.combo": "Best rhythm streak: {n}",
+  "six.over.nameLabel": "Add your name to the board",
+  "six.over.namePlaceholder": "Your name",
+  "six.over.save": "Save",
+  "six.over.anon": "Anonymous",
+  "six.over.ranked": "You're #{rank} on the local board!",
+  "six.over.notRanked": "Saved — keep bobbing to crack the top 10.",
+  "six.over.replay": "Go again",
+
+  // Leaderboard
+  "six.board.title": "Top 67s",
+  "six.board.empty": "No scores yet — be the first!",
+  "six.board.you": "You",
+  "six.board.count": "{n} × 67",
+
+  // Fruit Ninja (mini-game)
+  "nav.ninja": "Fruit Ninja",
+  "ninja.title": "Fruit Ninja",
+  "ninja.badge": "Slice · MediaPipe",
+  "ninja.heading": "Your hands are the blades.",
+  "ninja.sub":
+    "Fruit flies up, you slice it with your bare hands. MediaPipe tracks both wrists in real time — the same pose engine behind x-coach's squat analysis — and turns every swipe into a blade.",
+  "ninja.how1": "Stand back so your hands and shoulders are in frame.",
+  "ninja.how2": "Swipe a hand through the flying fruit to slice it. Fast swipes cut.",
+  "ninja.how3": "Dodge the 💣, and don't drop {lives} fruits — chain cuts for a combo.",
+  "ninja.startBtn": "Enable camera & slice",
+  "ninja.starting": "Starting camera…",
+  "ninja.cameraNote": "Runs on-device. Two-handed play works great.",
+  "ninja.deckTitle": "On the board",
+  "ninja.error": "Couldn't start the camera.",
+
+  // In-round HUD
+  "ninja.hud.score": "Score",
+  "ninja.hud.lives": "Lives",
+  "ninja.hud.combo": "{n} combo!",
+  "ninja.hud.boom": "💥 BOOM",
+  "ninja.hud.slice": "Swipe to slice",
+
+  // Over screen
+  "ninja.over.title": "Round over",
+  "ninja.over.bombed": "You hit a bomb!",
+  "ninja.over.combo": "Best combo: {n}",
+  "ninja.over.nameLabel": "Add your name to the board",
+  "ninja.over.namePlaceholder": "Your name",
+  "ninja.over.save": "Save",
+  "ninja.over.anon": "Anonymous",
+  "ninja.over.ranked": "You're #{rank} on the local board!",
+  "ninja.over.notRanked": "Saved — keep slicing to crack the top 10.",
+  "ninja.over.replay": "Play again",
+
+  // Leaderboard
+  "ninja.board.title": "Top slicers",
+  "ninja.board.empty": "No scores yet — be the first!",
+  "ninja.board.you": "You",
 };
 
 const zhHant: Dict = {
   // Sidebar
+  "nav.newAnalysis": "新增分析",
   "nav.analyse": "分析",
   "nav.library": "資料庫",
+  "nav.games": "小遊戲",
   "nav.hide": "隱藏導覽列",
   "nav.show": "顯示導覽列",
   "sidebar.version": "原型 v0.1",
   "sidebar.tagline": "姿態 · 規則 · GraphRAG",
+
+  // 小遊戲中心 — App Store 風格的姿態小遊戲總覽
+  "games.title": "小遊戲",
+  "games.badge": "動起來就能玩",
+  "games.heading": "姿態遊戲場",
+  "games.sub":
+    "用與 x-coach 同一套 MediaPipe 姿態引擎打造的鏡頭小遊戲。站起來動一動——我們會估算你消耗的卡路里。",
+  "games.totalTitle": "累計消耗",
+  "games.kcalUnit": "大卡",
+  "games.totalSub": "估計自 {n} 場遊戲",
+  "games.totalSubOne": "估計自 1 場遊戲",
+  "games.totalEmpty": "玩一場開始燃燒吧。",
+  "games.play": "開始遊玩",
+  "games.stat.bestScore": "最高分",
+  "games.stat.bestCount": "最多 67",
+  "games.ninja.desc": "你的雙手就是刀——切開飛來的水果，閃避炸彈。",
+  "games.six.desc": "做「6-7」抖手：一手上一手下輪流擺動，盡量累積次數。",
+
+  // 每回合卡路里估計（顯示於各遊戲的結算畫面）
+  "game.kcal.est": "≈ {n} 大卡",
+  "game.kcal.note": "估計值",
 
   // Header
   "header.session": "工作階段：{id}",
@@ -402,9 +553,29 @@ const zhHant: Dict = {
   "metric.landmarkConf": "關鍵點信心度",
   "metric.framesRatio": "{valid}/{total} 影格",
 
-  // Chat input
-  "chat.placeholder": "詢問 AI 教練…（LLM 功能即將推出）",
+  // Chat input — disabled fallback (auth/LLM not configured) + the working grounded chat.
+  "chat.placeholder": "詢問 Lumen…（LLM 功能即將推出）",
   "chat.title": "對話式教練功能將隨 LLM 層推出。",
+  "chat.heading": "Lumen",
+  "chat.grounded": "根據你的分析",
+  "chat.groundedShort": "有依據",
+  "chat.intro": "針對你的深蹲追問後續問題，回答將僅根據偵測到的錯誤與檢索到的提示。",
+  "chat.suggestFix": "我該先修正什麼？",
+  "chat.suggestDrill": "給我一個矯正動作",
+  "chat.suggestWhy": "這為什麼重要？",
+  "chat.placeholderActive": "追問後續問題…",
+  "chat.send": "傳送訊息",
+  "chat.thinking": "Lumen 思考中…",
+  "chat.signIn": "登入即可就本次分析與 Lumen 對話。",
+  "chat.error": "無法連線至 Lumen，請再試一次。",
+  "chat.sessionExpired": "登入階段已過期，請重新登入以繼續對話。",
+  "chat.you": "你",
+  "chat.coach": "Lumen",
+  "coach.followUp": "後續追問",
+  "loader.aria": "Lumen 分析中",
+  "loader.step1": "讀取姿勢",
+  "loader.step2": "對照力學",
+  "loader.step3": "照亮原因",
 
   // Library picker
   "library.title": "範例資料庫",
@@ -424,6 +595,8 @@ const zhHant: Dict = {
   "feedback.graphragContext": "GraphRAG 脈絡",
   "feedback.likelyCause": "可能原因：",
   "feedback.injuryRisk": "受傷風險：",
+  "feedback.cause": "原因",
+  "feedback.risk": "風險",
   "feedback.cue": "提示",
   "feedback.phaseTag": "（{phase}階段）",
 
@@ -662,6 +835,10 @@ const zhHant: Dict = {
   "settings.provider": "登入方式",
   "settings.provider.google": "Google",
   "settings.provider.email": "電子郵件與密碼",
+  "settings.model": "教練模型",
+  "settings.modelDesc": "選擇回答你追問的 LLM 模型，套用於之後的新訊息。",
+  "settings.modelDefault": "預設",
+  "settings.modelLoading": "載入模型中…",
   "settings.danger": "危險區域",
   "settings.clearTitle": "清除已存分析",
   "settings.clearDesc": "永久刪除你所有已存的分析，此操作無法復原。",
@@ -690,6 +867,85 @@ const zhHant: Dict = {
   "history.clean": "標準動作",
   "history.faultOne": "1 個錯誤",
   "history.faultMany": "{count} 個錯誤",
+
+  // 67（小遊戲）— 「six seven」迷因手勢計數
+  "nav.six": "67",
+  "six.title": "67",
+  "six.badge": "迷因 · 一台鏡頭",
+  "six.heading": "你能做出幾次 67？",
+  "six.sub":
+    "把「6-7」抖手動作變成計數遊戲。雙手往前伸，一上一下輪流擺動——six… seven…——盡量累積次數。用的正是 x-coach 分析姿態的同一套 MediaPipe 追蹤，對準了這個迷因。",
+  "six.how1": "站遠一點，讓雙手與肩膀都進到畫面。",
+  "six.how2": "先舉一隻手，再換另一隻——每次交替算一個 67。",
+  "six.how3": "保持節奏就能累積連擊。限時 {s} 秒。",
+  "six.leftHand": "左手在上",
+  "six.rightHand": "右手在上",
+  "six.startBtn": "開啟鏡頭開始",
+  "six.starting": "啟動鏡頭中…",
+  "six.cameraNote": "全程裝置端運算。{s} 秒衝刺。",
+  "six.error": "無法啟動鏡頭。",
+
+  // 回合中 HUD
+  "six.hud.time": "時間",
+  "six.hud.label": "六七次數",
+  "six.hud.combo": "{n}× 節奏",
+
+  // 結算畫面
+  "six.over.title": "時間到！你完成了",
+  "six.over.combo": "最佳節奏連擊：{n}",
+  "six.over.nameLabel": "把名字加進排行榜",
+  "six.over.namePlaceholder": "你的名字",
+  "six.over.save": "儲存",
+  "six.over.anon": "匿名",
+  "six.over.ranked": "你在本地排行榜第 {rank} 名！",
+  "six.over.notRanked": "已儲存——繼續抖手擠進前 10 名。",
+  "six.over.replay": "再玩一次",
+
+  // 排行榜
+  "six.board.title": "67 排行榜",
+  "six.board.empty": "還沒有紀錄——搶第一個吧！",
+  "six.board.you": "你",
+  "six.board.count": "{n} × 67",
+
+  // 水果忍者（小遊戲）
+  "nav.ninja": "水果忍者",
+  "ninja.title": "水果忍者",
+  "ninja.badge": "切水果 · MediaPipe",
+  "ninja.heading": "你的雙手就是刀。",
+  "ninja.sub":
+    "水果往上飛，用你的雙手把它切開。MediaPipe 即時追蹤雙手手腕——與 x-coach 深蹲分析同一套姿態引擎——把每一次揮動變成一把刀。",
+  "ninja.how1": "站遠一點，讓雙手與肩膀都進到畫面。",
+  "ninja.how2": "揮手劃過飛來的水果就能切開，要夠快才切得動。",
+  "ninja.how3": "閃避 💣，別漏接 {lives} 顆水果——連續切開累積連擊。",
+  "ninja.startBtn": "開啟鏡頭開切",
+  "ninja.starting": "啟動鏡頭中…",
+  "ninja.cameraNote": "全程裝置端運算。雙手一起玩最過癮。",
+  "ninja.deckTitle": "會出現的東西",
+  "ninja.error": "無法啟動鏡頭。",
+
+  // 回合中 HUD
+  "ninja.hud.score": "分數",
+  "ninja.hud.lives": "生命",
+  "ninja.hud.combo": "{n} 連擊！",
+  "ninja.hud.boom": "💥 爆炸",
+  "ninja.hud.slice": "揮手切開",
+
+  // 結算畫面
+  "ninja.over.title": "回合結束",
+  "ninja.over.bombed": "你切到炸彈了！",
+  "ninja.over.combo": "最高連擊：{n}",
+  "ninja.over.nameLabel": "把名字加進排行榜",
+  "ninja.over.namePlaceholder": "你的名字",
+  "ninja.over.save": "儲存",
+  "ninja.over.anon": "匿名",
+  "ninja.over.ranked": "你在本地排行榜第 {rank} 名！",
+  "ninja.over.notRanked": "已儲存——繼續切擠進前 10 名。",
+  "ninja.over.replay": "再玩一次",
+
+  // 排行榜
+  "ninja.board.title": "切水果排行榜",
+  "ninja.board.empty": "還沒有紀錄——搶第一個吧！",
+  "ninja.board.you": "你",
 };
 
 const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };

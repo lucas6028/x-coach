@@ -45,6 +45,16 @@ describe("DemoIntro", () => {
     expect(screen.getByRole("button", { name: /Open a sample clip/i })).toBeDisabled();
   });
 
+  it("swaps the dropzone for the Lumen scan loader while loading", () => {
+    renderWithProviders(
+      <DemoIntro onFile={vi.fn()} onOpenLibrary={vi.fn()} loading={true} statusMsg="Extracting pose…" error="" />
+    );
+    // The Lumen waiting state takes over the upload target, carrying the status message…
+    expect(screen.getByRole("status")).toHaveAttribute("aria-label", "Extracting pose…");
+    // …and the idle dropzone prompt is gone.
+    expect(screen.queryByText(/Drop a squat video/i)).not.toBeInTheDocument();
+  });
+
   it("shows the error panel when error is non-empty", () => {
     renderWithProviders(
       <DemoIntro onFile={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="Video too short" />

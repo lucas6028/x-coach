@@ -57,8 +57,8 @@ HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
 } as unknown as CanvasRenderingContext2D);
 
 // Stub requestAnimationFrame — tests don't need real animation frames.
-vi.stubGlobal("requestAnimationFrame", vi.fn((cb: FrameRequestCallback) => {
-  // Don't call cb — components that depend on rAF loops won't loop in tests.
+vi.stubGlobal("requestAnimationFrame", vi.fn((_cb: FrameRequestCallback) => {
+  // Don't call the callback — components that depend on rAF loops won't loop in tests.
   return 0;
 }));
 vi.stubGlobal("cancelAnimationFrame", vi.fn());

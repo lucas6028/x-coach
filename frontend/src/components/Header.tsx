@@ -10,10 +10,13 @@ import AccountMenu from "./AccountMenu";
 interface Props {
   analysis: Analysis | null;
   loading: boolean;
+  // A plain page title (History/Settings). When set, the navbar shows just this name and drops the
+  // analysis status line; the studio leaves it unset to show the session + status pill.
+  title?: string;
   onMenu?: () => void;
 }
 
-export default function Header({ analysis, loading, onMenu }: Props) {
+export default function Header({ analysis, loading, title, onMenu }: Props) {
   const { t } = useI18n();
   const { user } = useAuth();
   return (
@@ -27,24 +30,30 @@ export default function Header({ analysis, loading, onMenu }: Props) {
       </button>
       <div className="flex flex-1 flex-col min-w-0">
         <h1 className="text-content text-base lg:text-lg font-bold tracking-tight truncate">
-          {analysis ? t("header.session", { id: analysis.video_id }) : t("header.title")}
+          {title ?? (analysis ? t("header.session", { id: analysis.video_id }) : t("header.title"))}
         </h1>
-        <div className="flex items-center gap-2 text-[11px] text-muted font-mono">
-          <span
-            className={`inline-block w-2 h-2 rounded-full ${
-              loading ? "bg-yellow-400 animate-pulse" : analysis ? "bg-green-500" : "bg-faint"
-            }`}
-          />
-          {loading ? t("header.processing") : analysis ? t("header.complete") : t("header.awaiting")}
-          {analysis && (
-            <>
-              <span className="text-faint">|</span>
-              <span>{t("header.view", { type: viewLabel(t, analysis.view.view_type) })}</span>
-              <span className="text-faint hidden sm:inline">|</span>
-              <span className="hidden sm:inline uppercase">{analysis.source}</span>
-            </>
-          )}
-        </div>
+        {!title && (
+          <div className="flex items-center gap-2 text-[11px] text-muted font-mono">
+            <span
+              className={`inline-block w-2 h-2 rounded-full ${
+                loading ? "bg-yellow-400 animate-pulse" : analysis ? "bg-green-500" : "bg-faint"
+              }`}
+            />
+            {loading
+              ? t("header.processing")
+              : analysis
+                ? t("header.complete")
+                : t("header.awaiting")}
+            {analysis && (
+              <>
+                <span className="text-faint">|</span>
+                <span>{t("header.view", { type: viewLabel(t, analysis.view.view_type) })}</span>
+                <span className="text-faint hidden sm:inline">|</span>
+                <span className="hidden sm:inline uppercase">{analysis.source}</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Top-right controls: language, theme, account. */}

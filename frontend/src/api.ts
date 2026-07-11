@@ -116,6 +116,99 @@ export interface StoredAnalysis {
   result: Analysis;
 }
 
+// ---- Conversational coaching (LLM chat, grounded in an analysis) --------------------------
+
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+// One detected fault plus its retrieved knowledge, as the frontend already derives it for the
+// ReasoningLog view. Sent to the backend so it can build a grounded system prompt server-side.
+export interface ChatFaultContext {
+  fault_name: string;
+  phase?: string;
+  severity?: number;
+  start_time?: number;
+  end_time?: number;
+  evidence?: string;
+  causes: string[];
+  risks: string[];
+  corrections: string[];
+  rag_snippet?: string | null;
+}
+
+export interface ChatContext {
+  video_id?: string;
+  view_type?: string;
+  view_confidence?: number;
+  fault_count: number;
+  quality: Record<string, number>;
+  faults: ChatFaultContext[];
+}
+
+// Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
+// failure (LLM provider connect/mid-stream/empty) — the stream already returned 200, so it is not a
+// thrown ChatError. A pre-flight failure (401/422/503) is thrown as a ChatError before any of these
+// fire, so the two failure modes stay distinguishable to the caller.
+export interface ChatStreamHandlers {
+  onDelta: (text: string) => void;
+  onDone: (model: string) => void;
+  onError: (detail: string) => void;
+}
+
+// A persisted chat thread for one analysed video (one per user+video_id). Restored on history-replay.
+// `followups` is the latest answer's grounded next-question chips, persisted so a reload restores the
+// chips too (not just the answer). Optional — absent/empty for pre-followups rows or a cleared thread.
+export interface Conversation {
+  video_id: string;
+  messages: ChatMessage[];
+  followups?: string[];
+}
+
+// The coach-model picker is server-driven (from /api/health): the authoritative list of selectable
+// model ids + which is the default. Display names/logos are a frontend concern (see ModelIcon).
+export interface HealthResponse {
+  status: string;
+  auth_configured?: boolean;
+  chat_configured?: boolean;
+  chat_models?: string[];
+  chat_default?: string;
+}
+
+// Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
+// event line, or an unparseable data payload, is ignored (keep-alives / partial writes).
+function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
+  let event = "";
+  const dataLines: string[] = [];
+  for (const line of frame.split("\n")) {
+    if (line.startsWith("event:")) event = line.slice(6).trim();
+    else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+  }
+  if (!event) return;
+  let data: { text?: string; model?: string; detail?: string };
+  try {
+    data = JSON.parse(dataLines.join("\n"));
+  } catch {
+    return;
+  }
+  if (event === "delta") handlers.onDelta(data.text ?? "");
+  else if (event === "done") handlers.onDone(data.model ?? "");
+  else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
+}
+
+// Carries the HTTP status so the UI can tell an expired session (401) apart from an LLM outage
+// (502/503) and message the user accordingly, instead of a single undifferentiated failure.
+export class ChatError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "ChatError";
+  }
+}
+
 export interface LibraryItem {
   video_id: string;
   split: string;
@@ -146,7 +239,7 @@ async function getJSON<T>(url: string): Promise<T> {
 }
 
 export const api = {
-  health: () => getJSON<{ status: string }>("/api/health"),
+  health: () => getJSON<HealthResponse>("/api/health"),
 
   listVideos: (limit = 50, offset = 0, fault?: string) =>
     getJSON<LibraryPage>(
@@ -172,6 +265,91 @@ export const api = {
     const res = await fetch("/api/analyses", { method: "DELETE", headers: await authHeader() });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/analyses`);
     return (await res.json()) as { deleted: number };
+  },
+
+  // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
+  // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user
+  // turn last; `context` is the compact grounding blob from buildChatContext(analysis). Deltas,
+  // completion, and in-band errors are delivered via `handlers`; a pre-flight failure (before the
+  // stream opens) throws a ChatError carrying the HTTP status so the caller can tell an expired
+  // session (401) from an LLM outage. `model` is the user's chosen model slug (validated
+  // server-side); omit it to use the server default.
+  async chatStream(
+    messages: ChatMessage[],
+    context: ChatContext,
+    handlers: ChatStreamHandlers,
+    model?: string
+  ): Promise<void> {
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      // The server validates `model` against its allowlist; omit it to use the server default.
+      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+    });
+    if (!res.ok || !res.body) {
+      const detail = await res.json().catch(() => ({}));
+      throw new ChatError(
+        (detail as { detail?: string }).detail || `Chat failed (${res.status})`,
+        res.status
+      );
+    }
+
+    // Read the byte stream, splitting on the blank-line frame boundary. A frame can straddle two
+    // chunks, so buffer until a full "\n\n"-terminated frame is available before dispatching.
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buffer.indexOf("\n\n")) !== -1) {
+        dispatchSSE(buffer.slice(0, sep), handlers);
+        buffer = buffer.slice(sep + 2);
+      }
+    }
+  },
+
+  // Two grounded next-question suggestions for a completed turn (a separate, best-effort call the
+  // client fires *after* the answer renders — fire-and-forget, so it never blocks the answer).
+  // `messages` is the thread ending on the assistant answer; `context` is the same grounding blob.
+  // Resolves to the questions (or `[]` on any non-ok response, since a missing chip isn't worth
+  // surfacing an error). `model` is the user's chosen slug (validated server-side); omit for default.
+  async chatFollowups(
+    messages: ChatMessage[],
+    context: ChatContext,
+    model?: string
+  ): Promise<string[]> {
+    const res = await fetch("/api/chat/followups", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => ({}))) as { questions?: string[] };
+    return data.questions ?? [];
+  },
+
+  // Restore the caller's saved chat thread for a video ({messages: []} when none). Requires a
+  // session; the tray only calls it for a signed-in, chat-configured user.
+  getConversation: (videoId: string) =>
+    getJSON<Conversation>(`/api/conversations/${encodeURIComponent(videoId)}`),
+
+  // Save the caller's chat thread for a video (idempotent upsert of the whole thread). `followups`
+  // is the latest answer's chips; omit (or []) to clear them — matching the "clear on new send" flow.
+  async putConversation(
+    videoId: string,
+    messages: ChatMessage[],
+    followups: string[] = []
+  ): Promise<void> {
+    const url = `/api/conversations/${encodeURIComponent(videoId)}`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ messages, followups }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   },
 
   async analyzeUpload(file: File): Promise<Analysis> {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import { AuthProvider } from "../lib/auth";
 import App from "../App";
@@ -17,6 +17,33 @@ function renderApp() {
       </AuthProvider>
     </MemoryRouter>
   );
+}
+
+// Exposes the current location.search so a test can assert the URL the app navigated to.
+function LocationProbe() {
+  const loc = useLocation();
+  return <div data-testid="loc-search">{loc.search}</div>;
+}
+
+function renderAppWithLocation() {
+  return render(
+    <MemoryRouter initialEntries={["/app"]}>
+      <AuthProvider>
+        <I18nProvider>
+          <App />
+          <LocationProbe />
+        </I18nProvider>
+      </AuthProvider>
+    </MemoryRouter>
+  );
+}
+
+function uploadAClip() {
+  const input = document.querySelector("input[type=file]") as HTMLInputElement | null;
+  expect(input).not.toBeNull();
+  fireEvent.change(input!, {
+    target: { files: [new File(["data"], "squat.mp4", { type: "video/mp4" })] },
+  });
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -120,17 +147,83 @@ describe("App — analysis loaded", () => {
   });
 });
 
+describe("App — upload reflects the analysis in the URL", () => {
+  it("updates the URL to ?analysis=<id> after a persisted upload, without re-fetching", async () => {
+    // A signed-in upload comes back with a persisted analysis_id.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...mockAnalysis, analysis_id: "bb718ecf" }),
+    } as Response);
+
+    renderAppWithLocation();
+    uploadAClip();
+
+    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    // The URL now carries the id (shareable + refresh-survivable). Poll it: the router's location
+    // update can settle a tick after the analysis render.
+    await waitFor(() =>
+      expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
+    );
+    // The replay effect is guarded, so the analysis is NOT re-fetched — if it were, GET
+    // /api/analyses/<id> would return this same (result-less) shape and drop "ANALYSIS COMPLETE".
+    expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument();
+  });
+
+  it("leaves the URL untouched for an anonymous upload (no analysis_id)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => mockAnalysis, // anonymous: nothing persisted, no analysis_id
+    } as Response);
+
+    renderAppWithLocation();
+    uploadAClip();
+
+    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    expect(screen.getByTestId("loc-search").textContent).toBe("");
+  });
+});
+
+describe("App — new analysis reset", () => {
+  it("clears a loaded analysis and the ?analysis= param when 'New analysis' is clicked", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...mockAnalysis, analysis_id: "bb718ecf" }),
+    } as Response);
+
+    const user = userEvent.setup();
+    renderAppWithLocation();
+    uploadAClip();
+
+    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
+    );
+
+    // The sidebar CTA resets the studio in place (two sidebars render; the first is the desktop rail).
+    await user.click(screen.getAllByRole("button", { name: /New analysis/i })[0]);
+
+    // Back to the empty studio, and the shareable id is dropped from the URL.
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Analyze a squat in about 20 seconds."
+    );
+    await waitFor(() => expect(screen.getByTestId("loc-search").textContent).toBe(""));
+  });
+});
+
 describe("App — sidebar toggle", () => {
-  it("expands the desktop sidebar when the toggle button is clicked", async () => {
+  it("collapses the desktop sidebar when the toggle button is clicked", async () => {
     const user = userEvent.setup();
     renderApp();
-    // The desktop sidebar defaults to collapsed, so only the (always-open) mobile
-    // drawer shows the brand initially.
-    expect(screen.getAllByText("X-Coach").length).toBe(1);
-    // The desktop rail's show-navigation toggle (first in DOM order).
-    const showBtn = screen.getAllByRole("button", { name: /Show navigation/i })[0];
-    await user.click(showBtn);
-    // After expanding, both desktop and mobile sidebars show the brand.
+    // The desktop sidebar now defaults to open, so both it and the (always-open)
+    // mobile drawer show the brand initially.
     expect(screen.getAllByText("X-Coach").length).toBe(2);
+    // The desktop sidebar's hide-navigation toggle (first in DOM order).
+    const hideBtn = screen.getAllByRole("button", { name: /Hide navigation/i })[0];
+    await user.click(hideBtn);
+    // After collapsing, only the mobile drawer shows the brand.
+    expect(screen.getAllByText("X-Coach").length).toBe(1);
   });
 });

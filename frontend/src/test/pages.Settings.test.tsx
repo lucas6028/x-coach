@@ -25,6 +25,13 @@ function renderSettings() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
+  // Server-driven model catalog (from /api/health).
+  vi.spyOn(api, "health").mockResolvedValue({
+    status: "ok",
+    chat_models: ["deepseek/deepseek-v4-flash", "minimax/minimax-m3"],
+    chat_default: "deepseek/deepseek-v4-flash",
+  });
   mockUseAuth.mockReturnValue({
     user: {
       email: "ada@x.com",
@@ -42,6 +49,23 @@ describe("Settings", () => {
     expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
     expect(screen.getByText("ada@x.com")).toBeInTheDocument();
     expect(container.querySelector("img[src='https://x/me.png']")).toBeInTheDocument();
+  });
+
+  it("renders the server-driven catalog and pre-selects the server default", async () => {
+    renderSettings();
+    expect(screen.getByRole("heading", { name: "Coach model" })).toBeInTheDocument();
+    // Radios appear once the catalog loads from /api/health.
+    const deepseek = await screen.findByRole("radio", { name: /DeepSeek V4 Flash/i });
+    expect(deepseek).toBeChecked(); // fresh user -> server default (chat_default) pre-selected
+    expect(screen.getByRole("radio", { name: /MiniMax M3/i })).not.toBeChecked();
+    expect(screen.getAllByRole("radio")).toHaveLength(2); // exactly what the server offered
+  });
+
+  it("persists the chosen coach model to localStorage", async () => {
+    renderSettings();
+    await userEvent.click(await screen.findByRole("radio", { name: /MiniMax M3/i }));
+    expect(localStorage.getItem("chat_model")).toBe("minimax/minimax-m3");
+    expect(screen.getByRole("radio", { name: /MiniMax M3/i })).toBeChecked();
   });
 
   it("requires confirmation before clearing analyses", async () => {

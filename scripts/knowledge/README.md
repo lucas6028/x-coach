@@ -1,6 +1,6 @@
 # Knowledge And RAG Scripts
 
-Knowledge workflow entry points for adding documents, building/querying the local RAG index, and maintaining the squat knowledge graph.
+Knowledge workflow entry points for adding documents, building/querying the local RAG index, and maintaining the multi-movement sports knowledge graph (`data/kg/sports_kg_v3.graphml`).
 
 ## Local RAG
 

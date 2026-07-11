@@ -288,18 +288,16 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
 
   return (
     <>
-      {/* Compact summary card — sits at the foot of the feedback column and
-          opens the full node-link graph in an overlay. Shares the feedback
-          panel's background so it reads as coaching content, not part of the
-          follow-up input below it. */}
-      <div className="bg-background px-3 py-3">
-        <button
-          onClick={() => hasGraph && setFullscreen(true)}
-          disabled={!hasGraph}
-          aria-label={hasGraph ? t("kg.expand") : t("kg.empty")}
-          title={hasGraph ? t("kg.expand") : t("kg.empty")}
-          className="group flex w-full items-center gap-3 rounded-xl border border-border-dark bg-surface px-3 py-2.5 text-left transition-colors hover:border-content/20 hover:bg-content/[0.03] disabled:cursor-default disabled:opacity-70 disabled:hover:border-border-dark disabled:hover:bg-surface"
-        >
+      {/* Compact summary card — placed by the parent as the last item in the fault-card stack,
+          so it matches the cards' width and sits flush with them; opens the full node-link graph
+          in an overlay. Padding/placement is the parent's responsibility (no wrapper inset here). */}
+      <button
+        onClick={() => hasGraph && setFullscreen(true)}
+        disabled={!hasGraph}
+        aria-label={hasGraph ? t("kg.expand") : t("kg.empty")}
+        title={hasGraph ? t("kg.expand") : t("kg.empty")}
+        className="group flex w-full items-center gap-3 rounded-xl border border-border-dark bg-surface px-3 py-2.5 text-left transition-colors hover:border-content/20 hover:bg-content/[0.03] disabled:cursor-default disabled:opacity-70 disabled:hover:border-border-dark disabled:hover:bg-surface"
+      >
           <span
             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
             style={{
@@ -324,8 +322,7 @@ export default function KnowledgeGraphWidget({ analysis, activeFaultId }: Props)
               className="shrink-0 text-muted transition-colors group-hover:text-content"
             />
           )}
-        </button>
-      </div>
+      </button>
 
       {/* Fullscreen overlay — AnimatePresence keeps it mounted long enough to
           play the fade/scale-out on close. */}

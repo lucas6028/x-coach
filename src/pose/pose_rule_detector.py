@@ -477,6 +477,11 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                 evidence={
                     "min_knee_width_to_ankle_width": round(min_ratio, 4),
                     "threshold": 0.82,
+                    # `primary_*` names the one metric to surface (with the threshold it breached)
+                    # so the UI/chat never guess it from key order; see keyEvidence in retrieval.ts.
+                    "primary_label": "knee/ankle width",
+                    "primary_value": round(min_ratio, 4),
+                    "primary_threshold": 0.82,
                 },
             )
         )
@@ -509,6 +514,9 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "max_knee_forward_ratio": round(max_ratio, 4),
                     "threshold": KNEE_FORWARD_MILD,
                     "view_type": view_type,
+                    "primary_label": "knee-forward ratio",
+                    "primary_value": round(max_ratio, 4),
+                    "primary_threshold": KNEE_FORWARD_MILD,
                 },
             )
         )
@@ -552,6 +560,11 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
         hip_severity = severity_from_range(min_hip_depth, -0.02, -0.10, lower_is_worse=True)
         knee_severity = severity_from_range(max_knee_angle, 105.0, 125.0, lower_is_worse=False)
         severity = max(hip_severity, knee_severity)
+        # Depth has two candidate axes; the primary display metric is whichever drove the severity.
+        if hip_severity >= knee_severity:
+            primary_label, primary_value, primary_threshold = "hip-to-knee depth", round(min_hip_depth, 4), -0.02
+        else:
+            primary_label, primary_value, primary_threshold = "knee flexion angle", round(max_knee_angle, 2), 105.0
         detections.append(
             build_detection(
                 fault_id="shallow_depth",
@@ -568,6 +581,9 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "max_avg_knee_angle": round(max_knee_angle, 2),
                     "hip_threshold": -0.02,
                     "knee_angle_threshold": 105.0,
+                    "primary_label": primary_label,
+                    "primary_value": primary_value,
+                    "primary_threshold": primary_threshold,
                 },
             )
         )
@@ -595,6 +611,9 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                 evidence={
                     "max_torso_lean_deg": round(max_lean, 2),
                     "threshold": 35.0,
+                    "primary_label": "torso lean angle",
+                    "primary_value": round(max_lean, 2),
+                    "primary_threshold": 35.0,
                 },
             )
         )
@@ -633,6 +652,9 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "max_heel_lift_delta": round(max_lift, 4),
                     "setup_baseline": round(baseline, 4),
                     "threshold": 0.015,
+                    "primary_label": "heel lift",
+                    "primary_value": round(max_lift, 4),
+                    "primary_threshold": 0.015,
                 },
             )
         )
