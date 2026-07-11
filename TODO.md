@@ -299,6 +299,7 @@
 - [ ] `compare_analyses` / `list_user_history` 工具 + 進步追蹤（跨分析記憶）
 - [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
 - [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
+- [ ] 各個動作，相機擺放最適合的位置、角度
 
 ### P3：感知升級
 
