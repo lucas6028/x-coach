@@ -9,9 +9,9 @@ import { mockAnalysis, mockCleanAnalysis } from "./fixtures";
 // always visible regardless of auth — only the composer at the foot adapts. These cover the
 // feedback half (the chat half lives in components.CoachTray.chat.test.tsx).
 describe("CoachTray — coaching feedback", () => {
-  it("shows the AI Coach heading and the rule+GraphRAG provenance badge", () => {
+  it("shows the Lumen coach heading and the rule+GraphRAG provenance badge", () => {
     renderWithProviders(<CoachTray analysis={mockAnalysis} currentTime={0} onSeek={vi.fn()} />);
-    expect(screen.getByText("AI Coach")).toBeInTheDocument();
+    expect(screen.getByText("Lumen")).toBeInTheDocument();
     expect(screen.getByText("rule + GraphRAG")).toBeInTheDocument();
   });
 
