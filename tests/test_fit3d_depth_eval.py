@@ -8,8 +8,8 @@ import numpy as np
 
 from src.fit3d import dataset as ds
 from src.fit3d.depth_eval import (
-    CORE_JOINTS, SMPL24_TO_H36M17, depth_decomposition, map_smpl24_to_h36m17,
-    procrustes_align, resolve_lr,
+    CORE_JOINTS, H36M17_LR_SWAP, SMPL24_TO_H36M17, depth_decomposition,
+    map_smpl24_to_h36m17, procrustes_align, resolve_lr, resolve_lr_h36m17,
 )
 
 
@@ -81,6 +81,31 @@ class Smpl24MappingTests(unittest.TestCase):
         _, swap2, mpjpe2 = resolve_lr(smpl, gt_swapped)
         self.assertTrue(swap2)
         self.assertAlmostEqual(mpjpe2, 0.0, places=6)
+
+
+class ResolveLrH36m17Tests(unittest.TestCase):
+    """L/R resolution for a model that already emits H36M-17 (e.g. MediaPipe)."""
+
+    def _distinct_h36m17(self):
+        base = np.array([[i, -i, 2 * i + 1] for i in range(17)], dtype=np.float64)
+        return base[None].repeat(4, axis=0)  # (4, 17, 3), L/R-asymmetric
+
+    def test_swap_is_an_involution(self):
+        # applying the L/R swap twice is the identity
+        idx = np.asarray(H36M17_LR_SWAP)
+        np.testing.assert_array_equal(idx[idx], np.arange(17))
+
+    def test_resolve_picks_matching_orientation(self):
+        pred = self._distinct_h36m17()
+        _, swap, mpjpe = resolve_lr_h36m17(pred, pred.copy())
+        self.assertFalse(swap)
+        self.assertAlmostEqual(mpjpe, 0.0, places=6)
+
+        gt_swapped = pred[:, H36M17_LR_SWAP, :]
+        chosen, swap2, mpjpe2 = resolve_lr_h36m17(pred, gt_swapped)
+        self.assertTrue(swap2)
+        self.assertAlmostEqual(mpjpe2, 0.0, places=6)
+        np.testing.assert_allclose(chosen, gt_swapped)
 
 
 if __name__ == "__main__":

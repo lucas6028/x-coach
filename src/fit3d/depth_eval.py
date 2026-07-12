@@ -75,6 +75,32 @@ def map_smpl24_to_h36m17(joints_smpl24: np.ndarray, swap_lr: bool = False) -> np
     return joints_smpl24[:, idx, :]
 
 
+# H36M-17 left<->right index swap (used to resolve the L/R convention of a model that
+# already emits H36M-17, e.g. MediaPipe, against the GT -- same idea as ``resolve_lr``
+# for SMPL-24). Pairs: hip 1<->4, knee 2<->5, ankle 3<->6, shoulder 11<->14,
+# elbow 12<->15, wrist 13<->16; midline joints (0,7,8,9,10) unchanged.
+H36M17_LR_SWAP = (0, 4, 5, 6, 1, 2, 3, 7, 8, 9, 10, 14, 15, 16, 11, 12, 13)
+
+
+def resolve_lr_h36m17(pred_h36m17: np.ndarray, gt_cam_core: np.ndarray) -> tuple[np.ndarray, bool, float]:
+    """Pick the L/R orientation of an H36M-17 prediction with lower root-relative MPJPE vs GT.
+
+    Mirrors ``resolve_lr`` for the SMPL-24 path: a model that emits H36M-17 directly may
+    label left/right opposite to Fit3D's fixed convention. Because pa_mpjpe is *not*
+    swap-invariant (Procrustes rotates/scales but never permutes joints), leaving the swap
+    unresolved silently inflates it. Returns (pred (F,17,3), swap_lr_used, chosen_mpjpe).
+    """
+    best = None
+    for swap in (False, True):
+        pred = pred_h36m17[:, H36M17_LR_SWAP, :] if swap else pred_h36m17
+        d = root_relative(pred) - root_relative(gt_cam_core)
+        finite = np.isfinite(d).all(axis=2)
+        mpjpe = float(np.nanmean(np.linalg.norm(d, axis=2)[finite])) if finite.any() else float("inf")
+        if best is None or mpjpe < best[2]:
+            best = (pred, swap, mpjpe)
+    return best
+
+
 def resolve_lr(pred_smpl24: np.ndarray, gt_cam_core: np.ndarray) -> tuple[np.ndarray, bool, float]:
     """Map SMPL-24 to H36M-17 choosing the L/R orientation with lower root-relative MPJPE vs GT.
 
@@ -212,7 +238,9 @@ def load_prediction_h36m17(
         keys = set(data.files)
         if "joints_cam" in keys:
             pred = np.asarray(data["joints_cam"], dtype=np.float64) * units_scale
-            return pred, {"format": "h36m17", "swap_lr": False}
+            n = min(len(pred), len(gt_cam_core))
+            pred, swap, mpjpe = resolve_lr_h36m17(pred[:n], gt_cam_core[:n])
+            return pred, {"format": "h36m17", "swap_lr": swap, "resolve_mpjpe": mpjpe}
         key = source if source in keys else ("smpl3d" if "smpl3d" in keys else next(iter(keys & {"smpl3d_np"})))
         smpl = np.asarray(data[key], dtype=np.float64) * units_scale  # (F,24,3) mm
     n = min(len(smpl), len(gt_cam_core))
