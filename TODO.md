@@ -119,6 +119,10 @@
 - [ ] 系統角色分工：
   - `MediaPipe` 負責即時幾何警示
   - `VideoMAE` 負責高品質時空判斷
+- [ ] Exp 1(先做,最便宜,無相依):nlf_s_multi 過現有 Fit3D 框架 + 在這台機器上實測 CPU latency。回答「深度恢復在 S backbone 下還在不在、CPU 多快」。⚠️ 版本對齊:你們跑的是 v0.2.0 nlf_l_multi,配對就用 v0.2.0 nlf_s_multi(v0.2.2 修了 detect_smpl_batched 的 translation/2D 投影 bug,S-vs-L delta 要同版本才公平)。
+- [ ] Exp 2(延遲槓桿):nlf_s_crop + 便宜 box(MediaPipe 偵測/每 N 幀追蹤),量 CPU latency 與 Fit3D 上的準確度保留。
+- [ ] Exp 3(1–2 有前景才做):接一個非 NLF 的輕量架構(ROMP 或 HybrIK)當第二點交叉驗證,寫 adapter 到同 npz。
+- [ ] 訓一個 CPU 學生(輸入 MediaPipe 2D+world 或裁切影像,目標 NLF depth),直接把「NLF 的深度恢復」蒸餾進一個 CPU 模型——這比找現成輕量模型更精準命中「便宜地拿回 NLF 深度」。列為 stretch,因為工程量較大。
 
 ## 如何辨識 VideoMAE 的結果
 
