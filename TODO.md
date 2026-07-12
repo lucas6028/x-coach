@@ -279,6 +279,7 @@
 - [ ] 動作偵測、分類（= 多動作 movement ID，見路線圖 P2）
 - [x] LLM follow up questions (options)（followup chips 已上線，pinned 快速模型）
 - [ ] 健身菜單客製化，可用 LLM 進行修改（= 路線圖 P2 的 `make_drill_plan` 工具）
+- [ ] 新增運動科學、運動力學及 mocap 相關知識筆記的頁面
 
 ## Pipeline 與 Agent Harness 路線圖（2026-07-06 設計，詳見 `docs/ai-coach-pipeline-and-agent-harness.md`）
 
