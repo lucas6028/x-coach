@@ -118,6 +118,40 @@ whole ~14–18° error is projection geometry, and only 3D (~6–8°) fixes it. 
 proof of "depth is the bottleneck, not 2D accuracy". **Valgus** is the mirror image (detector-
 dominated → a better 2D detector helps, 3D not needed).
 
+## Sparse-skeleton depth quality — MediaPipe (weak depth) vs MeTRAbs (true depth)
+
+The dense SMPL regressors (NLF/HMR2.0/Multi-HMR) recover the sagittal depth cues. Is that because
+they are **dense**, or just because they emit **true metric depth**? Two *sparse* keypoint models
+isolate the axis:
+
+* **MediaPipe** (BlazePose GHUM) — sparse + **weak** depth (a heuristic `z`). Runs locally on CPU;
+  33 world landmarks mapped to H36M-17 (`src/fit3d/mediapipe_baseline.py`), saved as `joints_cam`
+  (F,17,3) mm so the eval resolves L/R against the GT (`depth_eval.resolve_lr_h36m17`).
+* **MeTRAbs** (Sárándi et al.) — sparse + **true** metric depth. Kaggle GPU kernel
+  (`.kaggle_tmp/metrabs_extract`, `haoping6028/fit3d-metrabs-extract`); `smpl_24` skeleton saved as
+  `smpl3d` (mm, camera frame) — the *same* code path as NLF/HMR2, so the mapping artifact cancels.
+  Passed Fit3D's **real per-camera intrinsics** (baked into the kernel), unlike NLF's assumed FOV≈55.
+
+Both are subsampled every 15th frame (per-frame-mean metrics are unbiased) so the sparse-vs-sparse
+contrast is on the *same* frames.
+
+```bash
+.venv\Scripts\python.exe -m pip install mediapipe
+.venv\Scripts\python.exe scripts/fit3d/run_mediapipe_fit3d.py \
+    --actions squat deadlift overhead_extension_thruster --subsample 15
+# MeTRAbs: push .kaggle_tmp/metrabs_extract (SMOKE=True first), then pull to preds/metrabs
+python scripts/fit3d/run_model_comparison.py --action squat \
+    --model MediaPipe=data/Fit3D/derived/preds/mediapipe \
+    --model MeTRAbs=data/Fit3D/derived/preds/metrabs \
+    --model NLF=data/Fit3D/derived/preds/nlf
+```
+
+Result (`notes/fit3d_sparse_depth_summary.md`): MediaPipe's 3D is weak everywhere (depth error ~2× NLF)
+and barely recovers the sagittal cues — its depth/flexion verdict-flip is no better than calibrated 2D.
+MeTRAbs, sparse but metric, recovers the cues **like the dense models** (pa_mpjpe and knee/hip cue
+NLF-level). So **true depth — not dense mesh — is what buys the recovery**; the bottleneck is depth
+quality, not skeleton density.
+
 ### Kaggle GPU extraction
 
 The NLF kernel (`scratchpad`/`haoping6028/fit3d-nlf-extract`) mirrors the proven
