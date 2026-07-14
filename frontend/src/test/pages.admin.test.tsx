@@ -8,6 +8,12 @@ import {
   type AdminSettingsResponse,
   type AdminUserRow,
 } from "../api";
+import AdminLayout from "../pages/admin/AdminLayout";
+import AdminOverviewPage from "../pages/admin/AdminOverview";
+import AdminUsers from "../pages/admin/AdminUsers";
+import AdminSettingsLlm from "../pages/admin/AdminSettingsLlm";
+import AdminSettingsRag from "../pages/admin/AdminSettingsRag";
+import AdminSettingsAnalyze from "../pages/admin/AdminSettingsAnalyze";
 
 const SAMPLE_SETTINGS: AdminSettingsResponse = {
   effective: {
@@ -70,16 +76,22 @@ const SAMPLE_USERS: AdminUserRow[] = [
 
 vi.mock("../lib/auth", () => ({ useAuth: vi.fn() }));
 import { useAuth } from "../lib/auth";
-import Admin from "../pages/Admin";
-
 const mockUseAuth = vi.mocked(useAuth);
 
-function renderAdmin() {
+// Render the real nested admin route tree at `path` so <Outlet/> (and its context) resolve exactly as
+// in production. A stub /app route stands in for the "back to app" destination.
+function renderAdmin(path: string) {
   return render(
     <I18nProvider>
-      <MemoryRouter initialEntries={["/admin"]}>
+      <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/admin" element={<Admin />} />
+          <Route path="/admin" element={<AdminLayout />}>
+            <Route index element={<AdminOverviewPage />} />
+            <Route path="users" element={<AdminUsers />} />
+            <Route path="settings/llm" element={<AdminSettingsLlm />} />
+            <Route path="settings/rag" element={<AdminSettingsRag />} />
+            <Route path="settings/analyze" element={<AdminSettingsAnalyze />} />
+          </Route>
           <Route path="/app" element={<div>app studio</div>} />
         </Routes>
       </MemoryRouter>
@@ -92,118 +104,118 @@ beforeEach(() => {
     user: { id: "u1", email: "ada@x.com" },
     signOut: vi.fn(),
   } as unknown as ReturnType<typeof useAuth>);
-  // Default happy-path stubs for the P3 overview + users sections so the existing admin-ready tests
-  // don't hit real fetch when those sections mount. Individual tests override as needed.
   vi.spyOn(api, "getAdminOverview").mockResolvedValue(SAMPLE_OVERVIEW);
   vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
+  vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
 });
 afterEach(() => vi.restoreAllMocks());
 
-describe("Admin", () => {
-  it("renders the admin panel for an admin", async () => {
+describe("AdminLayout gate", () => {
+  it("renders the admin nav for an admin", async () => {
     vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
-    vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
-    renderAdmin();
-    // The panel subtitle is unique to the admin ready-state (the "Admin" title also appears in the
-    // shared Header, so we key off the subtitle rather than the heading).
-    expect(
-      await screen.findByText(/Manage users, LLM settings, and pipeline parameters/i)
-    ).toBeInTheDocument();
-    // The denied card must NOT show for an admin.
+    renderAdmin("/admin");
+    // The nav lists all five admin destinations (plus the back-to-app link). The rail is rendered in
+    // both the desktop shell and the (off-canvas) mobile drawer, so each link appears more than once.
+    expect((await screen.findAllByRole("link", { name: "Users" })).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "LLM chat" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Back to app" }).length).toBeGreaterThan(0);
     expect(
       screen.queryByText("You don't have access to the admin panel.")
     ).not.toBeInTheDocument();
   });
 
-  it("loads the settings form with current values and saves the edited payload", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
-    vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
-    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
-    renderAdmin();
+  it("shows an access-denied card for a non-admin (and does not mount the child page)", async () => {
+    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: false });
+    const overview = vi.spyOn(api, "getAdminOverview").mockResolvedValue(SAMPLE_OVERVIEW);
+    renderAdmin("/admin");
+    expect(
+      await screen.findByText("You don't have access to the admin panel.")
+    ).toBeInTheDocument();
+    // The gated child never mounts, so it never fetches.
+    expect(overview).not.toHaveBeenCalled();
+  });
 
-    // The current effective values populate the controlled inputs.
+  it("surfaces an error when the status check fails", async () => {
+    vi.spyOn(api, "adminStatus").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin");
+    expect(await screen.findByText(/Couldn't verify your admin access/i)).toBeInTheDocument();
+  });
+});
+
+describe("AdminOverview", () => {
+  it("renders the system overview cards", async () => {
+    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
+    renderAdmin("/admin");
+    expect(await screen.findByText("Total users")).toBeInTheDocument();
+    expect(screen.getByText("7")).toBeInTheDocument(); // total analyses value
+    expect(screen.getByText("1/2 ready")).toBeInTheDocument();
+  });
+});
+
+describe("AdminUsers", () => {
+  it("renders the users table rows with the self tag", async () => {
+    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
+    renderAdmin("/admin/users");
+    expect(await screen.findByText("bob@x.com")).toBeInTheDocument();
+    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
+    expect(screen.getByText("You")).toBeInTheDocument();
+  });
+
+  it("toggles a non-self user's role and refreshes the list", async () => {
+    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
+    const setRole = vi.spyOn(api, "setUserRole").mockResolvedValue({ ok: true });
+    const list = vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
+    renderAdmin("/admin/users");
+
+    const makeAdmin = await screen.findByRole("button", { name: "Make admin" });
+    fireEvent.click(makeAdmin);
+    await waitFor(() => expect(setRole).toHaveBeenCalledWith("u2", true));
+    await waitFor(() => expect(list.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it("disables the toggle on the signed-in admin's own row (no self-demote)", async () => {
+    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
+    renderAdmin("/admin/users");
+    const revoke = await screen.findByRole("button", { name: "Revoke admin" });
+    expect(revoke).toBeDisabled();
+  });
+});
+
+describe("Admin settings pages", () => {
+  it("loads the LLM settings and shows current values", async () => {
+    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
+    renderAdmin("/admin/settings/llm");
     const baseUrl = await screen.findByLabelText("Provider base URL");
     expect(baseUrl).toHaveValue("https://openrouter.ai/api/v1");
-    expect(screen.getByLabelText("RAG top-k")).toHaveValue("5");
+  });
 
-    // Edit a knob and save.
-    fireEvent.change(screen.getByLabelText("RAG top-k"), { target: { value: "9" } });
+  it("saves only the RAG group's keys from the RAG settings page", async () => {
+    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/rag");
+
+    const topK = await screen.findByLabelText("RAG top-k");
+    expect(topK).toHaveValue("5");
+    fireEvent.change(topK, { target: { value: "9" } });
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
 
     await waitFor(() => expect(update).toHaveBeenCalled());
-    expect(update).toHaveBeenCalledWith(expect.objectContaining({ rag_top_k: 9 }));
-    // The edited value is surfaced back and a success state renders.
+    // Only the RAG group's keys are sent; no LLM/analyze keys leak in.
+    const payload = update.mock.calls[0][0];
+    expect(payload).toEqual({ rag_top_k: 9, kg_hops: 1, kg_seeds: 5 });
     expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
   });
 
   it("shows a load-error card when the settings fetch fails", async () => {
     vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     vi.spyOn(api, "getAdminSettings").mockRejectedValue(new Error("500 boom"));
-    renderAdmin();
+    renderAdmin("/admin/settings/analyze");
     expect(await screen.findByText("Couldn't load the current settings.")).toBeInTheDocument();
   });
 
-  it("shows an access-denied card for a non-admin", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: false });
-    renderAdmin();
-    expect(
-      await screen.findByText("You don't have access to the admin panel.")
-    ).toBeInTheDocument();
-    // The admin panel subtitle must NOT render for a non-admin.
-    expect(
-      screen.queryByText(/Manage users, LLM settings, and pipeline parameters/i)
-    ).not.toBeInTheDocument();
-  });
-
-  it("surfaces an error when the status check fails", async () => {
-    vi.spyOn(api, "adminStatus").mockRejectedValue(new Error("500 boom"));
-    renderAdmin();
-    expect(
-      await screen.findByText(/Couldn't verify your admin access/i)
-    ).toBeInTheDocument();
-  });
-
-  it("renders the system overview cards from getAdminOverview", async () => {
+  it("keeps the restart-required note on the analyze page", async () => {
     vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
-    vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
-    renderAdmin();
-    // Totals surface as their own cards; the stores card shows "1/2 ready" (one of two present).
-    expect(await screen.findByText("Total users")).toBeInTheDocument();
-    expect(screen.getByText("7")).toBeInTheDocument(); // total analyses value
-    expect(screen.getByText("1/2 ready")).toBeInTheDocument();
-  });
-
-  it("renders the users table rows from listAdminUsers", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
-    vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
-    renderAdmin();
-    expect(await screen.findByText("bob@x.com")).toBeInTheDocument();
-    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
-    // The signed-in admin's own row is tagged "You".
-    expect(screen.getByText("You")).toBeInTheDocument();
-  });
-
-  it("toggles a non-self user's role and refreshes the list", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
-    vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
-    const setRole = vi.spyOn(api, "setUserRole").mockResolvedValue({ ok: true });
-    const list = vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
-    renderAdmin();
-
-    // bob (u2) is not admin -> the button offers "Make admin".
-    const makeAdmin = await screen.findByRole("button", { name: "Make admin" });
-    fireEvent.click(makeAdmin);
-    await waitFor(() => expect(setRole).toHaveBeenCalledWith("u2", true));
-    // The list is re-fetched after a successful toggle (initial mount + post-toggle refresh).
-    await waitFor(() => expect(list.mock.calls.length).toBeGreaterThanOrEqual(2));
-  });
-
-  it("disables the toggle on the signed-in admin's own row (no self-demote)", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
-    vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
-    renderAdmin();
-    // ada (u1) is the current user and an admin -> her row's "Revoke admin" button is disabled.
-    const revoke = await screen.findByRole("button", { name: "Revoke admin" });
-    expect(revoke).toBeDisabled();
+    renderAdmin("/admin/settings/analyze");
+    expect(await screen.findByText("Restart required to take effect")).toBeInTheDocument();
   });
 });

@@ -6,7 +6,12 @@ import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
-import Admin from "./pages/Admin";
+import AdminLayout from "./pages/admin/AdminLayout";
+import AdminOverview from "./pages/admin/AdminOverview";
+import AdminUsers from "./pages/admin/AdminUsers";
+import AdminSettingsLlm from "./pages/admin/AdminSettingsLlm";
+import AdminSettingsRag from "./pages/admin/AdminSettingsRag";
+import AdminSettingsAnalyze from "./pages/admin/AdminSettingsAnalyze";
 import Games from "./pages/Games";
 import RequireAuth from "./components/RequireAuth";
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
@@ -62,10 +67,16 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               path="/admin"
               element={
                 <RequireAuth>
-                  <Admin />
+                  <AdminLayout />
                 </RequireAuth>
               }
-            />
+            >
+              <Route index element={<AdminOverview />} />
+              <Route path="users" element={<AdminUsers />} />
+              <Route path="settings/llm" element={<AdminSettingsLlm />} />
+              <Route path="settings/rag" element={<AdminSettingsRag />} />
+              <Route path="settings/analyze" element={<AdminSettingsAnalyze />} />
+            </Route>
           </Routes>
         </I18nProvider>
       </AuthProvider>
