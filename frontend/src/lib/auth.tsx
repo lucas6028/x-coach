@@ -15,6 +15,7 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
+import { api } from "../api";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
 interface AuthValue {
@@ -24,6 +25,12 @@ interface AuthValue {
   loading: boolean;
   /** Whether Supabase Auth is wired up at all (env present). */
   configured: boolean;
+  /** Whether the signed-in user holds the admin role (false when logged out). Probed ONCE per
+   *  session so the shell's Admin link and the /admin gate never re-hit the endpoint on every
+   *  navigation — the server re-checks on each admin API call, so this is UX gating only. */
+  isAdmin: boolean;
+  /** Status of the admin-role probe for the current user ("ready" also covers the logged-out case). */
+  adminState: "loading" | "ready" | "error";
   signInWithPassword: (email: string, password: string) => Promise<void>;
   /** Returns whether the account still needs email confirmation (no session yet). */
   signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
@@ -42,6 +49,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   // Only "loading" while a real client exists to query; otherwise we already know we're logged out.
   const [loading, setLoading] = useState(isSupabaseConfigured);
+  // Admin role, resolved once per signed-in user (keyed on user id below), not per component mount.
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminState, setAdminState] = useState<"loading" | "ready" | "error">("ready");
 
   useEffect(() => {
     if (!supabase) return;
@@ -60,6 +70,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       data.subscription.unsubscribe();
     };
   }, []);
+
+  // Resolve the admin role once whenever the signed-in identity changes (keyed on the user id, a
+  // stable primitive — not the session object, which changes reference on every token refresh). This
+  // replaces the per-mount probes the Sidebar and AdminLayout used to make on every navigation.
+  const userId = session?.user?.id ?? null;
+  useEffect(() => {
+    if (!userId) {
+      setIsAdmin(false);
+      setAdminState("ready");
+      return;
+    }
+    let active = true;
+    setAdminState("loading");
+    api
+      .adminStatus()
+      .then((res) => {
+        if (!active) return;
+        setIsAdmin(res.is_admin);
+        setAdminState("ready");
+      })
+      .catch(() => {
+        if (!active) return;
+        setIsAdmin(false);
+        setAdminState("error");
+      });
+    return () => {
+      active = false;
+    };
+  }, [userId]);
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
     const { error } = await requireClient().auth.signInWithPassword({ email, password });
@@ -92,12 +131,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       loading,
       configured: isSupabaseConfigured,
+      isAdmin,
+      adminState,
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,
       signOut,
     }),
-    [session, loading, signInWithPassword, signUpWithPassword, signInWithGoogle, signOut]
+    [
+      session,
+      loading,
+      isAdmin,
+      adminState,
+      signInWithPassword,
+      signUpWithPassword,
+      signInWithGoogle,
+      signOut,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

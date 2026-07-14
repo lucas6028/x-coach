@@ -99,11 +99,20 @@ function renderAdmin(path: string) {
   );
 }
 
-beforeEach(() => {
-  mockUseAuth.mockReturnValue({
+// The admin role now comes from AuthProvider (probed once per session), so the gate reads
+// `isAdmin`/`adminState` off useAuth rather than calling api.adminStatus per mount.
+function authValue(overrides: Record<string, unknown> = {}) {
+  return {
     user: { id: "u1", email: "ada@x.com" },
     signOut: vi.fn(),
-  } as unknown as ReturnType<typeof useAuth>);
+    isAdmin: true,
+    adminState: "ready",
+    ...overrides,
+  } as unknown as ReturnType<typeof useAuth>;
+}
+
+beforeEach(() => {
+  mockUseAuth.mockReturnValue(authValue());
   vi.spyOn(api, "getAdminOverview").mockResolvedValue(SAMPLE_OVERVIEW);
   vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
   vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
@@ -112,7 +121,6 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("AdminLayout gate", () => {
   it("renders the admin nav for an admin", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     renderAdmin("/admin");
     // The nav lists all five admin destinations (plus the back-to-app link). The rail is rendered in
     // both the desktop shell and the (off-canvas) mobile drawer, so each link appears more than once.
@@ -125,7 +133,7 @@ describe("AdminLayout gate", () => {
   });
 
   it("shows an access-denied card for a non-admin (and does not mount the child page)", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: false });
+    mockUseAuth.mockReturnValue(authValue({ isAdmin: false }));
     const overview = vi.spyOn(api, "getAdminOverview").mockResolvedValue(SAMPLE_OVERVIEW);
     renderAdmin("/admin");
     expect(
@@ -135,8 +143,8 @@ describe("AdminLayout gate", () => {
     expect(overview).not.toHaveBeenCalled();
   });
 
-  it("surfaces an error when the status check fails", async () => {
-    vi.spyOn(api, "adminStatus").mockRejectedValue(new Error("500 boom"));
+  it("surfaces an error when the admin probe fails", async () => {
+    mockUseAuth.mockReturnValue(authValue({ adminState: "error" }));
     renderAdmin("/admin");
     expect(await screen.findByText(/Couldn't verify your admin access/i)).toBeInTheDocument();
   });
@@ -144,7 +152,6 @@ describe("AdminLayout gate", () => {
 
 describe("AdminOverview", () => {
   it("renders the system overview cards", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     renderAdmin("/admin");
     expect(await screen.findByText("Total users")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument(); // total analyses value
@@ -154,7 +161,6 @@ describe("AdminOverview", () => {
 
 describe("AdminUsers", () => {
   it("renders the users table rows with the self tag", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     renderAdmin("/admin/users");
     expect(await screen.findByText("bob@x.com")).toBeInTheDocument();
     expect(screen.getByText("ada@x.com")).toBeInTheDocument();
@@ -162,7 +168,6 @@ describe("AdminUsers", () => {
   });
 
   it("toggles a non-self user's role and refreshes the list", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     const setRole = vi.spyOn(api, "setUserRole").mockResolvedValue({ ok: true });
     const list = vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
     renderAdmin("/admin/users");
@@ -174,7 +179,6 @@ describe("AdminUsers", () => {
   });
 
   it("disables the toggle on the signed-in admin's own row (no self-demote)", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     renderAdmin("/admin/users");
     const revoke = await screen.findByRole("button", { name: "Revoke admin" });
     expect(revoke).toBeDisabled();
@@ -183,14 +187,12 @@ describe("AdminUsers", () => {
 
 describe("Admin settings pages", () => {
   it("loads the LLM settings and shows current values", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     renderAdmin("/admin/settings/llm");
     const baseUrl = await screen.findByLabelText("Provider base URL");
     expect(baseUrl).toHaveValue("https://openrouter.ai/api/v1");
   });
 
   it("saves only the RAG group's keys from the RAG settings page", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
     renderAdmin("/admin/settings/rag");
 
@@ -207,14 +209,12 @@ describe("Admin settings pages", () => {
   });
 
   it("shows a load-error card when the settings fetch fails", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     vi.spyOn(api, "getAdminSettings").mockRejectedValue(new Error("500 boom"));
     renderAdmin("/admin/settings/analyze");
     expect(await screen.findByText("Couldn't load the current settings.")).toBeInTheDocument();
   });
 
   it("keeps the restart-required note on the analyze page", async () => {
-    vi.spyOn(api, "adminStatus").mockResolvedValue({ is_admin: true });
     renderAdmin("/admin/settings/analyze");
     expect(await screen.findByText("Restart required to take effect")).toBeInTheDocument();
   });

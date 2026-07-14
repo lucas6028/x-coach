@@ -1,7 +1,5 @@
-import { useEffect, useState } from "react";
 import { ClockCounterClockwise, Folders, GameController, List, Plus, ShieldCheck, VideoCamera } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
-import { api } from "../api";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 
@@ -22,7 +20,7 @@ interface Props {
 // Account, language and theme controls live in the top-right Header, not here.
 export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary, onNewAnalysis }: Props) {
   const { t } = useI18n();
-  const { user } = useAuth();
+  const { isAdmin } = useAuth();
   const { pathname } = useLocation();
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
@@ -30,27 +28,9 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
   const onAdmin = pathname === "/admin";
 
   // The Admin link is admin-only UX gating (the /admin page + backend re-check are the real
-  // defence). Only ask when signed in; swallow failures so a non-admin or an errored probe simply
-  // shows no link — the shell DOM stays identical for everyone else.
-  const [isAdmin, setIsAdmin] = useState(false);
-  useEffect(() => {
-    if (!user) {
-      setIsAdmin(false);
-      return;
-    }
-    let active = true;
-    api
-      .adminStatus()
-      .then((res) => {
-        if (active) setIsAdmin(res.is_admin);
-      })
-      .catch(() => {
-        if (active) setIsAdmin(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [user]);
+  // defence). `isAdmin` is resolved once per session by AuthProvider, so switching pages no longer
+  // re-probes the endpoint; a non-admin (or an errored probe) leaves it false and shows no link.
+
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
   const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
   const navBase =
