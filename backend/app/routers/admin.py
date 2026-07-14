@@ -35,13 +35,6 @@ def admin_status(user: CurrentUser = Depends(get_current_user)) -> dict:
 
 def _effective_settings() -> dict[str, Any]:
     """The currently-effective knobs (env defaults with admin overrides merged), grouped for the form."""
-    overrides = runtime_config.get_overrides()
-    raw_max = overrides.get("max_concurrent_analyses")
-    max_concurrent = (
-        settings._coerce_int(raw_max, config.MAX_CONCURRENT_ANALYSES)
-        if raw_max is not None
-        else config.MAX_CONCURRENT_ANALYSES
-    )
     return {
         "llm": {
             "llm_models": settings.chat_models(),
@@ -58,9 +51,10 @@ def _effective_settings() -> dict[str, Any]:
         },
         "analyze": {
             "allowed_upload_suffixes": list(settings.allowed_upload_suffixes()),
-            # The semaphore is fixed at import (see routers/analyze); a persisted change needs a
-            # restart to take effect. The UI flags this — we only store/display the value.
-            "max_concurrent_analyses": max_concurrent,
+            # READ-ONLY display value: the semaphore is fixed at import from the env var (see
+            # routers/analyze), so this is never overridable — it is surfaced purely so the admin UI
+            # can show the effective ceiling. It is sourced from the env constant and never written.
+            "max_concurrent_analyses": config.MAX_CONCURRENT_ANALYSES,
         },
     }
 
@@ -118,7 +112,9 @@ class AdminSettingsUpdate(BaseModel):
     rag_top_k: int | None = Field(default=None, ge=1, le=50)
     kg_hops: int | None = Field(default=None, ge=1, le=3)
     kg_seeds: int | None = Field(default=None, ge=1, le=20)
-    max_concurrent_analyses: int | None = Field(default=None, ge=1, le=16)
+    # NOTE: ``max_concurrent_analyses`` is intentionally NOT a field here — the analyze semaphore is
+    # fixed at import from the env var and an override never applied, so the PUT no longer accepts it.
+    # It remains a READ-ONLY, env-sourced display value in the GET payload (see ``_effective_settings``).
     allowed_upload_suffixes: list[str] | None = None
 
     @field_validator("llm_models")
@@ -139,6 +135,14 @@ class AdminSettingsUpdate(BaseModel):
         v = v.strip()
         if not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("llm_base_url must be an http(s) URL")
+        # Early 422 on the API path for an off-allowlist host — the read-time guard in
+        # ``settings.chat_base_url`` is the authoritative backstop, but rejecting here gives the admin
+        # a clear error instead of a silently-ignored override. The LLM API key is sent as a bearer
+        # token to this host, so only allowlisted provider hosts may be set.
+        if not settings._base_url_allowed(v):
+            raise ValueError(
+                "llm_base_url host is not allowlisted; set LLM_ALLOWED_BASE_HOSTS to permit it"
+            )
         return v
 
     @field_validator("allowed_upload_suffixes")
@@ -201,6 +205,13 @@ def set_admin_role(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="You cannot remove your own admin role.",
+        )
+    if not body.make_admin and store.count_admins(token=user.token) <= 1:
+        # Anti-lockout: refuse a revoke that would leave the project with zero admins. This closes the
+        # UI-driven path; a truly concurrent double-demote is a residual race acceptable at this scale.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove the last admin.",
         )
     store.set_user_role(token=user.token, user_id=user_id, make_admin=body.make_admin)
     return {"ok": True}

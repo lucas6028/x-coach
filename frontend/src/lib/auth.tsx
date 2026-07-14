@@ -11,6 +11,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -31,6 +32,9 @@ interface AuthValue {
   isAdmin: boolean;
   /** Status of the admin-role probe for the current user ("ready" also covers the logged-out case). */
   adminState: "loading" | "ready" | "error";
+  /** Re-run the admin-role probe for the current user (used to recover from a transient probe error
+   *  without a full reload). No-op when logged out. */
+  refreshAdmin: () => void;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   /** Returns whether the account still needs email confirmation (no session yet). */
   signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
@@ -75,30 +79,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // stable primitive — not the session object, which changes reference on every token refresh). This
   // replaces the per-mount probes the Sidebar and AdminLayout used to make on every navigation.
   const userId = session?.user?.id ?? null;
-  useEffect(() => {
+  // Monotonic probe id: only the newest probe's result is applied, so a stale in-flight probe (from a
+  // previous user id, or superseded by a manual refresh) can never clobber the current state.
+  const probeIdRef = useRef(0);
+  const refreshAdmin = useCallback(() => {
     if (!userId) {
       setIsAdmin(false);
       setAdminState("ready");
       return;
     }
-    let active = true;
+    const probeId = ++probeIdRef.current;
     setAdminState("loading");
     api
       .adminStatus()
       .then((res) => {
-        if (!active) return;
+        if (probeId !== probeIdRef.current) return;
         setIsAdmin(res.is_admin);
         setAdminState("ready");
       })
       .catch(() => {
-        if (!active) return;
+        if (probeId !== probeIdRef.current) return;
         setIsAdmin(false);
         setAdminState("error");
       });
-    return () => {
-      active = false;
-    };
   }, [userId]);
+
+  // Probe once on mount and whenever the signed-in identity changes.
+  useEffect(() => {
+    refreshAdmin();
+  }, [refreshAdmin]);
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
     const { error } = await requireClient().auth.signInWithPassword({ email, password });
@@ -133,6 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configured: isSupabaseConfigured,
       isAdmin,
       adminState,
+      refreshAdmin,
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,
@@ -143,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       isAdmin,
       adminState,
+      refreshAdmin,
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,

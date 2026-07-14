@@ -217,7 +217,8 @@ export interface AdminSettingsUpdate {
   rag_top_k?: number;
   kg_hops?: number;
   kg_seeds?: number;
-  max_concurrent_analyses?: number;
+  // max_concurrent_analyses is intentionally omitted: it's read-only (sourced from the
+  // XCOACH_MAX_CONCURRENT_ANALYSES env var, applied at startup) and must never be sent in an update.
   allowed_upload_suffixes?: string[];
 }
 

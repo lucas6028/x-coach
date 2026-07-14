@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Graph } from "@phosphor-icons/react";
-import { api, type AdminSettingsResponse, type AdminSettingsUpdate } from "../../api";
+import { api, type AdminSettingsResponse } from "../../api";
 import { useI18n } from "../../lib/i18n";
 import {
   Field,
@@ -10,6 +10,7 @@ import {
   SettingsLoading,
   defaultHint,
   inputClass,
+  parseRequiredNumbers,
   type SaveState,
 } from "./settingsShared";
 
@@ -27,15 +28,6 @@ function toForm(s: AdminSettingsResponse): RagForm {
     rag_top_k: String(rag_kg.rag_top_k),
     kg_hops: String(rag_kg.kg_hops),
     kg_seeds: String(rag_kg.kg_seeds),
-  };
-}
-
-// Sends only the RAG / KG group's keys.
-function toPayload(f: RagForm): AdminSettingsUpdate {
-  return {
-    rag_top_k: Number(f.rag_top_k),
-    kg_hops: Number(f.kg_hops),
-    kg_seeds: Number(f.kg_seeds),
   };
 }
 
@@ -69,14 +61,25 @@ export default function AdminSettingsRag() {
   const set = (key: keyof RagForm) => (value: string) => setForm((f) => (f ? { ...f, [key]: value } : f));
 
   const onSave = async () => {
+    // Guard the required positive integers on the client: bail with an honest error rather than
+    // sending NaN (→ stored null → silent reset) or 0 (→ backend ge=1 → opaque 422).
+    const nums = parseRequiredNumbers({
+      rag_top_k: form.rag_top_k,
+      kg_hops: form.kg_hops,
+      kg_seeds: form.kg_seeds,
+    });
+    if (!nums) {
+      setSave({ kind: "error", message: t("admin.settings.invalidNumber") });
+      return;
+    }
     setSave({ kind: "saving" });
     try {
-      const res = await api.updateAdminSettings(toPayload(form));
+      const res = await api.updateAdminSettings(nums);
       setData(res);
       setForm(toForm(res));
       setSave({ kind: "done" });
-    } catch (e) {
-      setSave({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    } catch {
+      setSave({ kind: "error", message: t("admin.settings.saveError") });
     }
   };
 

@@ -107,6 +107,7 @@ function authValue(overrides: Record<string, unknown> = {}) {
     signOut: vi.fn(),
     isAdmin: true,
     adminState: "ready",
+    refreshAdmin: vi.fn(),
     ...overrides,
   } as unknown as ReturnType<typeof useAuth>;
 }
@@ -147,6 +148,15 @@ describe("AdminLayout gate", () => {
     mockUseAuth.mockReturnValue(authValue({ adminState: "error" }));
     renderAdmin("/admin");
     expect(await screen.findByText(/Couldn't verify your admin access/i)).toBeInTheDocument();
+  });
+
+  it("offers a Retry that re-runs the admin probe (no reload needed)", async () => {
+    const refreshAdmin = vi.fn();
+    mockUseAuth.mockReturnValue(authValue({ adminState: "error", refreshAdmin }));
+    renderAdmin("/admin");
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    fireEvent.click(retry);
+    expect(refreshAdmin).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -214,8 +224,60 @@ describe("Admin settings pages", () => {
     expect(await screen.findByText("Couldn't load the current settings.")).toBeInTheDocument();
   });
 
-  it("keeps the restart-required note on the analyze page", async () => {
+  it("blocks the save and shows an invalid-number error when a required field is cleared", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/rag");
+
+    const topK = await screen.findByLabelText("RAG top-k");
+    fireEvent.change(topK, { target: { value: "" } }); // cleared → not a valid number
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+
+    expect(
+      await screen.findByText("Please enter a valid number for every field.")
+    ).toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("blocks the save on non-numeric input and never submits it", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/rag");
+
+    const hops = await screen.findByLabelText("KG hops");
+    fireEvent.change(hops, { target: { value: "abc" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+
+    expect(
+      await screen.findByText("Please enter a valid number for every field.")
+    ).toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("submits parsed numbers when every required field is valid", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/rag");
+
+    const topK = await screen.findByLabelText("RAG top-k");
+    fireEvent.change(topK, { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    // Sent as real numbers, not strings.
+    expect(update.mock.calls[0][0]).toEqual({ rag_top_k: 8, kg_hops: 1, kg_seeds: 5 });
+  });
+
+  it("shows max concurrent analyses read-only: no editable input, never sent in an update", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
     renderAdmin("/admin/settings/analyze");
-    expect(await screen.findByText("Restart required to take effect")).toBeInTheDocument();
+
+    // The read-only env-var note is shown, and there is no editable control for the value.
+    expect(
+      await screen.findByText(/XCOACH_MAX_CONCURRENT_ANALYSES/)
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /max concurrent/i })).toBeNull();
+
+    // Saving only sends the editable upload-formats field — never max_concurrent_analyses.
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0]).toEqual({ allowed_upload_suffixes: [".mp4", ".mov"] });
   });
 });

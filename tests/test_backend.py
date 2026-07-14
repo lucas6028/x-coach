@@ -1602,13 +1602,86 @@ class RuntimeSettingsGetterTests(unittest.TestCase):
             self.assertEqual(app_settings.chat_timeout(), 60.0)
             self.assertEqual(app_settings.rag_top_k_default(), 5)
 
-    def test_chat_base_url(self) -> None:
-        with self._no_overrides(), mock.patch.object(
-            app_settings, "get_settings", return_value=types.SimpleNamespace(llm_base_url="https://env")
+    def test_getters_clamp_out_of_range_overrides(self) -> None:
+        # F3: an out-of-band / direct-DB write can't drive an out-of-range value downstream — each
+        # getter clamps to the same bound the PUT validator enforces (rather than rejecting).
+        with self._overrides(
+            {
+                "rag_top_k": 999,
+                "kg_hops": 99,
+                "kg_seeds": 999,
+                "chat_timeout": 5000,
+                "followup_timeout": 5000,
+                "chat_temperature": 9,
+            }
         ):
-            self.assertEqual(app_settings.chat_base_url(), "https://env")
-        with self._overrides({"llm_base_url": "https://override"}):
-            self.assertEqual(app_settings.chat_base_url(), "https://override")
+            self.assertEqual(app_settings.rag_top_k_default(), 50)  # cap 50
+            self.assertEqual(app_settings.kg_hops_default(), 3)  # cap 3
+            self.assertEqual(app_settings.kg_seeds_default(), 20)  # cap 20
+            self.assertEqual(app_settings.chat_timeout(), 300.0)  # cap 300
+            self.assertEqual(app_settings.followup_timeout(), 300.0)  # cap 300
+            self.assertEqual(app_settings.chat_temperature(), 2.0)  # cap 2
+        with self._overrides(
+            {
+                "rag_top_k": 0,
+                "kg_hops": 0,
+                "kg_seeds": 0,
+                "chat_timeout": -5,
+                "followup_timeout": 0,
+                "chat_temperature": -1,
+            }
+        ):
+            self.assertEqual(app_settings.rag_top_k_default(), 1)  # floor 1
+            self.assertEqual(app_settings.kg_hops_default(), 1)  # floor 1
+            self.assertEqual(app_settings.kg_seeds_default(), 1)  # floor 1
+            self.assertEqual(app_settings.chat_timeout(), 1.0)  # positive floor
+            self.assertEqual(app_settings.followup_timeout(), 1.0)  # positive floor
+            self.assertEqual(app_settings.chat_temperature(), 0.0)  # floor 0
+
+    def test_chat_base_url(self) -> None:
+        env = types.SimpleNamespace(
+            llm_base_url="https://env.example.com/v1", llm_allowed_base_hosts=""
+        )
+        with self._no_overrides(), mock.patch.object(
+            app_settings, "get_settings", return_value=env
+        ):
+            self.assertEqual(app_settings.chat_base_url(), "https://env.example.com/v1")
+        # An allowlisted-host override (the env-default host is always allowed) is honoured.
+        with self._overrides({"llm_base_url": "https://env.example.com/api/alt"}), mock.patch.object(
+            app_settings, "get_settings", return_value=env
+        ):
+            self.assertEqual(app_settings.chat_base_url(), "https://env.example.com/api/alt")
+        # An off-allowlist override falls back to the env default (the read-time SSRF/key-leak guard).
+        with self._overrides({"llm_base_url": "https://evil.example.org/v1"}), mock.patch.object(
+            app_settings, "get_settings", return_value=env
+        ):
+            self.assertEqual(app_settings.chat_base_url(), "https://env.example.com/v1")
+
+    def test_base_url_allowed_accepts_builtin_and_env_hosts(self) -> None:
+        env = types.SimpleNamespace(
+            llm_base_url="https://env.example.com/v1", llm_allowed_base_hosts="extra.host.io"
+        )
+        with mock.patch.object(app_settings, "get_settings", return_value=env):
+            # Built-in provider hosts.
+            self.assertTrue(app_settings._base_url_allowed("https://openrouter.ai/api/v1"))
+            self.assertTrue(app_settings._base_url_allowed("https://api.openai.com/v1"))
+            self.assertTrue(app_settings._base_url_allowed("https://integrate.api.nvidia.com/v1"))
+            # Env-default host + an LLM_ALLOWED_BASE_HOSTS entry (case-insensitive).
+            self.assertTrue(app_settings._base_url_allowed("https://ENV.example.com/x"))
+            self.assertTrue(app_settings._base_url_allowed("http://extra.host.io/y"))
+
+    def test_base_url_allowed_rejects_offlist_and_bad_scheme(self) -> None:
+        env = types.SimpleNamespace(
+            llm_base_url="https://openrouter.ai/api/v1", llm_allowed_base_hosts=""
+        )
+        with mock.patch.object(app_settings, "get_settings", return_value=env):
+            self.assertFalse(app_settings._base_url_allowed("https://evil.example.org/v1"))
+            self.assertFalse(app_settings._base_url_allowed("http://127.0.0.1:8080/v1"))
+            self.assertFalse(app_settings._base_url_allowed("http://localhost/v1"))
+            self.assertFalse(app_settings._base_url_allowed("http://169.254.169.254/latest"))
+            self.assertFalse(app_settings._base_url_allowed("ftp://openrouter.ai/v1"))
+            self.assertFalse(app_settings._base_url_allowed("not-a-url"))
+            self.assertFalse(app_settings._base_url_allowed(None))
 
     def test_chat_models_override_string_list_and_env_fallback(self) -> None:
         with self._overrides({"llm_models": "a,b,a"}):
@@ -1746,10 +1819,10 @@ class AdminSettingsRouterTests(unittest.TestCase):
             {"rag_top_k": 51},
             {"kg_hops": 4},
             {"kg_seeds": 21},
-            {"max_concurrent_analyses": 17},
             {"llm_models": []},
             {"allowed_upload_suffixes": ["mp4"]},  # missing leading dot
             {"llm_base_url": "ftp://nope"},
+            {"llm_base_url": "https://evil.example.org/v1"},  # off-allowlist host (F1)
         ]
         with mock.patch.object(store, "is_admin", return_value=True):
             for payload in bad_payloads:
@@ -1779,7 +1852,7 @@ class AdminSettingsRouterTests(unittest.TestCase):
                 "/api/admin/settings",
                 json={
                     "llm_models": [" a/m ", "b/m"],
-                    "llm_base_url": "https://example.test/v1",
+                    "llm_base_url": "https://openrouter.ai/api/alt",  # built-in allowlisted host
                     "allowed_upload_suffixes": [".MP4", ".gif"],
                 },
             )
@@ -1788,7 +1861,7 @@ class AdminSettingsRouterTests(unittest.TestCase):
             token="tok",
             items={
                 "llm_models": ["a/m", "b/m"],
-                "llm_base_url": "https://example.test/v1",
+                "llm_base_url": "https://openrouter.ai/api/alt",
                 "allowed_upload_suffixes": [".mp4", ".gif"],
             },
         )
@@ -1819,6 +1892,33 @@ class AdminSettingsRouterTests(unittest.TestCase):
         app.dependency_overrides.clear()  # drop the override -> real dependency runs
         resp = self.client.put("/api/admin/settings", json={"rag_top_k": 8})
         self.assertEqual(resp.status_code, 401)
+
+    def test_put_ignores_max_concurrent_analyses(self) -> None:
+        # F5: max_concurrent_analyses is no longer a PUT field — it is silently ignored (never written),
+        # not accepted as an override, and never rejected. Only the real knob (rag_top_k) is upserted.
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "upsert_app_settings") as up, \
+             mock.patch.object(runtime_config, "clear_cache"), \
+             mock.patch.object(runtime_config, "get_overrides", return_value={}):
+            resp = self.client.put(
+                "/api/admin/settings", json={"max_concurrent_analyses": 99, "rag_top_k": 8}
+            )
+        self.assertEqual(resp.status_code, 200)
+        up.assert_called_once_with(token="tok", items={"rag_top_k": 8})  # no max_concurrent key
+
+    def test_get_effective_includes_readonly_max_concurrent(self) -> None:
+        # F5: the value stays present (read-only, env-sourced) under analyze in both effective+defaults.
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(runtime_config, "get_overrides", return_value={}):
+            resp = self.client.get("/api/admin/settings")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(
+            body["effective"]["analyze"]["max_concurrent_analyses"], config.MAX_CONCURRENT_ANALYSES
+        )
+        self.assertEqual(
+            body["defaults"]["analyze"]["max_concurrent_analyses"], config.MAX_CONCURRENT_ANALYSES
+        )
 
 
 # ------------------------------------------ store: admin_list_users / set_user_role (P3 seams)
@@ -1852,7 +1952,20 @@ class StoreAdminUsersTests(unittest.TestCase):
             store.set_user_role(token="t", user_id="u2", make_admin=False)
         self.assertTrue(query.deleted)
         self.assertIsNone(query.upserted)
-        client.table.assert_called_with("user_roles")
+
+    def test_count_admins_returns_count(self) -> None:
+        # Goes through the count_admins() SECURITY DEFINER RPC (not a table read), so the self-only
+        # user_roles SELECT policy can't shrink the count to 1 for the acting admin.
+        client, _ = _fake_client(_Resp(data=3))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertEqual(store.count_admins(token="t"), 3)
+        client.rpc.assert_called_with("count_admins")
+
+    def test_count_admins_zero_when_data_none(self) -> None:
+        client, _ = _fake_client(_Resp(data=None))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertEqual(store.count_admins(token="t"), 0)
+        client.rpc.assert_called_with("count_admins")
 
 
 # ------------------------------ routers.admin: /users, /users/{id}/role, /overview (P3 dashboard)
@@ -1911,6 +2024,26 @@ class AdminUsersRouterTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"ok": True})
         sr.assert_called_once_with(token="tok", user_id="u2", make_admin=True)
+
+    def test_set_role_rejects_removing_last_admin(self) -> None:
+        # F4: revoking another admin's role when only one admin remains is refused (400, anti-lockout).
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "count_admins", return_value=1), \
+             mock.patch.object(store, "set_user_role") as sr:
+            resp = self.client.put("/api/admin/users/u2/role", json={"make_admin": False})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("last admin", resp.json()["detail"].lower())
+        sr.assert_not_called()
+
+    def test_set_role_allows_removal_when_multiple_admins(self) -> None:
+        # F4: with more than one admin, revoking another admin's role succeeds.
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "count_admins", return_value=2), \
+             mock.patch.object(store, "set_user_role") as sr:
+            resp = self.client.put("/api/admin/users/u2/role", json={"make_admin": False})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True})
+        sr.assert_called_once_with(token="tok", user_id="u2", make_admin=False)
 
     # -- GET /overview ----------------------------------------------------------------------------
     def test_overview_forbidden_for_non_admin(self) -> None:

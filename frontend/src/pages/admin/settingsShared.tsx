@@ -22,6 +22,30 @@ export const splitList = (raw: string): string[] =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+// Parse a numeric form field. Returns null for a blank OR non-finite value (so the caller can reject
+// it) instead of silently coercing to NaN (→ JSON null → stored default) or 0 (→ backend 422) the way
+// bare Number() does.
+export const parseNumber = (raw: string): number | null => {
+  if (raw.trim() === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+};
+
+// Validate + parse a group of REQUIRED numeric fields in one pass. Returns the parsed numbers keyed
+// the same, or null if ANY field is blank/non-numeric — letting the caller show one honest error and
+// skip the submit rather than corrupting the group with NaN/0.
+export function parseRequiredNumbers<K extends string>(
+  fields: Record<K, string>
+): Record<K, number> | null {
+  const out = {} as Record<K, number>;
+  for (const key of Object.keys(fields) as K[]) {
+    const n = parseNumber(fields[key]);
+    if (n === null) return null;
+    out[key] = n;
+  }
+  return out;
+}
+
 export function defaultHint(t: TFunc, value: string | number): string {
   return t("admin.settings.defaultLabel", { value: String(value) });
 }
@@ -56,7 +80,8 @@ export function Field({
   hintDanger,
   children,
 }: {
-  id: string;
+  /** Omit for a read-only display (no associated form control to point `htmlFor` at). */
+  id?: string;
   label: string;
   hint?: string;
   hintDanger?: boolean;
@@ -94,7 +119,7 @@ export function SaveBar({ t, save, onSave }: { t: TFunc; save: SaveState; onSave
       {save.kind === "error" && (
         <p className="flex items-center gap-1.5 text-sm text-danger">
           <WarningCircle size={16} weight="fill" />
-          {t("admin.settings.saveError")}
+          {save.message}
         </p>
       )}
     </div>

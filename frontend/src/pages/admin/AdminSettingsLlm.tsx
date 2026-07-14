@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Brain } from "@phosphor-icons/react";
-import { api, type AdminSettingsResponse, type AdminSettingsUpdate } from "../../api";
+import { api, type AdminSettingsResponse } from "../../api";
 import { useI18n } from "../../lib/i18n";
 import {
   Field,
@@ -10,6 +10,8 @@ import {
   SettingsLoading,
   defaultHint,
   inputClass,
+  parseNumber,
+  parseRequiredNumbers,
   splitList,
   textareaClass,
   type SaveState,
@@ -35,19 +37,6 @@ function toForm(s: AdminSettingsResponse): LlmForm {
     chat_temperature: llm.chat_temperature === null ? "" : String(llm.chat_temperature),
     chat_timeout: String(llm.chat_timeout),
     followup_timeout: String(llm.followup_timeout),
-  };
-}
-
-// Sends only the LLM group's keys — getAdminSettings returns everything, updateAdminSettings upserts
-// just what we pass.
-function toPayload(f: LlmForm): AdminSettingsUpdate {
-  return {
-    llm_models: splitList(f.llm_models),
-    llm_followup_model: f.llm_followup_model.trim(),
-    llm_base_url: f.llm_base_url.trim(),
-    chat_temperature: f.chat_temperature.trim() === "" ? null : Number(f.chat_temperature),
-    chat_timeout: Number(f.chat_timeout),
-    followup_timeout: Number(f.followup_timeout),
   };
 }
 
@@ -81,14 +70,30 @@ export default function AdminSettingsLlm() {
   const set = (key: keyof LlmForm) => (value: string) => setForm((f) => (f ? { ...f, [key]: value } : f));
 
   const onSave = async () => {
+    // Guard the required positive-integer timeouts on the client (empty/typo → honest error, not a
+    // silent NaN reset or an opaque 422). chat_temperature stays optional: empty = "use default".
+    const nums = parseRequiredNumbers({
+      chat_timeout: form.chat_timeout,
+      followup_timeout: form.followup_timeout,
+    });
+    if (!nums) {
+      setSave({ kind: "error", message: t("admin.settings.invalidNumber") });
+      return;
+    }
     setSave({ kind: "saving" });
     try {
-      const res = await api.updateAdminSettings(toPayload(form));
+      const res = await api.updateAdminSettings({
+        llm_models: splitList(form.llm_models),
+        llm_followup_model: form.llm_followup_model.trim(),
+        llm_base_url: form.llm_base_url.trim(),
+        chat_temperature: parseNumber(form.chat_temperature),
+        ...nums,
+      });
       setData(res);
       setForm(toForm(res));
       setSave({ kind: "done" });
-    } catch (e) {
-      setSave({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    } catch {
+      setSave({ kind: "error", message: t("admin.settings.saveError") });
     }
   };
 
