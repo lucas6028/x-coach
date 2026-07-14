@@ -410,6 +410,15 @@ const en: Dict = {
   "admin.loading": "Checking your access…",
   "admin.error": "Couldn't verify your admin access. Please try again.",
 
+  // Admin console standalone shell (nav + section titles)
+  "admin.console.title": "Admin console",
+  "admin.nav.overview": "Overview",
+  "admin.nav.users": "Users",
+  "admin.nav.settingsLlm": "LLM chat",
+  "admin.nav.settingsRag": "RAG / KG",
+  "admin.nav.settingsAnalyze": "Analyze pipeline",
+  "admin.nav.backToApp": "Back to app",
+
   // Admin panel P2 — runtime settings
   "admin.settings.loading": "Loading settings…",
   "admin.settings.loadError": "Couldn't load the current settings.",
@@ -944,6 +953,15 @@ const zhHant: Dict = {
   "admin.denied": "你沒有存取後台管理面板的權限。",
   "admin.loading": "確認你的存取權限中…",
   "admin.error": "無法確認你的後台權限，請再試一次。",
+
+  // 後台管理獨立主控台外框（導覽＋分頁標題）
+  "admin.console.title": "後台管理主控台",
+  "admin.nav.overview": "總覽",
+  "admin.nav.users": "使用者",
+  "admin.nav.settingsLlm": "LLM 對話",
+  "admin.nav.settingsRag": "RAG / KG",
+  "admin.nav.settingsAnalyze": "分析管線",
+  "admin.nav.backToApp": "返回 app",
 
   // 後台管理 P2 — 執行階段設定
   "admin.settings.loading": "載入設定中…",
