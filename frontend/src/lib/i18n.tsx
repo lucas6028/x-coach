@@ -419,6 +419,15 @@ const en: Dict = {
   "admin.nav.settingsAnalyze": "Analyze pipeline",
   "admin.nav.backToApp": "Back to app",
 
+  // Dedicated admin console sign-in (email + password only; no OAuth)
+  "adminLogin.title": "Admin console",
+  "adminLogin.subtitle": "Sign in with your admin account to continue.",
+  "adminLogin.submit": "Sign in",
+  "adminLogin.submitting": "Signing in…",
+  "adminLogin.error": "Couldn't sign you in. Check your email and password.",
+  "adminLogin.switchAccount": "Sign in as admin",
+  "adminLogin.notConfigured": "Sign-in isn't set up on this server yet.",
+
   // Admin panel P2 — runtime settings
   "admin.settings.loading": "Loading settings…",
   "admin.settings.loadError": "Couldn't load the current settings.",
@@ -962,6 +971,15 @@ const zhHant: Dict = {
   "admin.nav.settingsRag": "RAG / KG",
   "admin.nav.settingsAnalyze": "分析管線",
   "admin.nav.backToApp": "返回 app",
+
+  // 後台管理專用登入（僅電子郵件 + 密碼，無 OAuth）
+  "adminLogin.title": "後台管理主控台",
+  "adminLogin.subtitle": "請以你的管理員帳號登入以繼續。",
+  "adminLogin.submit": "登入",
+  "adminLogin.submitting": "登入中…",
+  "adminLogin.error": "無法登入，請確認電子郵件與密碼。",
+  "adminLogin.switchAccount": "以其他帳號登入",
+  "adminLogin.notConfigured": "此伺服器尚未設定登入功能。",
 
   // 後台管理 P2 — 執行階段設定
   "admin.settings.loading": "載入設定中…",

@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import History from "./pages/History";
 import Settings from "./pages/Settings";
 import AdminLayout from "./pages/admin/AdminLayout";
+import AdminLogin from "./pages/admin/AdminLogin";
 import AdminOverview from "./pages/admin/AdminOverview";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminSettingsLlm from "./pages/admin/AdminSettingsLlm";
@@ -63,10 +64,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 </RequireAuth>
               }
             />
+            <Route path="/admin/login" element={<AdminLogin />} />
             <Route
               path="/admin"
               element={
-                <RequireAuth>
+                <RequireAuth redirectTo="/admin/login">
                   <AdminLayout />
                 </RequireAuth>
               }
