@@ -281,3 +281,219 @@ describe("Admin settings pages", () => {
     expect(update.mock.calls[0][0]).toEqual({ allowed_upload_suffixes: [".mp4", ".mov"] });
   });
 });
+
+// Deep-clone a settings response so a per-test tweak (e.g. a non-null temperature) never leaks.
+const cloneSettings = (): AdminSettingsResponse =>
+  JSON.parse(JSON.stringify(SAMPLE_SETTINGS)) as AdminSettingsResponse;
+
+describe("AdminSettingsLlm", () => {
+  it("renders the current LLM values across every field", async () => {
+    renderAdmin("/admin/settings/llm");
+    // Models are shown newline-joined in the textarea; temperature=null renders as an empty field.
+    expect(await screen.findByLabelText("Selectable models")).toHaveValue("a/model\nb/model");
+    expect(screen.getByLabelText("Follow-up model")).toHaveValue("fast/model");
+    expect(screen.getByLabelText("Provider base URL")).toHaveValue("https://openrouter.ai/api/v1");
+    expect(screen.getByLabelText("Temperature")).toHaveValue("");
+    expect(screen.getByLabelText("Answer timeout (s)")).toHaveValue("60");
+    expect(screen.getByLabelText("Follow-up timeout (s)")).toHaveValue("15");
+  });
+
+  it("renders a stored (non-null) temperature as a populated field", async () => {
+    const withTemp = cloneSettings();
+    withTemp.effective.llm.chat_temperature = 0.5;
+    vi.spyOn(api, "getAdminSettings").mockResolvedValue(withTemp);
+    renderAdmin("/admin/settings/llm");
+    expect(await screen.findByLabelText("Temperature")).toHaveValue("0.5");
+  });
+
+  it("edits every field and saves the parsed LLM payload, then reflects the reload", async () => {
+    // The save response carries a non-null temperature so the reload exercises toForm's non-null branch.
+    const saved = cloneSettings();
+    saved.effective.llm.chat_temperature = 0.7;
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(saved);
+    renderAdmin("/admin/settings/llm");
+
+    fireEvent.change(await screen.findByLabelText("Selectable models"), {
+      target: { value: "x/m, y/m\nz/m" }, // splitList handles both comma and newline separators
+    });
+    fireEvent.change(screen.getByLabelText("Follow-up model"), { target: { value: "  quick/model  " } });
+    fireEvent.change(screen.getByLabelText("Provider base URL"), { target: { value: "  https://alt/v1  " } });
+    fireEvent.change(screen.getByLabelText("Temperature"), { target: { value: "0.7" } });
+    fireEvent.change(screen.getByLabelText("Answer timeout (s)"), { target: { value: "45" } });
+    fireEvent.change(screen.getByLabelText("Follow-up timeout (s)"), { target: { value: "20" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0]).toEqual({
+      llm_models: ["x/m", "y/m", "z/m"],
+      llm_followup_model: "quick/model", // trimmed
+      llm_base_url: "https://alt/v1", // trimmed
+      chat_temperature: 0.7, // parseNumber of a non-blank value
+      chat_timeout: 45,
+      followup_timeout: 20,
+    });
+    expect(await screen.findByText("Settings saved.")).toBeInTheDocument();
+    // The reload re-derives the form from the (non-null temperature) response.
+    expect(screen.getByLabelText("Temperature")).toHaveValue("0.7");
+  });
+
+  it("keeps chat_temperature null when the field is left blank", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/llm");
+    // Leave temperature blank; only bump a required timeout so the submit still fires.
+    fireEvent.change(await screen.findByLabelText("Answer timeout (s)"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0].chat_temperature).toBeNull();
+  });
+
+  it("blocks the save and shows the invalid-number error when a required timeout is cleared", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/llm");
+    fireEvent.change(await screen.findByLabelText("Answer timeout (s)"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    expect(
+      await screen.findByText("Please enter a valid number for every field.")
+    ).toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it("shows the save-error state when the update request rejects", async () => {
+    vi.spyOn(api, "updateAdminSettings").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin/settings/llm");
+    fireEvent.click(await screen.findByRole("button", { name: /Save changes/i }));
+    expect(await screen.findByText("Couldn't save the settings.")).toBeInTheDocument();
+  });
+
+  it("renders the load-error card when the settings fetch fails", async () => {
+    vi.spyOn(api, "getAdminSettings").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin/settings/llm");
+    expect(await screen.findByText("Couldn't load the current settings.")).toBeInTheDocument();
+  });
+});
+
+describe("AdminSettingsRag save-error + full edit", () => {
+  it("edits kg_seeds and surfaces the save-error state when the update rejects", async () => {
+    vi.spyOn(api, "updateAdminSettings").mockRejectedValue(new Error("boom"));
+    renderAdmin("/admin/settings/rag");
+    fireEvent.change(await screen.findByLabelText("KG seed nodes"), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    expect(await screen.findByText("Couldn't save the settings.")).toBeInTheDocument();
+  });
+});
+
+describe("AdminSettingsAnalyze edit + save-error", () => {
+  it("sends only the edited upload suffixes on save", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/analyze");
+    fireEvent.change(await screen.findByLabelText("Allowed upload formats"), {
+      target: { value: ".mp4, .avi" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0]).toEqual({ allowed_upload_suffixes: [".mp4", ".avi"] });
+  });
+
+  it("shows the save-error state when the update rejects", async () => {
+    vi.spyOn(api, "updateAdminSettings").mockRejectedValue(new Error("boom"));
+    renderAdmin("/admin/settings/analyze");
+    fireEvent.click(await screen.findByRole("button", { name: /Save changes/i }));
+    expect(await screen.findByText("Couldn't save the settings.")).toBeInTheDocument();
+  });
+});
+
+describe("AdminOverview error + not-configured", () => {
+  it("shows the load-error card when the overview fetch fails", async () => {
+    vi.spyOn(api, "getAdminOverview").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin");
+    expect(await screen.findByText("Couldn't load the system overview.")).toBeInTheDocument();
+  });
+
+  it("renders 'Not configured' badges when auth/chat are down", async () => {
+    const down: AdminOverview = { ...SAMPLE_OVERVIEW, auth_configured: false, chat_configured: false };
+    vi.spyOn(api, "getAdminOverview").mockResolvedValue(down);
+    renderAdmin("/admin");
+    // Both the auth and chat cards resolve to the not-configured value.
+    expect((await screen.findAllByText("Not configured")).length).toBe(2);
+  });
+});
+
+describe("AdminUsers error / empty / toggle-failure", () => {
+  it("shows the load-error card when the users fetch fails", async () => {
+    vi.spyOn(api, "listAdminUsers").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin/users");
+    expect(await screen.findByText("Couldn't load the users list.")).toBeInTheDocument();
+  });
+
+  it("shows the empty state when there are no users", async () => {
+    vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: [] });
+    renderAdmin("/admin/users");
+    expect(await screen.findByText("No users yet.")).toBeInTheDocument();
+  });
+
+  it("surfaces an inline row error when the role toggle fails and leaves the list intact", async () => {
+    const setRole = vi.spyOn(api, "setUserRole").mockRejectedValue(new Error("nope"));
+    const list = vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
+    renderAdmin("/admin/users");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Make admin" }));
+    await waitFor(() => expect(setRole).toHaveBeenCalledWith("u2", true));
+    // Inline per-row error is shown; the list was NOT re-fetched (only the initial load ran).
+    expect(await screen.findByText("Couldn't update this user's role.")).toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(1);
+    // Both rows survive — the failed toggle didn't corrupt the table.
+    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
+    expect(screen.getByText("bob@x.com")).toBeInTheDocument();
+  });
+
+  it("falls back to the id for a null email and shows 'Never' for an unparseable date", async () => {
+    const edge: AdminUserRow[] = [
+      {
+        id: "u9",
+        email: null,
+        created_at: "not-a-date",
+        last_sign_in_at: null,
+        analyses_count: 0,
+        conversations_count: 0,
+        is_admin: false,
+      },
+    ];
+    vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: edge });
+    renderAdmin("/admin/users");
+    // Null email → the row id is displayed instead.
+    expect(await screen.findByText("u9")).toBeInTheDocument();
+    // Both the invalid created_at and the null last_sign_in_at render as the "Never" fallback.
+    expect(screen.getAllByText("Never").length).toBe(2);
+  });
+});
+
+describe("AdminLayout loading + mobile nav", () => {
+  it("shows the spinner while the admin probe is still loading", async () => {
+    mockUseAuth.mockReturnValue(authValue({ adminState: "loading" }));
+    renderAdmin("/admin");
+    expect(await screen.findByText("Checking your access…")).toBeInTheDocument();
+  });
+
+  it("opens the mobile drawer (backdrop) and closes it via the drawer's close button", async () => {
+    const { container } = renderAdmin("/admin");
+    await screen.findByLabelText("Show navigation");
+    // Drawer starts closed: the off-canvas backdrop is not mounted yet.
+    expect(container.querySelector(".bg-black\\/50")).toBeNull();
+    // Open: the header's menu button mounts the backdrop.
+    fireEvent.click(screen.getByLabelText("Show navigation"));
+    expect(container.querySelector(".bg-black\\/50")).not.toBeNull();
+    // Close: the drawer's onNavigate close button collapses it again.
+    fireEvent.click(screen.getByLabelText("Hide navigation"));
+    await waitFor(() => expect(container.querySelector(".bg-black\\/50")).toBeNull());
+  });
+
+  it("closes the mobile drawer when the backdrop is clicked", async () => {
+    const { container } = renderAdmin("/admin");
+    fireEvent.click(await screen.findByLabelText("Show navigation"));
+    const backdrop = container.querySelector(".bg-black\\/50");
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop as Element);
+    await waitFor(() => expect(container.querySelector(".bg-black\\/50")).toBeNull());
+  });
+});
