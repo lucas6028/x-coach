@@ -132,6 +132,12 @@ export default function AdminLayout() {
                   <ShieldWarning size={30} weight="duotone" />
                 </span>
                 <p className="font-medium text-content">{t("admin.denied")}</p>
+                <Link
+                  to="/admin/login"
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-primary-content transition-colors hover:bg-primary/90 active:scale-[0.99]"
+                >
+                  {t("adminLogin.switchAccount")}
+                </Link>
               </div>
             )}
 

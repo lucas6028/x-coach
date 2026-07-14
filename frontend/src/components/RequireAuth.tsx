@@ -6,9 +6,16 @@ import { useI18n } from "../lib/i18n";
 
 // Gate a route on a signed-in session. While the initial session check is in flight we show a
 // quiet placeholder (not the login page) so a logged-in user never sees a flash of /login on
-// refresh. Once resolved, anonymous users are redirected to /login with a `from` location so we
-// can return them after sign-in.
-export default function RequireAuth({ children }: { children: ReactNode }) {
+// refresh. Once resolved, anonymous users are redirected to the login page (default `/login`,
+// overridable via `redirectTo` — e.g. the admin tree points at `/admin/login`) with a `from`
+// location so we can return them after sign-in.
+export default function RequireAuth({
+  children,
+  redirectTo = "/login",
+}: {
+  children: ReactNode;
+  redirectTo?: string;
+}) {
   const { user, loading } = useAuth();
   const { t } = useI18n();
   const location = useLocation();
@@ -23,7 +30,7 @@ export default function RequireAuth({ children }: { children: ReactNode }) {
   }
 
   if (!user) {
-    return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+    return <Navigate to={redirectTo} replace state={{ from: location.pathname + location.search }} />;
   }
 
   return <>{children}</>;
