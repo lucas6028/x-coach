@@ -262,6 +262,7 @@
 - [ ] DB 連線池（PgBouncer）、`(user_id, created_at)` 索引、必要時讀副本
 - [ ] 每人 rate limit + 上傳配額
 - [ ] 可觀測性：結構化 log、Sentry、佇列/延遲/GPU 指標、health/readiness probe
+- [ ] 加入 Pub/Sub, 處理高流量
 
 ### 橫切議題（越早處理越省事）
 
