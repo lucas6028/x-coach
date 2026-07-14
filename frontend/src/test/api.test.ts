@@ -21,6 +21,120 @@ describe("api.health", () => {
   });
 });
 
+describe("api.adminStatus", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("GETs the admin status endpoint and returns the flag", async () => {
+    mockFetch({ is_admin: true });
+    const result = await api.adminStatus();
+    expect(result).toEqual({ is_admin: true });
+    expect(fetch).toHaveBeenCalledWith("/api/admin/status");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 401);
+    await expect(api.adminStatus()).rejects.toThrow("401");
+  });
+});
+
+describe("api.getAdminSettings", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("GETs the admin settings endpoint and returns the parsed payload", async () => {
+    const body = { effective: { rag_kg: { rag_top_k: 5 } }, defaults: {} };
+    mockFetch(body);
+    const result = await api.getAdminSettings();
+    expect(result).toEqual(body);
+    expect(fetch).toHaveBeenCalledWith("/api/admin/settings");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 403);
+    await expect(api.getAdminSettings()).rejects.toThrow("403");
+  });
+});
+
+describe("api.updateAdminSettings", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("PUTs the payload and returns the new settings", async () => {
+    const body = { effective: { rag_kg: { rag_top_k: 9 } }, defaults: {} };
+    const spy = mockFetch(body);
+    const result = await api.updateAdminSettings({ rag_top_k: 9 });
+    expect(result).toEqual(body);
+    expect(spy.mock.calls[0][0]).toBe("/api/admin/settings");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ rag_top_k: 9 });
+  });
+
+  it("throws on non-ok responses (e.g. 422 validation)", async () => {
+    mockFetch({}, false, 422);
+    await expect(api.updateAdminSettings({ rag_top_k: 99 })).rejects.toThrow("422");
+  });
+});
+
+describe("api.listAdminUsers", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("GETs the admin users endpoint and returns the parsed payload", async () => {
+    const body = { users: [{ id: "u1", email: "a@x.com", is_admin: true }] };
+    mockFetch(body);
+    const result = await api.listAdminUsers();
+    expect(result).toEqual(body);
+    expect(fetch).toHaveBeenCalledWith("/api/admin/users");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 403);
+    await expect(api.listAdminUsers()).rejects.toThrow("403");
+  });
+});
+
+describe("api.getAdminOverview", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("GETs the admin overview endpoint and returns the parsed payload", async () => {
+    const body = { auth_configured: true, total_users: 4, total_analyses: 12, stores: {} };
+    mockFetch(body);
+    const result = await api.getAdminOverview();
+    expect(result).toEqual(body);
+    expect(fetch).toHaveBeenCalledWith("/api/admin/overview");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 403);
+    await expect(api.getAdminOverview()).rejects.toThrow("403");
+  });
+});
+
+describe("api.setUserRole", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("PUTs the make_admin flag to the per-user role endpoint", async () => {
+    const spy = mockFetch({ ok: true });
+    const result = await api.setUserRole("u2", true);
+    expect(result).toEqual({ ok: true });
+    expect(spy.mock.calls[0][0]).toBe("/api/admin/users/u2/role");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ make_admin: true });
+  });
+
+  it("URL-encodes the user id and can revoke", async () => {
+    const spy = mockFetch({ ok: true });
+    await api.setUserRole("a b/c", false);
+    expect(spy.mock.calls[0][0]).toBe("/api/admin/users/a%20b%2Fc/role");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ make_admin: false });
+  });
+
+  it("throws on non-ok responses (e.g. 400 self-demote)", async () => {
+    mockFetch({}, false, 400);
+    await expect(api.setUserRole("u1", false)).rejects.toThrow("400");
+  });
+});
+
 describe("api.listVideos", () => {
   afterEach(() => vi.restoreAllMocks());
 
