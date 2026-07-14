@@ -475,6 +475,10 @@ class ChatRouterTests(unittest.TestCase):
         )
         with mock.patch.object(
             chat_router, "get_settings", return_value=types.SimpleNamespace(chat_configured=True)
+        ), mock.patch.object(
+            # Pin the allow-list so resolution is hermetic (independent of the deployment's real
+            # LLM_MODELS): the client's "minimax/minimax-m3" is offered, so it passes through.
+            app_settings, "get_settings", return_value=_fake_models("minimax/minimax-m3,openai/gpt-oss-120b")
         ), mock.patch.object(chat_service, "answer_stream", fake_answer_stream):
             resp = self._run(body)
             out = asyncio.run(_collect(resp))
