@@ -43,7 +43,7 @@ const NAV: NavItem[] = [
 export default function AdminLayout() {
   const { t } = useI18n();
   // The admin role is probed once per session by AuthProvider; this shell just reflects that state.
-  const { user, isAdmin, adminState } = useAuth();
+  const { user, isAdmin, adminState, refreshAdmin } = useAuth();
   const [mobileNav, setMobileNav] = useState(false);
 
   return (
@@ -97,9 +97,17 @@ export default function AdminLayout() {
             )}
 
             {adminState === "error" && (
-              <div className="flex items-start gap-2.5 rounded-2xl border border-danger/30 bg-danger/[0.06] p-4 text-sm text-danger">
-                <WarningCircle size={18} className="shrink-0" />
-                <p className="font-medium">{t("admin.error")}</p>
+              <div className="flex flex-col gap-3 rounded-2xl border border-danger/30 bg-danger/[0.06] p-4 text-sm text-danger">
+                <div className="flex items-start gap-2.5">
+                  <WarningCircle size={18} className="shrink-0" />
+                  <p className="font-medium">{t("admin.error")}</p>
+                </div>
+                <button
+                  onClick={() => refreshAdmin()}
+                  className="inline-flex w-fit items-center gap-1.5 rounded-xl border border-danger/40 px-3 py-1.5 text-sm font-semibold text-danger transition-colors hover:bg-danger/10 active:scale-[0.99]"
+                >
+                  {t("admin.retry")}
+                </button>
               </div>
             )}
 

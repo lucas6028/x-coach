@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { SlidersHorizontal } from "@phosphor-icons/react";
-import { api, type AdminSettingsResponse, type AdminSettingsUpdate } from "../../api";
+import { api, type AdminSettingsResponse } from "../../api";
 import { useI18n } from "../../lib/i18n";
 import {
   Field,
@@ -17,29 +17,21 @@ type Status = "loading" | "ready" | "error";
 
 interface AnalyzeForm {
   allowed_upload_suffixes: string;
-  max_concurrent_analyses: string;
 }
 
 function toForm(s: AdminSettingsResponse): AnalyzeForm {
   const { analyze } = s.effective;
   return {
     allowed_upload_suffixes: analyze.allowed_upload_suffixes.join(", "),
-    max_concurrent_analyses: String(analyze.max_concurrent_analyses),
   };
 }
 
-// Sends only the analyze group's keys.
-function toPayload(f: AnalyzeForm): AdminSettingsUpdate {
-  return {
-    allowed_upload_suffixes: splitList(f.allowed_upload_suffixes),
-    max_concurrent_analyses: Number(f.max_concurrent_analyses),
-  };
-}
-
-// Analyze-pipeline settings (admin-only): allowed upload formats + max concurrent analyses. The
-// concurrency knob only takes effect on restart (worker pool is built at startup) — surfaced inline.
+// Analyze-pipeline settings (admin-only): allowed upload formats are editable; max concurrent
+// analyses is env-var-driven (XCOACH_MAX_CONCURRENT_ANALYSES, applied at startup) so it's shown
+// read-only and never included in the update payload.
 export default function AdminSettingsAnalyze() {
   const { t } = useI18n();
+  const [data, setData] = useState<AdminSettingsResponse | null>(null);
   const [form, setForm] = useState<AnalyzeForm | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [save, setSave] = useState<SaveState>({ kind: "idle" });
@@ -50,6 +42,7 @@ export default function AdminSettingsAnalyze() {
       .getAdminSettings()
       .then((res) => {
         if (!active) return;
+        setData(res);
         setForm(toForm(res));
         setStatus("ready");
       })
@@ -60,18 +53,21 @@ export default function AdminSettingsAnalyze() {
   }, []);
 
   if (status === "loading") return <SettingsLoading t={t} />;
-  if (status === "error" || !form) return <SettingsLoadError t={t} />;
+  if (status === "error" || !form || !data) return <SettingsLoadError t={t} />;
 
   const set = (key: keyof AnalyzeForm) => (value: string) => setForm((f) => (f ? { ...f, [key]: value } : f));
 
   const onSave = async () => {
     setSave({ kind: "saving" });
     try {
-      const res = await api.updateAdminSettings(toPayload(form));
+      const res = await api.updateAdminSettings({
+        allowed_upload_suffixes: splitList(form.allowed_upload_suffixes),
+      });
+      setData(res);
       setForm(toForm(res));
       setSave({ kind: "done" });
-    } catch (e) {
-      setSave({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+    } catch {
+      setSave({ kind: "error", message: t("admin.settings.saveError") });
     }
   };
 
@@ -85,13 +81,11 @@ export default function AdminSettingsAnalyze() {
         <Field id="allowed_upload_suffixes" label={t("admin.settings.uploadFormats")} hint={t("admin.settings.uploadFormatsHint")}>
           <input id="allowed_upload_suffixes" value={form.allowed_upload_suffixes} onChange={(e) => set("allowed_upload_suffixes")(e.target.value)} className={inputClass} />
         </Field>
-        <Field
-          id="max_concurrent_analyses"
-          label={t("admin.settings.maxConcurrent")}
-          hint={t("admin.settings.restartRequired")}
-          hintDanger
-        >
-          <input id="max_concurrent_analyses" inputMode="numeric" value={form.max_concurrent_analyses} onChange={(e) => set("max_concurrent_analyses")(e.target.value)} className={inputClass} />
+        {/* Read-only: max concurrency is fixed at startup from an env var, not editable at runtime. */}
+        <Field label={t("admin.settings.maxConcurrent")} hint={t("admin.settings.maxConcurrentReadonly")}>
+          <p className="rounded-xl border border-border-dark bg-content/[0.04] px-3 py-2 text-sm text-muted">
+            {data.effective.analyze.max_concurrent_analyses}
+          </p>
         </Field>
       </SettingsCard>
 

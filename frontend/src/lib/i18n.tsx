@@ -409,6 +409,7 @@ const en: Dict = {
   "admin.denied": "You don't have access to the admin panel.",
   "admin.loading": "Checking your access…",
   "admin.error": "Couldn't verify your admin access. Please try again.",
+  "admin.retry": "Retry",
 
   // Admin console standalone shell (nav + section titles)
   "admin.console.title": "Admin console",
@@ -457,6 +458,8 @@ const en: Dict = {
   "admin.settings.uploadFormatsHint": "Comma-separated .ext values.",
   "admin.settings.maxConcurrent": "Max concurrent analyses",
   "admin.settings.restartRequired": "Restart required to take effect",
+  "admin.settings.maxConcurrentReadonly": "Read-only: set via the XCOACH_MAX_CONCURRENT_ANALYSES environment variable; requires a restart to change.",
+  "admin.settings.invalidNumber": "Please enter a valid number for every field.",
 
   // Admin panel P3 — system overview dashboard
   "admin.overview.title": "System overview",
@@ -962,6 +965,7 @@ const zhHant: Dict = {
   "admin.denied": "你沒有存取後台管理面板的權限。",
   "admin.loading": "確認你的存取權限中…",
   "admin.error": "無法確認你的後台權限，請再試一次。",
+  "admin.retry": "重試",
 
   // 後台管理獨立主控台外框（導覽＋分頁標題）
   "admin.console.title": "後台管理主控台",
@@ -1010,6 +1014,8 @@ const zhHant: Dict = {
   "admin.settings.uploadFormatsHint": "以逗號分隔的 .ext 值。",
   "admin.settings.maxConcurrent": "最大同時分析數",
   "admin.settings.restartRequired": "需重啟才生效",
+  "admin.settings.maxConcurrentReadonly": "唯讀：透過 XCOACH_MAX_CONCURRENT_ANALYSES 環境變數設定，需重啟才能變更。",
+  "admin.settings.invalidNumber": "請為每個欄位輸入有效的數字。",
 
   // 後台管理 P3 — 系統狀態總覽
   "admin.overview.title": "系統總覽",

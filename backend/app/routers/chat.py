@@ -13,6 +13,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.auth import CurrentUser, get_current_user
 from backend.app.services import chat as chat_service
@@ -84,7 +85,9 @@ async def chat(
 
     messages = [m.model_dump() for m in body.messages]
     context = body.context.model_dump()
-    model = resolve_chat_model(body.model)  # allow-list guard: never trust the client's raw choice.
+    # ``resolve_chat_model`` reads the admin overrides, which can do a synchronous Supabase round-trip
+    # on a cold cache — run it in a threadpool so it never blocks the event loop.
+    model = await run_in_threadpool(resolve_chat_model, body.model)  # allow-list guard.
 
     # The sync generator's blocking httpx calls are iterated off the event loop by StreamingResponse
     # (Starlette runs a non-async iterator in a threadpool). Disable proxy/browser buffering so
@@ -122,9 +125,12 @@ async def chat_followups(
             detail="Conversational coaching is not configured on the server.",
         )
 
+    # ``followup_chat_model`` reads the admin overrides (a possible cold-cache Supabase round-trip),
+    # so resolve it off the event loop before the best-effort suggestion call.
+    model = await run_in_threadpool(followup_chat_model)  # fast, server-pinned; independent of answer
     questions = chat_service.suggest_followups(
         messages=[m.model_dump() for m in body.messages],
         context=body.context.model_dump(),
-        model=followup_chat_model(),  # fast, server-pinned; independent of the answer model
+        model=model,
     )
     return FollowupsResponse(questions=questions)

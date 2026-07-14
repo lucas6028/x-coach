@@ -55,6 +55,21 @@ def is_admin(*, token: str, user_id: str) -> bool:
     return bool(resp.data)
 
 
+def count_admins(*, token: str) -> int:
+    """Return how many users currently hold the 'admin' role.
+
+    Used by the role PUT's last-admin guard to refuse a revoke that would leave zero admins. This
+    goes through the ``count_admins()`` SECURITY DEFINER RPC, NOT a direct table read: the tightened
+    ``user_roles`` SELECT policy scopes an authenticated caller to their OWN row, so a plain
+    ``.table("user_roles")`` count would always return 1 for the acting admin and wrongly block every
+    demotion. The definer function bypasses RLS and returns the true total. A patchable seam — the
+    unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = client.rpc("count_admins").execute()
+    return int(resp.data or 0)
+
+
 def get_app_settings(*, token: str) -> dict[str, Any]:
     """Return every ``app_settings`` override as ``{key: value}``, read as the caller (RLS-scoped).
 

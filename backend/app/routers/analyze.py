@@ -45,7 +45,10 @@ async def analyze(
     library clips identically.
     """
     suffix = Path(file.filename or "").suffix.lower() or ".mp4"
-    if suffix not in settings.allowed_upload_suffixes():
+    # ``allowed_upload_suffixes`` reads the admin overrides, which can do a synchronous Supabase
+    # round-trip on a cold cache — run it in a threadpool so it never blocks the event loop.
+    allowed = await run_in_threadpool(settings.allowed_upload_suffixes)
+    if suffix not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'.")
 
     data = await file.read()
