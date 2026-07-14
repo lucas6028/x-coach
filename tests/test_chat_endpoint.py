@@ -238,6 +238,8 @@ class SuggestFollowupsTests(unittest.TestCase):
             chat_service,
             "get_settings",
             return_value=types.SimpleNamespace(llm_base_url="https://openrouter.ai/api/v1"),
+        ), mock.patch.object(
+            chat_service, "chat_base_url", return_value="https://openrouter.ai/api/v1"
         ):
             qs = chat_service.suggest_followups(
                 messages=[
@@ -282,6 +284,8 @@ class SuggestFollowupsTests(unittest.TestCase):
             return_value=types.SimpleNamespace(
                 llm_base_url="https://integrate.api.nvidia.com/v1"
             ),
+        ), mock.patch.object(
+            chat_service, "chat_base_url", return_value="https://integrate.api.nvidia.com/v1"
         ):
             qs = chat_service.suggest_followups(
                 messages=[{"role": "user", "content": "why?"}], context=_FAULT_CTX, model="m"
@@ -341,6 +345,8 @@ class StreamCompletionTests(unittest.TestCase):
         cm.__exit__.return_value = False
         with mock.patch.object(
             chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch.object(
+            chat_service, "chat_base_url", return_value="https://openrouter.ai/api/v1"
         ), mock.patch("httpx.stream", return_value=cm) as stream:
             chunks = list(
                 chat_service._stream_completion(
@@ -370,6 +376,8 @@ class StreamCompletionTests(unittest.TestCase):
         cm.__exit__.return_value = False
         with mock.patch.object(
             chat_service, "get_settings", return_value=settings
+        ), mock.patch.object(
+            chat_service, "chat_base_url", return_value="https://integrate.api.nvidia.com/v1"
         ), mock.patch("httpx.stream", return_value=cm) as stream:
             list(chat_service._stream_completion([{"role": "user", "content": "hi"}], "meta/llama-3.3-70b-instruct"))
 

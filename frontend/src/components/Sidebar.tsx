@@ -1,5 +1,8 @@
-import { ClockCounterClockwise, Folders, GameController, List, Plus, VideoCamera } from "@phosphor-icons/react";
+import { useEffect, useState } from "react";
+import { ClockCounterClockwise, Folders, GameController, List, Plus, ShieldCheck, VideoCamera } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
+import { api } from "../api";
+import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -19,10 +22,35 @@ interface Props {
 // Account, language and theme controls live in the top-right Header, not here.
 export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary, onNewAnalysis }: Props) {
   const { t } = useI18n();
+  const { user } = useAuth();
   const { pathname } = useLocation();
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
+  const onAdmin = pathname === "/admin";
+
+  // The Admin link is admin-only UX gating (the /admin page + backend re-check are the real
+  // defence). Only ask when signed in; swallow failures so a non-admin or an errored probe simply
+  // shows no link — the shell DOM stays identical for everyone else.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    if (!user) {
+      setIsAdmin(false);
+      return;
+    }
+    let active = true;
+    api
+      .adminStatus()
+      .then((res) => {
+        if (active) setIsAdmin(res.is_admin);
+      })
+      .catch(() => {
+        if (active) setIsAdmin(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user]);
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
   const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
   const navBase =
@@ -96,6 +124,16 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
             <ClockCounterClockwise size={22} weight="duotone" />
             {open && <span className="text-sm font-medium">{t("nav.history")}</span>}
           </Link>
+          {isAdmin && (
+            <Link
+              to="/admin"
+              title={t("admin.nav")}
+              className={`${navBase} ${onAdmin ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            >
+              <ShieldCheck size={22} weight="duotone" />
+              {open && <span className="text-sm font-medium">{t("admin.nav")}</span>}
+            </Link>
+          )}
         </nav>
       </div>
       {open && (
