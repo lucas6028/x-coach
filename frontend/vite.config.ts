@@ -21,7 +21,18 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "html", "lcov"],
       include: ["src/**/*.{ts,tsx}"],
-      exclude: ["src/main.tsx", "src/test/**"],
+      // Impure edges that can't run under jsdom (kept in sync with codecov.yml `ignore`):
+      // sixSevenDetector.ts is the MediaPipe/WASM/WebGL/canvas glue, and SixSeven.tsx is the
+      // thin camera + requestAnimationFrame page shell. Every decision branch (visibility gate,
+      // gesture reasoning, rep counting) lives in src/lib/sixseven/* and is fully covered there.
+      exclude: [
+        "src/main.tsx",
+        "src/test/**",
+        "src/components/sixseven/sixSevenDetector.ts",
+        "src/pages/SixSeven.tsx",
+        "src/components/ninja/ninjaDetector.ts",
+        "src/pages/FruitNinja.tsx",
+      ],
       thresholds: {
         lines: 70,
         functions: 70,

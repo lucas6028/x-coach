@@ -115,8 +115,10 @@ export default function PosePreview() {
         </div>
       </div>
 
-      {/* grounded diagnosis card: the chain-of-thought output, overlapping */}
-      <div className="absolute -bottom-6 -right-3 w-60 rounded-2xl border border-white/10 bg-[#15191b]/90 p-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.85)] backdrop-blur sm:-right-6 sm:w-64">
+      {/* grounded diagnosis card: the chain-of-thought output.
+          On phones it sits in normal flow just below the preview (floating it
+          would cover the whole skeleton); from sm up it overlaps the corner. */}
+      <div className="relative mx-auto mt-4 w-full max-w-xs rounded-2xl border border-white/10 bg-[#15191b]/90 p-4 shadow-[0_24px_60px_-20px_rgba(0,0,0,0.85)] backdrop-blur sm:absolute sm:-bottom-6 sm:-right-6 sm:mt-0 sm:w-64 sm:max-w-none">
         <div className="flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-[#f5b945]/15 px-2.5 py-1 text-[11px] font-medium text-[#f5b945]">
             <span className="h-1.5 w-1.5 rounded-full bg-[#f5b945]" />

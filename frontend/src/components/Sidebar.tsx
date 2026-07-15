@@ -1,5 +1,6 @@
-import { ClockCounterClockwise, Folders, List, Plus, VideoCamera } from "@phosphor-icons/react";
+import { ClockCounterClockwise, Folders, GameController, List, Plus, ShieldCheck, VideoCamera } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
+import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 
 interface Props {
@@ -19,10 +20,19 @@ interface Props {
 // Account, language and theme controls live in the top-right Header, not here.
 export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary, onNewAnalysis }: Props) {
   const { t } = useI18n();
+  const { isAdmin } = useAuth();
   const { pathname } = useLocation();
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
+  const onAdmin = pathname === "/admin";
+
+  // The Admin link is admin-only UX gating (the /admin page + backend re-check are the real
+  // defence). `isAdmin` is resolved once per session by AuthProvider, so switching pages no longer
+  // re-probes the endpoint; a non-admin (or an errored probe) leaves it false and shows no link.
+
+  // The games hub, plus the individual game routes it links into, all light up the one Games entry.
+  const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
   const navBase =
     "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors";
   const navActive = "bg-primary/10 text-primary border border-primary/20";
@@ -79,6 +89,14 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
             {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
           </button>
           <Link
+            to="/games"
+            title={t("nav.games")}
+            className={`${navBase} ${onGames ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+          >
+            <GameController size={22} weight="duotone" />
+            {open && <span className="text-sm font-medium">{t("nav.games")}</span>}
+          </Link>
+          <Link
             to="/history"
             title={t("nav.history")}
             className={`${navBase} ${onHistory ? navActive : navIdle} ${open ? "" : "justify-center"}`}
@@ -86,6 +104,16 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
             <ClockCounterClockwise size={22} weight="duotone" />
             {open && <span className="text-sm font-medium">{t("nav.history")}</span>}
           </Link>
+          {isAdmin && (
+            <Link
+              to="/admin"
+              title={t("admin.nav")}
+              className={`${navBase} ${onAdmin ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            >
+              <ShieldCheck size={22} weight="duotone" />
+              {open && <span className="text-sm font-medium">{t("admin.nav")}</span>}
+            </Link>
+          )}
         </nav>
       </div>
       {open && (

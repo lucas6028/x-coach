@@ -29,10 +29,17 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
-from backend.app.settings import get_settings
+from backend.app.settings import (
+    chat_base_url,
+    chat_temperature,
+    chat_timeout,
+    followup_timeout,
+    get_settings,
+)
 
-# LLM round-trip budget (seconds). Generous enough for a reasoning model, bounded so a
-# hung upstream can't pin a worker thread indefinitely.
+# Fallback LLM round-trip budgets (seconds). The effective values now come from the override-aware
+# getters ``chat_timeout()`` / ``followup_timeout()`` (which default to these), so an admin can retune
+# them at runtime. Kept here as the documented defaults and for backwards-compatible test references.
 _REQUEST_TIMEOUT_S = 60.0
 
 # The follow-up call is a separate, best-effort background request; bound it tightly so a slow/hung
@@ -164,7 +171,7 @@ def _sse(event: str, data: dict[str, Any]) -> str:
 def _stream_completion(
     messages: list[dict[str, str]],
     model: str,
-    timeout: float = _REQUEST_TIMEOUT_S,
+    timeout: float | None = None,
     extra_body: dict[str, Any] | None = None,
 ) -> Iterator[str]:
     """Stream reply-text chunks from the configured provider's OpenAI-compatible chat-completions API.
@@ -179,15 +186,24 @@ def _stream_completion(
     """
     import httpx  # deferred: only needed on a live request, keeps router import light.
 
+    # The API key is a secret and stays pure-env; the base URL / temperature / timeout are the
+    # admin-tunable knobs, read through the override-aware getters. A ``None`` timeout means "use the
+    # configured answer budget" (the follow-up call passes its own tighter value explicitly).
     settings = get_settings()
+    base_url = chat_base_url()
+    if timeout is None:
+        timeout = chat_timeout()
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True}
+    temperature = chat_temperature()
+    if temperature is not None:  # omit entirely by default, preserving today's behaviour.
+        body["temperature"] = temperature
     if extra_body:
         body.update(extra_body)
     headers = {
         "Authorization": f"Bearer {settings.llm_api_key}",
         "Content-Type": "application/json",
     }
-    if _is_openrouter(settings.llm_base_url):
+    if _is_openrouter(base_url):
         # OpenRouter attribution headers (optional but recommended); other OpenAI-compatible peers
         # (e.g. NVIDIA NIM) don't use them, so keep them off those requests.
         headers["HTTP-Referer"] = "https://x-coach.local"
@@ -195,7 +211,7 @@ def _stream_completion(
     try:
         with httpx.stream(
             "POST",
-            f"{settings.llm_base_url.rstrip('/')}/chat/completions",
+            f"{base_url.rstrip('/')}/chat/completions",
             headers=headers,
             json=body,
             timeout=timeout,
@@ -256,11 +272,11 @@ def suggest_followups(
         {"role": "user", "content": _FOLLOWUP_NUDGE},  # restate the ask so the array isn't left open
     ]
     # The latency routing is OpenRouter-only; on any other OpenAI-compatible peer send no extra body.
-    routing = _FOLLOWUP_ROUTING if _is_openrouter(get_settings().llm_base_url) else None
+    routing = _FOLLOWUP_ROUTING if _is_openrouter(chat_base_url()) else None
     parts: list[str] = []
     try:
         for chunk in _stream_completion(
-            convo, model, timeout=_FOLLOWUP_TIMEOUT_S, extra_body=routing
+            convo, model, timeout=followup_timeout(), extra_body=routing
         ):
             parts.append(chunk)
     except RuntimeError:

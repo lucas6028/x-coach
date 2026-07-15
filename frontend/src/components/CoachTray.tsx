@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Brain, CheckCircle, CircleNotch, PaperPlaneTilt, SignIn } from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, PaperPlaneTilt, SignIn } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { api, ChatError, type Analysis, type ChatMessage } from "../api";
 import { buildChatContext } from "../lib/grounding";
@@ -10,6 +10,7 @@ import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import FaultCard from "./FaultCard";
 import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
+import { LumenAvatar, LumenLoader } from "./LumenLoader";
 import Markdown from "./Markdown";
 
 interface Props {
@@ -217,9 +218,7 @@ export default function CoachTray({
 
   const signInComposer = (
     <div className="flex items-center gap-3 rounded-2xl border border-border-dark bg-background/60 p-3">
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
-        <Brain size={18} weight="duotone" className="text-primary" />
-      </span>
+      <LumenAvatar size={36} className="shrink-0" />
       <p className="min-w-0 flex-1 text-xs leading-relaxed text-muted">{t("chat.signIn")}</p>
       <Link
         to="/login"
@@ -269,12 +268,30 @@ export default function CoachTray({
         ? disabledComposer
         : workingComposer;
 
+  // The byline above each of Lumen's answers (committed and streaming share it): her avatar, her
+  // name, and the "grounded in your analysis" provenance tag.
+  const coachTag = (
+    <div className="mb-1.5 flex items-center gap-2">
+      <LumenAvatar size={18} />
+      <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+        {t("chat.coach")}
+      </span>
+      <span
+        title={t("chat.grounded")}
+        className="inline-flex items-center gap-1 text-[10px] font-medium text-secondary"
+      >
+        <CheckCircle size={12} weight="fill" />
+        {t("chat.groundedShort")}
+      </span>
+    </div>
+  );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       {/* One header for the whole coaching conversation. */}
       <div className="flex items-center justify-between gap-2 border-b border-border-dark bg-surface-dark px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-content">
-          <Brain size={17} weight="duotone" className="text-primary" />
+          <LumenAvatar size={22} />
           {t("chat.heading")}
         </h2>
         <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-mono text-[10px] text-primary">
@@ -372,18 +389,7 @@ export default function CoachTray({
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                     >
-                      <div className="mb-1.5 flex items-center gap-2">
-                        <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">
-                          {t("chat.coach")}
-                        </span>
-                        <span
-                          title={t("chat.grounded")}
-                          className="inline-flex items-center gap-1 text-[10px] font-medium text-secondary"
-                        >
-                          <CheckCircle size={12} weight="fill" />
-                          {t("chat.groundedShort")}
-                        </span>
-                      </div>
+                      {coachTag}
                       <Markdown>{m.content}</Markdown>
                     </motion.div>
                   ),
@@ -392,25 +398,14 @@ export default function CoachTray({
                     committed coach turn so it doesn't jump on completion. */}
                 {streaming && (
                   <div>
-                    <div className="mb-1.5 flex items-center gap-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">
-                        {t("chat.coach")}
-                      </span>
-                      <span
-                        title={t("chat.grounded")}
-                        className="inline-flex items-center gap-1 text-[10px] font-medium text-secondary"
-                      >
-                        <CheckCircle size={12} weight="fill" />
-                        {t("chat.groundedShort")}
-                      </span>
-                    </div>
+                    {coachTag}
                     <Markdown>{streaming}</Markdown>
                   </div>
                 )}
-                {/* Spinner only until the first token lands; then the streaming text carries it. */}
+                {/* Lumen's dots only until the first token lands; then the streaming text carries it. */}
                 {loading && !streaming && (
                   <div className="flex items-center gap-2 text-xs text-muted">
-                    <CircleNotch size={14} className="animate-spin" />
+                    <LumenLoader variant="dots" />
                     {t("chat.thinking")}
                   </div>
                 )}

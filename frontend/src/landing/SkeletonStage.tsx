@@ -76,6 +76,10 @@ export default function SkeletonStage({
     if (!ctx) return;
     const fps = pose.fps || 25;
     const frames = pose.frames;
+    // On phones the video is center-cropped (object-cover) to fill the square so
+    // wide 16:9 clips don't letterbox; from sm up it letterboxes (object-contain).
+    // Map the skeleton onto whichever fit is active so joints track the body.
+    const coverMql = window.matchMedia("(max-width: 639px)");
     let raf = 0;
 
     const draw = () => {
@@ -98,8 +102,11 @@ export default function SkeletonStage({
       const vh = video.videoHeight || pose.height || 1;
       const videoAspect = vw / vh;
       const boxAspect = canvas.width / canvas.height;
+      // contain fits the video inside the box; cover fills the box and crops.
+      // The two modes are mirror images — just flip which axis we fit to.
+      const fitByHeight = coverMql.matches ? boxAspect <= videoAspect : boxAspect > videoAspect;
       let rW: number, rH: number, oX: number, oY: number;
-      if (boxAspect > videoAspect) {
+      if (fitByHeight) {
         rH = canvas.height;
         rW = rH * videoAspect;
         oX = (canvas.width - rW) / 2;
@@ -168,7 +175,7 @@ export default function SkeletonStage({
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}
         onClick={togglePlay}
-        className="absolute inset-0 h-full w-full object-contain"
+        className="absolute inset-0 h-full w-full object-cover sm:object-contain"
       />
 
       {/* analyzed layer, revealed by the wipe */}

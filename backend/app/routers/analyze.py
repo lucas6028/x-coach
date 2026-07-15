@@ -9,15 +9,13 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
-from backend.app import config
+from backend.app import config, settings
 from backend.app.auth import CurrentUser, get_optional_user
 from backend.app.services import analysis, store
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["analyze"])
-
-_ALLOWED_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
 # Bound how many uploads run the (blocking, CPU/RAM-heavy) pipeline at once. Excess requests
 # await a slot here instead of spawning unbounded worker threads. This is a single-process
@@ -47,7 +45,10 @@ async def analyze(
     library clips identically.
     """
     suffix = Path(file.filename or "").suffix.lower() or ".mp4"
-    if suffix not in _ALLOWED_SUFFIXES:
+    # ``allowed_upload_suffixes`` reads the admin overrides, which can do a synchronous Supabase
+    # round-trip on a cold cache — run it in a threadpool so it never blocks the event loop.
+    allowed = await run_in_threadpool(settings.allowed_upload_suffixes)
+    if suffix not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'.")
 
     data = await file.read()

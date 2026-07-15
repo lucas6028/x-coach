@@ -14,7 +14,7 @@ from typing import Any
 
 from src.pose.pose_rule_detector import retrieve_contexts_for_detections
 
-from backend.app import config
+from backend.app import config, settings
 from backend.app.services.analysis import build_pose_block
 
 # Time-segment ground-truth labels keyed by video id (start/end seconds per fault file).
@@ -22,9 +22,6 @@ _LABEL_FILES = {
     "knees_forward": config.LABELS_DIR / "error_knees_forward.json",
     "knees_inward": config.LABELS_DIR / "error_knees_inward.json",
 }
-
-# Suffixes an uploaded source clip may carry (mirrors the analyze router's allow-list).
-_UPLOAD_SUFFIXES = (".mp4", ".mov", ".avi", ".mkv", ".webm")
 
 # A ``video_id`` is a filename stem (a dataset slug or ``upload_<hex>``). It is interpolated
 # into filesystem paths and, previously, into a glob pattern — so it must never carry path
@@ -91,7 +88,7 @@ def uploaded_video_path(video_id: str) -> Path | None:
     """
     if not is_safe_video_id(video_id):
         return None
-    for suffix in _UPLOAD_SUFFIXES:
+    for suffix in settings.allowed_upload_suffixes():
         candidate = config.UPLOAD_DIR / f"{video_id}{suffix}"
         if candidate.exists():
             return candidate

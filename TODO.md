@@ -119,6 +119,10 @@
 - [ ] 系統角色分工：
   - `MediaPipe` 負責即時幾何警示
   - `VideoMAE` 負責高品質時空判斷
+- [ ] Exp 1(先做,最便宜,無相依):nlf_s_multi 過現有 Fit3D 框架 + 在這台機器上實測 CPU latency。回答「深度恢復在 S backbone 下還在不在、CPU 多快」。⚠️ 版本對齊:你們跑的是 v0.2.0 nlf_l_multi,配對就用 v0.2.0 nlf_s_multi(v0.2.2 修了 detect_smpl_batched 的 translation/2D 投影 bug,S-vs-L delta 要同版本才公平)。
+- [ ] Exp 2(延遲槓桿):nlf_s_crop + 便宜 box(MediaPipe 偵測/每 N 幀追蹤),量 CPU latency 與 Fit3D 上的準確度保留。
+- [ ] Exp 3(1–2 有前景才做):接一個非 NLF 的輕量架構(ROMP 或 HybrIK)當第二點交叉驗證,寫 adapter 到同 npz。
+- [ ] 訓一個 CPU 學生(輸入 MediaPipe 2D+world 或裁切影像,目標 NLF depth),直接把「NLF 的深度恢復」蒸餾進一個 CPU 模型——這比找現成輕量模型更精準命中「便宜地拿回 NLF 深度」。列為 stretch,因為工程量較大。
 
 ## 如何辨識 VideoMAE 的結果
 
@@ -258,6 +262,7 @@
 - [ ] DB 連線池（PgBouncer）、`(user_id, created_at)` 索引、必要時讀副本
 - [ ] 每人 rate limit + 上傳配額
 - [ ] 可觀測性：結構化 log、Sentry、佇列/延遲/GPU 指標、health/readiness probe
+- [ ] 加入 Pub/Sub, 處理高流量
 
 ### 橫切議題（越早處理越省事）
 
@@ -275,6 +280,7 @@
 - [ ] 動作偵測、分類（= 多動作 movement ID，見路線圖 P2）
 - [x] LLM follow up questions (options)（followup chips 已上線，pinned 快速模型）
 - [ ] 健身菜單客製化，可用 LLM 進行修改（= 路線圖 P2 的 `make_drill_plan` 工具）
+- [ ] 新增運動科學、運動力學及 mocap 相關知識筆記的頁面
 
 ## Pipeline 與 Agent Harness 路線圖（2026-07-06 設計，詳見 `docs/ai-coach-pipeline-and-agent-harness.md`）
 
@@ -299,6 +305,7 @@
 - [ ] `compare_analyses` / `list_user_history` 工具 + 進步追蹤（跨分析記憶）
 - [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
 - [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
+- [ ] 各個動作，相機擺放最適合的位置、角度
 
 ### P3：感知升級
 
