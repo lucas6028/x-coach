@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 import Sidebar from "../components/Sidebar";
+import { I18nProvider } from "../lib/i18n";
+import { AuthProvider } from "../lib/auth";
 import { renderWithProviders } from "./renderWithProviders";
 
 describe("Sidebar — open", () => {
@@ -63,6 +66,40 @@ describe("Sidebar — open", () => {
     );
     await user.click(screen.getByRole("button", { name: /New analysis/i }));
     expect(onNewAnalysis).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Sidebar — games hub active state", () => {
+  // The single Games entry highlights on the hub route AND on either individual game route it
+  // links into; render at each so every branch of the onGames check is exercised.
+  const renderAt = (path: string) =>
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <AuthProvider>
+          <I18nProvider>
+            <Sidebar
+              open
+              width={240}
+              animate={false}
+              onToggle={vi.fn()}
+              onOpenLibrary={vi.fn()}
+              onNewAnalysis={vi.fn()}
+            />
+          </I18nProvider>
+        </AuthProvider>
+      </MemoryRouter>
+    );
+
+  it.each(["/games", "/67", "/ninja", "/blast"])("highlights the Games entry on %s", (path) => {
+    renderAt(path);
+    const link = screen.getByRole("link", { name: /Games/i });
+    expect(link.className).toContain("text-primary");
+  });
+
+  it("does not highlight the Games entry on an unrelated route", () => {
+    renderAt("/history");
+    const link = screen.getByRole("link", { name: /Games/i });
+    expect(link.className).not.toContain("text-primary");
   });
 });
 

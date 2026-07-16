@@ -4,11 +4,13 @@ import { ArrowCounterClockwise, Confetti } from "@phosphor-icons/react";
 import { useI18n } from "../../lib/i18n";
 import type { BlastEntry } from "../../lib/blast/leaderboard";
 import BlastLeaderboard from "./BlastLeaderboard";
+import CalorieBadge from "../games/CalorieBadge";
 
 export type BlastResult = {
   score: number;
   hits: number;
   bestCombo: number;
+  kcal: number;
 };
 
 interface Props {
@@ -66,6 +68,8 @@ export default function BlastOverScreen({
               <p className="text-xs text-muted">{t("blast.over.combo")}</p>
             </div>
           </div>
+
+          <CalorieBadge kcal={result.kcal} />
 
           {!submitted ? (
             <div className="mt-6">

@@ -176,6 +176,78 @@ export interface HealthResponse {
   chat_default?: string;
 }
 
+// ---- Admin: runtime settings (admin-only; GET/PUT /api/admin/settings) --------------------
+
+export interface AdminLlmSettings {
+  llm_models: string[];
+  llm_followup_model: string;
+  llm_base_url: string;
+  chat_temperature: number | null;
+  chat_timeout: number;
+  followup_timeout: number;
+}
+export interface AdminRagKgSettings {
+  rag_top_k: number;
+  kg_hops: number;
+  kg_seeds: number;
+}
+export interface AdminAnalyzeSettings {
+  allowed_upload_suffixes: string[];
+  max_concurrent_analyses: number;
+}
+export interface AdminSettingsGroups {
+  llm: AdminLlmSettings;
+  rag_kg: AdminRagKgSettings;
+  analyze: AdminAnalyzeSettings;
+}
+// GET/PUT both return the currently-effective knobs plus their env/constant defaults, grouped so the
+// form can show "current vs default". No secret (API key / Supabase creds) ever appears here.
+export interface AdminSettingsResponse {
+  effective: AdminSettingsGroups;
+  defaults: AdminSettingsGroups;
+}
+// A partial update — only the provided knobs are persisted. Ranges are validated server-side (422).
+export interface AdminSettingsUpdate {
+  llm_models?: string[];
+  llm_followup_model?: string;
+  llm_base_url?: string;
+  chat_temperature?: number | null;
+  chat_timeout?: number;
+  followup_timeout?: number;
+  rag_top_k?: number;
+  kg_hops?: number;
+  kg_seeds?: number;
+  // max_concurrent_analyses is intentionally omitted: it's read-only (sourced from the
+  // XCOACH_MAX_CONCURRENT_ANALYSES env var, applied at startup) and must never be sent in an update.
+  allowed_upload_suffixes?: string[];
+}
+
+// ---- Admin: user oversight + system overview (admin-only; P3) -----------------------------
+
+// One row of the admin users table: identity, activity counts, and whether they hold the admin role.
+export interface AdminUserRow {
+  id: string;
+  email: string | null;
+  created_at: string;
+  last_sign_in_at: string | null;
+  analyses_count: number;
+  conversations_count: number;
+  is_admin: boolean;
+}
+export interface AdminUsersResponse {
+  users: AdminUserRow[];
+}
+// The admin dashboard: the same health flags as /api/health plus user/analysis totals. No secret here.
+export interface AdminOverview {
+  auth_configured: boolean;
+  chat_configured: boolean;
+  chat_models: string[];
+  chat_default: string;
+  stores: Record<string, boolean>;
+  total_users: number;
+  total_analyses: number;
+}
+
 // Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
 // event line, or an unparseable data payload, is ignored (keep-alives / partial writes).
 function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
@@ -240,6 +312,45 @@ async function getJSON<T>(url: string): Promise<T> {
 
 export const api = {
   health: () => getJSON<HealthResponse>("/api/health"),
+
+  // Whether the signed-in caller holds the admin role. Any signed-in user may ask (the backend
+  // returns their own flag, not a 403); used to gate the Admin nav link and page. Auto-attaches
+  // the bearer token via getJSON.
+  adminStatus: () => getJSON<{ is_admin: boolean }>("/api/admin/status"),
+
+  // The effective runtime knobs + their defaults (admin-only; 403 for a non-admin). Auto-attaches
+  // the bearer token via getJSON.
+  getAdminSettings: () => getJSON<AdminSettingsResponse>("/api/admin/settings"),
+
+  // Persist a partial settings update (admin-only). Only the provided knobs are written; the backend
+  // validates ranges (422 on a bad value) and returns the new effective state. Auth header auto-attached.
+  async updateAdminSettings(payload: AdminSettingsUpdate): Promise<AdminSettingsResponse> {
+    const res = await fetch("/api/admin/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/admin/settings`);
+    return (await res.json()) as AdminSettingsResponse;
+  },
+
+  // The read-only users overview (admin-only; 403 for a non-admin). Auth header auto-attached.
+  listAdminUsers: () => getJSON<AdminUsersResponse>("/api/admin/users"),
+
+  // The system-status dashboard: health flags + user/analysis totals (admin-only). Auth auto-attached.
+  getAdminOverview: () => getJSON<AdminOverview>("/api/admin/overview"),
+
+  // Grant/revoke another user's admin role (admin-only). The backend rejects self-demotion (400).
+  async setUserRole(userId: string, makeAdmin: boolean): Promise<{ ok: boolean }> {
+    const url = `/api/admin/users/${encodeURIComponent(userId)}/role`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ make_admin: makeAdmin }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
+    return (await res.json()) as { ok: boolean };
+  },
 
   listVideos: (limit = 50, offset = 0, fault?: string) =>
     getJSON<LibraryPage>(

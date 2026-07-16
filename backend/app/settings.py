@@ -18,6 +18,7 @@ auth-gated endpoints return 503 and ``/api/analyze`` falls back to anonymous "de
 from __future__ import annotations
 
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -51,6 +52,12 @@ class Settings(BaseSettings):
         "deepseek/deepseek-v4-flash,xiaomi/mimo-v2.5,minimax/minimax-m3,tencent/hy3-preview"
     )
     llm_base_url: str = "https://openrouter.ai/api/v1"
+    # Extra base-URL hosts an admin may point the LLM transport at, beyond the env-default host and the
+    # built-in provider set (see ``_allowed_base_hosts``). Comma-separated hostnames. This is a
+    # security boundary: the ``Authorization: Bearer <llm_api_key>`` header is only ever sent to an
+    # allowlisted host, so an admin override (or a direct-DB write) can't exfiltrate the key to an
+    # arbitrary endpoint or SSRF an internal one.
+    llm_allowed_base_hosts: str = ""
     # Follow-up chips are a separate, latency-sensitive call (see services/chat.suggest_followups):
     # pinned to a fast model independent of the answer model, so a slow/reasoning answer model doesn't
     # make the chips crawl. Env-overridable; blank it to reuse the default answer model instead.
@@ -70,28 +77,243 @@ class Settings(BaseSettings):
 # Used only if ``LLM_MODELS`` is misconfigured to empty, so the picker is never empty.
 _FALLBACK_MODEL = "deepseek/deepseek-v4-flash"
 
+# Provider hosts the LLM transport is always allowed to reach, in addition to the env-default base
+# URL's host and any ``LLM_ALLOWED_BASE_HOSTS`` entry. The chat call sends the API key in an
+# ``Authorization`` header, so the destination host is a security boundary — see ``_base_url_allowed``.
+_BUILTIN_ALLOWED_HOSTS: frozenset[str] = frozenset(
+    {"openrouter.ai", "api.openai.com", "integrate.api.nvidia.com"}
+)
+
+
+def _allowed_base_hosts() -> set[str]:
+    """The set of hostnames the LLM base URL may point at (lower-cased).
+
+    The env-default ``llm_base_url`` host is always allowed (so the shipped default works), plus the
+    built-in provider set, plus any comma-separated hostnames in ``LLM_ALLOWED_BASE_HOSTS``.
+    """
+    s = get_settings()
+    hosts = {h.lower() for h in _BUILTIN_ALLOWED_HOSTS}
+    # ``getattr`` defaults keep this robust when a test patches ``get_settings`` to a lightweight
+    # stand-in that lacks these fields (several existing unit tests do exactly that).
+    default_host = urlparse(getattr(s, "llm_base_url", "") or "").hostname
+    if default_host:
+        hosts.add(default_host.lower())
+    for extra in (getattr(s, "llm_allowed_base_hosts", "") or "").split(","):
+        extra = extra.strip().lower()
+        if extra:
+            hosts.add(extra)
+    return hosts
+
+
+def _base_url_allowed(url: object) -> bool:
+    """True when ``url`` is an http(s) URL whose host is on the allowlist (``_allowed_base_hosts``).
+
+    The authoritative guard for where the ``Authorization: Bearer <llm_api_key>`` request may go:
+    an off-list host (an arbitrary external endpoint, ``localhost``, a cloud metadata IP, …) is
+    rejected so the key can't be exfiltrated and internal endpoints can't be SSRF'd.
+    """
+    if not isinstance(url, str):
+        return False
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    return host.lower() in _allowed_base_hosts()
+
+# Constant fallbacks for the runtime-tunable knobs. These preserve today's behaviour exactly when
+# no admin override is present (the ``chat.py`` timeout constants and the analyze router's suffix set
+# are duplicated here as the authoritative defaults for the override-first getters below).
+_DEFAULT_CHAT_TIMEOUT_S = 60.0
+_DEFAULT_FOLLOWUP_TIMEOUT_S = 15.0
+# Clamp bounds for the timeout getters: a request budget must be positive and is capped so an
+# out-of-band write can't leave a request hanging indefinitely. Mirrors the PUT validator (``gt=0,
+# le=300``); the positive floor is a small sane minimum since a sub-second budget is never useful.
+_MIN_TIMEOUT_S = 1.0
+_MAX_TIMEOUT_S = 300.0
+_DEFAULT_RAG_TOP_K = 5
+_DEFAULT_KG_HOPS = 1
+_DEFAULT_KG_SEEDS = 5
+_DEFAULT_UPLOAD_SUFFIXES: tuple[str, ...] = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+
+
+def _overrides() -> dict:
+    """The admin runtime overrides (``{}`` when unconfigured / on error). Imported lazily to avoid an
+    import cycle: ``runtime_config`` imports this module's ``get_settings``."""
+    from backend.app.services import runtime_config
+
+    return runtime_config.get_overrides()
+
+
+def _models_from(value: object) -> list[str]:
+    """Normalise a models override (a comma-string OR a list) into a deduped, ordered id list."""
+    if isinstance(value, str):
+        raw = [m.strip() for m in value.split(",") if m.strip()]
+    elif isinstance(value, (list, tuple)):
+        raw = [str(m).strip() for m in value if str(m).strip()]
+    else:
+        raw = []
+    return list(dict.fromkeys(raw))
+
 
 def chat_models() -> list[str]:
-    """The selectable model ids, parsed from ``LLM_MODELS`` (first = default).
+    """The selectable model ids (first = default): admin override ``llm_models`` first, else ``LLM_MODELS``.
 
-    Order is preserved and ids are deduped; a blank/empty setting falls back to a single built-in
-    model so the picker is never empty. Display names are a frontend concern — this is purely the
-    authoritative id list.
+    The override may be a comma-string or a JSON list. Order is preserved and ids are deduped; a
+    blank/empty result falls back to a single built-in model so the picker is never empty. Display
+    names are a frontend concern — this is purely the authoritative id list.
     """
-    raw = [m.strip() for m in get_settings().llm_models.split(",") if m.strip()]
-    return list(dict.fromkeys(raw)) or [_FALLBACK_MODEL]
+    models = _models_from(_overrides().get("llm_models"))
+    if not models:
+        models = _models_from(get_settings().llm_models)
+    return models or [_FALLBACK_MODEL]
 
 
 def default_chat_model() -> str:
-    """The model used when the client sends none — the first entry of ``LLM_MODELS``."""
+    """The model used when the client sends none — the first entry of the effective model list."""
     return chat_models()[0]
 
 
 def followup_chat_model() -> str:
     """The model for follow-up suggestions — a fast one pinned server-side, independent of the answer
-    model the user picked. Falls back to the default answer model if ``LLM_FOLLOWUP_MODEL`` is
-    blanked (a self-hoster whose account lacks the pinned model). Not client-selectable by design."""
-    return get_settings().llm_followup_model.strip() or default_chat_model()
+    model the user picked. Admin override ``llm_followup_model`` first, else ``LLM_FOLLOWUP_MODEL``;
+    a blank value falls back to the default answer model. Not client-selectable by design."""
+    override = _overrides().get("llm_followup_model")
+    pinned = str(override).strip() if override is not None else get_settings().llm_followup_model.strip()
+    return pinned or default_chat_model()
+
+
+def chat_base_url() -> str:
+    """The LLM provider base URL — admin override ``llm_base_url`` first, else ``LLM_BASE_URL``.
+
+    The override is honoured ONLY when its host is allowlisted (``_base_url_allowed``); an off-list
+    override falls back to the env default. This is the authoritative read-time guard — it protects
+    the ``Authorization: Bearer <llm_api_key>`` request even against a direct-DB write that bypasses
+    the PUT validator.
+    """
+    override = _overrides().get("llm_base_url")
+    if isinstance(override, str) and override.strip() and _base_url_allowed(override.strip()):
+        return override.strip()
+    return get_settings().llm_base_url
+
+
+def chat_temperature() -> float | None:
+    """The sampling temperature to send, or ``None`` to omit it (the current default behaviour).
+
+    Override key ``chat_temperature``. Coerced to float; a missing/blank/uncoercible override yields
+    ``None`` so the completion body carries no ``temperature`` field (unchanged from today).
+    """
+    override = _overrides().get("chat_temperature")
+    if override is None or override == "":
+        return None
+    try:
+        value = float(override)
+    except (TypeError, ValueError):
+        return None
+    # Clamp into the same 0..2 range the PUT validator enforces, so a direct-DB write can't drive an
+    # out-of-range sampling temperature into the completion body.
+    return min(max(value, 0.0), 2.0)
+
+
+def chat_timeout() -> float:
+    """The answer-call round-trip budget in seconds — override ``chat_timeout``, else 60.0 (clamped 1..300)."""
+    return _coerce_float(
+        _overrides().get("chat_timeout"),
+        _DEFAULT_CHAT_TIMEOUT_S,
+        minimum=_MIN_TIMEOUT_S,
+        maximum=_MAX_TIMEOUT_S,
+    )
+
+
+def followup_timeout() -> float:
+    """The follow-up-call round-trip budget in seconds — override ``followup_timeout``, else 15.0 (clamped 1..300)."""
+    return _coerce_float(
+        _overrides().get("followup_timeout"),
+        _DEFAULT_FOLLOWUP_TIMEOUT_S,
+        minimum=_MIN_TIMEOUT_S,
+        maximum=_MAX_TIMEOUT_S,
+    )
+
+
+def rag_top_k_default() -> int:
+    """The default RAG result count — override ``rag_top_k``, else 5 (clamped 1..50; query params still win)."""
+    return _coerce_int(_overrides().get("rag_top_k"), _DEFAULT_RAG_TOP_K, minimum=1, maximum=50)
+
+
+def kg_hops_default() -> int:
+    """The default KG traversal depth — override ``kg_hops``, else 1 (clamped 1..3; query params still win)."""
+    return _coerce_int(_overrides().get("kg_hops"), _DEFAULT_KG_HOPS, minimum=1, maximum=3)
+
+
+def kg_seeds_default() -> int:
+    """The default KG seed-node count — override ``kg_seeds``, else 5 (clamped 1..20)."""
+    return _coerce_int(_overrides().get("kg_seeds"), _DEFAULT_KG_SEEDS, minimum=1, maximum=20)
+
+
+def allowed_upload_suffixes() -> tuple[str, ...]:
+    """The accepted upload file suffixes — override ``allowed_upload_suffixes`` (a list), else the
+    built-in set. A non-list / empty / malformed override falls back to the default."""
+    override = _overrides().get("allowed_upload_suffixes")
+    if isinstance(override, (list, tuple)):
+        cleaned = tuple(
+            str(s).strip().lower()
+            for s in override
+            if str(s).strip().startswith(".")
+        )
+        if cleaned:
+            return cleaned
+    return _DEFAULT_UPLOAD_SUFFIXES
+
+
+def _coerce_float(
+    value: object,
+    default: float,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    """Best-effort float coercion; returns ``default`` on a missing/blank/uncoercible value.
+
+    When ``minimum``/``maximum`` are given, the coerced result is CLAMPED into that range (not
+    rejected) so an out-of-band / direct-DB write can't drive an out-of-range value downstream.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and result < minimum:
+        result = minimum
+    if maximum is not None and result > maximum:
+        result = maximum
+    return result
+
+
+def _coerce_int(
+    value: object,
+    default: int,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    """Best-effort int coercion; returns ``default`` on a missing/blank/uncoercible value.
+
+    When ``minimum``/``maximum`` are given, the coerced result is CLAMPED into that range (not
+    rejected) so an out-of-band / direct-DB write can't drive an out-of-range value downstream.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return default
+    if minimum is not None and result < minimum:
+        result = minimum
+    if maximum is not None and result > maximum:
+        result = maximum
+    return result
 
 
 def resolve_chat_model(requested: str | None) -> str:

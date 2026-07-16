@@ -4,7 +4,7 @@ import { renderWithProviders } from "./renderWithProviders";
 import SixSevenOverScreen from "../components/sixseven/SixSevenOverScreen";
 import type { SixSevenEntry } from "../lib/sixseven/leaderboard";
 
-const result = { count: 37, bestCombo: 9 };
+const result = { count: 37, bestCombo: 9, kcal: 6 };
 const board: SixSevenEntry[] = [{ name: "Me", count: 37, bestCombo: 9, ts: 1 }];
 
 function setup(props: Partial<React.ComponentProps<typeof SixSevenOverScreen>> = {}) {

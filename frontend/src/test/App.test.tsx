@@ -214,16 +214,16 @@ describe("App — new analysis reset", () => {
 });
 
 describe("App — sidebar toggle", () => {
-  it("expands the desktop sidebar when the toggle button is clicked", async () => {
+  it("collapses the desktop sidebar when the toggle button is clicked", async () => {
     const user = userEvent.setup();
     renderApp();
-    // The desktop sidebar defaults to collapsed, so only the (always-open) mobile
-    // drawer shows the brand initially.
-    expect(screen.getAllByText("X-Coach").length).toBe(1);
-    // The desktop rail's show-navigation toggle (first in DOM order).
-    const showBtn = screen.getAllByRole("button", { name: /Show navigation/i })[0];
-    await user.click(showBtn);
-    // After expanding, both desktop and mobile sidebars show the brand.
+    // The desktop sidebar now defaults to open, so both it and the (always-open)
+    // mobile drawer show the brand initially.
     expect(screen.getAllByText("X-Coach").length).toBe(2);
+    // The desktop sidebar's hide-navigation toggle (first in DOM order).
+    const hideBtn = screen.getAllByRole("button", { name: /Hide navigation/i })[0];
+    await user.click(hideBtn);
+    // After collapsing, only the mobile drawer shows the brand.
+    expect(screen.getAllByText("X-Coach").length).toBe(1);
   });
 });

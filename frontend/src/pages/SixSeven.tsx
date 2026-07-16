@@ -7,31 +7,15 @@ import { useI18n } from "../lib/i18n";
 import { handLead, type Lead } from "../lib/sixseven/gesture";
 import { stepCount, initialCount, ROUND_SECONDS, type CountState } from "../lib/sixseven/counter";
 import { loadLeaderboard, saveScore, type SixSevenEntry } from "../lib/sixseven/leaderboard";
+import { estimateKcal, EFFORT } from "../lib/calories";
+import { addCalories } from "../lib/calorieStore";
+import { waitForVideoFrame } from "../lib/videoFrame";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene } from "../components/sixseven/sixSevenDetector";
 
 type Phase = "intro" | "countdown" | "playing" | "over";
 
 const POP_MS = 350;
-
-// Resolve once the <video> has a decoded frame MediaPipe can read (readyState >= HAVE_CURRENT_DATA).
-// On mobile `video.play()` resolving does NOT guarantee a decoded frame, so we wait for `loadeddata`,
-// with a timeout so a stalled camera never wedges the loading phase.
-function waitForVideoFrame(video: HTMLVideoElement, timeoutMs = 3000): Promise<void> {
-  if (video.readyState >= 2) return Promise.resolve();
-  return new Promise((resolve) => {
-    let settled = false;
-    const done = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      video.removeEventListener("loadeddata", done);
-      resolve();
-    };
-    const timer = setTimeout(done, timeoutMs);
-    video.addEventListener("loadeddata", done);
-  });
-}
 
 // 67 — the brainrot mini-game. Do the "6-7" bob (alternate raising each hand) and every switch
 // counts one 67; keep the rhythm for a combo. React state drives the UI; a ref-backed rAF loop
@@ -52,7 +36,7 @@ export default function SixSeven() {
   const [lead, setLead] = useState<Lead>("neutral");
   const [pop, setPop] = useState(0);
 
-  const [result, setResult] = useState<SixSevenResult>({ count: 0, bestCombo: 0 });
+  const [result, setResult] = useState<SixSevenResult>({ count: 0, bestCombo: 0, kcal: 0 });
   const [submitted, setSubmitted] = useState(false);
   const [rank, setRank] = useState<number | null>(null);
 
@@ -102,7 +86,10 @@ export default function SixSeven() {
   const endRound = useCallback(() => {
     const c = g.current.counter;
     teardown();
-    setResult({ count: c.count, bestCombo: c.bestCombo });
+    // The round always runs the full clock; 67s completed are the movement signal. Record once here.
+    const kcal = estimateKcal({ durationSec: ROUND_SECONDS, moves: c.count, effort: EFFORT.sixseven });
+    addCalories("sixseven", kcal);
+    setResult({ count: c.count, bestCombo: c.bestCombo, kcal });
     setLeaderboard(loadLeaderboard());
     setSubmitted(false);
     setRank(null);
@@ -287,7 +274,7 @@ export default function SixSeven() {
   const showCamera = phase === "playing" || phase === "countdown";
 
   return (
-    <AppLayout title={t("six.title")}>
+    <AppLayout title={t("six.title")} initialSidebarOpen={false}>
       {phase === "intro" && (
         <SixSevenStartScreen
           leaderboard={leaderboard}

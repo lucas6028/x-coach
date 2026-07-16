@@ -2,6 +2,7 @@ import { Brain, FilmSlate, Graph, PersonSimpleRun, WarningCircle, type Icon } fr
 import { motion, useReducedMotion } from "motion/react";
 import { useI18n } from "../lib/i18n";
 import UploadDropzone from "./UploadDropzone";
+import { LumenLoader } from "./LumenLoader";
 
 interface Props {
   onFile: (file: File) => void;
@@ -40,7 +41,14 @@ export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, e
           <p className="mt-4 max-w-md leading-relaxed text-muted">{t("demo.sub")}</p>
 
           <div className="mt-8 max-w-md">
-            <UploadDropzone onFile={onFile} loading={loading} statusMsg={statusMsg} />
+            {loading ? (
+              // Analysis waiting state: Lumen takes over the upload target and narrates the
+              // pipeline (read pose → check mechanics → surface the reason) while it runs. The
+              // loader carries its own navy stage, so no wrapper card is needed.
+              <LumenLoader variant="scan" caption={statusMsg} />
+            ) : (
+              <UploadDropzone onFile={onFile} />
+            )}
 
             <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-faint">
               <span className="h-px flex-1 bg-border-dark" />

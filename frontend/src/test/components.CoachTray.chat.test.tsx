@@ -299,7 +299,7 @@ describe("CoachTray — follow-up chat", () => {
     h.health.mockResolvedValue({ status: "ok", chat_configured: false });
     renderTray();
 
-    const disabled = await screen.findByPlaceholderText(/Ask the AI Coach/i);
+    const disabled = await screen.findByPlaceholderText(/Ask Lumen/i);
     expect(disabled).toBeDisabled();
     expect(h.chatStream).not.toHaveBeenCalled();
   });

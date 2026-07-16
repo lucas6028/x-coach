@@ -14,7 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 DATA_DIR = REPO_ROOT / "data"
-LABELED_DIR = DATA_DIR / "Squat" / "Labeled_Dataset"
+LABELED_DIR = DATA_DIR / "Fitness-AQA" / "Squat" / "Labeled_Dataset"
 VIDEOS_DIR = LABELED_DIR / "videos"
 POSE_JSON_DIR = LABELED_DIR / "pose_json"
 DETECTIONS_DIR = LABELED_DIR / "pose_rule_detections"

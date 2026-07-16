@@ -8,6 +8,8 @@ import { handState } from "../lib/blast/gestures";
 import { ROUND_SECONDS } from "../lib/blast/scoring";
 import { createGameState, stepFrame, BEAM_MS, type GameState } from "../lib/blast/engine";
 import { loadLeaderboard, saveScore, type BlastEntry } from "../lib/blast/leaderboard";
+import { estimateKcal, EFFORT } from "../lib/calories";
+import { addCalories } from "../lib/calorieStore";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene } from "../components/blast/blastDetector";
 
@@ -34,7 +36,7 @@ export default function MemeBlast() {
   const [armed, setArmed] = useState(false);
   const [flash, setFlash] = useState<{ hits: number; points: number } | null>(null);
 
-  const [result, setResult] = useState<BlastResult>({ score: 0, hits: 0, bestCombo: 0 });
+  const [result, setResult] = useState<BlastResult>({ score: 0, hits: 0, bestCombo: 0, kcal: 0 });
   const [submitted, setSubmitted] = useState(false);
   const [rank, setRank] = useState<number | null>(null);
 
@@ -69,7 +71,10 @@ export default function MemeBlast() {
   const endRound = useCallback(() => {
     const e = g.current.engine;
     teardown();
-    setResult({ score: e.score, hits: e.hits, bestCombo: e.bestCombo });
+    // The round always runs the full clock; orbs blasted are the movement signal. Record once here.
+    const kcal = estimateKcal({ durationSec: ROUND_SECONDS, moves: e.hits, effort: EFFORT.blast });
+    addCalories("blast", kcal);
+    setResult({ score: e.score, hits: e.hits, bestCombo: e.bestCombo, kcal });
     setLeaderboard(loadLeaderboard());
     setSubmitted(false);
     setRank(null);

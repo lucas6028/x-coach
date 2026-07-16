@@ -4,7 +4,7 @@ import { renderWithProviders } from "./renderWithProviders";
 import BlastOverScreen from "../components/blast/BlastOverScreen";
 import type { BlastEntry } from "../lib/blast/leaderboard";
 
-const result = { score: 1800, hits: 15, bestCombo: 7 };
+const result = { score: 1800, hits: 15, bestCombo: 7, kcal: 18 };
 const board: BlastEntry[] = [{ name: "Me", score: 1800, hits: 15, bestCombo: 7, ts: 1 }];
 
 function setup(props: Partial<React.ComponentProps<typeof BlastOverScreen>> = {}) {
@@ -27,6 +27,11 @@ describe("BlastOverScreen", () => {
     expect(screen.getByText("1,800")).toBeInTheDocument();
     expect(screen.getByText("15")).toBeInTheDocument();
     expect(screen.getByText("7×")).toBeInTheDocument();
+  });
+
+  it("shows the estimated calories burned", () => {
+    setup();
+    expect(screen.getByText("≈ 18 kcal")).toBeInTheDocument();
   });
 
   it("submits a typed name", () => {

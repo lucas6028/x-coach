@@ -17,8 +17,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 
+from backend.app.services import store
 from backend.app.settings import get_settings
 
 
@@ -91,6 +92,22 @@ def get_current_user(authorization: str | None = Header(default=None)) -> Curren
             headers={"WWW-Authenticate": "Bearer"},
         )
     return _verify(token)
+
+
+def get_admin_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Admin-gated auth: require a valid session AND the 'admin' role, else 403.
+
+    Delegates the role check to ``store.is_admin`` (queried with the user's own JWT, RLS-scoped), so
+    every admin endpoint re-verifies server-side on each request — the frontend gating is only UX.
+    ``store`` is imported at module top: it defers its own ``supabase`` import and does not import
+    ``auth``, so there is no import cycle.
+    """
+    if not store.is_admin(token=user.token, user_id=user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges are required.",
+        )
+    return user
 
 
 def get_optional_user(authorization: str | None = Header(default=None)) -> CurrentUser | None:

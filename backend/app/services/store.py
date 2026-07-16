@@ -36,6 +36,98 @@ def _summarize(result: dict[str, Any]) -> tuple[str | None, int, str | None]:
     return view_type, fault_count, pipeline_version
 
 
+def is_admin(*, token: str, user_id: str) -> bool:
+    """Return whether ``user_id`` holds the 'admin' role, queried as the user (RLS-scoped).
+
+    Uses the caller's own JWT: the ``user_roles`` SELECT policy lets any authenticated user read the
+    table, so a user can learn whether they themselves are admin without a service_role key. A
+    patchable seam — the unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("user_roles")
+        .select("user_id")
+        .eq("user_id", user_id)
+        .eq("role", "admin")
+        .limit(1)
+        .execute()
+    )
+    return bool(resp.data)
+
+
+def count_admins(*, token: str) -> int:
+    """Return how many users currently hold the 'admin' role.
+
+    Used by the role PUT's last-admin guard to refuse a revoke that would leave zero admins. This
+    goes through the ``count_admins()`` SECURITY DEFINER RPC, NOT a direct table read: the tightened
+    ``user_roles`` SELECT policy scopes an authenticated caller to their OWN row, so a plain
+    ``.table("user_roles")`` count would always return 1 for the acting admin and wrongly block every
+    demotion. The definer function bypasses RLS and returns the true total. A patchable seam — the
+    unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = client.rpc("count_admins").execute()
+    return int(resp.data or 0)
+
+
+def get_app_settings(*, token: str) -> dict[str, Any]:
+    """Return every ``app_settings`` override as ``{key: value}``, read as the caller (RLS-scoped).
+
+    Used by the admin ``GET /api/admin/settings`` handler to show the currently-persisted overrides.
+    The table's SELECT policy lets any authenticated user read it; the admin gate is enforced by the
+    endpoint's ``get_admin_user`` dependency. A patchable seam — the unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = client.table("app_settings").select("key, value").execute()
+    return {row["key"]: row["value"] for row in (resp.data or []) if "key" in row}
+
+
+def upsert_app_settings(*, token: str, items: dict[str, Any]) -> None:
+    """Upsert the given ``{key: value}`` overrides into ``app_settings`` as the caller (RLS-scoped).
+
+    Writes are gated in Postgres by the ``is_admin(auth.uid())`` INSERT/UPDATE policies, so a
+    non-admin's write is rejected by RLS even though the endpoint already checks ``get_admin_user``.
+    Only the provided keys are touched; omitted knobs keep their previous value (or their env default
+    if never set). A patchable seam — the unit tests replace ``_user_client``.
+    """
+    if not items:
+        return
+    rows = [{"key": key, "value": value} for key, value in items.items()]
+    client = _user_client(token)
+    client.table("app_settings").upsert(rows, on_conflict="key").execute()
+
+
+def admin_list_users(*, token: str) -> list[dict[str, Any]]:
+    """Return one row per user (id, email, activity counts, is_admin) for the admin overview.
+
+    Calls the ``admin_list_users()`` SECURITY DEFINER function with the caller's own JWT: the function
+    gates itself internally on ``is_admin(auth.uid())`` (raising 42501 for a non-admin), so no
+    service_role key is needed to read ``auth.users``. A patchable seam — the unit tests replace
+    ``_user_client``. The endpoint's ``get_admin_user`` dependency is the frontline gate; the function's
+    internal guard is the Postgres-side backstop.
+    """
+    client = _user_client(token)
+    resp = client.rpc("admin_list_users").execute()
+    return resp.data or []
+
+
+def set_user_role(*, token: str, user_id: str, make_admin: bool) -> None:
+    """Grant or revoke the 'admin' role for ``user_id``, written as the caller (RLS-scoped).
+
+    Writes to ``user_roles`` are gated in Postgres by the ``is_admin(auth.uid())`` INSERT/DELETE
+    policies, so only an admin's write lands even though the endpoint already checks ``get_admin_user``.
+    ``make_admin`` → upsert the role row (idempotent on ``user_id``); otherwise → delete it. A patchable
+    seam — the unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    if make_admin:
+        client.table("user_roles").upsert(
+            {"user_id": user_id, "role": "admin"}, on_conflict="user_id"
+        ).execute()
+    else:
+        client.table("user_roles").delete().eq("user_id", user_id).execute()
+
+
 def persist_analysis(
     *,
     token: str,
