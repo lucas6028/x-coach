@@ -14,6 +14,7 @@ import AdminSettingsLlm from "./pages/admin/AdminSettingsLlm";
 import AdminSettingsRag from "./pages/admin/AdminSettingsRag";
 import AdminSettingsAnalyze from "./pages/admin/AdminSettingsAnalyze";
 import Games from "./pages/Games";
+import LiffDiag from "./pages/LiffDiag";
 import RequireAuth from "./components/RequireAuth";
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
 const SixSeven = lazy(() => import("./pages/SixSeven"));
@@ -48,6 +49,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               }
             />
             <Route path="/login" element={<Login />} />
+            {/* LIFF device check (Phase 0 of the LINE rollout): open inside LINE on a phone. */}
+            <Route path="/liff/diag" element={<LiffDiag />} />
             <Route
               path="/history"
               element={

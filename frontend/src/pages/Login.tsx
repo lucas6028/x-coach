@@ -24,6 +24,19 @@ const POINTS: { Icon: Icon; key: string }[] = [
   { Icon: Lock, key: "auth.point3" },
 ];
 
+// The LINE mark, simplified: the brand-green rounded square holding a white speech bubble.
+function LineBubble() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <rect width="24" height="24" rx="6" fill="#06C755" />
+      <path
+        fill="#fff"
+        d="M12 5.3c-4.2 0-7.6 2.77-7.6 6.18 0 3.05 2.7 5.61 6.35 6.1.25.05.42.17.38.44l-.16 1.1c-.05.33.27.58.56.42 3.15-1.73 8.07-4.13 8.07-8.06 0-3.41-3.4-6.18-7.6-6.18z"
+      />
+    </svg>
+  );
+}
+
 // The Google "G" is a brand mark (the OAuth convention), not a hand-rolled generic icon.
 function GoogleG() {
   return (
@@ -43,7 +56,8 @@ export default function Login() {
   const reduce = useReducedMotion();
   const navigate = useNavigate();
   const location = useLocation();
-  const { user, configured, signInWithPassword, signUpWithPassword, signInWithGoogle } = useAuth();
+  const { user, configured, signInWithPassword, signUpWithPassword, signInWithGoogle, signInWithLine } =
+    useAuth();
 
   const from = (location.state as { from?: string } | null)?.from ?? "/app";
 
@@ -87,6 +101,20 @@ export default function Login() {
       await signInWithGoogle(); // navigates away on success
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  }
+
+  async function line() {
+    setError("");
+    setBusy(true);
+    try {
+      // Web: navigates away (OAuth redirect). Inside LIFF: resolves in place with a live
+      // session — `user` flips and the <Navigate> above leaves this page.
+      await signInWithLine();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
       setBusy(false);
     }
   }
@@ -227,6 +255,16 @@ export default function Login() {
           >
             <GoogleG />
             {t("auth.google")}
+          </button>
+
+          <button
+            type="button"
+            onClick={line}
+            disabled={busy || !configured}
+            className="mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border border-border-dark bg-surface-dark px-5 py-2.5 text-sm font-medium text-content transition-colors hover:bg-content/[0.05] active:scale-[0.99] disabled:opacity-60"
+          >
+            <LineBubble />
+            {t("auth.lineBtn")}
           </button>
 
           <p className="mt-6 text-center text-sm text-muted">

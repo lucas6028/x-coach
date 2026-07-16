@@ -37,10 +37,15 @@ SPLIT_NAMES = ("train", "val", "test")
 # ``uvicorn --workers N`` the effective ceiling is N * MAX_CONCURRENT_ANALYSES.
 MAX_CONCURRENT_ANALYSES = max(1, int(os.getenv("XCOACH_MAX_CONCURRENT_ANALYSES", "2")))
 
-# Allowed origins for the Vite dev server.
+# Allowed origins: the Vite dev server, plus any extra comma-separated origins from the
+# environment — e.g. the ngrok tunnel or production host serving the LINE LIFF frontend
+# (XCOACH_CORS_ORIGINS=https://xxxx.ngrok-free.app). Note that when the SPA is served
+# through Vite's /api proxy (including via ngrok), requests are same-origin and CORS never
+# applies; this matters only when the frontend calls the API cross-origin directly.
 CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    *[o.strip() for o in os.getenv("XCOACH_CORS_ORIGINS", "").split(",") if o.strip()],
 ]
 
 

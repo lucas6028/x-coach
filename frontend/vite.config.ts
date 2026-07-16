@@ -6,6 +6,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // LIFF endpoints must be HTTPS: in dev the app is exposed through an ngrok tunnel
+    // (see docs/line-login-liff-setup.md). Vite blocks unknown Host headers by default;
+    // allow the tunnel domains so the LIFF browser can reach the dev server.
+    allowedHosts: [".ngrok-free.app", ".ngrok.app", ".ngrok.dev"],
     proxy: {
       "/api": {
         target: "http://localhost:8000",
