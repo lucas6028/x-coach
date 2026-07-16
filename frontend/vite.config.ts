@@ -36,6 +36,9 @@ export default defineConfig({
         "src/pages/SixSeven.tsx",
         "src/components/ninja/ninjaDetector.ts",
         "src/pages/FruitNinja.tsx",
+        // Same impure boundary: the LIFF diag's camera→MediaPipe chain probe needs a real
+        // camera + WASM + WebGL.
+        "src/lib/poseProbe.ts",
       ],
       thresholds: {
         lines: 70,

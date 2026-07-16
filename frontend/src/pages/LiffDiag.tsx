@@ -5,10 +5,11 @@
 // LIFF browser. Everything is read-only except the camera probe (opens then immediately
 // releases the stream) and the file-capture input (manual tap test).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Liff } from "@line/liff";
 import { probeCamera, type CameraProbeResult } from "../lib/camera";
+import { probeLivePose, type PoseProbeResult } from "../lib/poseProbe";
 import { initLiff, isLiffConfigured } from "../lib/liff";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
@@ -58,7 +59,10 @@ export default function LiffDiag() {
   const [facts, setFacts] = useState<Fact[]>([]);
   const [probe, setProbe] = useState<CameraProbeResult | null>(null);
   const [probing, setProbing] = useState(false);
+  const [pose, setPose] = useState<PoseProbeResult | null>(null);
+  const [posing, setPosing] = useState(false);
   const [inClient, setInClient] = useState(false);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -80,7 +84,29 @@ export default function LiffDiag() {
     setProbing(false);
   }
 
+  async function runPoseProbe() {
+    const video = videoRef.current;
+    if (!video) return;
+    setPosing(true);
+    setPose(null);
+    const result = await probeLivePose(video);
+    setPose(result);
+    setPosing(false);
+  }
+
   const showLiffHint = probe && !probe.ok && inClient && probe.reason !== "denied";
+
+  // Camera answering is necessary but not sufficient — the games are playable only when
+  // sustained MediaPipe inference keeps a usable frame rate in this browser.
+  const poseVerdictKey = !pose?.ok
+    ? null
+    : !pose.landmarksSeen
+      ? "diag.poseNoLandmarks"
+      : (pose.avgFps ?? 0) >= 15
+        ? "diag.poseGood"
+        : (pose.avgFps ?? 0) >= 8
+          ? "diag.poseMarginal"
+          : "diag.poseBad";
 
   return (
     <div className="min-h-[100dvh] bg-background-dark px-5 py-10 text-content">
@@ -138,6 +164,56 @@ export default function LiffDiag() {
             <p className="font-mono text-xs uppercase">{probe.reason}</p>
             <p className="mt-1">{probe.ok ? t("diag.cameraOk") : probe.message}</p>
             {showLiffHint && <p className="mt-2">{t("camera.liffHint")}</p>}
+          </div>
+        )}
+
+        {/* Camera + MediaPipe together — camera alone doesn't prove the games are playable:
+            WASM/WebGL performance inside the LINE WebView is its own failure mode. */}
+        <h2 className="mt-8 text-xs font-semibold uppercase tracking-wider text-faint">
+          {t("diag.pose")}
+        </h2>
+        <button
+          type="button"
+          onClick={runPoseProbe}
+          disabled={posing}
+          className="mt-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content transition-colors hover:bg-primary/90 disabled:opacity-60"
+        >
+          {posing ? t("diag.probing") : t("diag.poseBtn")}
+        </button>
+        {/* Small live preview so the tester can aim the camera at themselves. */}
+        <video
+          ref={videoRef}
+          muted
+          playsInline
+          className={`mt-3 w-40 rounded-lg border border-border-dark ${posing ? "" : "hidden"}`}
+        />
+        {pose && (
+          <div
+            className={`mt-3 rounded-xl border p-3.5 text-sm ${
+              pose.ok
+                ? "border-primary/30 bg-primary/[0.06] text-primary"
+                : "border-danger/30 bg-danger/[0.06] text-danger"
+            }`}
+          >
+            <p className="font-mono text-xs uppercase">{pose.stage}</p>
+            {pose.ok ? (
+              <dl className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 font-mono text-xs">
+                <dt>model</dt>
+                <dd>{pose.modelLoadMs} ms</dd>
+                <dt>warmup</dt>
+                <dd>{pose.warmupMs} ms</dd>
+                <dt>fps</dt>
+                <dd>{pose.avgFps}</dd>
+                <dt>landmarks</dt>
+                <dd>{pose.landmarksSeen ? "yes" : "no"}</dd>
+              </dl>
+            ) : (
+              <p className="mt-1">{pose.message}</p>
+            )}
+            {poseVerdictKey && <p className="mt-2">{t(poseVerdictKey)}</p>}
+            {!pose.ok && inClient && pose.stage === "camera" && (
+              <p className="mt-2">{t("camera.liffHint")}</p>
+            )}
           </div>
         )}
 
