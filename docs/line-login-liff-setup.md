@@ -86,14 +86,23 @@ ngrok http 5173
 
 1. **執行環境**表:`liff.init` 應為 `ok`、`isInClient` 為 `true`、`ID token` 為 `present`。
 2. **登入 Session**:若後端橋接已設定,開頁應已自動登入(顯示 `line_<sub>@line.invalid`)。
-3. **即時相機**:按「測試相機」——
-   - `ok` → 該裝置可在 LIFF 內玩即時相機(SixSeven / FruitNinja / 即時姿態)。
-   - `timeout` / `unsupported`(iOS 已知問題)→ LIFF 內即時相機不可用;
+3. **即時相機**(快篩):按「測試相機」——
+   - `ok` → 相機打得開,續做步驟 4 才能下結論。
+   - `timeout` / `unsupported`(iOS 已知問題)→ LIFF 內即時相機不可用,步驟 4 免做;
      遊戲頁會自動顯示「改用外部瀏覽器」提示(`camera.liffHint`),主流程的影片上傳不受影響。
    - `denied` → 單純權限被拒,再試並允許即可。
-4. **影片檔案拍攝**:點檔案輸入,確認能否直接開相機錄影(上傳分析流程的替代路徑)。
+4. **即時姿態(相機 + MediaPipe)**(決定性測試):按「測試相機＋姿態」——
+   相機通了**不代表**遊戲可玩:WebView 裡的 WASM/WebGL 是獨立的失敗點
+   (模型下載、GPU shader 編譯可凍住主執行緒數十秒、推論 FPS 掉到不可玩)。
+   此測試跑的是與遊戲完全相同的鏈路(同一個 `createPoseLandmarker`、同樣的相機參數),
+   量測 5 秒後回報:
+   - `model` / `warmup` 毫秒數:模型載入與首次推論(shader 編譯)時間。
+   - `fps`:**≥15 可玩;8–14 勉強;<8 不可玩**(頁面會直接給結論)。
+   - `landmarks: no` → 鏈路正常但沒拍到人,對準自己再測。
+   - 失敗時會顯示卡在哪一段(`camera` / `video` / `model` / `warmup` / `detect`)。
+5. **影片檔案拍攝**:點檔案輸入,確認能否直接開相機錄影(上傳分析流程的替代路徑)。
 
-請在 **iOS 與 Android 各測一台**,結果決定要不要把即時相機功能留在 LIFF 內。
+請在 **iOS 與 Android 各測一台**,以步驟 4 的 FPS 結論決定要不要把即時相機功能留在 LIFF 內。
 
 ## 6. 已知設計取捨(troubleshooting 前先讀)
 
