@@ -12,7 +12,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app import config
-from backend.app.routers import admin, analyses, analyze, chat, conversations, knowledge, videos
+from backend.app.routers import (
+    admin,
+    analyses,
+    analyze,
+    auth_line,
+    chat,
+    conversations,
+    knowledge,
+    videos,
+)
 from backend.app.settings import chat_models, default_chat_model, get_settings
 
 app = FastAPI(
@@ -36,6 +45,7 @@ app.include_router(knowledge.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
 app.include_router(admin.router)
+app.include_router(auth_line.router)
 
 
 @app.get("/api/health", tags=["meta"])
@@ -46,6 +56,11 @@ def health() -> dict:
         "status": "ok",
         "auth_configured": settings.auth_configured,
         "chat_configured": settings.chat_configured,
+        # Whether the in-LIFF silent login (POST /api/auth/line) is available, so the
+        # frontend only auto-attempts the exchange when the bridge is actually configured.
+        # ``getattr`` default keeps this robust when a test patches ``get_settings`` to a
+        # lightweight stand-in without the property (matching settings._allowed_base_hosts).
+        "line_login_configured": bool(getattr(settings, "line_login_configured", False)),
         # The Settings picker is server-driven: the selectable models + which is the default both
         # come from here (env-configurable), so the frontend never hard-codes the list.
         "chat_models": chat_models(),

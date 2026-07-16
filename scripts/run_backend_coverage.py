@@ -22,7 +22,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 # Default target: the complete, dependency-light backend suite (network/ML/Supabase all mocked).
-_DEFAULT_TESTS = ["tests/test_backend.py", "tests/test_chat_endpoint.py"]
+_DEFAULT_TESTS = [
+    "tests/test_backend.py",
+    "tests/test_chat_endpoint.py",
+    "tests/test_backend_line_auth.py",
+]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]
 

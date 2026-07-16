@@ -1,9 +1,15 @@
 # LINE Login + LIFF 導入評估
 
-Status: **評估（尚未實作）** · Created 2026-07-15
+Status: **已決策並實作（方案 A + B 並行）；外部服務設定見 `line-login-liff-setup.md`** ·
+Created 2026-07-15 · Updated 2026-07-16
 
 評估「在 x-coach 導入 LINE Login 作為登入方式，並以 LINE LIFF 讓前端能在 LINE App 內執行、
 取得類似原生 App 的體驗」的可行性、架構選項、風險與落地計畫。
+
+> **2026-07-16 決策**：完整 LIFF App 化、LIFF／相機不可用時 fallback 回網頁；dev 先用
+> ngrok；接受方案 B 的 service_role。§8 的 Phase 1（方案 A 前端）、Phase 3（方案 B 後端
+> 橋接 `/api/auth/line`）與 Phase 0 的檢測頁（`/liff/diag`）＋ 相機 timeout fallback 均已
+> 實作；剩餘手動步驟是 Phase 0 真機驗證與 LINE／Supabase 控制台設定（見設定手冊）。
 
 本文結論建立在實際程式碼（`frontend/src/lib/auth.tsx`、`frontend/src/api.ts`、
 `backend/app/auth.py`、`db/migrations/*`）與 LINE / Supabase 官方文件之上，非泛論。

@@ -172,8 +172,28 @@ export interface HealthResponse {
   status: string;
   auth_configured?: boolean;
   chat_configured?: boolean;
+  // Whether POST /api/auth/line (the in-LIFF silent login bridge) is configured server-side.
+  line_login_configured?: boolean;
   chat_models?: string[];
   chat_default?: string;
+}
+
+// A minted Supabase session from the LINE bridge — handed straight to supabase.auth.setSession.
+export interface LineSession {
+  access_token: string;
+  refresh_token: string;
+}
+
+// Non-chat endpoint failure that still needs its HTTP status (e.g. the LINE bridge: 401 means
+// "stale LINE token, re-run liff.login()", anything else is a real error to surface).
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
 }
 
 // ---- Admin: runtime settings (admin-only; GET/PUT /api/admin/settings) --------------------
@@ -312,6 +332,25 @@ async function getJSON<T>(url: string): Promise<T> {
 
 export const api = {
   health: () => getJSON<HealthResponse>("/api/health"),
+
+  // Exchange a LINE (LIFF) ID token for a Supabase session (see backend routers/auth_line).
+  // Unauthenticated by design — the ID token itself is the proof of identity. Throws ApiError
+  // carrying the HTTP status so the caller can tell a stale LINE token (401) from an outage.
+  async lineLogin(idToken: string): Promise<LineSession> {
+    const res = await fetch("/api/auth/line", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id_token: idToken }),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new ApiError(
+        (detail as { detail?: string }).detail || `LINE login failed (${res.status})`,
+        res.status
+      );
+    }
+    return (await res.json()) as LineSession;
+  },
 
   // Whether the signed-in caller holds the admin role. Any signed-in user may ask (the backend
   // returns their own flag, not a 403); used to gate the Admin nav link and page. Auto-attaches

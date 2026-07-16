@@ -13,6 +13,8 @@ import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leader
 import { estimateKcal, EFFORT } from "../lib/calories";
 import { addCalories } from "../lib/calorieStore";
 import { waitForVideoFrame } from "../lib/videoFrame";
+import { CameraError, getCameraStream } from "../lib/camera";
+import { isInLiffClient } from "../lib/liff";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene, type Point } from "../components/ninja/ninjaDetector";
 
@@ -270,7 +272,9 @@ export default function FruitNinja() {
       // camera — kick it off in parallel with the getUserMedia permission/stream so the two waits
       // overlap instead of stacking.
       const landmarkerPromise = createPoseLandmarker();
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // Timeout-wrapped: inside the LINE (LIFF) in-app browser on iOS getUserMedia can hang
+      // forever — the wrapper turns that into a catchable error (see lib/camera).
+      const stream = await getCameraStream({
         video: { facingMode: "user", width: 640, height: 480 },
         audio: false,
       });
@@ -321,7 +325,13 @@ export default function FruitNinja() {
     } catch (e) {
       teardown();
       setStarting(false);
-      setError(e instanceof Error ? e.message : t("ninja.error"));
+      // A hung/missing camera inside the LINE in-app browser gets a specific escape-hatch
+      // hint (open in a real browser) instead of the raw error message.
+      if (e instanceof CameraError && (await isInLiffClient())) {
+        setError(t("camera.liffHint"));
+      } else {
+        setError(e instanceof Error ? e.message : t("ninja.error"));
+      }
     }
   }, [beginCountdown, teardown, t]);
 

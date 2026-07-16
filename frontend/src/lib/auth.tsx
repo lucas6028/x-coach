@@ -16,7 +16,8 @@ import {
   type ReactNode,
 } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { api } from "../api";
+import { api, ApiError } from "../api";
+import { initLiff, isLiffConfigured } from "./liff";
 import { isSupabaseConfigured, supabase } from "./supabase";
 
 interface AuthValue {
@@ -39,8 +40,20 @@ interface AuthValue {
   /** Returns whether the account still needs email confirmation (no session yet). */
   signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
   signInWithGoogle: () => Promise<void>;
+  /** LINE login: silent LIFF-token exchange inside the LINE app, OAuth redirect on the web. */
+  signInWithLine: () => Promise<void>;
   signOut: () => Promise<void>;
 }
+
+// Supabase custom OIDC provider slug for LINE — register the provider as "line" in the
+// Supabase dashboard (Auth → Sign In / Up → Custom providers) for the web login path.
+const LINE_OAUTH_PROVIDER = "custom:line" as const;
+
+// One liff.login() reload per browser session: a stale cached LINE ID token 401s on the
+// bridge and liff.login() re-mints it via a full-page redirect — but if the exchange keeps
+// failing after that, looping the redirect forever would brick the tab. sessionStorage
+// (not state) because the redirect wipes the JS heap.
+const LIFF_RELOGIN_KEY = "xcoach.liffReloginTried";
 
 const AuthContext = createContext<AuthValue | null>(null);
 
@@ -129,6 +142,78 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (error) throw new Error(error.message);
   }, []);
 
+  const signInWithLine = useCallback(async () => {
+    const client = requireClient();
+
+    // Inside the LINE app the user is already LINE-authenticated: exchange the LIFF ID
+    // token for a Supabase session through the backend bridge — no redirect, no form.
+    const liff = await initLiff();
+    if (liff?.isInClient()) {
+      const idToken = liff.getIDToken();
+      if (idToken) {
+        try {
+          const minted = await api.lineLogin(idToken);
+          const { error } = await client.auth.setSession(minted);
+          if (error) throw new Error(error.message);
+          sessionStorage.removeItem(LIFF_RELOGIN_KEY);
+          return;
+        } catch (err) {
+          // 401 = the cached LINE ID token went stale; fall through to one liff.login().
+          if (!(err instanceof ApiError && err.status === 401)) {
+            throw err instanceof Error ? err : new Error(String(err));
+          }
+        }
+      }
+      // Missing/stale ID token: re-run LINE auth ONCE (full-page redirect). A second
+      // failure in the same browser session surfaces as an error instead of a reload loop.
+      if (sessionStorage.getItem(LIFF_RELOGIN_KEY) !== "1") {
+        sessionStorage.setItem(LIFF_RELOGIN_KEY, "1");
+        liff.login();
+        return;
+      }
+      throw new Error("LINE sign-in failed inside LIFF. Please try again later.");
+    }
+
+    // Plain web: Supabase's custom OIDC provider handles the whole redirect dance, exactly
+    // like the Google path (detectSessionInUrl picks the session up on return).
+    const { error } = await client.auth.signInWithOAuth({
+      provider: LINE_OAUTH_PROVIDER,
+      options: { redirectTo: `${window.location.origin}/app` },
+    });
+    if (error) throw new Error(error.message);
+  }, []);
+
+  // Auto sign-in inside the LINE app: a LIFF user already proved who they are to LINE, so
+  // the first anonymous render silently exchanges their ID token for a session (once per
+  // mount — NOT retried after sign-out, and never via liff.login() here, so the auto path
+  // can't cause redirect loops). Failures stay silent: the Login button remains the
+  // explicit, error-surfacing path.
+  const autoLineTriedRef = useRef(false);
+  useEffect(() => {
+    if (!supabase || !isLiffConfigured() || loading || session || autoLineTriedRef.current) return;
+    autoLineTriedRef.current = true;
+    let active = true;
+    (async () => {
+      const liff = await initLiff();
+      if (!active || !liff?.isInClient()) return;
+      const idToken = liff.getIDToken();
+      if (!idToken) return;
+      // Only attempt the exchange when the server says the bridge is configured.
+      const health = await api.health().catch(() => null);
+      if (!active || !health?.line_login_configured) return;
+      try {
+        const minted = await api.lineLogin(idToken);
+        if (!active) return;
+        await supabase!.auth.setSession(minted);
+      } catch {
+        /* silent — see above */
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [loading, session]);
+
   const signOut = useCallback(async () => {
     if (!supabase) return;
     await supabase.auth.signOut();
@@ -146,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,
+      signInWithLine,
       signOut,
     }),
     [
@@ -157,6 +243,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,
+      signInWithLine,
       signOut,
     ]
   );
