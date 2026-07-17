@@ -360,8 +360,11 @@ export const api = {
 
   getAnalysis: (videoId: string) => getJSON<Analysis>(`/api/analysis/${videoId}`),
 
-  graph: (query: string) =>
-    getJSON<RetrievalContext>(`/api/knowledge/graph?query=${encodeURIComponent(query)}`),
+  graph: (query: string, movement?: string) =>
+    getJSON<RetrievalContext>(
+      `/api/knowledge/graph?query=${encodeURIComponent(query)}` +
+        (movement ? `&movement=${encodeURIComponent(movement)}` : "")
+    ),
 
   videoFileUrl: (videoId: string) => `/api/video-file/${videoId}`,
 

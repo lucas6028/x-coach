@@ -187,6 +187,20 @@ describe("api.graph", () => {
     await api.graph("knee valgus");
     expect(fetch).toHaveBeenCalledWith("/api/knowledge/graph?query=knee%20valgus");
   });
+
+  it("omits the movement param when none is given", async () => {
+    mockFetch({ matched_nodes: [] });
+    await api.graph("x");
+    expect(fetch).toHaveBeenCalledWith("/api/knowledge/graph?query=x");
+  });
+
+  it("appends the movement scope when provided", async () => {
+    mockFetch({ matched_nodes: [] });
+    await api.graph("knee valgus", "Squat");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/knowledge/graph?query=knee%20valgus&movement=Squat"
+    );
+  });
 });
 
 describe("api.listAnalyses", () => {

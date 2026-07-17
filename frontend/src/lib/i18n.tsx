@@ -353,10 +353,20 @@ const en: Dict = {
 
   // Account / nav
   "nav.history": "My records",
+  "nav.explore": "Explore",
   "account.signin": "Sign in",
   "account.signout": "Sign out",
   "account.menu": "Account menu",
   "account.settings": "Settings",
+
+  // Explore page
+  "explore.title": "Explore the movement knowledge graph",
+  "explore.subtitle": "Pick a movement, then a fault, to see its causes, corrections and risks.",
+  "explore.search": "Search faults",
+  "explore.empty": "No faults match.",
+  "explore.error": "Could not load the knowledge graph.",
+  "explore.groupFlagship": "Flagship",
+  "explore.groupGeneral": "General",
 
   // Settings page
   "settings.title": "Settings",
@@ -910,10 +920,20 @@ const zhHant: Dict = {
 
   // Account / nav
   "nav.history": "我的紀錄",
+  "nav.explore": "探索",
   "account.signin": "登入",
   "account.signout": "登出",
   "account.menu": "帳號選單",
   "account.settings": "設定",
+
+  // Explore page
+  "explore.title": "探索動作知識圖譜",
+  "explore.subtitle": "先選一個動作，再挑一個錯誤，即可看到它的成因、修正與風險。",
+  "explore.search": "搜尋錯誤",
+  "explore.empty": "沒有符合的錯誤。",
+  "explore.error": "無法載入知識圖譜。",
+  "explore.groupFlagship": "旗艦",
+  "explore.groupGeneral": "一般",
 
   // Settings page
   "settings.title": "設定",
@@ -1193,6 +1213,9 @@ function dataLabel(t: TFunc, prefix: string, raw: string): string {
 }
 
 export const faultLabel = (t: TFunc, raw: string) => dataLabel(t, "fault", raw);
+// Canonical movement names ("Squat", "Overhead Press", ...) title-case cleanly, so movement.* keys
+// are optional; the fallback renders the display text.
+export const movementLabel = (t: TFunc, raw: string) => dataLabel(t, "movement", raw);
 export const viewLabel = (t: TFunc, raw: string) => dataLabel(t, "view", raw);
 export const phaseLabel = (t: TFunc, raw: string) => dataLabel(t, "phase", raw);
 

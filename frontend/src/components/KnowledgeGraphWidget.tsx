@@ -9,9 +9,9 @@ interface Props {
   activeFaultId: string | null;
 }
 
-type Kind = "cause" | "risk" | "correction" | "evidence";
+export type Kind = "cause" | "risk" | "correction" | "evidence";
 
-interface Neighbor {
+export interface Neighbor {
   label: string;
   kind: Kind;
 }
@@ -25,10 +25,10 @@ const KIND_COLOR: Record<Kind, string> = {
   correction: "#42d159", // secondary green
   evidence: "#94a3b8", // slate (neutral)
 };
-const KIND_ORDER: Kind[] = ["cause", "risk", "correction", "evidence"];
+export const KIND_ORDER: Kind[] = ["cause", "risk", "correction", "evidence"];
 const CENTER = "#f5b945"; // amber: the fault itself, distinct from red "risk"
 
-function collect(retrieval: Retrieval | undefined): { center: string; neighbors: Neighbor[] } {
+export function collect(retrieval: Retrieval | undefined): { center: string; neighbors: Neighbor[] } {
   if (!retrieval) return { center: "", neighbors: [] };
   const results = (retrieval.context.results as Array<Record<string, unknown>>) || [];
   const neighbors: Neighbor[] = [];
@@ -57,7 +57,7 @@ interface Pt {
 }
 type DragTarget = { kind: "node"; i: number } | { kind: "center" } | null;
 
-function GraphScene({
+export function GraphScene({
   centerLabel,
   neighbors,
   large,
@@ -250,7 +250,7 @@ function GraphScene({
   );
 }
 
-function Legend({ kinds, t }: { kinds: Kind[]; t: ReturnType<typeof useI18n>["t"] }) {
+export function Legend({ kinds, t }: { kinds: Kind[]; t: ReturnType<typeof useI18n>["t"] }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       {kinds.map((k) => (
