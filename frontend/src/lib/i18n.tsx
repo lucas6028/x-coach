@@ -220,7 +220,7 @@ const en: Dict = {
   "landing.hero.titleAccent": "trace to the joint",
   "landing.hero.titlePost": ".",
   "landing.hero.sub":
-    "x-coach reads a squat video, locates the fault, traces its cause in a biomechanics knowledge graph, and explains the fix.",
+    "x-coach reads a squat video, locates the fault, traces its cause in a biomechanics knowledge graph spanning 16 movements, and explains the fix.",
   "landing.hero.readMethod": "Read the method",
 
   // Landing — problem
@@ -307,7 +307,7 @@ const en: Dict = {
 
   // Landing — footer
   "landing.footer.pipeline": "Pipeline",
-  "landing.footer.tagline": "Explainable squat coaching, research prototype.",
+  "landing.footer.tagline": "Explainable movement coaching, research prototype.",
 
   // Landing — movement showcase
   "landing.showcase.title": "One pipeline, the whole movement library.",
@@ -790,7 +790,7 @@ const zhHant: Dict = {
   "landing.hero.titleAccent": "追溯到關節",
   "landing.hero.titlePost": "。",
   "landing.hero.sub":
-    "x-coach 讀取深蹲影片，定位動作錯誤，在生物力學知識圖譜中追溯成因，並說明修正方式。",
+    "x-coach 讀取深蹲影片，定位動作錯誤，在涵蓋 16 個動作的生物力學知識圖譜中追溯成因，並說明修正方式。",
   "landing.hero.readMethod": "了解方法",
 
   // Landing — problem
@@ -877,7 +877,7 @@ const zhHant: Dict = {
 
   // Landing — footer
   "landing.footer.pipeline": "處理流程",
-  "landing.footer.tagline": "可解釋的深蹲教練，研究原型。",
+  "landing.footer.tagline": "可解釋的動作教練，研究原型。",
 
   // Landing — movement showcase
   "landing.showcase.title": "同一套流程，涵蓋整個動作庫。",

@@ -64,7 +64,7 @@ describe("Landing page", () => {
 
   it("renders the footer tagline", () => {
     renderWithProviders(<Landing />);
-    expect(screen.getByText(/Explainable squat coaching/i)).toBeInTheDocument();
+    expect(screen.getByText(/Explainable movement coaching/i)).toBeInTheDocument();
   });
 
   it("renders nav links for the three sections", () => {
