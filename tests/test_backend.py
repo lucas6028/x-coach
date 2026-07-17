@@ -559,7 +559,7 @@ class KnowledgeServiceTests(_TempConfigBase):
             out = knowledge.graph_context("knees inward", hops=2, max_seeds=3)
         self.assertEqual(out, {"nodes": []})
         rg.assert_called_once_with(
-            "knees inward", graph_file=self.kg_file, hops=2, max_seeds=3
+            "knees inward", graph_file=self.kg_file, hops=2, max_seeds=3, movement=None
         )
 
     def test_graph_context_defaults(self) -> None:
@@ -772,7 +772,18 @@ class KnowledgeRouterTests(_TempConfigBase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"nodes": [1]})
         # The router now also threads the admin-tunable KG seed default through to the service.
-        gc.assert_called_once_with("knees", hops=2, max_seeds=5)
+        # `movement` defaults to None when the query param is omitted.
+        gc.assert_called_once_with("knees", hops=2, max_seeds=5, movement=None)
+
+    def test_graph_endpoint_forwards_movement(self) -> None:
+        with mock.patch.object(
+            knowledge, "graph_context", return_value={"nodes": []}
+        ) as gc:
+            resp = self.client.get(
+                "/api/knowledge/graph", params={"query": "knee valgus", "movement": "Squat"}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(gc.call_args.kwargs["movement"], "Squat")
 
     def test_graph_default_hops(self) -> None:
         with mock.patch.object(knowledge, "graph_context", return_value={}) as gc:

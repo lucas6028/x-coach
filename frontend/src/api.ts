@@ -34,6 +34,7 @@ export interface Detection {
 
 export interface SubgraphNode {
   node_id: string;
+  name?: string;
   label: string;
 }
 export interface SubgraphEdge {

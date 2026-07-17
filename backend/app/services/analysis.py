@@ -88,6 +88,7 @@ def analyze_video_file(source_path: Path, *, video_id: str | None = None) -> dic
         include_retrieval=True,
         graph_file=config.KG_GRAPH_FILE,
         rag_db_dir=config.RAG_DB_DIR,
+        movement=config.DEFAULT_ANALYSIS_MOVEMENT,
     )
     result = _strip_frame_metrics(result)
     result["pose"] = build_pose_block(pose_json_path)

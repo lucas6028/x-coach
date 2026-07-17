@@ -227,6 +227,7 @@ def summarize_seed(graph: nx.MultiDiGraph, seed: str, edges: list[EdgeRecord]) -
         grouped[bucket].append(
             {
                 "node_id": counterpart,
+                "name": str(graph.nodes[counterpart].get("name", counterpart)),
                 "label": counterpart_label,
                 "relation": edge.relation,
                 "direction": edge.direction,
@@ -253,6 +254,7 @@ def summarize_seed(graph: nx.MultiDiGraph, seed: str, edges: list[EdgeRecord]) -
     return {
         "seed": {
             "node_id": seed,
+            "name": str(graph.nodes[seed].get("name", seed)),
             "label": str(graph.nodes[seed].get("label", "Unknown")),
         },
         "summary": deduped_grouped,
@@ -285,6 +287,7 @@ def retrieve_graph_context(
     nodes_payload = [
         {
             "node_id": node_id,
+            "name": str(graph.nodes[node_id].get("name", node_id)),
             "label": str(graph.nodes[node_id].get("label", "Unknown")),
         }
         for node_id in sorted(subgraph_nodes)

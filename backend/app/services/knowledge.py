@@ -10,13 +10,16 @@ from src.knowledge.rag_vector_db import query_vector_db
 from backend.app import config
 
 
-def graph_context(query: str, *, hops: int = 1, max_seeds: int = 5) -> dict[str, Any]:
+def graph_context(
+    query: str, *, hops: int = 1, max_seeds: int = 5, movement: str | None = None
+) -> dict[str, Any]:
     """Return the knowledge-graph subgraph + summaries for a fault/query string."""
     return retrieve_graph_context(
         query,
         graph_file=config.KG_GRAPH_FILE,
         hops=hops,
         max_seeds=max_seeds,
+        movement=movement,
     )
 
 

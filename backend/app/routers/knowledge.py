@@ -15,9 +15,15 @@ router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
 # A caller may still pass these query params to override; when omitted, the *default* comes from the
 # admin-tunable getters so an operator can retune retrieval breadth without a redeploy.
 @router.get("/graph")
-def graph(query: str = Query(..., min_length=1), hops: int | None = Query(None, ge=1, le=3)) -> dict:
+def graph(
+    query: str = Query(..., min_length=1),
+    hops: int | None = Query(None, ge=1, le=3),
+    movement: str | None = Query(None),
+) -> dict:
     resolved_hops = hops if hops is not None else settings.kg_hops_default()
-    return knowledge.graph_context(query, hops=resolved_hops, max_seeds=settings.kg_seeds_default())
+    return knowledge.graph_context(
+        query, hops=resolved_hops, max_seeds=settings.kg_seeds_default(), movement=movement
+    )
 
 
 @router.get("/rag")

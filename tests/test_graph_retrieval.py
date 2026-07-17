@@ -122,7 +122,10 @@ class SummarizeSeedTests(unittest.TestCase):
     def test_edges_are_grouped_into_expected_buckets(self):
         edges, _ = collect_edges_for_seed(self.graph, "Knee Valgus", hops=1)
         summary = summarize_seed(self.graph, "Knee Valgus", edges)
-        self.assertEqual(summary["seed"], {"node_id": "Knee Valgus", "label": "Fault"})
+        # Seed carries a bare `name` (falls back to node_id when no `name` attr is set).
+        self.assertEqual(
+            summary["seed"], {"node_id": "Knee Valgus", "name": "Knee Valgus", "label": "Fault"}
+        )
         self.assertEqual(
             set(summary["summary"].keys()),
             {"phases", "evidence", "causes", "risks", "corrections"},
@@ -159,6 +162,46 @@ class RetrieveGraphContextTests(unittest.TestCase):
         result = retrieve_graph_context("xyzzy", graph_file=self.graph_file, hops=1)
         self.assertEqual(result["matched_nodes"], [])
         self.assertEqual(result["results"], [])
+
+
+def _build_v3_graph() -> nx.MultiDiGraph:
+    """A v3-shaped graph: scoped ids namespaced `Movement:Name` carry a `movement` tag and a bare
+    `name`; shared nodes carry `movement="shared"`. Two movements share the fault name "Knee Valgus"
+    so the movement filter has something to discriminate; a shared node sits 2 hops from the Squat seed."""
+    graph = nx.MultiDiGraph()
+    graph.add_node("Squat:Knee Valgus", label="Fault", name="Knee Valgus", movement="Squat")
+    graph.add_node("Lunge:Knee Valgus", label="Fault", name="Knee Valgus", movement="Lunge")
+    graph.add_node("Squat:Narrow Stance", label="EvidenceSignal", name="Narrow Stance", movement="Squat")
+    graph.add_node("Pelvic Control", label="Cause", name="Pelvic Control", movement="shared")
+
+    graph.add_edge("Squat:Knee Valgus", "Squat:Narrow Stance", type="INDICATED_BY")
+    graph.add_edge("Squat:Narrow Stance", "Pelvic Control", type="CAUSED_BY")
+    graph.add_edge("Lunge:Knee Valgus", "Pelvic Control", type="CAUSED_BY")
+    return graph
+
+
+class ScopedRetrievalTests(unittest.TestCase):
+    """Cover the v3 movement-scoping path (is_scoped_for / _movement_ok) end to end."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.graph_file = self.tmp / "kg_v3.graphml"
+        nx.write_graphml(_build_v3_graph(), self.graph_file)
+
+    def test_movement_scoped_seeds_traversal_and_name_payload(self):
+        result = retrieve_graph_context(
+            "knee valgus", graph_file=self.graph_file, hops=2, movement="Squat"
+        )
+        # (a) seeds are restricted to the Squat-scoped node; the Lunge-scoped same-name node is excluded.
+        self.assertIn("Squat:Knee Valgus", result["matched_nodes"])
+        self.assertNotIn("Lunge:Knee Valgus", result["matched_nodes"])
+        # (b) a 2-hop traversal still crosses (Squat:Narrow Stance ->) into the shared node.
+        node_ids = {node["node_id"] for node in result["subgraph"]["nodes"]}
+        self.assertIn("Pelvic Control", node_ids)
+        # (c) node payloads now carry a bare `name` — the scoped seed renders "Knee Valgus", not the id.
+        by_id = {node["node_id"]: node for node in result["subgraph"]["nodes"]}
+        self.assertEqual(by_id["Squat:Knee Valgus"]["name"], "Knee Valgus")
 
 
 if __name__ == "__main__":
