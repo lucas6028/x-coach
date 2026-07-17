@@ -26,6 +26,14 @@ def graph(
     )
 
 
+@router.get("/faults")
+def faults(movement: str = Query(..., min_length=1)) -> dict:
+    """The complete fault list for a movement (name + 1-hop graph connectivity), for the
+    Explore browser. `movement` is required and passed as a query param (movement names contain
+    spaces/hyphens, e.g. "Overhead Press")."""
+    return {"movement": movement, "faults": knowledge.movement_faults(movement)}
+
+
 @router.get("/rag")
 def rag(query: str = Query(..., min_length=1), top_k: int | None = Query(None, ge=1, le=50)) -> dict:
     resolved_top_k = top_k if top_k is not None else settings.rag_top_k_default()

@@ -5,6 +5,7 @@ import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -91,11 +92,56 @@ class EdgeRecord:
         }
 
 
-def load_graph(graph_file: Path = DEFAULT_GRAPH_FILE) -> nx.MultiDiGraph:
-    graph = nx.read_graphml(graph_file)
+# Labels whose 1-hop neighbours are what GraphScene renders around a fault
+# (causes / risks / corrections / evidence). A fault with zero such neighbours has
+# no graph to show — used to compute per-fault connectivity for the Explore browser.
+FAULT_NEIGHBOR_LABELS = frozenset({"Cause", "Risk", "Cue", "EvidenceSignal"})
+
+
+@lru_cache(maxsize=8)
+def _read_graph_cached(path_str: str, _mtime: float) -> nx.MultiDiGraph:
+    graph = nx.read_graphml(path_str)
     if not graph.is_multigraph():
         graph = nx.MultiDiGraph(graph)
     return graph
+
+
+def load_graph(graph_file: Path = DEFAULT_GRAPH_FILE) -> nx.MultiDiGraph:
+    """Load a KG graphml, memoised by (path, mtime) so repeated queries in one process
+    don't re-parse the 2000+ node file. Callers MUST treat the result as read-only —
+    it is a shared instance. The mtime key invalidates the cache when the file is rebuilt."""
+    path = Path(graph_file)
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        mtime = 0.0
+    return _read_graph_cached(str(path), mtime)
+
+
+def list_movement_faults(
+    graph_file: Path = DEFAULT_GRAPH_FILE, movement: str | None = None
+) -> list[dict[str, Any]]:
+    """Every ``Fault`` node for a movement, by the ``movement`` node attribute (not traversal,
+    which under- or over-counts), each with its 1-hop ``connectivity`` — the count of distinct
+    Cause/Risk/Cue/EvidenceSignal neighbours GraphScene would render. connectivity == 0 means the
+    fault has no graph to show yet. Sorted by display name."""
+    graph = load_graph(graph_file)
+    faults: list[dict[str, Any]] = []
+    for node_id, attrs in graph.nodes(data=True):
+        if str(attrs.get("label")) != "Fault":
+            continue
+        if movement is not None and str(attrs.get("movement")) != movement:
+            continue
+        neighbours: set[str] = set()
+        for _, target in graph.out_edges(node_id):
+            if str(graph.nodes[target].get("label")) in FAULT_NEIGHBOR_LABELS:
+                neighbours.add(target)
+        for source, _ in graph.in_edges(node_id):
+            if str(graph.nodes[source].get("label")) in FAULT_NEIGHBOR_LABELS:
+                neighbours.add(source)
+        faults.append({"name": str(attrs.get("name", node_id)), "connectivity": len(neighbours)})
+    faults.sort(key=lambda f: str(f["name"]).lower())
+    return faults
 
 
 def build_lookup(graph: nx.MultiDiGraph) -> dict[str, set[str]]:

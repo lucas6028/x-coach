@@ -203,6 +203,16 @@ describe("api.graph", () => {
   });
 });
 
+describe("api.movementFaults", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("URL-encodes the movement (spaces/hyphens) in the faults query", async () => {
+    mockFetch({ movement: "Overhead Press", faults: [] });
+    await api.movementFaults("Overhead Press");
+    expect(fetch).toHaveBeenCalledWith("/api/knowledge/faults?movement=Overhead%20Press");
+  });
+});
+
 describe("api.listAnalyses", () => {
   afterEach(() => vi.restoreAllMocks());
 

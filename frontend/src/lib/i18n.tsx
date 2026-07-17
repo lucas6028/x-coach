@@ -365,6 +365,8 @@ const en: Dict = {
   "explore.search": "Search faults",
   "explore.empty": "No faults match.",
   "explore.error": "Could not load the knowledge graph.",
+  "explore.noGraph": "This fault has no linked causes, corrections or risks yet.",
+  "explore.pick": "Select a fault to view its knowledge.",
   "explore.groupFlagship": "Flagship",
   "explore.groupGeneral": "General",
 
@@ -932,6 +934,8 @@ const zhHant: Dict = {
   "explore.search": "搜尋錯誤",
   "explore.empty": "沒有符合的錯誤。",
   "explore.error": "無法載入知識圖譜。",
+  "explore.noGraph": "此錯誤目前尚未連結任何成因、修正或風險。",
+  "explore.pick": "請選擇一個錯誤以檢視其知識圖譜。",
   "explore.groupFlagship": "旗艦",
   "explore.groupGeneral": "一般",
 
