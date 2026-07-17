@@ -353,22 +353,27 @@ const en: Dict = {
 
   // Account / nav
   "nav.history": "My records",
-  "nav.explore": "Explore",
+  "nav.movements": "Movements",
   "account.signin": "Sign in",
   "account.signout": "Sign out",
   "account.menu": "Account menu",
   "account.settings": "Settings",
 
-  // Explore page
-  "explore.title": "Explore the movement knowledge graph",
-  "explore.subtitle": "Pick a movement, then a fault, to see its causes, corrections and risks.",
-  "explore.search": "Search faults",
-  "explore.empty": "No faults match.",
-  "explore.error": "Could not load the knowledge graph.",
-  "explore.noGraph": "This fault has no linked causes, corrections or risks yet.",
-  "explore.pick": "Select a fault to view its knowledge.",
-  "explore.groupFlagship": "Flagship",
-  "explore.groupGeneral": "General",
+  // Movements menu
+  "movements.title": "Movement library",
+  "movements.subtitle":
+    "Every movement the coach knows. Squat analysis is live today; the rest are on the way.",
+  "movements.groupLower": "Lower body",
+  "movements.groupUpper": "Upper body",
+  "movements.groupCore": "Core",
+  "movements.groupFullBody": "Full body",
+  "movements.analyze": "Analyze a video",
+  "movements.soon": "Soon",
+
+  // Movement display names. Only the ones titleCase() would mangle need an entry here; the rest
+  // fall back to their canonical spelling.
+  "movement.Push-up": "Push-up",
+  "movement.Sit-up": "Sit-up",
 
   // Settings page
   "settings.title": "Settings",
@@ -922,22 +927,39 @@ const zhHant: Dict = {
 
   // Account / nav
   "nav.history": "我的紀錄",
-  "nav.explore": "探索",
+  "nav.movements": "動作庫",
   "account.signin": "登入",
   "account.signout": "登出",
   "account.menu": "帳號選單",
   "account.settings": "設定",
 
-  // Explore page
-  "explore.title": "探索動作知識圖譜",
-  "explore.subtitle": "先選一個動作，再挑一個錯誤，即可看到它的成因、修正與風險。",
-  "explore.search": "搜尋錯誤",
-  "explore.empty": "沒有符合的錯誤。",
-  "explore.error": "無法載入知識圖譜。",
-  "explore.noGraph": "此錯誤目前尚未連結任何成因、修正或風險。",
-  "explore.pick": "請選擇一個錯誤以檢視其知識圖譜。",
-  "explore.groupFlagship": "旗艦",
-  "explore.groupGeneral": "一般",
+  // Movements menu
+  "movements.title": "動作庫",
+  "movements.subtitle": "教練目前認識的所有動作。深蹲分析已經上線，其餘動作陸續開放。",
+  "movements.groupLower": "下肢",
+  "movements.groupUpper": "上肢",
+  "movements.groupCore": "核心",
+  "movements.groupFullBody": "全身",
+  "movements.analyze": "分析影片",
+  "movements.soon": "即將開放",
+
+  // Movement display names.
+  "movement.Squat": "深蹲",
+  "movement.Lunge": "弓步蹲",
+  "movement.Deadlift": "硬舉",
+  "movement.Leg Abduction": "腿部外展",
+  "movement.Shoulder Bridge": "臀橋",
+  "movement.Push-up": "伏地挺身",
+  "movement.Overhead Press": "肩上推舉",
+  "movement.Row": "划船",
+  "movement.Bicep Curl": "二頭彎舉",
+  "movement.Band Pull Apart": "彈力帶擴胸",
+  "movement.Arm Abduction": "手臂外展",
+  "movement.Arm VW": "手臂 VW 開合",
+  "movement.Sit-up": "仰臥起坐",
+  "movement.Torso Twist": "軀幹旋轉",
+  "movement.Jumping Jacks": "開合跳",
+  "movement.High Knee": "高抬腿",
 
   // Settings page
   "settings.title": "設定",

@@ -59,7 +59,7 @@ export interface RetrievalContext {
 }
 
 // One fault a movement defines, with its 1-hop graph connectivity (0 = no linked
-// causes/corrections/risks to render yet). Drives the Explore fault browser.
+// causes/corrections/risks to render yet).
 export interface MovementFault {
   name: string;
   connectivity: number;
@@ -373,7 +373,8 @@ export const api = {
         (movement ? `&movement=${encodeURIComponent(movement)}` : "")
     ),
 
-  // The complete, movement-scoped fault list for the Explore browser (name + connectivity).
+  // The complete, movement-scoped fault list (name + connectivity), enumerated by the graph's
+  // `movement` node attribute so no fault is hidden. Backs GET /api/knowledge/faults.
   movementFaults: (movement: string) =>
     getJSON<{ movement: string; faults: MovementFault[] }>(
       `/api/knowledge/faults?movement=${encodeURIComponent(movement)}`
