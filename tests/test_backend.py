@@ -581,6 +581,13 @@ class KnowledgeServiceTests(_TempConfigBase):
         self.assertEqual(out, {"query": "depth", "results": [{"text": "do x"}]})
         qv.assert_called_once_with("depth", db_dir=self.rag_dir, top_k=3)
 
+    def test_movement_faults_passthrough(self) -> None:
+        rows = [{"name": "Knee Valgus", "connectivity": 3}]
+        with mock.patch.object(knowledge, "list_movement_faults", return_value=rows) as lf:
+            out = knowledge.movement_faults("Overhead Press")
+        self.assertEqual(out, rows)
+        lf.assert_called_once_with(graph_file=self.kg_file, movement="Overhead Press")
+
 
 # --------------------------------------------------------------------- routers
 

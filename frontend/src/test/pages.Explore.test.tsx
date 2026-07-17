@@ -43,7 +43,15 @@ const FAULTS = [
 
 const withCause: RetrievalContext = {
   results: [
-    { summary: { causes: [{ node_id: "Weak Hip Abductors", name: "Weak Hip Abductors" }], risks: [], corrections: [], evidence: [] } },
+    {
+      summary: {
+        // second cause has no `name` -> exercises the `name ?? node_id` fallback in collect().
+        causes: [{ node_id: "Weak Hip Abductors", name: "Weak Hip Abductors" }, { node_id: "Bare Node Id" }],
+        risks: [],
+        corrections: [],
+        evidence: [],
+      },
+    },
   ],
 };
 const noNeighbors: RetrievalContext = {
@@ -143,5 +151,58 @@ describe("Explore", () => {
     await user.click(screen.getByRole("button", { name: "Retry" }));
     // Retry must re-run the graph fetch (not just the fault list) so the skeleton clears.
     expect(await screen.findByText("Cause")).toBeInTheDocument();
+  });
+
+  it("handles a movement with no faults (empty list)", async () => {
+    faultsMock.mockImplementation(async (movement: string) => ({ movement, faults: [] }));
+    renderWithProviders(<Explore />);
+    expect(await screen.findByText("No faults match.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Knee Valgus" })).not.toBeInTheDocument();
+    expect(graphMock).not.toHaveBeenCalled(); // no active fault -> the graph effect early-returns
+  });
+
+  it("falls back to the first fault when none are linked, showing the no-graph message", async () => {
+    faultsMock.mockImplementation(async (movement: string) => ({
+      movement,
+      faults: [{ name: "Bar Drift", connectivity: 0 }, { name: "Sticking Point", connectivity: 0 }],
+    }));
+    renderWithProviders(<Explore />);
+    expect(
+      await screen.findByText("This fault has no linked causes, corrections or risks yet.")
+    ).toBeInTheDocument();
+    await waitFor(() => expect(graphMock).toHaveBeenCalledWith("Bar Drift", "Squat"));
+  });
+
+  it("recovers when the FAULT-LIST fetch (not the graph) fails", async () => {
+    faultsMock.mockRejectedValueOnce(new Error("boom"));
+    const user = userEvent.setup();
+    renderWithProviders(<Explore />);
+    expect(await screen.findByText("Could not load the knowledge graph.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "Knee Valgus" })).toBeInTheDocument();
+  });
+
+  it("re-selecting the current movement is a no-op (no refetch)", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Explore />);
+    await screen.findByRole("button", { name: "Knee Valgus" });
+    faultsMock.mockClear();
+    await user.click(screen.getByRole("button", { name: "Squat" })); // open selector
+    await user.click(screen.getByRole("menuitemradio", { name: /Squat/ })); // pick the same movement
+    expect(faultsMock).not.toHaveBeenCalled();
+  });
+
+  it("closes the movement menu on Escape and on outside click", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<Explore />);
+    await screen.findByRole("button", { name: "Knee Valgus" });
+    await user.click(screen.getByRole("button", { name: "Squat" }));
+    expect(screen.getByText("Flagship")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByText("Flagship")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Squat" }));
+    expect(screen.getByText("Flagship")).toBeInTheDocument();
+    await user.click(document.body);
+    expect(screen.queryByText("Flagship")).not.toBeInTheDocument();
   });
 });
