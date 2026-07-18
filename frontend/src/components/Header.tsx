@@ -1,4 +1,4 @@
-import { List, SignIn } from "@phosphor-icons/react";
+import { CircleNotch, List, SignIn } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import type { Analysis } from "../api";
 import { useI18n, viewLabel } from "../lib/i18n";
@@ -18,7 +18,7 @@ interface Props {
 
 export default function Header({ analysis, loading, title, onMenu }: Props) {
   const { t } = useI18n();
-  const { user } = useAuth();
+  const { user, lineAuthenticating } = useAuth();
   return (
     <header className="relative z-30 h-16 shrink-0 border-b border-border-dark bg-background-dark/95 backdrop-blur flex items-center gap-2 justify-between px-4 lg:px-6">
       <button
@@ -63,6 +63,16 @@ export default function Header({ analysis, loading, title, onMenu }: Props) {
         <div className="mx-1 h-6 w-px bg-border-dark" />
         {user ? (
           <AccountMenu />
+        ) : lineAuthenticating ? (
+          // Silent LINE auto-login is in flight (typically the web redirect-return): show a
+          // "signing in" affordance instead of the log-in link, which would read as failed.
+          <span
+            aria-live="polite"
+            className="flex items-center gap-1.5 h-10 px-2.5 text-sm font-medium text-muted"
+          >
+            <CircleNotch size={18} weight="bold" className="animate-spin" />
+            <span className="hidden sm:inline">{t("account.lineSigningIn")}</span>
+          </span>
         ) : (
           <Link
             to="/login"

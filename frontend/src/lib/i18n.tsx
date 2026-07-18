@@ -381,6 +381,7 @@ const en: Dict = {
   "account.signout": "Sign out",
   "account.menu": "Account menu",
   "account.settings": "Settings",
+  "account.lineSigningIn": "Signing in with LINE…",
 
   // Settings page
   "settings.title": "Settings",
@@ -961,6 +962,7 @@ const zhHant: Dict = {
   "account.signout": "登出",
   "account.menu": "帳號選單",
   "account.settings": "設定",
+  "account.lineSigningIn": "LINE 登入中…",
 
   // Settings page
   "settings.title": "設定",

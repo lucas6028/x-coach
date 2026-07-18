@@ -46,8 +46,10 @@ import { AuthProvider, useAuth } from "../lib/auth";
 function fakeLiff(overrides: Record<string, unknown> = {}) {
   return {
     isInClient: vi.fn().mockReturnValue(true),
+    isLoggedIn: vi.fn().mockReturnValue(true),
     getIDToken: vi.fn().mockReturnValue("liff-id-token"),
     login: vi.fn(),
+    logout: vi.fn(),
     ...overrides,
   };
 }
@@ -58,6 +60,7 @@ function Probe() {
   return (
     <div>
       <span data-testid="msg">{msg}</span>
+      <span data-testid="authing">{String(a.lineAuthenticating)}</span>
       <button
         onClick={async () => {
           try {
@@ -70,6 +73,7 @@ function Probe() {
       >
         line
       </button>
+      <button onClick={() => a.signOut()}>signout</button>
     </div>
   );
 }
@@ -91,27 +95,52 @@ beforeEach(() => {
     data: { subscription: { unsubscribe: vi.fn() } },
   });
   mockApi.adminStatus.mockResolvedValue({ is_admin: false });
-  // Default: bridge unconfigured, so the auto-login effect stays quiet unless a test opts in.
+  // Default liffState.liff = null keeps the auto-login effect quiet unless a test opts in
+  // with a fake LIFF. (health is no longer on the login path, but stays mocked for any
+  // other caller.)
   mockApi.health.mockResolvedValue({ status: "ok", line_login_configured: false });
 });
 
-describe("signInWithLine — web path", () => {
-  it("starts the Supabase custom OIDC flow outside LIFF", async () => {
-    mockAuth.signInWithOAuth.mockResolvedValue({ error: null });
+describe("signInWithLine — web path (external browser, via LIFF)", () => {
+  // An external browser starts logged-out: the first tap hands off to LINE's login
+  // redirect (liff.login), NOT Supabase's custom OIDC (which can't verify LINE's HS256
+  // ID token). Returning to the app logged-in, the auto-login effect finishes the bridge.
+  it("runs liff.login() to start LINE auth when not logged in", async () => {
+    const liff = fakeLiff({
+      isInClient: vi.fn().mockReturnValue(false),
+      isLoggedIn: vi.fn().mockReturnValue(false),
+    });
+    liffState.liff = liff;
     renderProbe();
     await userEvent.click(screen.getByText("line"));
-    await waitFor(() => expect(screen.getByTestId("msg")).toHaveTextContent("line-done"));
-    expect(mockAuth.signInWithOAuth).toHaveBeenCalledWith(
-      expect.objectContaining({ provider: "custom:line" })
-    );
+    await waitFor(() => expect(liff.login).toHaveBeenCalledTimes(1));
+    expect(mockAuth.signInWithOAuth).not.toHaveBeenCalled();
     expect(mockApi.lineLogin).not.toHaveBeenCalled();
   });
 
-  it("surfaces an OAuth error", async () => {
-    mockAuth.signInWithOAuth.mockResolvedValue({ error: { message: "provider missing" } });
+  it("exchanges the ID token via the bridge once LINE-authenticated", async () => {
+    const liff = fakeLiff({
+      isInClient: vi.fn().mockReturnValue(false),
+      isLoggedIn: vi.fn().mockReturnValue(true),
+    });
+    liffState.liff = liff;
+    mockApi.lineLogin.mockResolvedValue({ access_token: "acc", refresh_token: "ref" });
+    mockAuth.setSession.mockResolvedValue({ error: null });
     renderProbe();
     await userEvent.click(screen.getByText("line"));
-    await waitFor(() => expect(screen.getByTestId("msg")).toHaveTextContent("provider missing"));
+    await waitFor(() => expect(screen.getByTestId("msg")).toHaveTextContent("line-done"));
+    expect(mockApi.lineLogin).toHaveBeenCalledWith("liff-id-token");
+    expect(mockAuth.setSession).toHaveBeenCalledWith({ access_token: "acc", refresh_token: "ref" });
+    expect(mockAuth.signInWithOAuth).not.toHaveBeenCalled();
+  });
+
+  it("errors clearly when LIFF is unavailable (no VITE_LIFF_ID / init failed)", async () => {
+    liffState.liff = null;
+    renderProbe();
+    await userEvent.click(screen.getByText("line"));
+    await waitFor(() => expect(screen.getByTestId("msg")).toHaveTextContent(/not available/i));
+    expect(mockAuth.signInWithOAuth).not.toHaveBeenCalled();
+    expect(mockApi.lineLogin).not.toHaveBeenCalled();
   });
 });
 
@@ -187,11 +216,41 @@ describe("in-LIFF auto-login", () => {
     );
   });
 
-  it("does nothing when the server bridge is unconfigured", async () => {
-    liffState.liff = fakeLiff();
+  it("also completes in an external browser after LINE login (logged in, not in-client)", async () => {
+    // The one-click web flow: liff.login() redirects out and back; on return isLoggedIn()
+    // is true even though isInClient() is false, and the effect finishes the exchange.
+    liffState.liff = fakeLiff({
+      isInClient: vi.fn().mockReturnValue(false),
+      isLoggedIn: vi.fn().mockReturnValue(true),
+    });
+    mockApi.health.mockResolvedValue({ status: "ok", line_login_configured: true });
+    mockApi.lineLogin.mockResolvedValue({ access_token: "acc", refresh_token: "ref" });
+    mockAuth.setSession.mockResolvedValue({ error: null });
     renderProbe();
-    await waitFor(() => expect(mockApi.health).toHaveBeenCalled());
+    await waitFor(() => expect(mockApi.lineLogin).toHaveBeenCalledWith("liff-id-token"));
+    await waitFor(() =>
+      expect(mockAuth.setSession).toHaveBeenCalledWith({ access_token: "acc", refresh_token: "ref" })
+    );
+  });
+
+  it("does nothing when not LINE-authenticated (logged out external browser)", async () => {
+    liffState.liff = fakeLiff({
+      isInClient: vi.fn().mockReturnValue(false),
+      isLoggedIn: vi.fn().mockReturnValue(false),
+    });
+    mockApi.health.mockResolvedValue({ status: "ok", line_login_configured: true });
+    renderProbe();
+    await waitFor(() => expect(mockAuth.getSession).toHaveBeenCalled());
     expect(mockApi.lineLogin).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when the bridge is unconfigured (503, swallowed)", async () => {
+    liffState.liff = fakeLiff();
+    mockApi.lineLogin.mockRejectedValue(new ApiError("LINE login is not configured.", 503));
+    renderProbe();
+    await waitFor(() => expect(mockApi.lineLogin).toHaveBeenCalled());
+    expect(mockAuth.setSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId("msg")).toHaveTextContent("");
   });
 
   it("does nothing outside the LINE client", async () => {
@@ -199,8 +258,23 @@ describe("in-LIFF auto-login", () => {
     renderProbe();
     // Settle the initial effects, then confirm no exchange was attempted.
     await waitFor(() => expect(mockAuth.getSession).toHaveBeenCalled());
-    expect(mockApi.health).not.toHaveBeenCalled();
     expect(mockApi.lineLogin).not.toHaveBeenCalled();
+  });
+
+  it("flags lineAuthenticating while the exchange is in flight, then clears it", async () => {
+    liffState.liff = fakeLiff();
+    let resolveLogin: (v: { access_token: string; refresh_token: string }) => void = () => {};
+    mockApi.lineLogin.mockReturnValue(
+      new Promise((resolve) => {
+        resolveLogin = resolve;
+      })
+    );
+    mockAuth.setSession.mockResolvedValue({ error: null });
+    renderProbe();
+    // Header uses this to show "signing in…" instead of the logged-out state.
+    await waitFor(() => expect(screen.getByTestId("authing")).toHaveTextContent("true"));
+    resolveLogin({ access_token: "acc", refresh_token: "ref" });
+    await waitFor(() => expect(screen.getByTestId("authing")).toHaveTextContent("false"));
   });
 
   it("stays silent when the exchange fails", async () => {
@@ -211,5 +285,64 @@ describe("in-LIFF auto-login", () => {
     await waitFor(() => expect(mockApi.lineLogin).toHaveBeenCalled());
     expect(mockAuth.setSession).not.toHaveBeenCalled();
     expect(screen.getByTestId("msg")).toHaveTextContent("");
+  });
+});
+
+describe("signOut", () => {
+  it("clears the LIFF login in an external browser so auto-login won't sign back in", async () => {
+    const liff = fakeLiff({
+      isInClient: vi.fn().mockReturnValue(false),
+      isLoggedIn: vi.fn().mockReturnValue(true),
+    });
+    liffState.liff = liff;
+    mockAuth.signOut.mockResolvedValue({ error: null });
+    renderProbe();
+    await userEvent.click(screen.getByText("signout"));
+    await waitFor(() => expect(mockAuth.signOut).toHaveBeenCalled());
+    expect(liff.logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the LIFF session alone inside the LINE app (in-client)", async () => {
+    const liff = fakeLiff(); // isInClient: true
+    liffState.liff = liff;
+    mockAuth.signOut.mockResolvedValue({ error: null });
+    renderProbe();
+    await userEvent.click(screen.getByText("signout"));
+    await waitFor(() => expect(mockAuth.signOut).toHaveBeenCalled());
+    expect(liff.logout).not.toHaveBeenCalled();
+  });
+
+  // Regression: the web flow finishes in the auto-login effect (no click handler survives
+  // the redirect), so the one-shot guard must be cleared there — otherwise sign-out (which
+  // flips isLoggedIn to false) leaves the guard poisoned and the NEXT sign-in dead-ends.
+  it("web login → signout → sign-in again re-runs liff.login() (guard not poisoned)", async () => {
+    // Post-redirect return state: LINE-authenticated in an external browser with the guard
+    // set by the pre-redirect liff.login().
+    const liff = fakeLiff({
+      isInClient: vi.fn().mockReturnValue(false),
+      isLoggedIn: vi.fn().mockReturnValue(true),
+    });
+    liffState.liff = liff;
+    sessionStorage.setItem("xcoach.liffReloginTried", "1");
+    mockApi.health.mockResolvedValue({ status: "ok", line_login_configured: true });
+    mockApi.lineLogin.mockResolvedValue({ access_token: "acc", refresh_token: "ref" });
+    mockAuth.setSession.mockResolvedValue({ error: null });
+    mockAuth.signOut.mockResolvedValue({ error: null });
+    renderProbe();
+
+    // Auto-login completes the exchange and clears the guard.
+    await waitFor(() => expect(mockAuth.setSession).toHaveBeenCalled());
+    await waitFor(() => expect(sessionStorage.getItem("xcoach.liffReloginTried")).toBeNull());
+
+    // Sign out: LIFF logs out too, so isLoggedIn() is now false.
+    liff.isLoggedIn.mockReturnValue(false);
+    await userEvent.click(screen.getByText("signout"));
+    await waitFor(() => expect(mockAuth.signOut).toHaveBeenCalled());
+
+    // Sign in again: must start a fresh LINE login, not throw the "failed" dead-end.
+    liff.login.mockClear();
+    await userEvent.click(screen.getByText("line"));
+    await waitFor(() => expect(liff.login).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("msg")).not.toHaveTextContent(/failed/i);
   });
 });

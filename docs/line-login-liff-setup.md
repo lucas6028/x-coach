@@ -8,14 +8,23 @@ Status: **程式碼已實作,待外部服務設定** · Created 2026-07-15 ·
 
 ---
 
-## 0. 架構速覽:兩條登入路徑,一個結果
+## 0. 架構速覽:一個橋接,兩種進入點
 
-兩條路都終結於「真正的 Supabase session」,所以 RLS、歷史紀錄、聊天、管理員機制完全共用:
+**web 與 LINE App 內走同一條路**:都用 LIFF 拿到 LINE ID token,再 `POST /api/auth/line`
+交給後端橋接驗證並鑄造「真正的 Supabase session」。因此同一個 LINE 使用者不論從哪進來
+**都是同一個 Supabase 帳號**,RLS、歷史紀錄、聊天、管理員機制完全共用:
 
 | 情境 | 路徑 | 程式碼 |
 |---|---|---|
-| **一般網頁**(含 LIFF 外部瀏覽器) | Supabase Custom OIDC redirect(provider `custom:line`) | `frontend/src/lib/auth.tsx` `signInWithLine()` 後半 |
-| **LINE App 內(LIFF)** | `liff.getIDToken()` → `POST /api/auth/line` → 後端驗證並鑄造 session → `setSession` | 同上前半 + `backend/app/services/line_auth.py`;開啟即自動登入(`auth.tsx` auto-login effect) |
+| **一般網頁**(含 LIFF 外部瀏覽器) | `liff.login()` 導去 LINE 登入 → 返回後 `liff.getIDToken()` → `POST /api/auth/line` → `setSession` | `frontend/src/lib/auth.tsx` `signInWithLine()` + auto-login effect(返回後在原頁完成交換) |
+| **LINE App 內(LIFF)** | 已登入,直接 `liff.getIDToken()` → `POST /api/auth/line` → `setSession` | 同上;開啟即自動登入 |
+
+> **為什麼不用 Supabase Custom OIDC 接 LINE?** LINE 的 ID token 用 **HS256**(以 channel
+> secret 為 HMAC key)簽章,但 Supabase 的 custom OIDC provider 依 LINE discovery 只接受
+> **ES256**(對 JWKS 公鑰驗證),兩者結構上不相容 —— web 登入會回
+> `Error getting user profile from external provider`(GoTrue:`id token signed with
+> unsupported algorithm, expected ["ES256"] got "HS256"`)。後端橋接改用 LINE 官方 verify
+> endpoint,不受簽章演算法影響,所以兩條路都走它。
 
 後端橋接細節(合成 email 設計、service_role 只用於鑄造 session)見
 `backend/app/services/line_auth.py` 檔頭註解。
@@ -27,10 +36,11 @@ Status: **程式碼已實作,待外部服務設定** · Created 2026-07-15 ·
 1. 到 [developers.line.biz](https://developers.line.biz/console/) 建立(或使用既有)**Provider**。
 2. 建立 **LINE Login channel**:
    - **Channel ID** → 填入根目錄 `.env` 的 `LINE_CHANNEL_ID`(後端驗 ID token 的 audience)。
-   - **Channel secret** → 之後給 Supabase Custom OIDC 用。
+   - **Channel secret** → 橋接不需要(用不到 Supabase Custom OIDC 了);保管好即可。
    - Scopes:勾選 **openid**、**profile**。(**email** 需另外向 LINE 申請審核,先不用)
-   - **Callback URL**:填 Supabase 的 OAuth callback
-     `https://<你的專案>.supabase.co/auth/v1/callback`(web 路徑用)。
+   - **Callback URL**:channel 要求至少填一個,填前端網址即可
+     (dev 填 ngrok 網址,見 §4)。LIFF 的登入導向由 LINE 經 `liff.line.me` 自動處理,
+     **不需要**再填 Supabase 的 `/auth/v1/callback`。
 3. 在同一個 channel 底下建立 **LIFF app**(LIFF tab → Add):
    - **Endpoint URL**:HTTPS 前端網址 —— dev 先填 ngrok 網址(見 §4),正式部署後改。
    - **Size**:`Full`(全螢幕,最像 App)。
@@ -39,19 +49,16 @@ Status: **程式碼已實作,待外部服務設定** · Created 2026-07-15 ·
 
 ## 2. Supabase Dashboard
 
-1. **Custom OIDC provider(web 路徑)**:Authentication → Sign In / Providers →
-   Custom OAuth/OIDC → 新增,**名稱填 `line`**(前端寫死呼叫 `custom:line`):
-   - 模式選 **OIDC auto-discovery**,Issuer:`https://access.line.me`
-     (discovery 文件在 `https://access.line.me/.well-known/openid-configuration`)。
-   - Client ID / Client secret:LINE Login channel 的 Channel ID / Channel secret。
-   - Scopes:`openid profile`。
-   - 免費方案最多 3 個 custom provider,夠用。
-2. **service_role key(LIFF 橋接)**:Project Settings → API → `service_role` →
-   填入根目錄 `.env` 的 `SUPABASE_SERVICE_ROLE_KEY`。
+> **不需要** Custom OIDC provider —— web 與 App 內都走橋接(見 §0 的 HS256/ES256 說明)。
+> 若你之前照舊版手冊建了名為 `line` 的 custom provider,可以直接刪掉,已無任何程式碼引用。
+
+1. **service_role key(LIFF 橋接,唯一必要設定)**:Project Settings → API → `service_role`
+   → 填入根目錄 `.env` 的 `SUPABASE_SERVICE_ROLE_KEY`。
    ⚠️ 只給後端、只被 `services/line_auth` 用來建使用者與產生一次性登入連結;
    絕不放進 `frontend/`、絕不 commit。
-3. **Redirect URLs**:Authentication → URL Configuration → 把前端網址(ngrok / 正式域名)
-   加進 allowed redirect URLs,否則 web 路徑登入完會被擋。
+
+橋接用 `generate_link` + `verify_otp` 鑄造 session,不經過瀏覽器 OAuth 導向,
+所以 **不需要**在 Authentication → URL Configuration 設 redirect URLs。
 
 ## 3. 環境變數總表
 
@@ -111,8 +118,8 @@ ngrok http 5173
   真名/頭像在 `user_metadata`(`full_name` / `avatar_url`),前端顯示正常。
 - **pairwise sub**:LINE 的 `sub` 是「每個 channel 一組」。dev 與 prod 用不同 channel
   會產生**不同帳號**;正式上線前就決定好 channel,別讓使用者資料分家。
-  同理,web 路徑(custom OIDC)與 LIFF 橋接**必須用同一個 LINE Login channel**,
-  否則同一人兩條路登入會變兩個帳號。
+  web 與 App 內都走同一條橋接、以 `sub` 衍生同一個合成 email,所以**只要 LIFF app 掛在
+  與 `LINE_CHANNEL_ID` 相同的 LINE Login channel 底下**,同一人兩種進入點就是同一個帳號。
 - **一次性 reload 保險**:LIFF 內 ID token 過期時會 `liff.login()` 重載一次;同一瀏覽器
   session 內只會嘗試一次(`sessionStorage` 旗標),不會無限迴圈。
 - **登出後不會被自動再登入**:auto-login 每次載入只嘗試一次。

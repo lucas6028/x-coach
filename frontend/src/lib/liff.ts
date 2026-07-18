@@ -49,12 +49,14 @@ export async function isInLiffClient(): Promise<boolean> {
 
 /**
  * The current LINE ID token, or null (not in LIFF / not logged in / no `openid` scope).
- * Restricted to the in-client case on purpose: the external-browser login path goes through
- * Supabase's custom OIDC provider instead (see lib/auth.signInWithLine).
+ * Works in the LINE in-app browser AND in an external browser once the user has completed
+ * `liff.login()` — both surface a standard LINE ID token the backend bridge can verify
+ * (see lib/auth.signInWithLine). Keyed on `isLoggedIn()`, not `isInClient()`, so the web
+ * login path is covered too.
  */
 export async function getLiffIdToken(): Promise<string | null> {
   const liff = await initLiff();
-  if (!liff?.isInClient()) return null;
+  if (!liff?.isLoggedIn()) return null;
   try {
     return liff.getIDToken();
   } catch {

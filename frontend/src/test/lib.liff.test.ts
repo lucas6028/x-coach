@@ -24,6 +24,7 @@ function fakeSdk(overrides: Record<string, unknown> = {}) {
   return {
     init: vi.fn().mockResolvedValue(undefined),
     isInClient: vi.fn().mockReturnValue(true),
+    isLoggedIn: vi.fn().mockReturnValue(true),
     getIDToken: vi.fn().mockReturnValue("id-token"),
     ...overrides,
   };
@@ -75,9 +76,17 @@ describe("lib/liff (configured)", () => {
     expect(await getLiffIdToken()).toBe("id-token");
   });
 
-  it("returns no ID token outside the LINE client", async () => {
-    sdkState.sdk = fakeSdk({ isInClient: vi.fn().mockReturnValue(false) });
+  it("still returns the ID token in an external browser once logged in", async () => {
+    sdkState.sdk = fakeSdk({
+      isInClient: vi.fn().mockReturnValue(false),
+      isLoggedIn: vi.fn().mockReturnValue(true),
+    });
     expect(await isInLiffClient()).toBe(false);
+    expect(await getLiffIdToken()).toBe("id-token");
+  });
+
+  it("returns no ID token when not logged in", async () => {
+    sdkState.sdk = fakeSdk({ isLoggedIn: vi.fn().mockReturnValue(false) });
     expect(await getLiffIdToken()).toBeNull();
   });
 
