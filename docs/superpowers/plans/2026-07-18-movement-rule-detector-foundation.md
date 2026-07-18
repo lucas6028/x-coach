@@ -36,7 +36,7 @@ Add to `tests/test_pose_rule_detector.py`:
 
 ```python
 def test_detection_carries_citation_metadata(self) -> None:
-    frames = [frame(knee_x_gap=0.20, ankle_x_gap=0.40, frame_index=i) for i in range(12)]
+    frames = [frame(frame_index=i) for i in range(12)]
     metrics = compute_frame_metrics(frames, fps=30.0)
     detections = detect_rule_segments(metrics, fps=30.0, view_type="rear", view_confidence=0.8)
     inward = next(d for d in detections if d.fault_id == "knees_inward")
@@ -372,7 +372,7 @@ def test_squat_via_registry_matches_legacy(self) -> None:
     from src.pose.movements.base import run_detector
     from tests.test_pose_rule_detector import frame  # reuse fixture builder
 
-    frames = [frame(knee_x_gap=0.20, ankle_x_gap=0.40, frame_index=i) for i in range(14)]
+    frames = [frame(frame_index=i) for i in range(14)]
     legacy = detect_rule_segments(compute_frame_metrics(frames, 30.0), fps=30.0, view_type="rear", view_confidence=0.8)
     _, new = run_detector(registry.get_detector("Squat"), frames, 30.0, "rear", 0.8)
     self.assertEqual([d.fault_id for d in legacy], [d.fault_id for d in new])
