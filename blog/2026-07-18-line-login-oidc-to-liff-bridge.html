@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LINE 網頁登入:從 Supabase OIDC 改道到 LIFF 橋接</title>
+<style>
+  :root{
+    --line:#06C755; --line-d:#05a648;
+    --ink:#1a2230; --muted:#5b6675; --faint:#8b96a5;
+    --bg:#f6f8fb; --card:#ffffff; --border:#e4e9f0;
+    --add-bg:#e7f8ec; --add-bd:#8fd8a6; --del-bg:#fdecec; --del-bd:#efb1b1;
+    --accent:#2b6cff; --warn:#c9720b; --warn-bg:#fdf4e6;
+    --code:#eef2f7; --shadow:0 1px 3px rgba(20,30,50,.06),0 8px 24px -12px rgba(20,30,50,.14);
+    --maxw:820px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif;
+    line-height:1.75; font-size:17px; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--maxw); margin:0 auto; padding:0 20px 120px}
+  header.hero{
+    background:linear-gradient(135deg,#0a2e1c 0%,#06C755 130%);
+    color:#fff; padding:56px 20px 46px; text-align:center;
+  }
+  header.hero .inner{max-width:var(--maxw); margin:0 auto}
+  header.hero h1{font-size:30px; line-height:1.35; margin:0 0 12px; font-weight:800; letter-spacing:.2px}
+  header.hero p{margin:0 auto; max-width:640px; color:#eafff2; font-size:17px}
+  header.hero .tag{display:inline-block; margin-bottom:18px; background:rgba(255,255,255,.16);
+    border:1px solid rgba(255,255,255,.25); padding:4px 12px; border-radius:999px; font-size:13px; letter-spacing:.4px}
+
+  nav.toc{position:sticky; top:0; z-index:20; background:rgba(255,255,255,.92);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--border); margin-bottom:8px}
+  nav.toc ol{display:flex; flex-wrap:wrap; gap:4px 6px; list-style:none; margin:0 auto; padding:10px 20px; max-width:var(--maxw)}
+  nav.toc a{color:var(--muted); font-size:14px; font-weight:600; padding:5px 11px; border-radius:8px; white-space:nowrap}
+  nav.toc a:hover{background:var(--code); text-decoration:none; color:var(--ink)}
+  nav.toc a.active{background:var(--line); color:#fff}
+
+  section{margin-top:52px}
+  h2{font-size:25px; font-weight:800; margin:0 0 6px; padding-top:8px; letter-spacing:.2px}
+  h2 .num{color:var(--line); font-variant-numeric:tabular-nums; margin-right:10px}
+  h3{font-size:19px; font-weight:750; margin:34px 0 8px}
+  h4{font-size:16px; font-weight:750; margin:22px 0 4px; color:var(--muted)}
+  p{margin:12px 0}
+  .lead{font-size:18px; color:var(--muted)}
+  ul,ol.list{padding-left:22px}
+  li{margin:6px 0}
+  hr.soft{border:none; border-top:1px solid var(--border); margin:30px 0}
+  .skip{font-size:14px; color:var(--faint); font-style:italic}
+
+  /* callouts */
+  .callout{border-radius:14px; padding:16px 18px; margin:20px 0; border:1px solid var(--border);
+    background:var(--card); box-shadow:var(--shadow)}
+  .callout .h{font-weight:750; margin:0 0 4px; display:flex; align-items:center; gap:8px}
+  .callout p{margin:6px 0}
+  .callout.def{border-left:5px solid var(--accent)}
+  .callout.key{border-left:5px solid var(--line); background:#f2fbf5}
+  .callout.warn{border-left:5px solid var(--warn); background:var(--warn-bg)}
+  .callout .ic{width:22px;height:22px;flex:0 0 22px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:800}
+  .def .ic{background:var(--accent)} .key .ic{background:var(--line)} .warn .ic{background:var(--warn)}
+
+  /* code */
+  pre{white-space:pre; overflow-x:auto; background:#0f1826; color:#e7edf5; border-radius:12px;
+    padding:16px 18px; font-size:13.5px; line-height:1.6; margin:16px 0;
+    font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace; box-shadow:var(--shadow)}
+  pre .c{color:#7c8aa0} pre .g{color:#8fd8a6} pre .k{color:#c39bff} pre .s{color:#f2c078} pre .r{color:#ff9aa2}
+  pre.diff .add{display:block; background:rgba(120,220,150,.14); color:#c7f5d6}
+  pre.diff .del{display:block; background:rgba(255,120,120,.13); color:#ffc4c4}
+  pre.diff .add::before{content:"+ "; color:#8fd8a6} pre.diff .del::before{content:"- "; color:#ff9aa2}
+  pre.diff .ctx{display:block; color:#aab6c6} pre.diff .ctx::before{content:"  "}
+  code.inl{background:var(--code); border:1px solid var(--border); border-radius:6px; padding:1px 6px; font-size:14px;
+    font-family:"SFMono-Regular",Consolas,monospace; color:#334}
+
+  /* diagram: flow nodes */
+  .fig{background:var(--card); border:1px solid var(--border); border-radius:16px; padding:20px; margin:22px 0; box-shadow:var(--shadow)}
+  .fig .cap{font-size:14px; color:var(--faint); text-align:center; margin-top:14px}
+  .flow{display:flex; align-items:stretch; gap:10px; flex-wrap:wrap; justify-content:center}
+  .node{flex:1 1 150px; min-width:130px; background:#fbfdff; border:1.5px solid var(--border); border-radius:12px; padding:12px 13px; position:relative}
+  .node .t{font-weight:750; font-size:14.5px; margin-bottom:3px}
+  .node .d{font-size:12.5px; color:var(--muted); line-height:1.5}
+  .node.ok{border-color:var(--add-bd); background:var(--add-bg)}
+  .node.bad{border-color:var(--del-bd); background:var(--del-bg)}
+  .node.line{border-color:var(--line); background:#eefaf1}
+  .arrow{align-self:center; color:var(--faint); font-weight:800; font-size:20px; flex:0 0 auto}
+  .databadge{display:inline-block; margin-top:8px; background:#0f1826; color:#f2c078; font-family:Consolas,monospace;
+    font-size:11.5px; padding:3px 8px; border-radius:6px; white-space:nowrap}
+  .verdict{margin-top:10px; font-weight:750; font-size:13.5px}
+  .verdict.fail{color:#c0392b} .verdict.pass{color:var(--line-d)}
+
+  /* key vs key diagram */
+  .keys{display:flex; gap:14px; flex-wrap:wrap}
+  .keycard{flex:1 1 260px; border:1.5px solid var(--border); border-radius:14px; padding:16px; background:#fbfdff}
+  .keycard h4{margin:0 0 8px; color:var(--ink)}
+  .keycard.sym{border-top:4px solid var(--warn)}
+  .keycard.asym{border-top:4px solid var(--accent)}
+  .krow{display:flex; align-items:center; gap:10px; font-size:14px; margin:8px 0}
+  .kico{font-size:20px}
+
+  /* mini UI mock */
+  .uimock{border:1px solid var(--border); border-radius:14px; overflow:hidden; background:#fff; max-width:340px; margin:8px auto}
+  .uibar{background:#0f1826; color:#cfe; font-size:12px; padding:7px 12px; display:flex; justify-content:space-between; align-items:center}
+  .uibody{padding:18px 16px}
+  .uibtn{display:flex; align-items:center; justify-content:center; gap:8px; border:1px solid var(--border);
+    border-radius:11px; padding:10px; font-weight:650; font-size:14px; margin:8px 0; color:#334}
+  .uichip{display:inline-flex; align-items:center; gap:6px; font-size:13px; color:var(--muted)}
+  .spinner{width:14px;height:14px;border:2px solid var(--line); border-top-color:transparent; border-radius:50%;
+    display:inline-block; animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .lineglyph{width:20px;height:20px;border-radius:5px;background:var(--line);display:inline-flex;align-items:center;justify-content:center}
+  .avatar{width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#8fd8a6,#06C755);color:#063; font-size:11px; font-weight:800; display:inline-flex; align-items:center; justify-content:center}
+
+  table.cmp{width:100%; border-collapse:collapse; margin:16px 0; font-size:14.5px; background:var(--card); border-radius:12px; overflow:hidden; box-shadow:var(--shadow)}
+  table.cmp th,table.cmp td{padding:10px 12px; text-align:left; border-bottom:1px solid var(--border); vertical-align:top}
+  table.cmp th{background:#f0f4f9; font-weight:750}
+  table.cmp tr:last-child td{border-bottom:none}
+
+  /* quiz */
+  .quiz{background:var(--card); border:1px solid var(--border); border-radius:16px; padding:20px 20px 8px; margin:20px 0; box-shadow:var(--shadow)}
+  .quiz .q{font-weight:750; margin:0 0 12px}
+  .quiz .q .n{color:var(--line); margin-right:8px}
+  .opt{display:block; width:100%; text-align:left; border:1.5px solid var(--border); background:#fbfdff;
+    border-radius:11px; padding:11px 14px; margin:8px 0; font-size:15px; cursor:pointer; transition:.15s; color:var(--ink)}
+  .opt:hover:not(:disabled){border-color:var(--line); background:#f2fbf5}
+  .opt:disabled{cursor:default}
+  .opt.correct{border-color:var(--add-bd); background:var(--add-bg)}
+  .opt.wrong{border-color:var(--del-bd); background:var(--del-bg)}
+  .fb{font-size:14.5px; border-radius:10px; padding:11px 14px; margin:6px 0 14px; display:none}
+  .fb.show{display:block}
+  .fb.good{background:var(--add-bg); border:1px solid var(--add-bd)}
+  .fb.bad{background:var(--del-bg); border:1px solid var(--del-bd)}
+  .fb b{color:var(--line-d)}
+  footer{color:var(--faint); font-size:13px; text-align:center; padding:40px 20px}
+
+  @media (max-width:640px){
+    body{font-size:16px}
+    header.hero h1{font-size:24px}
+    h2{font-size:22px}
+    .flow{flex-direction:column; align-items:stretch}
+    .arrow{transform:rotate(90deg); align-self:center}
+    .node{min-width:0}
+  }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="inner">
+    <span class="tag">程式碼變更解說 · x-coach</span>
+    <h1>LINE 網頁登入:從 Supabase OIDC 改道到 LIFF 橋接</h1>
+    <p>一個藏在簽章演算法裡的不相容——HS256 對上 ES256——如何逼著整條「網頁版 LINE 登入」換一條路走。順帶還修了一個死鎖、加了一個轉圈指示器,並換上官方 LINE 標誌。</p>
+  </div>
+</header>
+
+<nav class="toc" id="toc">
+  <ol>
+    <li><a href="#bg">背景</a></li>
+    <li><a href="#pre">前置知識</a></li>
+    <li><a href="#intu">核心直覺</a></li>
+    <li><a href="#code">程式碼走讀</a></li>
+    <li><a href="#quiz">隨堂測驗</a></li>
+  </ol>
+</nav>
+
+<div class="wrap">
+
+<!-- ============ BACKGROUND ============ -->
+<section id="bg">
+  <h2><span class="num">01</span>背景</h2>
+  <p class="lead">要看懂這次的變更,得先知道「用 LINE 登入」在幕後究竟發生了什麼事。以下先給新手一段較深的鋪陳,已經熟悉的人可以直接跳到<a href="#narrow">與本次直接相關的部分</a>。</p>
+
+  <h3>深入背景(熟悉的讀者可略過)</h3>
+  <p class="skip">如果你已經知道 OAuth/OIDC、JWT 簽章、Supabase Auth 與 LIFF 是什麼,請直接往下捲。</p>
+
+  <h4>「用 X 登入」的本質:一張簽過名的身分證</h4>
+  <p>當你在某個 App 按下「用 Google / LINE 登入」,背後跑的是一套叫 <strong>OAuth 2.0 / OpenID Connect(OIDC)</strong> 的協定。你被導去 LINE 的登入頁證明「我就是我」,LINE 接著發給這個 App 一張數位身分證,叫做 <strong>ID token</strong>。</p>
+  <p>這張身分證是一個 <strong>JWT(JSON Web Token)</strong>:三段用點號隔開的 Base64 字串——標頭、內容(claims,像 <code class="inl">sub</code> 使用者唯一編號、<code class="inl">name</code>、<code class="inl">picture</code>)、以及最關鍵的<strong>簽章</strong>。簽章的用途,是讓收到 token 的一方能確認「這真的是 LINE 發的、中途沒被竄改」。</p>
+
+  <div class="callout def">
+    <p class="h"><span class="ic">i</span>簽章怎麼驗?兩種家族</p>
+    <p>JWT 的標頭裡有一個 <code class="inl">alg</code> 欄位,標明簽章用了哪種演算法。粗分兩大類:<strong>對稱式(如 HS256)</strong>用「同一把密鑰」既簽也驗;<strong>非對稱式(如 ES256、RS256)</strong>用「私鑰簽、公鑰驗」。這個區別,正是本次變更的核心。稍後細談。</p>
+  </div>
+
+  <h4>Supabase Auth:幫你保管登入狀態的托管服務</h4>
+  <p>這個 app(x-coach)用 <strong>Supabase</strong> 當後端資料庫與登入系統。它內建一個叫 <strong>GoTrue</strong> 的認證服務,負責發放 <strong>session</strong>——也就是一組 access token / refresh token。使用者的所有東西(訓練歷史、對話紀錄、管理員權限)都靠這個 session 綁定,並由資料庫的列級安全(RLS)把關。<em>換句話說:沒有 Supabase session,使用者就等於沒登入。</em></p>
+
+  <h4>LIFF:讓網頁跑進 LINE、也拿得到 LINE 身分</h4>
+  <p><strong>LIFF(LINE Front-end Framework)</strong>是 LINE 提供的前端 SDK。它最為人知的用途是把你的網頁「嵌」在 LINE App 內開啟;但一個常被忽略的事實是——<strong>LIFF 在一般外部瀏覽器也能運作</strong>。無論在哪,只要使用者完成 LINE 登入,你都能呼叫 <code class="inl">liff.getIDToken()</code> 拿到那張前面說的 LINE ID token。這個小事實,是本次修復的支點。</p>
+
+  <hr class="soft">
+
+  <h3 id="narrow">與本次變更直接相關的背景</h3>
+  <p>在這次改動之前,x-coach 有<strong>兩條</strong>各自獨立的 LINE 登入路徑:</p>
+
+  <table class="cmp">
+    <tr><th>情境</th><th>原本走的路</th><th>結果</th></tr>
+    <tr>
+      <td><strong>在 LINE App 內</strong>(LIFF)</td>
+      <td>後端橋接:<code class="inl">liff.getIDToken()</code> → <code class="inl">POST /api/auth/line</code> → 後端向 <strong>LINE 官方 verify endpoint</strong> 驗證 → 鑄造 Supabase session</td>
+      <td>✅ 可用(已有 34 個測試)</td>
+    </tr>
+    <tr>
+      <td><strong>一般網頁</strong></td>
+      <td>Supabase 的 <strong>Custom OIDC provider</strong>(provider 名 <code class="inl">custom:line</code>),走瀏覽器 OAuth 導向,由 Supabase 自己驗 LINE 的 token</td>
+      <td>❌ 一直失敗</td>
+    </tr>
+  </table>
+
+  <p>使用者回報的症狀非常具體:能正確導去 LINE、也是對的 channel,但<strong>登入完導回 App 卻不是登入狀態,Supabase 裡也沒有任何使用者紀錄</strong>。網址列帶著這一串:</p>
+  <pre><span class="r">?error=server_error&amp;error_code=unexpected_failure</span>
+<span class="r">&amp;error_description=Error getting user profile from external provider</span></pre>
+  <p>注意這個錯誤是 <strong>Supabase(GoTrue)丟的</strong>,不是 App 自己的程式碼。它發生在「用授權碼換到 token 之後、要取得使用者 profile 時」——這個時間點很重要,它幾乎排除了 Channel ID/secret 或 redirect 白名單設錯的可能。真正的兇手藏在更裡面。</p>
+</section>
+
+<!-- ============ PREREQUISITE ============ -->
+<section id="pre">
+  <h2><span class="num">02</span>前置知識</h2>
+  <p class="lead">本次解說會用到幾個名詞。若想墊高背景,以下每項附 1–2 個入門資源。</p>
+  <div class="callout def">
+    <p class="h"><span class="ic">1</span>OAuth 2.0 / OpenID Connect</p>
+    <p>「第三方登入」的底層協定;OIDC 在 OAuth 之上加了「身分」(ID token)。</p>
+    <p>→ <a href="https://openid.net/developers/how-connect-works/" target="_blank" rel="noopener">How OpenID Connect Works</a> ·
+       <a href="https://oauth.net/2/" target="_blank" rel="noopener">OAuth 2.0 總覽</a></p>
+  </div>
+  <div class="callout def">
+    <p class="h"><span class="ic">2</span>JWT 與簽章演算法(HS256 vs ES256)</p>
+    <p>理解對稱(HMAC)與非對稱(ECDSA/RSA)簽章的差別,是看懂根因的關鍵。</p>
+    <p>→ <a href="https://jwt.io/introduction" target="_blank" rel="noopener">jwt.io:JWT 介紹</a> ·
+       <a href="https://datatracker.ietf.org/doc/html/rfc7518" target="_blank" rel="noopener">RFC 7518(JWA:演算法定義)</a></p>
+  </div>
+  <div class="callout def">
+    <p class="h"><span class="ic">3</span>LINE Login / LIFF / ID token 驗證</p>
+    <p>LINE 如何簽 ID token、官方 verify endpoint 怎麼用、LIFF 的能力範圍。</p>
+    <p>→ <a href="https://developers.line.biz/en/docs/line-login/verify-id-token/" target="_blank" rel="noopener">Verify ID token</a> ·
+       <a href="https://developers.line.biz/en/docs/liff/overview/" target="_blank" rel="noopener">LIFF Overview</a></p>
+  </div>
+  <div class="callout def">
+    <p class="h"><span class="ic">4</span>Supabase Auth(GoTrue)</p>
+    <p>session / provider / custom OIDC 設定的官方說明。</p>
+    <p>→ <a href="https://supabase.com/docs/guides/auth" target="_blank" rel="noopener">Supabase Auth 文件</a></p>
+  </div>
+</section>
+
+<!-- ============ INTUITION ============ -->
+<section id="intu">
+  <h2><span class="num">03</span>核心直覺</h2>
+  <p class="lead">整個故事可以濃縮成一句話:<strong>LINE 用一把「只有它跟你共享的密鑰」簽身分證,而 Supabase 卻堅持要用「一把公開的鑰匙」去驗——兩者對不上,網頁登入注定失敗。</strong></p>
+
+  <h3>兇手的名字:去 Supabase 後台撈到的那一行 log</h3>
+  <p>網址列上那句 <em>Error getting user profile</em> 只是被包過的泛用訊息。真正的內部錯誤只在 Supabase 的 Auth Log 裡,長這樣:</p>
+  <pre><span class="r">failed to verify ID token: oidc: id token signed with unsupported</span>
+<span class="r">algorithm, expected ["ES256"] got "HS256"</span></pre>
+  <p>一句話破案。Supabase 期待 <code class="inl">ES256</code>,但 LINE 給的是 <code class="inl">HS256</code>。</p>
+
+  <h3>為什麼「期待 ES256,拿到 HS256」是死局</h3>
+  <div class="fig">
+    <div class="keys">
+      <div class="keycard sym">
+        <h4>HS256 — 對稱式(LINE 用這個)</h4>
+        <div class="krow"><span class="kico">🔑</span><span>只有<strong>一把密鑰</strong>:LINE 的 <em>channel secret</em>。</span></div>
+        <div class="krow"><span class="kico">✍️</span><span>用這把密鑰<strong>簽</strong>。</span></div>
+        <div class="krow"><span class="kico">🔍</span><span>要<strong>驗</strong>,得握有<em>同一把</em>密鑰(HMAC)。</span></div>
+      </div>
+      <div class="keycard asym">
+        <h4>ES256 — 非對稱式(Supabase 想用這個)</h4>
+        <div class="krow"><span class="kico">🔐</span><span>私鑰<strong>簽</strong>(發行方保管)。</span></div>
+        <div class="krow"><span class="kico">🔓</span><span>公鑰<strong>驗</strong>(放在公開的 JWKS,人人可取)。</span></div>
+        <div class="krow"><span class="kico">🌐</span><span>驗證方<strong>不需要</strong>任何秘密。</span></div>
+      </div>
+    </div>
+    <div class="cap">圖一:兩種簽章家族。對稱式要「同一把秘密」才驗得動;非對稱式靠公鑰,誰都能驗。</div>
+  </div>
+  <p>Supabase 的 custom OIDC provider 是這樣運作的:它讀 LINE 的<em>探索文件</em>(<code class="inl">access.line.me/.well-known/openid-configuration</code>),看到裡面宣告 <code class="inl">id_token_signing_alg_values_supported: ["ES256"]</code>,於是它只準備用「公鑰(JWKS)」去驗 ES256。</p>
+  <p>但實際上 LINE 發的 token 是用 <strong>HS256</strong> 簽的——要驗它,得拿 channel secret 當 HMAC 金鑰。Supabase 的 OIDC 流程裡<strong>沒有地方</strong>能叫它「改用那把密鑰去驗」。這不是設定沒調對,而是<strong>結構上驗不動</strong>。這也正是網路上「LINE + Supabase custom OIDC」屢屢失敗的原因。</p>
+
+  <div class="callout warn">
+    <p class="h"><span class="ic">!</span>關鍵結論</p>
+    <p>沒有任何 Supabase 後台設定能修好網頁 OIDC 路徑。這條路<strong>必須整條換掉</strong>。</p>
+  </div>
+
+  <h3>為什麼「橋接」那條路從來沒中招</h3>
+  <p>回頭看 App 內那條早就能用的橋接:後端<strong>不自己驗簽章</strong>,而是把整張 token 丟給 <strong>LINE 官方的 verify endpoint</strong>(<code class="inl">api.line.me/oauth2/v2.1/verify</code>)。LINE 自己當然握有那把 channel secret,所以無論它用 HS256 還是 ES256 簽,LINE 都驗得動。<strong>演算法不相容的問題,在這條路上根本不會發生。</strong></p>
+
+  <h3>支點:LIFF 在「外部瀏覽器」也能用</h3>
+  <p>那網頁怎麼辦?這裡用上前面埋的那個小事實:<strong>LIFF 不只在 LINE App 內能用,在一般瀏覽器也能。</strong>在網頁上呼叫 <code class="inl">liff.login()</code> 會把使用者導去 LINE 登入,回來後 <code class="inl">liff.getIDToken()</code> 一樣給你一張標準 LINE ID token。</p>
+  <p>於是解法水到渠成:<strong>網頁不要再用 Supabase OIDC,改用跟 App 內完全同一條橋接。</strong></p>
+
+  <div class="fig">
+    <div class="flow">
+      <div class="node bad"><div class="t">① 瀏覽器</div><div class="d">按「用 LINE 登入」<br>走 Supabase OIDC 導向</div></div>
+      <div class="arrow">→</div>
+      <div class="node"><div class="t">② LINE</div><div class="d">使用者登入<br>發回 ID token</div><span class="databadge">alg = HS256</span></div>
+      <div class="arrow">→</div>
+      <div class="node bad"><div class="t">③ Supabase callback</div><div class="d">用 JWKS 公鑰驗<br>只認 ES256</div><div class="verdict fail">✗ 演算法不符 → 爆炸</div></div>
+    </div>
+    <div class="cap">圖二(舊):OIDC 路徑。token 是 HS256,Supabase 只會用 ES256 公鑰驗 → <em>Error getting user profile</em>,無 session、無使用者。</div>
+  </div>
+
+  <div class="fig">
+    <div class="flow">
+      <div class="node line"><div class="t">① 瀏覽器</div><div class="d"><code>liff.login()</code><br>→ 回來 <code>getIDToken()</code></div><span class="databadge">alg = HS256</span></div>
+      <div class="arrow">→</div>
+      <div class="node line"><div class="t">② 後端橋接<br><code>/api/auth/line</code></div><div class="d">把 token 交給<br><strong>LINE verify endpoint</strong></div><div class="verdict pass">✓ 演算法無關</div></div>
+      <div class="arrow">→</div>
+      <div class="node ok"><div class="t">③ Supabase</div><div class="d">建/查使用者<br>鑄造 session</div><span class="databadge">line_&lt;sub&gt;@line.invalid</span></div>
+    </div>
+    <div class="cap">圖三(新):網頁改走橋接,與 App 內同一條。LINE 自己驗簽,HS256 不再是問題。</div>
+  </div>
+
+  <h3>意外的紅利:兩條路合而為一,帳號不再分裂</h3>
+  <p>還有一個沒明說、卻很要命的好處。舊的 OIDC 路徑,Supabase 會替 LINE 使用者建立一列 <code class="inl">identities</code>(provider = <code class="inl">line</code>);而橋接路徑建立的是「用合成 email <code class="inl">line_&lt;sub&gt;@line.invalid</code> 標記」的使用者。<strong>兩種建帳機制不相容</strong>——同一個人用網頁 vs. 用 App 內登入,會變成<strong>兩個不同的 Supabase 帳號、兩份歷史</strong>,而且永遠對不起來。</p>
+  <p>把網頁也導進同一條橋接後,兩邊都以 <code class="inl">sub</code> 衍生<strong>同一個合成 email</strong> → 同一人不論從哪進來都是<em>同一個帳號</em>。修 bug 的同時,順手拆掉了一顆未爆彈。</p>
+
+  <h3>順帶處理的三件小事</h3>
+  <div class="callout key">
+    <p class="h"><span class="ic">A</span>一次性 guard 的死鎖 bug</p>
+    <p>網頁登入的「成功」其實是在頁面<em>重導回來後</em>的 auto-login effect 裡完成的(那時已經沒有按鈕的 click handler 了)。舊碼只在按鈕分支清掉「一次性重導旗標」<code class="inl">LIFF_RELOGIN_KEY</code>,忘了在 effect 裡清。結果:登入成功 → 登出(會順手 <code class="inl">liff.logout()</code> 讓 <code class="inl">isLoggedIn()</code> 變 false)→ <strong>下次登入撞上還沒清掉的旗標而死鎖</strong>,直到關掉分頁。修法:在 effect 拿到 session 後也清旗標,並在 <code class="inl">signOut</code> 再清一次保險。</p>
+  </div>
+  <div class="callout key">
+    <p class="h"><span class="ic">B</span>「LINE 登入中…」指示器</p>
+    <p>網頁重導回 <code class="inl">/app</code> 後,session 要等 <code class="inl">liff.init()</code> + 後端橋接跑完(數秒)才到位。這幾秒 header 右上角原本顯示「登入」連結——看起來像壞掉。新增一個 <code class="inl">lineAuthenticating</code> 狀態,在交換進行時顯示轉圈的「LINE 登入中…」。</p>
+  </div>
+  <div class="callout key">
+    <p class="h"><span class="ic">C</span>官方 LINE 標誌</p>
+    <p>登入頁的 LINE 按鈕原本用一個簡化的白色氣泡。改成 LINE 官方標誌(品牌綠圓角方塊 + 白色氣泡 + 綠色「LINE」字),直接把官方 SVG 的向量路徑內嵌進來(不外連圖片——app 的 CSP 會擋外部圖片)。</p>
+  </div>
+</section>
+
+<!-- ============ CODE ============ -->
+<section id="code">
+  <h2><span class="num">04</span>程式碼走讀</h2>
+  <p class="lead">改動集中在前端。核心是 <code class="inl">frontend/src/lib/auth.tsx</code>;其餘是 UX、效能、圖示與文件的收尾。以下依「先骨幹、後枝節」的順序走一遍。</p>
+
+  <h3>群組一:核心改道——網頁登入從 OIDC 換成 LIFF 橋接</h3>
+  <p>先刪掉那個再也用不到的 OIDC provider 常數,並把 <code class="inl">signInWithLine</code> 的網頁分支整段重寫。關鍵轉折:判斷條件從 <code class="inl">isInClient()</code>(只在 LINE App 內)放寬成 <code class="inl">isLoggedIn()</code>(在外部瀏覽器完成登入後也為真),於是同一段程式同時服務 App 內與網頁。</p>
+  <pre class="diff"><span class="del">// Supabase custom OIDC provider slug for LINE …</span>
+<span class="del">const LINE_OAUTH_PROVIDER = "custom:line" as const;</span>
+
+<span class="ctx">const signInWithLine = useCallback(async () =&gt; {</span>
+<span class="ctx">  const liff = await initLiff();</span>
+<span class="add">  if (!liff) throw new Error("LINE sign-in is not available.");</span>
+<span class="ctx"></span>
+<span class="add">  // 尚未 LINE 登入(外部瀏覽器第一次點):交給 LINE 的登入重導。</span>
+<span class="add">  if (!liff.isLoggedIn()) {</span>
+<span class="add">    if (sessionStorage.getItem(LIFF_RELOGIN_KEY) === "1")</span>
+<span class="add">      throw new Error("LINE sign-in failed. Please try again later.");</span>
+<span class="add">    sessionStorage.setItem(LIFF_RELOGIN_KEY, "1");</span>
+<span class="add">    liff.login({ redirectUri: `${window.location.origin}/app` });</span>
+<span class="add">    return;</span>
+<span class="add">  }</span>
+<span class="ctx"></span>
+<span class="ctx">  const idToken = liff.getIDToken();          // 已登入:直接拿 token</span>
+<span class="ctx">  // … POST /api/auth/line → client.auth.setSession(minted) …</span>
+<span class="del">  // 舊的網頁 fallback:Supabase custom OIDC 導向(整段刪除)</span>
+<span class="del">  await client.auth.signInWithOAuth({ provider: LINE_OAUTH_PROVIDER, … });</span>
+<span class="ctx">}, []);</span></pre>
+
+  <p>接著,把「靜默自動登入」的 effect 也放寬,讓它同時涵蓋兩種情境:App 內(本來就已登入)與<strong>網頁重導回來的那一趟</strong>。這一步是「一鍵完成」網頁登入的關鍵——回到 <code class="inl">/app</code> 後,沒有按鈕了,就靠這個 effect 把交換收尾。</p>
+  <pre class="diff"><span class="ctx">const liff = await initLiff();</span>
+<span class="del">if (!active || !liff?.isInClient()) return;</span>
+<span class="add">if (!active || !liff?.isLoggedIn()) return;   // 網頁重導回來時也成立</span>
+<span class="ctx">const idToken = liff.getIDToken();</span>
+<span class="ctx">if (!idToken) return;</span></pre>
+
+  <p>登出也要對稱處理。在外部瀏覽器,LIFF 會自己記住登入狀態;若不一起清掉,auto-login effect 會在下次載入時把使用者「偷偷登回去」,破壞明確的登出。因此網頁登出時順手 <code class="inl">liff.logout()</code>(App 內則保留,那裡「開啟即登入」是刻意的行為)。</p>
+  <pre class="diff"><span class="ctx">await supabase.auth.signOut();</span>
+<span class="add">sessionStorage.removeItem(LIFF_RELOGIN_KEY);     // 見群組二</span>
+<span class="add">const liff = await initLiff();</span>
+<span class="add">if (liff && !liff.isInClient() && liff.isLoggedIn()) {</span>
+<span class="add">  try { liff.logout(); } catch { /* best-effort */ }</span>
+<span class="add">}</span></pre>
+
+  <h3>群組二:修掉一次性 guard 的死鎖</h3>
+  <p>如前所述,網頁登入的成功發生在 auto-login effect,而非按鈕。舊碼只在按鈕分支清 <code class="inl">LIFF_RELOGIN_KEY</code>。補上 effect 裡的清除(以及群組一 <code class="inl">signOut</code> 的保險清除),就能讓「登入 → 登出 → 再登入」的循環不再卡死。</p>
+  <pre class="diff"><span class="ctx">const minted = await api.lineLogin(idToken);</span>
+<span class="ctx">await supabase!.auth.setSession(minted);</span>
+<span class="add">// 網頁流程真正在此完成 → 清掉一次性旗標,否則下次登入會死鎖</span>
+<span class="add">sessionStorage.removeItem(LIFF_RELOGIN_KEY);</span></pre>
+  <div class="callout warn">
+    <p class="h"><span class="ic">!</span>測試為何原本抓不到</p>
+    <p>單元測試的 <code class="inl">beforeEach</code> 每次都清 <code class="inl">sessionStorage</code>,所以「成功 → 登出 → 再登入」這條跨越三步的鏈路從未被連起來測。新增的回歸測試特地把這條循環走完一遍。</p>
+  </div>
+
+  <h3>群組三:「LINE 登入中…」指示器</h3>
+  <p>三個檔案協力:<code class="inl">auth.tsx</code> 暴露狀態、<code class="inl">Header.tsx</code> 顯示、<code class="inl">i18n.tsx</code> 加字串。狀態只在真正開始交換到結束之間為真,用 <code class="inl">try/finally</code> 精準開關。</p>
+  <pre class="diff"><span class="ctx">// auth.tsx — auto-login effect</span>
+<span class="add">if (active) setLineAuthenticating(true);</span>
+<span class="ctx">try {</span>
+<span class="ctx">  const minted = await api.lineLogin(idToken);</span>
+<span class="ctx">  await supabase!.auth.setSession(minted);</span>
+<span class="ctx">} catch { /* silent */ }</span>
+<span class="add">finally { if (active) setLineAuthenticating(false); }</span></pre>
+  <pre class="diff"><span class="ctx">// Header.tsx — 右上角三態</span>
+<span class="ctx">{user ? (</span>
+<span class="ctx">  &lt;AccountMenu /&gt;</span>
+<span class="add">) : lineAuthenticating ? (</span>
+<span class="add">  &lt;span aria-live="polite"&gt;&lt;CircleNotch className="animate-spin" /&gt; {t("account.lineSigningIn")}&lt;/span&gt;</span>
+<span class="ctx">) : (</span>
+<span class="ctx">  &lt;Link to="/login"&gt;{t("account.signin")}&lt;/Link&gt;   // 原本只有這個</span>
+<span class="ctx">)}</span></pre>
+  <div class="fig">
+    <p style="text-align:center;margin:0 0 10px;color:var(--faint);font-size:14px">Header 右上角的三種狀態</p>
+    <div class="flow" style="align-items:flex-start">
+      <div class="uimock" style="flex:1 1 200px">
+        <div class="uibar"><span>x-coach</span><span class="uichip">登入 →</span></div>
+        <div class="uibody" style="font-size:13px;color:var(--muted)">登出且閒置</div>
+      </div>
+      <div class="uimock" style="flex:1 1 200px">
+        <div class="uibar"><span>x-coach</span><span class="uichip"><span class="spinner"></span> LINE 登入中…</span></div>
+        <div class="uibody" style="font-size:13px;color:var(--muted)">交換進行中(數秒)</div>
+      </div>
+      <div class="uimock" style="flex:1 1 200px">
+        <div class="uibar"><span>x-coach</span><span class="uichip"><span class="avatar">A</span> ▾</span></div>
+        <div class="uibody" style="font-size:13px;color:var(--muted)">已登入</div>
+      </div>
+    </div>
+    <div class="cap">圖四:原本中間那段(數秒)顯示「登入」連結,像沒登入;現在顯示轉圈的「LINE 登入中…」。</div>
+  </div>
+
+  <h3>群組四:砍掉多餘的往返、提早暖機</h3>
+  <p>auto-login 原本會先打一次 <code class="inl">GET /api/health</code> 確認橋接有沒有設定,再打 <code class="inl">POST /api/auth/line</code>——兩次循序的往返(透過 ngrok 隧道更貴)。health 其實多餘:沒設定的橋接本來就會在 lineLogin 回 <code class="inl">503</code> 並被吞掉。移除它,每次登入省一趟。</p>
+  <pre class="diff"><span class="del">const health = await api.health().catch(() =&gt; null);</span>
+<span class="del">if (!active || !health?.line_login_configured) return;</span>
+<span class="ctx">const minted = await api.lineLogin(idToken);   // 未設定則回 503,照樣吞掉</span></pre>
+  <p>另外在 <code class="inl">main.tsx</code> 開機時就先觸發 <code class="inl">initLiff()</code>(fire-and-forget、有快取),讓 LIFF SDK 載入與 LINE 換 token 的那 ~1.5 秒與頁面首次繪製<strong>重疊</strong>,而不是等頁面畫完才開始。</p>
+  <pre class="diff"><span class="ctx">import { initLiff } from "./lib/liff";</span>
+<span class="add">void initLiff();   // 提早暖機,與首屏並行</span></pre>
+
+  <h3>群組五:官方 LINE 標誌</h3>
+  <p>登入頁 <code class="inl">Login.tsx</code> 把原本簡化的 <code class="inl">LineBubble</code> 換成逐路徑內嵌的官方標誌 <code class="inl">LineLogo</code>(綠圓角方塊 + 白氣泡 + 綠色「LINE」字)。內嵌而非外連,是因為 app 的 CSP 會擋外部圖片,內嵌也能在任何尺寸維持銳利。</p>
+  <pre class="diff"><span class="del">&lt;LineBubble /&gt;              // 簡化的白色氣泡</span>
+<span class="add">&lt;LineLogo size={20} /&gt;      // 內嵌的官方 LINE 標誌 SVG</span></pre>
+
+  <h3>群組六:文件、註解與環境變數收尾</h3>
+  <ul>
+    <li><strong><code class="inl">docs/line-login-liff-setup.md</code></strong>:改寫「兩條路」的架構表為「一個橋接、兩種進入點」,刪除 Supabase Custom OIDC provider 的設定步驟,並寫下 HS256/ES256 的原因,免得日後有人再把 OIDC 加回來。</li>
+    <li><strong><code class="inl">frontend/.env.example</code> / <code class="inl">Settings.tsx</code> 註解</strong>:更新對「網頁路徑走 OIDC」的過時描述。</li>
+    <li><strong>測試</strong>:重寫網頁路徑測試(改測 LIFF 而非 OIDC)、新增外部瀏覽器 auto-login、登出清 LIFF、以及群組二的死鎖回歸測試;完整前端測試套件與覆蓋率門檻全綠。</li>
+  </ul>
+</section>
+
+<!-- ============ QUIZ ============ -->
+<section id="quiz">
+  <h2><span class="num">05</span>隨堂測驗</h2>
+  <p class="lead">五題中等難度,測你是否真的抓到了這次變更的實質。點選選項即時對答案。</p>
+  <div id="quizRoot"></div>
+</section>
+
+</div>
+
+<footer>
+  由程式碼變更自動生成的解說 · 2026-07-18 · x-coach / <code class="inl">claude/line-login-liff-oil6x9</code>
+</footer>
+
+<script>
+const QUIZ = [
+  {
+    q: "為什麼 Supabase 的 custom OIDC provider 一定驗不了 LINE 的 ID token?",
+    opts: [
+      "LINE 的 ID token 用 HS256(對稱、需 channel secret)簽,但 OIDC 依 LINE 的探索文件只準備用 ES256 公鑰(JWKS)驗,結構上不相容",
+      "Channel ID 或 secret 填錯了,導致換 token 失敗",
+      "LINE 沒有回傳 email,而 Supabase 一定要 email",
+      "redirect URL 沒加進 Supabase 的白名單"
+    ],
+    a: 0,
+    fb: "沒錯。log 明講 expected [\"ES256\"] got \"HS256\"。ES256 用公鑰驗、HS256 需密鑰驗,OIDC 流程無法改用密鑰,所以結構上驗不動——這不是設定問題。而且錯誤發生在『換到 token 之後』,正好排除了 Channel/secret 或 redirect 白名單設錯的可能。"
+  },
+  {
+    q: "同樣一張 HS256 的 LINE token,為什麼後端『橋接』那條路驗得動?",
+    opts: [
+      "後端把 LINE 的公鑰快取起來,自己驗 ES256",
+      "後端不自己驗簽章,而是把 token 交給 LINE 官方 verify endpoint,由握有 secret 的 LINE 來驗,因此與簽章演算法無關",
+      "後端用 service_role key 跳過所有驗證",
+      "橋接改用 RS256 重新簽一次 token"
+    ],
+    a: 1,
+    fb: "正解。橋接呼叫 api.line.me/oauth2/v2.1/verify,讓 LINE 自己驗(它當然有 channel secret)。HS256 還是 ES256 都無所謂——這正是它從不中招的原因。"
+  },
+  {
+    q: "讓『網頁』也能改用這條橋接的關鍵前提是什麼?",
+    opts: [
+      "Supabase 新增了對 HS256 的支援",
+      "LINE 把 ID token 改成 ES256 簽章",
+      "LIFF 在一般外部瀏覽器也能運作:liff.login() 會導去 LINE 登入,回來後 getIDToken() 一樣拿得到標準 token",
+      "改用 LINE Messaging API 取代 Login"
+    ],
+    a: 2,
+    fb: "對。判斷條件因此從 isInClient()(只在 App 內)放寬成 isLoggedIn()(外部瀏覽器登入後也為真),同一段程式就能同時服務 App 內與網頁。"
+  },
+  {
+    q: "為什麼一定要在 auto-login effect 裡(而不只在按鈕分支)清掉 LIFF_RELOGIN_KEY?",
+    opts: [
+      "為了讓測試更好寫",
+      "因為網頁登入的成功其實在重導回來後的 effect 裡完成(按鈕的 handler 早已不在);不清的話,配合登出時的 liff.logout(),下次登入會撞上殘留旗標而死鎖",
+      "因為 sessionStorage 有容量上限",
+      "因為 health 檢查被移除了"
+    ],
+    a: 1,
+    fb: "正是。重導後沒有 click handler,是 effect 收尾。舊碼只在按鈕分支清旗標,於是『登入→登出(liff.logout 讓 isLoggedIn=false)→再登入』會卡在還沒清的旗標,直到關分頁。修法:effect 成功後清、signOut 再清一次保險。"
+  },
+  {
+    q: "把網頁也導進同一條橋接,除了修好登入,還消除了什麼隱患?",
+    opts: [
+      "消除了 access token 過期的問題",
+      "消除了 RLS 設定的需要",
+      "消除了『帳號分裂』:兩條路都以 sub 衍生同一個合成 email line_<sub>@line.invalid,同一人不論從哪登入都是同一個 Supabase 帳號",
+      "消除了對 ngrok 的依賴"
+    ],
+    a: 2,
+    fb: "對。舊 OIDC 路徑建的是 provider=line 的 identity,橋接建的是合成 email(line_&lt;sub&gt;@line.invalid)使用者——兩種機制不相容,會讓同一人變兩個帳號、兩份歷史。統一到橋接後,兩邊同一個合成 email → 同一個帳號。"
+  }
+];
+
+const root = document.getElementById('quizRoot');
+QUIZ.forEach((item, qi) => {
+  const box = document.createElement('div');
+  box.className = 'quiz';
+  const q = document.createElement('p');
+  q.className = 'q';
+  q.innerHTML = '<span class="n">Q' + (qi+1) + '.</span>' + item.q;
+  box.appendChild(q);
+  const fb = document.createElement('div');
+  fb.className = 'fb';
+  item.opts.forEach((opt, oi) => {
+    const b = document.createElement('button');
+    b.className = 'opt';
+    b.textContent = opt;
+    b.onclick = () => {
+      if (box.dataset.done) return;
+      box.dataset.done = '1';
+      const btns = box.querySelectorAll('.opt');
+      btns.forEach(x => x.disabled = true);
+      btns[item.a].classList.add('correct');
+      if (oi !== item.a) b.classList.add('wrong');
+      fb.classList.add('show', oi === item.a ? 'good' : 'bad');
+      fb.innerHTML = (oi === item.a ? '<b>答對了!</b> ' : '<b>再想想。</b> ') + item.fb;
+    };
+    box.appendChild(b);
+  });
+  box.appendChild(fb);
+  root.appendChild(box);
+});
+
+// active TOC highlight
+const links = [...document.querySelectorAll('#toc a')];
+const map = {};
+links.forEach(a => { const id = a.getAttribute('href').slice(1); map[id] = a; });
+const obs = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      links.forEach(l => l.classList.remove('active'));
+      if (map[e.target.id]) map[e.target.id].classList.add('active');
+    }
+  });
+}, { rootMargin: '-45% 0px -50% 0px' });
+document.querySelectorAll('section[id]').forEach(s => obs.observe(s));
+</script>
+</body>
+</html>

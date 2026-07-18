@@ -21,7 +21,15 @@ const SixSeven = lazy(() => import("./pages/SixSeven"));
 const FruitNinja = lazy(() => import("./pages/FruitNinja"));
 import { I18nProvider } from "./lib/i18n";
 import { AuthProvider } from "./lib/auth";
+import { initLiff } from "./lib/liff";
 import "./index.css";
+
+// Kick off LIFF init at bootstrap (fire-and-forget, cached) so the SDK load + LINE
+// callback token-exchange (~1-1.5s) overlaps first paint instead of running only once the
+// auto-login effect fires after getSession. On a LINE redirect-return this is squarely on
+// the login critical path; a no-op when VITE_LIFF_ID is unset. AuthProvider's effect
+// awaits the very same cached promise, so nothing runs twice.
+void initLiff();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

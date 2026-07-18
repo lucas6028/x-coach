@@ -55,9 +55,9 @@ export default function Settings() {
   const url = imgError ? null : avatarUrl(user);
   const name = displayName(user);
   const provider = (user.app_metadata?.provider as string) ?? "email";
-  // LINE users arrive two ways: Supabase custom OIDC on the web (provider "custom:line")
-  // or the LIFF bridge (provider "email" + a line_sub in user_metadata). Exact matches
-  // only — `includes("line")` would also catch "linkedin".
+  // Every LINE user now arrives through the LIFF bridge — web and in-app alike (provider
+  // "email" + a line_sub in user_metadata). The provider-name checks remain as a harmless
+  // fallback. Exact matches only — `includes("line")` would also catch "linkedin".
   const isLineUser =
     provider === "custom:line" || provider === "line" || Boolean(user.user_metadata?.line_sub);
   const providerLabel = isLineUser
