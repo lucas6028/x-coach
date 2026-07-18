@@ -21,8 +21,12 @@ DETECTIONS_DIR = LABELED_DIR / "pose_rule_detections"
 LABELS_DIR = LABELED_DIR / "Labels"
 
 # Knowledge stores (defaults match the src/ modules).
-KG_GRAPH_FILE = DATA_DIR / "kg" / "squat_kg_v2.graphml"
+KG_GRAPH_FILE = DATA_DIR / "kg" / "sports_kg_v3.graphml"
 RAG_DB_DIR = DATA_DIR / "rag" / "vector_db"
+
+# Transitional default for the analyze/library retrieval scope: the pose rule detector is
+# squat-only today, so retrieval seeds are scoped to Squat until per-movement detectors exist.
+DEFAULT_ANALYSIS_MOVEMENT = "Squat"
 
 # Runtime scratch space for uploaded videos and their derived pose JSON (gitignored).
 RUNTIME_DIR = DATA_DIR / "runtime"
@@ -37,10 +41,15 @@ SPLIT_NAMES = ("train", "val", "test")
 # ``uvicorn --workers N`` the effective ceiling is N * MAX_CONCURRENT_ANALYSES.
 MAX_CONCURRENT_ANALYSES = max(1, int(os.getenv("XCOACH_MAX_CONCURRENT_ANALYSES", "2")))
 
-# Allowed origins for the Vite dev server.
+# Allowed origins: the Vite dev server, plus any extra comma-separated origins from the
+# environment — e.g. the ngrok tunnel or production host serving the LINE LIFF frontend
+# (XCOACH_CORS_ORIGINS=https://xxxx.ngrok-free.app). Note that when the SPA is served
+# through Vite's /api proxy (including via ngrok), requests are same-origin and CORS never
+# applies; this matters only when the frontend calls the API cross-origin directly.
 CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    *[o.strip() for o in os.getenv("XCOACH_CORS_ORIGINS", "").split(",") if o.strip()],
 ]
 
 

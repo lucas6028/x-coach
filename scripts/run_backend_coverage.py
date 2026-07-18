@@ -25,6 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _DEFAULT_TESTS = [
     "tests/test_backend.py",
     "tests/test_chat_endpoint.py",
+    "tests/test_backend_line_auth.py",
     "tests/test_line_endpoint.py",
 ]
 # Package(s) to measure coverage for.

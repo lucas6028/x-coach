@@ -151,6 +151,7 @@ def load_analysis(video_id: str) -> dict[str, Any]:
             result["detections"],
             graph_file=config.KG_GRAPH_FILE,
             rag_db_dir=config.RAG_DB_DIR,
+            movement=config.DEFAULT_ANALYSIS_MOVEMENT,
         )
 
     pose_path = pose_json_path(video_id)

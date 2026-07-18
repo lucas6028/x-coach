@@ -7,6 +7,9 @@ import type { Detection, RagResult, Retrieval } from "../api";
 
 export interface SummaryNode {
   node_id: string;
+  // v3 namespaces scoped ids as "Movement:Name"; `name` is the bare display label. Optional so
+  // pre-v3 payloads (node_id only) still type-check and fall back to node_id.
+  name?: string;
   label: string;
 }
 
@@ -24,7 +27,7 @@ export function summaryCategory(retrieval: Retrieval | undefined, key: string): 
   const out: string[] = [];
   for (const seed of results) {
     const summary = (seed.summary as Record<string, SummaryNode[]>) || {};
-    for (const n of summary[key] || []) out.push(n.node_id);
+    for (const n of summary[key] || []) out.push(n.name ?? n.node_id);
   }
   return Array.from(new Set(out)).slice(0, 4);
 }

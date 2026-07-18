@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_anon_key: str = ""
 
+    # LINE Login bridge (LIFF): POST /api/auth/line verifies a LINE ID token against the
+    # channel named here, then mints a Supabase session via the Admin API. The service_role
+    # key exists ONLY for that mint (create user + generate one-shot link) — it is never
+    # used for data access, which stays on the user's own JWT with RLS as the backstop.
+    # Leave both unset to keep the endpoint disabled (503); web LINE login via Supabase's
+    # custom OIDC provider works without either. See services/line_auth.
+    line_channel_id: str = ""
+    supabase_service_role_key: str = ""
+
     # LLM conversational-coaching layer, served over an OpenAI-compatible chat-completions API. The
     # provider is deliberately NOT baked into the names: the transport speaks only the plain OpenAI
     # dialect, so these ``LLM_*`` vars point at any compatible endpoint — OpenRouter (the default
@@ -73,7 +82,8 @@ class Settings(BaseSettings):
     # All three vars are server-side only. Unset -> the LINE endpoints 503 and the webhook no-ops.
     line_channel_secret: str = ""  # verifies the X-Line-Signature HMAC on every webhook request
     line_channel_access_token: str = ""  # long-lived token for the LINE reply/push Messaging API
-    supabase_service_role_key: str = ""  # service-role key for line_store (bypasses RLS; keep secret)
+    # NOTE: the third var this integration needs, ``supabase_service_role_key``, is declared once
+    # above (shared with the LINE Login bridge); ``services/line_store`` uses it to bypass RLS.
 
     @property
     def auth_configured(self) -> bool:
@@ -84,6 +94,12 @@ class Settings(BaseSettings):
     def chat_configured(self) -> bool:
         """True when an LLM API key is present (the chat endpoint is otherwise 503)."""
         return bool(self.llm_api_key)
+
+    @property
+    def line_login_configured(self) -> bool:
+        """True when the LIFF→Supabase bridge can run: LINE channel id + service_role key,
+        on top of the base Supabase config (the mint needs both anon and admin clients)."""
+        return bool(self.line_channel_id and self.supabase_service_role_key and self.auth_configured)
 
     @property
     def line_configured(self) -> bool:

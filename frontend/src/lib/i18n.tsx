@@ -220,7 +220,7 @@ const en: Dict = {
   "landing.hero.titleAccent": "trace to the joint",
   "landing.hero.titlePost": ".",
   "landing.hero.sub":
-    "x-coach reads a squat video, locates the fault, traces its cause in a biomechanics knowledge graph, and explains the fix.",
+    "x-coach reads a squat video, locates the fault, traces its cause in a biomechanics knowledge graph spanning 16 movements, and explains the fix.",
   "landing.hero.readMethod": "Read the method",
 
   // Landing — problem
@@ -307,7 +307,7 @@ const en: Dict = {
 
   // Landing — footer
   "landing.footer.pipeline": "Pipeline",
-  "landing.footer.tagline": "Explainable squat coaching, research prototype.",
+  "landing.footer.tagline": "Explainable movement coaching, research prototype.",
 
   // Landing — movement showcase
   "landing.showcase.title": "One pipeline, the whole movement library.",
@@ -336,6 +336,30 @@ const en: Dict = {
   "auth.signUpBtn": "Create account",
   "auth.or": "or",
   "auth.google": "Continue with Google",
+  "auth.lineBtn": "Continue with LINE",
+
+  // Camera-in-LIFF fallback + the /liff/diag device check page
+  "camera.liffHint":
+    "The LINE in-app browser couldn't open the camera on this device. Tap the ⋯ menu and choose \"Open in browser\" to play with the camera.",
+  "diag.title": "LIFF device check",
+  "diag.subtitle":
+    "Open this page inside LINE on your phone to verify login and camera support before rolling out the LIFF app.",
+  "diag.env": "Environment",
+  "diag.session": "Login session",
+  "diag.signedIn": "Signed in",
+  "diag.signedOut": "Not signed in",
+  "diag.camera": "Live camera (getUserMedia)",
+  "diag.probeBtn": "Test camera",
+  "diag.probing": "Testing…",
+  "diag.cameraOk": "Camera works in this browser.",
+  "diag.pose": "Live pose (camera + MediaPipe)",
+  "diag.poseBtn": "Test camera + pose",
+  "diag.poseGood": "Smooth — the live-camera games should be playable here.",
+  "diag.poseMarginal": "Runs, but slowly — expect a degraded game experience.",
+  "diag.poseBad": "Too slow — keep live-camera features out of LIFF on this device.",
+  "diag.poseNoLandmarks":
+    "Camera and model both ran, but no person was detected — aim the camera at yourself and retest.",
+  "diag.capture": "Video file capture (tap to confirm the camera recorder opens)",
   "auth.noAccount": "New here?",
   "auth.toSignup": "Create an account",
   "auth.haveAccount": "Already have an account?",
@@ -353,10 +377,28 @@ const en: Dict = {
 
   // Account / nav
   "nav.history": "My records",
+  "nav.movements": "Movements",
   "account.signin": "Sign in",
   "account.signout": "Sign out",
   "account.menu": "Account menu",
   "account.settings": "Settings",
+  "account.lineSigningIn": "Signing in with LINE…",
+
+  // Movements menu
+  "movements.title": "Movement library",
+  "movements.subtitle":
+    "Every movement the coach knows. Squat analysis is live today; the rest are on the way.",
+  "movements.groupLower": "Lower body",
+  "movements.groupUpper": "Upper body",
+  "movements.groupCore": "Core",
+  "movements.groupFullBody": "Full body",
+  "movements.analyze": "Analyze a video",
+  "movements.soon": "Soon",
+
+  // Movement display names. Only the ones titleCase() would mangle need an entry here; the rest
+  // fall back to their canonical spelling.
+  "movement.Push-up": "Push-up",
+  "movement.Sit-up": "Sit-up",
 
   // Settings page
   "settings.title": "Settings",
@@ -367,6 +409,7 @@ const en: Dict = {
   "settings.email": "Email",
   "settings.provider": "Signed in with",
   "settings.provider.google": "Google",
+  "settings.provider.line": "LINE",
   "settings.provider.email": "Email & password",
   "settings.model": "Coach model",
   "settings.modelDesc": "Choose which LLM answers your follow-up questions. Applies to new messages.",
@@ -778,7 +821,7 @@ const zhHant: Dict = {
   "landing.hero.titleAccent": "追溯到關節",
   "landing.hero.titlePost": "。",
   "landing.hero.sub":
-    "x-coach 讀取深蹲影片，定位動作錯誤，在生物力學知識圖譜中追溯成因，並說明修正方式。",
+    "x-coach 讀取深蹲影片，定位動作錯誤，在涵蓋 16 個動作的生物力學知識圖譜中追溯成因，並說明修正方式。",
   "landing.hero.readMethod": "了解方法",
 
   // Landing — problem
@@ -865,7 +908,7 @@ const zhHant: Dict = {
 
   // Landing — footer
   "landing.footer.pipeline": "處理流程",
-  "landing.footer.tagline": "可解釋的深蹲教練，研究原型。",
+  "landing.footer.tagline": "可解釋的動作教練，研究原型。",
 
   // Landing — movement showcase
   "landing.showcase.title": "同一套流程，涵蓋整個動作庫。",
@@ -894,6 +937,28 @@ const zhHant: Dict = {
   "auth.signUpBtn": "建立帳號",
   "auth.or": "或",
   "auth.google": "使用 Google 繼續",
+  "auth.lineBtn": "使用 LINE 繼續",
+
+  // LIFF 內相機的備援提示 + /liff/diag 裝置檢測頁
+  "camera.liffHint":
+    "LINE 內建瀏覽器在此裝置無法開啟相機。請點右上角「⋯」選單,選擇「用瀏覽器開啟」再使用相機功能。",
+  "diag.title": "LIFF 裝置檢測",
+  "diag.subtitle": "請在手機的 LINE 內開啟本頁,以在正式導入 LIFF 前確認登入與相機支援程度。",
+  "diag.env": "執行環境",
+  "diag.session": "登入 Session",
+  "diag.signedIn": "已登入",
+  "diag.signedOut": "未登入",
+  "diag.camera": "即時相機 (getUserMedia)",
+  "diag.probeBtn": "測試相機",
+  "diag.probing": "測試中…",
+  "diag.cameraOk": "此瀏覽器可正常使用相機。",
+  "diag.pose": "即時姿態(相機 + MediaPipe)",
+  "diag.poseBtn": "測試相機＋姿態",
+  "diag.poseGood": "流暢——此裝置可在 LIFF 內玩即時相機遊戲。",
+  "diag.poseMarginal": "跑得動但偏慢——遊戲體驗會打折。",
+  "diag.poseBad": "太慢——此裝置的即時相機功能建議留在外部瀏覽器。",
+  "diag.poseNoLandmarks": "相機與模型都正常,但未偵測到人——請將相機對準自己再測一次。",
+  "diag.capture": "影片檔案拍攝(點擊確認能否開啟相機錄影)",
   "auth.noAccount": "還沒有帳號？",
   "auth.toSignup": "建立帳號",
   "auth.haveAccount": "已經有帳號了？",
@@ -910,10 +975,40 @@ const zhHant: Dict = {
 
   // Account / nav
   "nav.history": "我的紀錄",
+  "nav.movements": "動作庫",
   "account.signin": "登入",
   "account.signout": "登出",
   "account.menu": "帳號選單",
   "account.settings": "設定",
+  "account.lineSigningIn": "LINE 登入中…",
+
+  // Movements menu
+  "movements.title": "動作庫",
+  "movements.subtitle": "教練目前認識的所有動作。深蹲分析已經上線，其餘動作陸續開放。",
+  "movements.groupLower": "下肢",
+  "movements.groupUpper": "上肢",
+  "movements.groupCore": "核心",
+  "movements.groupFullBody": "全身",
+  "movements.analyze": "分析影片",
+  "movements.soon": "即將開放",
+
+  // Movement display names.
+  "movement.Squat": "深蹲",
+  "movement.Lunge": "弓步蹲",
+  "movement.Deadlift": "硬舉",
+  "movement.Leg Abduction": "腿部外展",
+  "movement.Shoulder Bridge": "臀橋",
+  "movement.Push-up": "伏地挺身",
+  "movement.Overhead Press": "肩上推舉",
+  "movement.Row": "划船",
+  "movement.Bicep Curl": "二頭彎舉",
+  "movement.Band Pull Apart": "彈力帶擴胸",
+  "movement.Arm Abduction": "手臂外展",
+  "movement.Arm VW": "手臂 VW 開合",
+  "movement.Sit-up": "仰臥起坐",
+  "movement.Torso Twist": "軀幹旋轉",
+  "movement.Jumping Jacks": "開合跳",
+  "movement.High Knee": "高抬腿",
 
   // Settings page
   "settings.title": "設定",
@@ -924,6 +1019,7 @@ const zhHant: Dict = {
   "settings.email": "電子郵件",
   "settings.provider": "登入方式",
   "settings.provider.google": "Google",
+  "settings.provider.line": "LINE",
   "settings.provider.email": "電子郵件與密碼",
   "settings.model": "教練模型",
   "settings.modelDesc": "選擇回答你追問的 LLM 模型，套用於之後的新訊息。",
@@ -1193,6 +1289,9 @@ function dataLabel(t: TFunc, prefix: string, raw: string): string {
 }
 
 export const faultLabel = (t: TFunc, raw: string) => dataLabel(t, "fault", raw);
+// Canonical movement names ("Squat", "Overhead Press", ...) title-case cleanly, so movement.* keys
+// are optional; the fallback renders the display text.
+export const movementLabel = (t: TFunc, raw: string) => dataLabel(t, "movement", raw);
 export const viewLabel = (t: TFunc, raw: string) => dataLabel(t, "view", raw);
 export const phaseLabel = (t: TFunc, raw: string) => dataLabel(t, "phase", raw);
 

@@ -1,7 +1,7 @@
 {
   "name": "X-Coach",
   "short_name": "X-Coach",
-  "description": "Explainable squat-coaching feedback.",
+  "description": "Explainable movement-coaching feedback.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#121416",

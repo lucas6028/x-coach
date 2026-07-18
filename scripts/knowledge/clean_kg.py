@@ -47,6 +47,13 @@ def canonical_label(node_id: str, label: str, mapping: dict) -> str:
 
 
 def clean_graph(graph: nx.MultiDiGraph, mapping: dict) -> tuple[nx.MultiDiGraph, dict[str, list[str]]]:
+    # This cleaner rebuilds nodes with only a `label` attr, which would silently strip the
+    # `movement`/`name` attrs that namespace a v3 (multi-movement) graph. Refuse to run on one.
+    if any("movement" in attrs for _, attrs in graph.nodes(data=True)):
+        raise SystemExit(
+            "clean_kg.py is squat-v2-only; it would strip v3 movement/name attrs. "
+            "Refusing to run on a namespaced graph."
+        )
     cleaned = nx.MultiDiGraph()
     merge_report = {"merged": [], "review": []}
     node_id_map: dict[str, str] = {}

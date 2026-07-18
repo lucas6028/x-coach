@@ -1,4 +1,4 @@
-import { ClockCounterClockwise, Folders, GameController, List, Plus, ShieldCheck, VideoCamera } from "@phosphor-icons/react";
+import { Barbell, ClockCounterClockwise, Folders, GameController, List, Plus, ShieldCheck, VideoCamera } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
@@ -25,6 +25,7 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
+  const onMovements = pathname === "/movements";
   const onAdmin = pathname === "/admin";
 
   // The Admin link is admin-only UX gating (the /admin page + backend re-check are the real
@@ -95,6 +96,14 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
           >
             <GameController size={22} weight="duotone" />
             {open && <span className="text-sm font-medium">{t("nav.games")}</span>}
+          </Link>
+          <Link
+            to="/movements"
+            title={t("nav.movements")}
+            className={`${navBase} ${onMovements ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+          >
+            <Barbell size={22} weight="duotone" />
+            {open && <span className="text-sm font-medium">{t("nav.movements")}</span>}
           </Link>
           <Link
             to="/history"

@@ -288,7 +288,7 @@
 
 ### P0：地基
 
-- [ ] KG 切換 `squat_kg_v2` → `sports_kg_v3` + movement-aware 檢索參數（backend `config.py` 改指向 + 回歸測試）
+- [x] KG 切換 `squat_kg_v2` → `sports_kg_v3` + movement-aware 檢索參數（`config.py` 已改指向；`movement` 參數貫穿 services/router；`/api/knowledge/graph?movement=` + `/api/knowledge/faults?movement=`；backend coverage 99.5%；commit `23d1089f` + `3ea1f1fd`。附帶：Explore 頁 + MovementSelector 已上線可瀏覽 16 動作 KG，commit `835afbf2`）
 - [ ] Rep 切分 + per-rep metrics（膝/髖角度極值切 rep；決定 frame_metrics 保留策略——建議存 per-rep 摘要）
 - [ ] 非同步分析佇列（= 上方系統 P2 的 Celery/Redis 項）
 
@@ -306,6 +306,8 @@
 - [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
 - [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
 - [ ] 各個動作，相機擺放最適合的位置、角度
+- [ ] **（待 per-movement detector 上線後）全面泛化「分析流程」文案**：目前 studio header「Squat Analysis」、上傳提示「Drop a squat video」、「Analyze a squat」CTA、History 列「{view} squat」、chat intro「about your squat」等 ~26 處刻意保留 `squat`（偵測器僅支援深蹲，改掉會誤導使用者上傳非深蹲影片拿到錯結果）。偵測器多動作化後，把這批文案改成多動作用語（en + zhHant 皆需更新；品牌／landing 文案已於 commit `4d64e659` 泛化為 multi-exercise）。使用者 2026-07-17 指定：未來採「完全泛化」而非加註解。
+- [ ] **（待多動作分析上線後）修正 landing showcase 過度宣稱**：`landing.showcase.sub`（「reads the rest of the library, on real footage」）、`landing.showcase.title`（「One pipeline, the whole movement library」）、`Analyzing` 標籤目前暗示 pipeline 能分析全部動作，但 `MovementShowcase.tsx` 的 push-up/high-knee/sit-up clip 只有 MediaPipe pose tracking、無 fault 偵測（只有深蹲有）。分析真正多動作化後對齊；在那之前若要誠實化，改為「16 動作知識庫 + pose 感知，fault 分析從深蹲起步」（en + zhHant）。使用者 2026-07-17 標記為待辦。
 
 ### P3：感知升級
 
