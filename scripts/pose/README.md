@@ -34,7 +34,19 @@ python scripts/pose/run_pose_rule_detection.py \
 python scripts/pose/run_pose_rule_detection.py \
   --pose-json data/Squat/Unlabeled_Dataset/processed_poses/25195_3.json \
   --output-json results/single_detection.json
+
+# Select the movement detector explicitly (default: Squat; also supports "Overhead Press").
+# (illustrative path — no Overhead Press dataset is checked in yet)
+python scripts/pose/run_pose_rule_detection.py \
+  --pose-json path/to/overhead_press_pose.json \
+  --output-json results/single_detection.json \
+  --movement "Overhead Press"
 ```
+
+`--movement "<Name>"` picks which registered detector (`src/pose/movements/registry.py`) processes
+the pose JSON; it defaults to `Squat`. Currently `Squat` and `Overhead Press` are registered — OHP
+thresholds are spec-derived and not yet validated against labeled data (see
+`docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md` §8).
 
 ## Evaluation And Analysis
 

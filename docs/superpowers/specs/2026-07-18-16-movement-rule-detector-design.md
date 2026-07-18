@@ -1365,3 +1365,8 @@ These are stated rather than papered over, per the spec's honesty requirement:
 3. Wire each fault's `citation`/`citation_support` into the KG/RAG retrieval layer so the coaching
    chat can surface the grounding source, as the squat faults already do via `kg_query`.
 4. Validate thresholds against labeled data per movement before shipping analysis for that movement.
+
+**Status (2026-07-18):** Foundation shipped (movement registry + citations + behavior-preserving
+squat migration + Overhead Press) on branch `feat/movement-rule-detector-spec`. **OHP thresholds
+are spec-derived and unvalidated** — no labeled OHP data yet (§8.4). Remaining 14 movements follow
+as per-movement plans reusing this framework.
