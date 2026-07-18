@@ -312,6 +312,9 @@ class AnalyzeVideoFileTests(_TempConfigBase):
         self.assertEqual(kwargs["video_id"], "vid42")
         self.assertEqual(kwargs["graph_file"], self.kg_file)
         self.assertEqual(kwargs["rag_db_dir"], self.rag_dir)
+        # analyze retrieval is scoped to the transitional squat-only movement — the branch's core
+        # safety property; without it the multi-movement graph query would span all 16 movements.
+        self.assertEqual(kwargs["movement"], config.DEFAULT_ANALYSIS_MOVEMENT)
 
     def test_raises_when_process_video_returns_false(self) -> None:
         module_patch, detect_patch = self._patches(ok=False)
@@ -526,6 +529,8 @@ class LoadAnalysisTests(_TempConfigBase):
         # retrieval wired to the configured stores
         self.assertEqual(retr.call_args.kwargs["graph_file"], self.kg_file)
         self.assertEqual(retr.call_args.kwargs["rag_db_dir"], self.rag_dir)
+        # library retrieval is likewise scoped to the squat-only movement.
+        self.assertEqual(retr.call_args.kwargs["movement"], config.DEFAULT_ANALYSIS_MOVEMENT)
 
     def test_keeps_existing_retrievals(self) -> None:
         payload = _detection_payload(["knees_inward"], retrievals=[{"cached": True}])
@@ -559,7 +564,7 @@ class KnowledgeServiceTests(_TempConfigBase):
             out = knowledge.graph_context("knees inward", hops=2, max_seeds=3)
         self.assertEqual(out, {"nodes": []})
         rg.assert_called_once_with(
-            "knees inward", graph_file=self.kg_file, hops=2, max_seeds=3
+            "knees inward", graph_file=self.kg_file, hops=2, max_seeds=3, movement=None
         )
 
     def test_graph_context_defaults(self) -> None:
@@ -575,6 +580,13 @@ class KnowledgeServiceTests(_TempConfigBase):
             out = knowledge.rag_snippets("depth", top_k=3)
         self.assertEqual(out, {"query": "depth", "results": [{"text": "do x"}]})
         qv.assert_called_once_with("depth", db_dir=self.rag_dir, top_k=3)
+
+    def test_movement_faults_passthrough(self) -> None:
+        rows = [{"name": "Knee Valgus", "connectivity": 3}]
+        with mock.patch.object(knowledge, "list_movement_faults", return_value=rows) as lf:
+            out = knowledge.movement_faults("Overhead Press")
+        self.assertEqual(out, rows)
+        lf.assert_called_once_with(graph_file=self.kg_file, movement="Overhead Press")
 
 
 # --------------------------------------------------------------------- routers
@@ -772,7 +784,18 @@ class KnowledgeRouterTests(_TempConfigBase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"nodes": [1]})
         # The router now also threads the admin-tunable KG seed default through to the service.
-        gc.assert_called_once_with("knees", hops=2, max_seeds=5)
+        # `movement` defaults to None when the query param is omitted.
+        gc.assert_called_once_with("knees", hops=2, max_seeds=5, movement=None)
+
+    def test_graph_endpoint_forwards_movement(self) -> None:
+        with mock.patch.object(
+            knowledge, "graph_context", return_value={"nodes": []}
+        ) as gc:
+            resp = self.client.get(
+                "/api/knowledge/graph", params={"query": "knee valgus", "movement": "Squat"}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(gc.call_args.kwargs["movement"], "Squat")
 
     def test_graph_default_hops(self) -> None:
         with mock.patch.object(knowledge, "graph_context", return_value={}) as gc:
@@ -784,6 +807,17 @@ class KnowledgeRouterTests(_TempConfigBase):
         # empty query violates min_length=1
         resp = self.client.get("/api/knowledge/graph", params={"query": ""})
         self.assertEqual(resp.status_code, 422)
+
+    def test_faults_endpoint(self) -> None:
+        rows = [{"name": "Knee Valgus", "connectivity": 3}, {"name": "Bar Drift", "connectivity": 0}]
+        with mock.patch.object(knowledge, "movement_faults", return_value=rows) as mf:
+            resp = self.client.get("/api/knowledge/faults", params={"movement": "Overhead Press"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"movement": "Overhead Press", "faults": rows})
+        mf.assert_called_once_with("Overhead Press")
+
+    def test_faults_requires_movement(self) -> None:
+        self.assertEqual(self.client.get("/api/knowledge/faults").status_code, 422)
 
     def test_rag_endpoint(self) -> None:
         with mock.patch.object(

@@ -1,6 +1,6 @@
 # x-coach
 
-x-coach is an AI coaching research prototype for squat analysis. It connects video perception, rule-based biomechanics checks, lightweight classifiers, and local retrieval over project knowledge so visual signals can be turned into explainable coaching feedback.
+x-coach is an AI coaching research prototype. It analyzes squat form over a 16-movement biomechanics knowledge graph, connecting video perception, rule-based biomechanics checks, lightweight classifiers, and local retrieval over project knowledge so visual signals can be turned into explainable coaching feedback. (Video analysis is squat-only today; the knowledge graph and in-app Explore browser already span all 16 movements.)
 
 ## What This Project Does
 
@@ -10,7 +10,7 @@ x-coach is an AI coaching research prototype for squat analysis. It connects vid
 - Builds REHAB24-6 repetition-level skeleton features and correctness classifiers.
 - Detects common squat technique faults with interpretable pose rules.
 - Builds and queries a local RAG index from project notes, documents, and knowledge-graph content.
-- Provides knowledge-graph utilities for extracting, cleaning, auditing, and querying squat-domain concepts.
+- Provides knowledge-graph utilities for extracting, cleaning, auditing, and querying multi-movement biomechanics concepts (16 movements across 5 flagships + 11 general stubs).
 
 ## Project Layout
 
@@ -65,4 +65,4 @@ Command details live with the script directories:
 
 ## Project Goal
 
-Support explainable coaching feedback for squat analysis by linking visual signals, structured biomechanics knowledge, and retrieval-based guidance.
+Support explainable coaching feedback — squat analysis today, over a multi-movement biomechanics knowledge graph — by linking visual signals, structured biomechanics knowledge, and retrieval-based guidance.

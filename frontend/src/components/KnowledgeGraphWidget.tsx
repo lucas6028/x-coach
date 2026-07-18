@@ -34,8 +34,9 @@ function collect(retrieval: Retrieval | undefined): { center: string; neighbors:
   const neighbors: Neighbor[] = [];
   const push = (key: string, kind: Kind) => {
     for (const seed of results) {
-      const summary = (seed.summary as Record<string, { node_id: string }[]>) || {};
-      for (const n of summary[key] || []) neighbors.push({ label: n.node_id, kind });
+      const summary = (seed.summary as Record<string, { node_id: string; name?: string }[]>) || {};
+      // Prefer the bare `name` (v3 exposes scoped ids like "Squat:Knee Valgus"; render "Knee Valgus").
+      for (const n of summary[key] || []) neighbors.push({ label: n.name ?? n.node_id, kind });
     }
   };
   // Pushed in KIND_ORDER so same-kind nodes stay adjacent around the ring.

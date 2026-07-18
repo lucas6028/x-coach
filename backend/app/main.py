@@ -26,7 +26,7 @@ from backend.app.settings import chat_models, default_chat_model, get_settings
 
 app = FastAPI(
     title="x-coach API",
-    description="Explainable squat-coaching: pose perception + biomechanics rules + KG/RAG retrieval.",
+    description="Explainable movement coaching: pose perception + biomechanics rules + KG/RAG retrieval over a 16-movement graph (video analysis is squat-only today).",
     version="0.1.0",
 )
 

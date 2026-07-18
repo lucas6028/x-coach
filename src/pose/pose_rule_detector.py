@@ -671,6 +671,7 @@ def detect_pose_rules_from_payload(
     include_retrieval: bool = False,
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
+    movement: str | None = None,
 ) -> dict[str, Any]:
     metadata = payload.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -720,6 +721,7 @@ def detect_pose_rules_from_payload(
             result["detections"],
             graph_file=graph_file,
             rag_db_dir=rag_db_dir,
+            movement=movement,
         )
     return result
 
@@ -731,6 +733,7 @@ def detect_pose_rules_from_json(
     include_retrieval: bool = False,
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
+    movement: str | None = None,
 ) -> dict[str, Any]:
     path = Path(pose_json_path)
     return detect_pose_rules_from_payload(
@@ -740,6 +743,7 @@ def detect_pose_rules_from_json(
         include_retrieval=include_retrieval,
         graph_file=graph_file,
         rag_db_dir=rag_db_dir,
+        movement=movement,
     )
 
 
@@ -749,6 +753,7 @@ def retrieve_contexts_for_detections(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     top_k: int = 5,
+    movement: str | None = None,
 ) -> list[dict[str, Any]]:
     retrievals: list[dict[str, Any]] = []
     for detection in detections:
@@ -764,7 +769,7 @@ def retrieve_contexts_for_detections(
                 "results": query_vector_db(query, db_dir=rag_db_dir, top_k=top_k),
             }
         else:
-            context = retrieve_graph_context(query, graph_file=graph_file, hops=1, max_seeds=3)
+            context = retrieve_graph_context(query, graph_file=graph_file, hops=1, max_seeds=3, movement=movement)
         retrievals.append(
             {
                 "fault_id": detection.get("fault_id", ""),

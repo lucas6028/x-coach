@@ -5,6 +5,7 @@ import App from "./App";
 import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
+import Movements from "./pages/Movements";
 import Settings from "./pages/Settings";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminLogin from "./pages/admin/AdminLogin";
@@ -64,6 +65,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               element={
                 <RequireAuth>
                   <History />
+                </RequireAuth>
+              }
+            />
+            <Route
+              path="/movements"
+              element={
+                <RequireAuth>
+                  <Movements />
                 </RequireAuth>
               }
             />

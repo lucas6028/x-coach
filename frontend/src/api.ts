@@ -34,6 +34,7 @@ export interface Detection {
 
 export interface SubgraphNode {
   node_id: string;
+  name?: string;
   label: string;
 }
 export interface SubgraphEdge {
@@ -55,6 +56,13 @@ export interface RetrievalContext {
   results?: Array<Record<string, unknown>> | RagResult[];
   subgraph?: { nodes: SubgraphNode[]; edges: SubgraphEdge[] };
   query?: string;
+}
+
+// One fault a movement defines, with its 1-hop graph connectivity (0 = no linked
+// causes/corrections/risks to render yet).
+export interface MovementFault {
+  name: string;
+  connectivity: number;
 }
 
 export interface Retrieval {
@@ -398,8 +406,18 @@ export const api = {
 
   getAnalysis: (videoId: string) => getJSON<Analysis>(`/api/analysis/${videoId}`),
 
-  graph: (query: string) =>
-    getJSON<RetrievalContext>(`/api/knowledge/graph?query=${encodeURIComponent(query)}`),
+  graph: (query: string, movement?: string) =>
+    getJSON<RetrievalContext>(
+      `/api/knowledge/graph?query=${encodeURIComponent(query)}` +
+        (movement ? `&movement=${encodeURIComponent(movement)}` : "")
+    ),
+
+  // The complete, movement-scoped fault list (name + connectivity), enumerated by the graph's
+  // `movement` node attribute so no fault is hidden. Backs GET /api/knowledge/faults.
+  movementFaults: (movement: string) =>
+    getJSON<{ movement: string; faults: MovementFault[] }>(
+      `/api/knowledge/faults?movement=${encodeURIComponent(movement)}`
+    ),
 
   videoFileUrl: (videoId: string) => `/api/video-file/${videoId}`,
 
