@@ -41,7 +41,7 @@ export default function ResizeHandle({ onResize, onResizeStart, onResizeEnd, cla
       onMouseDown={handleMouseDown}
       role="separator"
       aria-orientation="vertical"
-      className={`shrink-0 w-1 cursor-col-resize bg-border-dark hover:bg-primary/60 active:bg-primary transition-colors ${className}`}
+      className={`shrink-0 w-1 cursor-col-resize bg-transparent hover:bg-primary/60 active:bg-primary transition-colors ${className}`}
     />
   );
 }

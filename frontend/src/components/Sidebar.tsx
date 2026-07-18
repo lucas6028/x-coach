@@ -1,4 +1,4 @@
-import { Barbell, ClockCounterClockwise, Folders, GameController, List, Plus, ShieldCheck, VideoCamera } from "@phosphor-icons/react";
+import { Barbell, ClockCounterClockwise, Folders, GameController, Plus, ShieldCheck, VideoCamera, X } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
@@ -8,17 +8,20 @@ interface Props {
   width: number;
   // Animate width changes (toggle) but not while the user is dragging the resize handle.
   animate: boolean;
-  onToggle: () => void;
   onOpenLibrary: () => void;
   // Start a fresh studio session (clears the current analysis / routes into the studio).
   onNewAnalysis: () => void;
+  // Mobile drawer only: when provided, the sidebar renders a brand + close row at the top and
+  // wires the ✕ button to it. The desktop rail omits this — its brand lives in the top navbar,
+  // and its collapse toggle lives there too (see Header).
+  onClose?: () => void;
 }
 
-// Labelled bar when `open`, slim icon rail when collapsed — mirrors demo/index.html.
-// The menu toggle lives in the top row so it stays reachable in either state.
-// Width is driven from the parent so it can be dragged to resize.
-// Account, language and theme controls live in the top-right Header, not here.
-export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary, onNewAnalysis }: Props) {
+// The navigation rail: labelled when `open`, a slim icon rail when collapsed. The brand lockup and
+// the collapse toggle now live in the full-width top navbar (Header), so this component is purely the
+// nav list + footer. The aside itself is borderless and shares the main canvas background; the
+// divider between the desktop rail and the content area is drawn by the wrapper in AppLayout.
+export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnalysis, onClose }: Props) {
   const { t } = useI18n();
   const { isAdmin } = useAuth();
   const { pathname } = useLocation();
@@ -35,39 +38,41 @@ export default function Sidebar({ open, width, animate, onToggle, onOpenLibrary,
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
   const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
   const navBase =
-    "flex items-center gap-3 px-3 py-3 rounded-lg transition-colors";
-  const navActive = "bg-primary/10 text-primary border border-primary/20";
+    "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors";
+  // Borderless, softly-tinted active pill (the reference's sidebar look) — no outline ring.
+  const navActive = "bg-primary/10 text-primary font-semibold";
   const navIdle = "text-muted hover:bg-content/5 hover:text-content";
   return (
     <aside
       style={{ width }}
-      className={`h-full shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between overflow-hidden ${
+      className={`h-full shrink-0 bg-background-dark flex flex-col justify-between overflow-hidden ${
         animate ? "transition-[width] duration-200 ease-in-out" : ""
       }`}
     >
       <div>
-        <div className="h-16 flex items-center gap-2 px-3 border-b border-border-dark">
-          <button
-            onClick={onToggle}
-            aria-label={open ? t("nav.hide") : t("nav.show")}
-            title={open ? t("nav.hide") : t("nav.show")}
-            className="shrink-0 w-10 h-10 flex items-center justify-center rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
-          >
-            <List size={20} />
-          </button>
-          {open && (
-            <div className="flex items-center min-w-0">
-              <img src="/icon.svg" alt="" className="w-8 h-8 rounded shrink-0" />
-              <span className="ml-2 font-bold tracking-wide truncate">X-Coach</span>
+        {/* Mobile drawer only: brand + close. The desktop rail keeps its top clear (brand is in the navbar). */}
+        {onClose && (
+          <div className="h-16 flex items-center gap-2 px-3 border-b border-border-dark">
+            <div className="flex items-center min-w-0 flex-1">
+              <img src="/icon.svg" alt="" className="w-9 h-9 rounded-xl shadow-accent ring-1 ring-black/5 shrink-0" />
+              <span className="ml-2.5 font-display font-bold tracking-tight truncate">X-Coach</span>
             </div>
-          )}
-        </div>
-        <nav className="flex flex-col gap-1 p-2">
+            <button
+              onClick={onClose}
+              aria-label={t("nav.hide")}
+              title={t("nav.hide")}
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-muted hover:bg-content/5 hover:text-content transition-colors"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        )}
+        <nav className="flex flex-col gap-1 p-2 pt-3">
           {/* Primary CTA: start a fresh analysis from anywhere in the app. */}
           <button
             onClick={onNewAnalysis}
             title={t("nav.newAnalysis")}
-            className={`${navBase} mb-1 bg-primary text-primary-content font-medium hover:bg-primary/90 active:scale-[0.99] ${
+            className={`${navBase} mb-1.5 bg-primary text-primary-content font-semibold shadow-accent hover:bg-primary/90 active:scale-[0.99] ${
               open ? "" : "justify-center"
             }`}
           >

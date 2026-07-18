@@ -214,16 +214,16 @@ describe("App — new analysis reset", () => {
 });
 
 describe("App — sidebar toggle", () => {
-  it("collapses the desktop sidebar when the toggle button is clicked", async () => {
+  it("collapses the desktop sidebar when the navbar toggle is clicked", async () => {
     const user = userEvent.setup();
     renderApp();
-    // The desktop sidebar now defaults to open, so both it and the (always-open)
-    // mobile drawer show the brand initially.
-    expect(screen.getAllByText("X-Coach").length).toBe(2);
-    // The desktop sidebar's hide-navigation toggle (first in DOM order).
+    // The brand now lives in the top navbar; the collapse state shows through the nav labels.
+    // The open desktop rail and the (always-open) mobile drawer both render them initially.
+    expect(screen.getAllByText("Analyse").length).toBe(2);
+    // The navbar's hide-navigation toggle (first in DOM order — the navbar precedes the drawer).
     const hideBtn = screen.getAllByRole("button", { name: /Hide navigation/i })[0];
     await user.click(hideBtn);
-    // After collapsing, only the mobile drawer shows the brand.
-    expect(screen.getAllByText("X-Coach").length).toBe(1);
+    // After collapsing, the desktop rail drops its labels; only the mobile drawer's remain.
+    expect(screen.getAllByText("Analyse").length).toBe(1);
   });
 });

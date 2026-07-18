@@ -3,12 +3,10 @@ import { useNavigate } from "react-router-dom";
 import type { Analysis } from "../api";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
-import ResizeHandle from "./ResizeHandle";
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-
-const SIDEBAR_MIN = 160;
-const SIDEBAR_MAX = 480;
+// Fixed expanded width — the sidebar is no longer drag-resizable; it only toggles
+// between this and the 64px icon rail.
+const SIDEBAR_WIDTH = 200;
 
 interface Props {
   children: ReactNode;
@@ -40,11 +38,9 @@ export default function AppLayout({
   initialSidebarOpen = true,
 }: Props) {
   const navigate = useNavigate();
-  // Desktop sidebar starts open but on the narrow side; the user can widen it via the drag handle.
+  // Desktop sidebar is a fixed-width rail; it only toggles between expanded and the icon rail.
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const [mobileNav, setMobileNav] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(200);
-  const [resizing, setResizing] = useState(false);
 
   // Off the studio there is no picker, so "Library" just routes into the studio.
   const openLibrary = onOpenLibrary ?? (() => navigate("/app"));
@@ -52,58 +48,61 @@ export default function AppLayout({
   const newAnalysis = onNewAnalysis ?? (() => navigate("/app"));
 
   return (
-    <div className="h-[100dvh] w-full flex bg-background-dark text-content overflow-hidden">
-      {/* Desktop: inline, resizable sidebar */}
-      <div className="hidden lg:flex shrink-0">
-        <Sidebar
-          open={sidebarOpen}
-          width={sidebarOpen ? sidebarWidth : 64}
-          animate={!resizing}
-          onToggle={() => setSidebarOpen((v) => !v)}
-          onOpenLibrary={openLibrary}
-          onNewAnalysis={newAnalysis}
-        />
-        {sidebarOpen && (
-          <ResizeHandle
-            onResize={(d) => setSidebarWidth((w) => clamp(w + d, SIDEBAR_MIN, SIDEBAR_MAX))}
-            onResizeStart={() => setResizing(true)}
-            onResizeEnd={() => setResizing(false)}
+    <div className="h-[100dvh] w-full flex flex-col bg-background-dark text-content overflow-hidden">
+      {/* Full-width top navbar, spanning both the sidebar and main columns (the reference layout).
+          It carries the brand and the desktop sidebar-collapse toggle. */}
+      <Header
+        analysis={analysis}
+        loading={loading}
+        title={title}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((v) => !v)}
+        onMenu={() => setMobileNav(true)}
+      />
+
+      {/* Below the navbar: the sidebar and main sit side by side, split by a vertical divider. */}
+      <div className="flex flex-1 min-h-0 min-w-0">
+        {/* Desktop: inline, fixed-width sidebar with a divider between it and the main content. */}
+        <div className="hidden lg:flex shrink-0 border-r border-border-dark">
+          <Sidebar
+            open={sidebarOpen}
+            width={sidebarOpen ? SIDEBAR_WIDTH : 64}
+            animate
+            onOpenLibrary={openLibrary}
+            onNewAnalysis={newAnalysis}
+          />
+        </div>
+
+        {/* Mobile: off-canvas drawer + backdrop (overlays the navbar too) */}
+        {mobileNav && (
+          <div
+            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            onClick={() => setMobileNav(false)}
           />
         )}
-      </div>
-
-      {/* Mobile: off-canvas drawer + backdrop */}
-      {mobileNav && (
         <div
-          className="fixed inset-0 z-30 bg-black/50 lg:hidden"
-          onClick={() => setMobileNav(false)}
-        />
-      )}
-      <div
-        className={`fixed inset-y-0 left-0 z-40 w-[270px] max-w-[80vw] transition-transform duration-200 ease-in-out lg:hidden ${
-          mobileNav ? "translate-x-0" : "-translate-x-full"
-        }`}
-      >
-        <Sidebar
-          open
-          width={270}
-          animate={false}
-          onToggle={() => setMobileNav(false)}
-          onOpenLibrary={() => {
-            setMobileNav(false);
-            openLibrary();
-          }}
-          onNewAnalysis={() => {
-            setMobileNav(false);
-            newAnalysis();
-          }}
-        />
-      </div>
+          className={`fixed inset-y-0 left-0 z-50 w-[270px] max-w-[80vw] bg-background-dark transition-transform duration-200 ease-in-out lg:hidden ${
+            mobileNav ? "translate-x-0" : "-translate-x-full"
+          }`}
+        >
+          <Sidebar
+            open
+            width={270}
+            animate={false}
+            onClose={() => setMobileNav(false)}
+            onOpenLibrary={() => {
+              setMobileNav(false);
+              openLibrary();
+            }}
+            onNewAnalysis={() => {
+              setMobileNav(false);
+              newAnalysis();
+            }}
+          />
+        </div>
 
-      <main className="flex-1 flex flex-col min-w-0 min-h-0">
-        <Header analysis={analysis} loading={loading} title={title} onMenu={() => setMobileNav(true)} />
-        {children}
-      </main>
+        <main className="flex-1 flex flex-col min-w-0 min-h-0">{children}</main>
+      </div>
     </div>
   );
 }

@@ -20,7 +20,6 @@ function renderSidebar(isAdmin: boolean, path = "/app") {
           open
           width={240}
           animate={false}
-          onToggle={vi.fn()}
           onOpenLibrary={vi.fn()}
           onNewAnalysis={vi.fn()}
         />

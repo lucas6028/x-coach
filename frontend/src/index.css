@@ -14,6 +14,11 @@
   --c-faint: 138 146 156;
   --c-track: 210 215 221;
   --c-fault: 183 121 31; /* amber, darkened for contrast on light canvas */
+  /* Soft, cool-tinted card elevation — the reference's borderless-white-card look.
+     Tinted toward slate (16 24 40) rather than pure black so shadows sit in the palette. */
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 24px -8px rgb(16 24 40 / 0.10);
+  --shadow-card-hover: 0 2px 6px rgb(16 24 40 / 0.07), 0 16px 34px -10px rgb(16 24 40 / 0.16);
+  --shadow-accent: 0 6px 16px -6px rgb(15 117 138 / 0.40); /* teal-tinted lift for the primary CTA */
 }
 
 .dark {
@@ -26,6 +31,11 @@
   --c-faint: 107 114 128;
   --c-track: 55 65 81;
   --c-fault: 245 185 69; /* amber #f5b945 for dark canvas */
+  /* On the dark canvas soft shadows all but vanish, so go deeper and lean on the card's
+     hairline border for separation. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.45), 0 12px 28px -12px rgb(0 0 0 / 0.60);
+  --shadow-card-hover: 0 2px 6px rgb(0 0 0 / 0.55), 0 18px 36px -14px rgb(0 0 0 / 0.70);
+  --shadow-accent: 0 6px 18px -6px rgb(15 117 138 / 0.55);
 }
 
 body {

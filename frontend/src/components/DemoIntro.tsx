@@ -1,4 +1,4 @@
-import { Brain, FilmSlate, Graph, PersonSimpleRun, WarningCircle, type Icon } from "@phosphor-icons/react";
+import { Brain, FilmSlate, Graph, PersonSimpleRun, Sparkle, WarningCircle, type Icon } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useI18n } from "../lib/i18n";
 import UploadDropzone from "./UploadDropzone";
@@ -77,21 +77,29 @@ export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, e
           </div>
         </div>
 
-        {/* Right: what the demo returns */}
+        {/* Right: what the demo returns — a dashboard-style section panel: a faintly
+            tinted icon-header strip over a divided list, lifted by a soft card shadow. */}
         <div className="lg:w-80 lg:shrink-0">
-          <p className="mb-3 font-mono text-xs uppercase tracking-wider text-faint">{t("demo.getTitle")}</p>
-          <div className="divide-y divide-border-dark overflow-hidden rounded-2xl border border-border-dark bg-surface-dark">
-            {STEPS.map((s) => (
-              <div key={s.titleKey} className="flex items-start gap-4 p-5">
-                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <s.Icon size={22} weight="duotone" />
-                </span>
-                <div className="min-w-0">
-                  <p className="font-medium text-content">{t(s.titleKey)}</p>
-                  <p className="mt-1 text-sm leading-snug text-muted">{t(s.bodyKey)}</p>
+          <div className="overflow-hidden rounded-2xl border border-border-dark bg-surface-dark shadow-card">
+            <div className="flex items-center gap-2.5 border-b border-border-dark bg-content/[0.02] px-5 py-4">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Sparkle size={18} weight="duotone" />
+              </span>
+              <p className="font-display text-sm font-semibold text-content">{t("demo.getTitle")}</p>
+            </div>
+            <div className="divide-y divide-border-dark">
+              {STEPS.map((s) => (
+                <div key={s.titleKey} className="flex items-start gap-4 p-5">
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <s.Icon size={22} weight="duotone" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-medium text-content">{t(s.titleKey)}</p>
+                    <p className="mt-1 text-sm leading-snug text-muted">{t(s.bodyKey)}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </div>
       </motion.div>

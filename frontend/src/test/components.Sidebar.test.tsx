@@ -7,52 +7,35 @@ import { I18nProvider } from "../lib/i18n";
 import { AuthProvider } from "../lib/auth";
 import { renderWithProviders } from "./renderWithProviders";
 
-describe("Sidebar — open", () => {
-  it("shows the X-Coach brand name when open", () => {
+describe("Sidebar — desktop rail (open)", () => {
+  const renderRail = () =>
     renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onToggle={vi.fn()} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
+      <Sidebar open={true} width={240} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
     );
-    expect(screen.getByText("X-Coach")).toBeInTheDocument();
-  });
 
   it("shows the nav labels when open", () => {
-    renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onToggle={vi.fn()} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
-    );
+    renderRail();
     expect(screen.getByText("Analyse")).toBeInTheDocument();
     expect(screen.getByText("Library")).toBeInTheDocument();
   });
 
   it("shows the version and tagline when open", () => {
-    renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onToggle={vi.fn()} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
-    );
+    renderRail();
     expect(screen.getByText("Prototype v0.1")).toBeInTheDocument();
     expect(screen.getByText("Pose · Rules · GraphRAG")).toBeInTheDocument();
   });
 
-  it("has a 'Hide navigation' toggle button when open", () => {
-    renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onToggle={vi.fn()} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
-    );
-    expect(screen.getByRole("button", { name: /Hide navigation/i })).toBeInTheDocument();
-  });
-
-  it("calls onToggle when the toggle button is clicked", async () => {
-    const user = userEvent.setup();
-    const onToggle = vi.fn();
-    renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onToggle={onToggle} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
-    );
-    await user.click(screen.getByRole("button", { name: /Hide navigation/i }));
-    expect(onToggle).toHaveBeenCalledOnce();
+  it("omits the brand and collapse toggle — those live in the top navbar", () => {
+    renderRail();
+    expect(screen.queryByText("X-Coach")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /navigation/i })).not.toBeInTheDocument();
   });
 
   it("calls onOpenLibrary when the Library button is clicked", async () => {
     const user = userEvent.setup();
     const onOpenLibrary = vi.fn();
     renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onToggle={vi.fn()} onOpenLibrary={onOpenLibrary} onNewAnalysis={vi.fn()} />
+      <Sidebar open={true} width={240} animate={false} onOpenLibrary={onOpenLibrary} onNewAnalysis={vi.fn()} />
     );
     await user.click(screen.getByRole("button", { name: /Library/i }));
     expect(onOpenLibrary).toHaveBeenCalledOnce();
@@ -62,7 +45,7 @@ describe("Sidebar — open", () => {
     const user = userEvent.setup();
     const onNewAnalysis = vi.fn();
     renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onToggle={vi.fn()} onOpenLibrary={vi.fn()} onNewAnalysis={onNewAnalysis} />
+      <Sidebar open={true} width={240} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={onNewAnalysis} />
     );
     await user.click(screen.getByRole("button", { name: /New analysis/i }));
     expect(onNewAnalysis).toHaveBeenCalledOnce();
@@ -81,7 +64,6 @@ describe("Sidebar — games hub active state", () => {
               open
               width={240}
               animate={false}
-              onToggle={vi.fn()}
               onOpenLibrary={vi.fn()}
               onNewAnalysis={vi.fn()}
             />
@@ -103,18 +85,31 @@ describe("Sidebar — games hub active state", () => {
   });
 });
 
-describe("Sidebar — collapsed", () => {
-  it("hides the brand name when collapsed", () => {
+describe("Sidebar — collapsed rail", () => {
+  it("hides the nav labels when collapsed", () => {
     renderWithProviders(
-      <Sidebar open={false} width={64} animate={false} onToggle={vi.fn()} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
+      <Sidebar open={false} width={64} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
     );
-    expect(screen.queryByText("X-Coach")).not.toBeInTheDocument();
+    expect(screen.queryByText("Analyse")).not.toBeInTheDocument();
+    expect(screen.queryByText("Prototype v0.1")).not.toBeInTheDocument();
+  });
+});
+
+describe("Sidebar — mobile drawer (onClose)", () => {
+  it("shows the brand when rendered as a drawer", () => {
+    renderWithProviders(
+      <Sidebar open width={270} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} onClose={vi.fn()} />
+    );
+    expect(screen.getByText("X-Coach")).toBeInTheDocument();
   });
 
-  it("has a 'Show navigation' toggle button when collapsed", () => {
+  it("calls onClose when the close button is clicked", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
     renderWithProviders(
-      <Sidebar open={false} width={64} animate={false} onToggle={vi.fn()} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
+      <Sidebar open width={270} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} onClose={onClose} />
     );
-    expect(screen.getByRole("button", { name: /Show navigation/i })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Hide navigation/i }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

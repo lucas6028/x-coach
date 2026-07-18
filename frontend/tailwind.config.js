@@ -37,6 +37,13 @@ export default {
         body: ["Noto Sans", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
       },
+      // Theme-aware elevation driven by CSS vars (see index.css) so cards lift the same
+      // way on the light and dark canvases.
+      boxShadow: {
+        card: "var(--shadow-card)",
+        "card-hover": "var(--shadow-card-hover)",
+        accent: "var(--shadow-accent)",
+      },
     },
   },
   plugins: [],
