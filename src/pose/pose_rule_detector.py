@@ -560,7 +560,6 @@ def detect_pose_rules_from_payload(
         frames = []
 
     fps = float(metadata.get("fps", 0.0) or 0.0)
-    metrics = compute_frame_metrics(frames, fps=fps if fps > 0 else 30.0)
     if pose_json_path is not None:
         view = estimate_view_for_pose(pose_json_path)
         view_payload = asdict(view)
@@ -571,13 +570,13 @@ def detect_pose_rules_from_payload(
         view_type = "unknown"
         view_confidence = 0.0
 
-    valid_frames = [metric for metric in metrics if metric.valid]
-    detections = detect_rule_segments(
-        metrics,
-        fps=fps if fps > 0 else 30.0,
-        view_type=view_type,
-        view_confidence=view_confidence,
-    )
+    from src.pose.movements import registry
+    from src.pose.movements.base import run_detector
+
+    detector = registry.get_detector(movement)
+    core, detections = run_detector(detector, frames, fps if fps > 0 else 30.0, view_type, view_confidence)
+
+    valid_frames = [c for c in core if c.valid]
     result = {
         "video_id": video_id or (pose_json_path.stem if pose_json_path else ""),
         "pose_json_path": str(pose_json_path) if pose_json_path else "",
@@ -587,13 +586,23 @@ def detect_pose_rules_from_payload(
             "total_frames": len(frames),
             "valid_frames": len(valid_frames),
             "valid_frame_ratio": round(len(valid_frames) / len(frames), 4) if frames else 0.0,
-            "lower_body_visibility_mean": round(float(np.mean([m.lower_body_visibility for m in metrics])), 4)
-            if metrics
+            "lower_body_visibility_mean": round(float(np.mean([c.lower_body_visibility for c in core])), 4)
+            if core
             else 0.0,
         },
         "detections": [asdict(detection) for detection in detections],
         "retrievals": [],
-        "frame_metrics": [asdict(metric) for metric in metrics],
+        "frame_metrics": [
+            {
+                "frame_index": c.frame_index,
+                "time": c.time,
+                "phase": c.phase,
+                "valid": c.valid,
+                "lower_body_visibility": c.lower_body_visibility,
+                **c.metrics,
+            }
+            for c in core
+        ],
     }
     if include_retrieval:
         result["retrievals"] = retrieve_contexts_for_detections(
