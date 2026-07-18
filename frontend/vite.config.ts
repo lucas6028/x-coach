@@ -8,8 +8,16 @@ export default defineConfig({
     port: 5173,
     // LIFF endpoints must be HTTPS: in dev the app is exposed through an ngrok tunnel
     // (see docs/line-login-liff-setup.md). Vite blocks unknown Host headers by default;
-    // allow the tunnel domains so the LIFF browser can reach the dev server.
-    allowedHosts: [".ngrok-free.app", ".ngrok.app", ".ngrok.dev"],
+    // allow every domain family ngrok hands out (free-tier tunnels come from both
+    // ngrok-free.app AND ngrok-free.dev, legacy ones from ngrok.io) so the LIFF browser
+    // can reach the dev server. A leading dot matches all subdomains.
+    allowedHosts: [
+      ".ngrok-free.app",
+      ".ngrok-free.dev",
+      ".ngrok.app",
+      ".ngrok.dev",
+      ".ngrok.io",
+    ],
     proxy: {
       "/api": {
         target: "http://localhost:8000",
