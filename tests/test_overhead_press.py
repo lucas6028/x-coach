@@ -35,11 +35,19 @@ def _elbow_xy(
     return mx + d * perp[0], my + d * perp[1]
 
 
-def ohp_frame(elbow_angle: float, wrist_y: float, shoulder_y: float = 0.4, frame_index: int = 0) -> dict:
+def ohp_frame(
+    elbow_angle: float,
+    wrist_y: float,
+    shoulder_y: float = 0.4,
+    frame_index: int = 0,
+    shoulder_dx: float = 0.0,
+) -> dict:
     lm = [{"x": 0.5, "y": 0.5, "z": 0.0, "visibility": 1.0} for _ in range(33)]
     # shoulders 11/12, elbows 13/14, wrists 15/16, hips 23/24, ears 7/8
-    left_shoulder = (0.45, shoulder_y)
-    right_shoulder = (0.55, shoulder_y)
+    # shoulder_dx shifts both shoulders' x while hips stay put, simulating a
+    # shoulders-behind-hips back-lean (positive torso_lean_signed_deg).
+    left_shoulder = (0.45 + shoulder_dx, shoulder_y)
+    right_shoulder = (0.55 + shoulder_dx, shoulder_y)
     left_wrist = (0.44, wrist_y)
     right_wrist = (0.56, wrist_y)
     left_elbow = _elbow_xy(left_shoulder, left_wrist, elbow_angle, "left")
@@ -126,3 +134,22 @@ class OverheadPressRulesTests(unittest.TestCase):
         frames = [ohp_frame(160, wrist_y=0.15, frame_index=i) for i in range(12)]
         ids = {d.fault_id for d in self._run(frames, view="front")}
         self.assertNotIn("ohp_asymmetric_press", ids)
+
+    def test_back_lean_flagged(self) -> None:
+        # Same setup -> press -> lockout -> lower shape as the lockout tests, but with
+        # shoulders shifted +0.15 in x on every frame (hips fixed) so torso_lean_signed_deg
+        # is well past the 15 deg threshold for the press/lockout portion of the rep.
+        frames = ([ohp_frame(90, 0.45, frame_index=i, shoulder_dx=0.15) for i in range(4)]
+                  + [ohp_frame(178, 0.15, frame_index=i + 4, shoulder_dx=0.15) for i in range(6)]
+                  + [ohp_frame(90, 0.45, frame_index=i + 10, shoulder_dx=0.15) for i in range(4)])
+        ids = {d.fault_id for d in self._run(frames)}
+        self.assertIn("ohp_lumbar_hyperextension", ids)
+
+    def test_upright_not_flagged(self) -> None:
+        # Identical rep shape with shoulder_dx=0.0 (shoulders directly above hips
+        # throughout) must not trip the back-lean rule.
+        frames = ([ohp_frame(90, 0.45, frame_index=i) for i in range(4)]
+                  + [ohp_frame(178, 0.15, frame_index=i + 4) for i in range(6)]
+                  + [ohp_frame(90, 0.45, frame_index=i + 10) for i in range(4)])
+        ids = {d.fault_id for d in self._run(frames)}
+        self.assertNotIn("ohp_lumbar_hyperextension", ids)
