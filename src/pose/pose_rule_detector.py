@@ -769,11 +769,18 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--include-frames", action="store_true")
     parser.add_argument("--no-retrieval", action="store_true", help="Skip KG/RAG retrieval context.")
+    parser.add_argument(
+        "--movement",
+        default="Squat",
+        help="Canonical movement name to detect (e.g. 'Squat', 'Overhead Press').",
+    )
     args = parser.parse_args()
 
     summary_rows: list[dict[str, Any]] = []
     if args.pose_json is not None:
-        result = detect_pose_rules_from_json(args.pose_json, include_retrieval=not args.no_retrieval)
+        result = detect_pose_rules_from_json(
+            args.pose_json, include_retrieval=not args.no_retrieval, movement=args.movement
+        )
         output_path = args.output_json or args.output_dir / f"{args.pose_json.stem}.json"
         write_detection_json(output_path, result, include_frames=args.include_frames)
         for detection in result["detections"]:
@@ -789,6 +796,7 @@ def main() -> None:
                 request.pose_json_path,
                 video_id=request.video_id,
                 include_retrieval=not args.no_retrieval,
+                movement=args.movement,
             )
             write_detection_json(request.output_path, result, include_frames=args.include_frames)
             for detection in result["detections"]:

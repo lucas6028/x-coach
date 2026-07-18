@@ -29,3 +29,22 @@ class MovementRegistryTests(unittest.TestCase):
         _, new = run_detector(registry.get_detector("Squat"), frames, 30.0, "rear", 0.8)
         self.assertEqual([d.fault_id for d in legacy], [d.fault_id for d in new])
         self.assertEqual([round(d.severity, 4) for d in legacy], [round(d.severity, 4) for d in new])
+
+    def test_payload_routes_to_named_movement(self) -> None:
+        from src.pose.pose_rule_detector import detect_pose_rules_from_payload
+        from tests.test_overhead_press import ohp_frame
+
+        frames = [ohp_frame(elbow_angle=140, wrist_y=0.30, frame_index=i) for i in range(12)]
+        payload = {"metadata": {"fps": 30.0}, "frames": frames}
+        result = detect_pose_rules_from_payload(payload, movement="Overhead Press")
+        ids = {d["fault_id"] for d in result["detections"]}
+        self.assertIn("ohp_incomplete_lockout", ids)
+
+    def test_payload_unknown_movement_raises(self) -> None:
+        from src.pose.pose_rule_detector import detect_pose_rules_from_payload
+        from tests.test_overhead_press import ohp_frame
+
+        frames = [ohp_frame(elbow_angle=140, wrist_y=0.30, frame_index=i) for i in range(12)]
+        payload = {"metadata": {"fps": 30.0}, "frames": frames}
+        with self.assertRaises(KeyError):
+            detect_pose_rules_from_payload(payload, movement="No Such Movement")
