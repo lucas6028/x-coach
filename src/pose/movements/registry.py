@@ -18,3 +18,4 @@ def get_detector(movement: str | None) -> MovementDetector:
 
 # Import movement modules for their registration side effects.
 from src.pose.movements import squat  # noqa: E402,F401
+from src.pose.movements import overhead_press  # noqa: E402,F401

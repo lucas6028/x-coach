@@ -30,3 +30,29 @@ class OverheadPressMetricsTests(unittest.TestCase):
                   + [ohp_frame(90, 0.45, frame_index=i + 8) for i in range(4)])
         phases = ohp_assign_phases(ohp_compute_raw(frames, 30.0))
         self.assertIn("lockout", phases)
+
+
+class OverheadPressRulesTests(unittest.TestCase):
+    def _run(self, frames, view="side", vc=0.8):
+        from src.pose.movements import registry
+        from src.pose.movements.base import run_detector
+        return run_detector(registry.get_detector("Overhead Press"), frames, 30.0, view, vc)[1]
+
+    def test_incomplete_lockout_flagged(self) -> None:
+        frames = ([ohp_frame(90, 0.45, frame_index=i) for i in range(4)]
+                  + [ohp_frame(120, 0.30, frame_index=i + 4) for i in range(6)]   # elbows never extend
+                  + [ohp_frame(90, 0.45, frame_index=i + 10) for i in range(4)])
+        ids = {d.fault_id for d in self._run(frames)}
+        self.assertIn("ohp_incomplete_lockout", ids)
+
+    def test_full_lockout_not_flagged(self) -> None:
+        frames = ([ohp_frame(90, 0.45, frame_index=i) for i in range(4)]
+                  + [ohp_frame(178, 0.12, frame_index=i + 4) for i in range(6)]
+                  + [ohp_frame(90, 0.45, frame_index=i + 10) for i in range(4)])
+        ids = {d.fault_id for d in self._run(frames)}
+        self.assertNotIn("ohp_incomplete_lockout", ids)
+
+    def test_lockout_rule_carries_citation(self) -> None:
+        frames = [ohp_frame(120, 0.30, frame_index=i) for i in range(12)]
+        det = next((d for d in self._run(frames) if d.fault_id == "ohp_incomplete_lockout"), None)
+        assert det is not None and det.citation and det.citation_support
