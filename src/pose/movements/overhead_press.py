@@ -98,6 +98,11 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
 
         shoulder_mid = midpoint(points, LEFT_SHOULDER, RIGHT_SHOULDER, dims=2)
         hip_mid = midpoint(points, LEFT_HIP, RIGHT_HIP, dims=2)
+        # Facing assumption: this sign convention treats the subject's anterior direction
+        # as +x (shoulders drifting toward +x relative to the hips reads as a backward
+        # lean). A subject facing the opposite way inverts the sign of every reading below.
+        # This is a known monocular limitation -- neither the sign nor the back-lean
+        # threshold (see rule_excessive_back_lean) has been validated on real data.
         if shoulder_mid is not None and hip_mid is not None:
             torso_lean_signed_deg = float(
                 np.degrees(
@@ -313,10 +318,14 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
 
 def rule_excessive_back_lean(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Flag frames where the trunk leans backward past 15 deg past vertical, the
-    compensation historically linked to lower-back injury in overhead pressing."""
+    compensation historically linked to lower-back injury in overhead pressing.
+    Per spec, back-lean is assessed at/after mid-press, so the mask is restricted to
+    the press/lockout phases."""
     observable_lean = ctx.view_type in {"side", "front_oblique"}
+    back_lean_phases = {"press", "lockout"}
     lean_mask = [
         frame.valid
+        and frame.phase in back_lean_phases
         and np.isfinite(frame.m("torso_lean_signed_deg"))
         and frame.m("torso_lean_signed_deg") > 15.0
         for frame in core
@@ -359,10 +368,17 @@ def rule_excessive_back_lean(core: list[CoreFrame], ctx: RuleContext) -> list[Po
 def rule_asymmetric_press(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Flag frames where one wrist presses meaningfully higher than the other (normalized by
     shoulder width), a proxy for the scapular/shoulder-girdle asymmetry (scapular dyskinesis)
-    linked to elevated shoulder-injury risk."""
+    linked to elevated shoulder-injury risk. Per spec, asymmetric press is assessed at/near
+    lockout, so the mask is restricted to lockout-phase frames -- falling back to
+    press+lockout when a rep has no lockout-phase frames at all (e.g. a weak/incomplete
+    lockout window), so it still gets evaluated instead of silently never firing."""
     observable_asymmetry = ctx.view_type in {"front", "rear"}
+    asymmetry_phases = (
+        {"lockout"} if any(frame.phase == "lockout" for frame in core) else {"press", "lockout"}
+    )
     asymmetry_mask = [
         frame.valid
+        and frame.phase in asymmetry_phases
         and np.isfinite(frame.m("wrist_height_asymmetry"))
         and frame.m("wrist_height_asymmetry") > 0.15
         for frame in core

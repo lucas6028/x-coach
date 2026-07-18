@@ -6,7 +6,7 @@ from typing import Callable, Sequence
 
 import numpy as np
 
-from src.pose.geometry import centered_median, contiguous_true_segments  # noqa: F401
+from src.pose.geometry import centered_median
 from src.pose.pose_rule_detector import PoseRuleDetection
 
 
