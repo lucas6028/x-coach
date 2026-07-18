@@ -83,6 +83,14 @@ class PoseRuleDetectorTests(unittest.TestCase):
         self.assertIsInstance(shallow.evidence["primary_value"], (int, float))
         self.assertIsInstance(shallow.evidence["primary_threshold"], (int, float))
 
+    def test_detection_carries_citation_metadata(self) -> None:
+        frames = [frame(frame_index=i) for i in range(12)]
+        metrics = compute_frame_metrics(frames, fps=30.0)
+        detections = detect_rule_segments(metrics, fps=30.0, view_type="rear", view_confidence=0.8)
+        inward = next(d for d in detections if d.fault_id == "knees_inward")
+        assert inward.citation.startswith("Ford KR")
+        assert "73%" in inward.citation_support or "abduction" in inward.citation_support.lower()
+
     def test_persistence_filter_suppresses_single_frame_spike(self) -> None:
         base = FrameMetrics(
             frame_index=0,

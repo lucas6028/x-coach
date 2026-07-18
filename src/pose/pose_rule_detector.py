@@ -90,6 +90,8 @@ class PoseRuleDetection:
     peak_frame: int
     phase: str
     evidence: dict[str, float | int | str]
+    citation: str = ""
+    citation_support: str = ""
 
 
 @dataclass(frozen=True)
@@ -413,6 +415,8 @@ def build_detection(
     confidence: float,
     observability: str,
     evidence: dict[str, float | int | str],
+    citation: str = "",
+    citation_support: str = "",
 ) -> PoseRuleDetection:
     finite_scores = np.asarray(score_values, dtype=np.float32)
     if finite_scores.size and np.isfinite(finite_scores).any():
@@ -439,6 +443,8 @@ def build_detection(
         peak_frame=peak.frame_index,
         phase=dominant_phase(segment_metrics),
         evidence=evidence,
+        citation=citation,
+        citation_support=citation_support,
     )
 
 
@@ -483,6 +489,11 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": round(min_ratio, 4),
                     "primary_threshold": 0.82,
                 },
+                citation="Ford KR, Nguyen AD, Dischiavi SL, Hegedus EJ, Zuk EF, Taylor JB. (2015). "
+                         "An evidence-based review of hip-focused neuromuscular exercise interventions "
+                         "to address dynamic lower extremity valgus. Open Access J Sports Med. PMC4556293.",
+                citation_support="Knee abduction moment predicted future ACL injury risk with 73% "
+                                 "sensitivity and 78% specificity in young female athletes.",
             )
         )
 
@@ -518,6 +529,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": round(max_ratio, 4),
                     "primary_threshold": KNEE_FORWARD_MILD,
                 },
+                citation="Zellmer M, et al. (2019). Patellar tendon stress between two variations "
+                         "of the forward step lunge. J Sport Health Sci. PMC6523035.",
+                citation_support="Moving the knee in front of the toes increased peak patellar "
+                                 "tendon stress by 11.1% and peak knee extension moment by 25.8% (p<0.001).",
             )
         )
     if not observable_side:
@@ -539,6 +554,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                         "view_type": view_type,
                         "view_confidence": round(view_confidence, 4),
                     },
+                    citation="Zellmer M, et al. (2019). Patellar tendon stress between two variations "
+                             "of the forward step lunge. J Sport Health Sci. PMC6523035.",
+                    citation_support="Moving the knee in front of the toes increased peak patellar "
+                                     "tendon stress by 11.1% and peak knee extension moment by 25.8% (p<0.001).",
                 )
             )
 
@@ -585,6 +604,11 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": primary_value,
                     "primary_threshold": primary_threshold,
                 },
+                citation="Hartmann H, Wirth K, Klusemann M. (2013). Analysis of the load on the knee "
+                         "joint and vertebral column with changes in squatting depth and weight load. "
+                         "Sports Medicine 43(10):993-1008. PMID 23821469.",
+                citation_support="Half and quarter squat training with heavy loads favors long-term "
+                                 "degenerative changes in the knee and spinal joints versus deep squats.",
             )
         )
 
@@ -615,6 +639,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": round(max_lean, 2),
                     "primary_threshold": 35.0,
                 },
+                citation="Moreira VM, et al. (2023). Analysis of Muscle Strength and Electromyographic "
+                         "Activity during Different Deadlift Positions. Muscles. PMC12225233.",
+                citation_support="Leaning the trunk forward raises spinal flexion torque, requiring "
+                                 "higher erector spinae activation and strength to resist trunk flexion.",
             )
         )
 
@@ -656,6 +684,12 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": round(max_lift, 4),
                     "primary_threshold": 0.015,
                 },
+                citation="Mata AJ, Hayashi H, Moreno PA, Dudley RI, Sorenson EA. (2021). Hip Flexion "
+                         "Angles During Supine Range of Motion and Bodyweight Squats. Int J Exerc Sci "
+                         "14(1):912-918.",
+                citation_support="Heel elevation increased ankle excursion and squat depth (p<0.001); "
+                                 "reduced dorsiflexion mobility can lead to compensatory joint moments "
+                                 "up the kinetic chain, risking injury.",
             )
         )
 
