@@ -9,7 +9,7 @@ from src.pose.geometry import (
     LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility, mean_finite,
-    contiguous_true_segments, severity_from_range,
+    contiguous_true_segments, severity_from_range, distance,
 )
 from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
 from src.pose.movements import registry
@@ -46,6 +46,7 @@ OHP_METRIC_KEYS: tuple[str, ...] = (
     "wrist_above_shoulder",
     "torso_lean_signed_deg",
     "elbow_height_asymmetry",
+    "wrist_height_asymmetry",
     "shoulder_ear_gap",
 )
 
@@ -117,6 +118,16 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
             else np.nan
         )
 
+        shoulder_width = distance(points, LEFT_SHOULDER, RIGHT_SHOULDER, dims=2)
+        wrist_height_asymmetry = (
+            abs(left_wrist_y - right_wrist_y) / shoulder_width
+            if np.isfinite(left_wrist_y)
+            and np.isfinite(right_wrist_y)
+            and np.isfinite(shoulder_width)
+            and shoulder_width > 1e-6
+            else np.nan
+        )
+
         left_ear_y = _y(points, LEFT_EAR)
         right_ear_y = _y(points, RIGHT_EAR)
         left_gap = left_shoulder_y - left_ear_y if np.isfinite(left_ear_y) else np.nan
@@ -135,6 +146,7 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
                 "wrist_above_shoulder": wrist_above_shoulder,
                 "torso_lean_signed_deg": torso_lean_signed_deg,
                 "elbow_height_asymmetry": elbow_height_asymmetry,
+                "wrist_height_asymmetry": wrist_height_asymmetry,
                 "shoulder_ear_gap": shoulder_ear_gap,
             }
         )
@@ -191,21 +203,20 @@ def ohp_assign_phases(raw: list[dict]) -> list[str]:
     return phases
 
 
-# Wrist height (relative to shoulder) that counts as "meaningfully cleared the shoulder" at
-# lockout; negative because wrist_above_shoulder is negative when the wrist rises above the
-# shoulder line. NOTE: fixture-calibrated (see tests.test_overhead_press.ohp_frame -- its
-# elbow lands at a fixed shoulder_y + 0.15 regardless of the caller's `elbow_angle` arg, so
-# avg_elbow_angle never leaves a ~0-10 deg band and can't be compared against the literature's
-# ~165 deg lockout threshold in unit tests). Detection is therefore keyed on wrist height, not
-# elbow angle; the elbow-angle severity ramp below still runs but saturates on this fixture.
-# Flagged for human confirmation of the production threshold once checked against real video.
-WRIST_CLEAR_THRESHOLD = -0.20
+def _worse_elbow_angle(frame: CoreFrame) -> float:
+    """The more-limiting (smaller) of the two elbow angles for a frame, per spec's
+    "take the worse of the two arms" rule; NaN if neither side is finite."""
+    left = frame.m("left_elbow_angle")
+    right = frame.m("right_elbow_angle")
+    finite = [value for value in (left, right) if np.isfinite(value)]
+    return min(finite) if finite else np.nan
 
 
 def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
-    """Flag reps that never reach a stable overhead lockout: the wrists don't rise far
-    enough above the shoulders. Evaluated over the `lockout` phase, or a window around the
-    highest wrist position when no `lockout` phase is present."""
+    """Flag reps that never reach a stable overhead lockout: the worse (more bent) elbow's
+    peak extension stays below ~160 deg, or the wrists never clear the shoulders at all.
+    Evaluated over the `lockout` phase, or a window around the highest wrist position when
+    no `lockout` phase is present."""
     observable_alignment = ctx.view_type in {"side", "front", "front_oblique"}
 
     lockout_indices = {i for i, frame in enumerate(core) if frame.valid and frame.phase == "lockout"}
@@ -221,30 +232,54 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
             window_end = min(len(core) - 1, peak_index + half_window)
             lockout_indices = set(range(window_start, window_end + 1))
 
-    lockout_mask = [
-        index in lockout_indices
-        and frame.valid
-        and np.isfinite(frame.m("wrist_above_shoulder"))
-        and frame.m("wrist_above_shoulder") > WRIST_CLEAR_THRESHOLD
-        for index, frame in enumerate(core)
-    ]
+    lockout_mask = []
+    for index, frame in enumerate(core):
+        if index not in lockout_indices or not frame.valid:
+            lockout_mask.append(False)
+            continue
+        worse_elbow = _worse_elbow_angle(frame)
+        wrist = frame.m("wrist_above_shoulder")
+        elbow_flag = np.isfinite(worse_elbow) and worse_elbow < 160.0
+        wrist_flag = np.isfinite(wrist) and wrist > 0.0
+        lockout_mask.append(elbow_flag or wrist_flag)
 
     detections: list[PoseRuleDetection] = []
     for start, end in contiguous_true_segments(lockout_mask, ctx.min_frames):
         segment = core[start : end + 1]
-        elbow_values = [frame.m("avg_elbow_angle") for frame in segment]
+        worse_elbow_values = [_worse_elbow_angle(frame) for frame in segment]
         wrist_values = [frame.m("wrist_above_shoulder") for frame in segment]
-        peak_elbow = float(np.nanmax(elbow_values)) if any(np.isfinite(v) for v in elbow_values) else np.nan
-        max_wrist = float(np.nanmax(wrist_values))  # least-cleared (worst) wrist height in the segment
-        severity = (
-            severity_from_range(peak_elbow, 165.0, 140.0, lower_is_worse=True)
-            if np.isfinite(peak_elbow)
-            else 0.0
+        peak_worse_elbow = (
+            float(np.nanmax(worse_elbow_values))
+            if any(np.isfinite(v) for v in worse_elbow_values)
+            else np.nan
         )
+        max_wrist = (
+            float(np.nanmax(wrist_values)) if any(np.isfinite(v) for v in wrist_values) else np.nan
+        )
+
+        if np.isfinite(peak_worse_elbow):
+            severity = severity_from_range(peak_worse_elbow, 160.0, 140.0, lower_is_worse=True)
+            primary_label = "peak worse-arm elbow angle"
+            primary_value = round(peak_worse_elbow, 2)
+            primary_threshold = 160.0
+        elif np.isfinite(max_wrist):
+            # Flagged only by the wrist-never-clears-shoulder condition (no finite elbow
+            # reading in the segment) -- drive severity off how far below the shoulder line
+            # the wrist stayed instead.
+            severity = severity_from_range(max_wrist, 0.0, 0.15, lower_is_worse=False)
+            primary_label = "wrist height above shoulder"
+            primary_value = round(max_wrist, 4)
+            primary_threshold = 0.0
+        else:
+            severity = 0.0
+            primary_label = "peak worse-arm elbow angle"
+            primary_value = 0.0
+            primary_threshold = 160.0
+
         detections.append(
             build_detection(
                 fault_id="ohp_incomplete_lockout",
-                fault_name="Incomplete Lockout at the Top",
+                fault_name="Incomplete lockout at the top",
                 kg_query="Incomplete Elbow Lockout",
                 retrieval_mode="kg",
                 segment_metrics=segment,
@@ -253,13 +288,13 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
                 confidence=severity * (1.0 if observable_alignment else 0.65),
                 observability="high" if observable_alignment else "medium",
                 evidence={
-                    "max_wrist_above_shoulder": round(max_wrist, 4),
-                    "wrist_clear_threshold": WRIST_CLEAR_THRESHOLD,
-                    "peak_avg_elbow_angle": round(peak_elbow, 2) if np.isfinite(peak_elbow) else 0.0,
-                    "elbow_threshold": 165.0,
-                    "primary_label": "wrist height above shoulder",
-                    "primary_value": round(max_wrist, 4),
-                    "primary_threshold": WRIST_CLEAR_THRESHOLD,
+                    "peak_worse_elbow_angle": round(peak_worse_elbow, 2) if np.isfinite(peak_worse_elbow) else 0.0,
+                    "elbow_threshold": 160.0,
+                    "max_wrist_above_shoulder": round(max_wrist, 4) if np.isfinite(max_wrist) else 0.0,
+                    "wrist_threshold": 0.0,
+                    "primary_label": primary_label,
+                    "primary_value": primary_value,
+                    "primary_threshold": primary_threshold,
                 },
                 citation="Evangelista P, Rum L, Picerno P, Biscarini A. (2025). Decoding the Contribution "
                          "of Shoulder and Elbow Mechanics to Barbell Kinematics and the Sticking Region in "
@@ -268,8 +303,9 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
                 citation_support="Elbow extensors contribute minimally in early lift phases but become "
                                  "dominant near full extension, and the lift is defined complete only "
                                  "\"when the elbow is fully extended … and the barbell reaches its final "
-                                 "position\" -- so a rep stopping short of full elbow extension (here proxied "
-                                 "by wrist height) omits the lockout that defines a completed press.",
+                                 "position\" -- so a rep stopping short of full elbow extension (peak worse-arm "
+                                 "extension < ~160 deg, vs full lockout ~175-180 deg) omits the lockout that "
+                                 "defines a completed press.",
             )
         )
     return detections
@@ -278,7 +314,7 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
 def rule_excessive_back_lean(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Flag frames where the trunk leans backward past 15 deg past vertical, the
     compensation historically linked to lower-back injury in overhead pressing."""
-    observable_lean = ctx.view_type in {"side", "front_oblique", "rear_oblique"}
+    observable_lean = ctx.view_type in {"side", "front_oblique"}
     lean_mask = [
         frame.valid
         and np.isfinite(frame.m("torso_lean_signed_deg"))
@@ -293,9 +329,9 @@ def rule_excessive_back_lean(core: list[CoreFrame], ctx: RuleContext) -> list[Po
         severity = severity_from_range(max_lean, 15.0, 35.0, lower_is_worse=False)
         detections.append(
             build_detection(
-                fault_id="ohp_excessive_back_lean",
-                fault_name="Excessive Back-Lean",
-                kg_query="Excessive Back Lean",
+                fault_id="ohp_lumbar_hyperextension",
+                fault_name="Excessive back-lean / lumbar hyperextension (rib flare)",
+                kg_query="Lumbar Hyperextension",
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=values,
@@ -309,36 +345,34 @@ def rule_excessive_back_lean(core: list[CoreFrame], ctx: RuleContext) -> list[Po
                     "primary_value": round(max_lean, 2),
                     "primary_threshold": 15.0,
                 },
-                citation="Gregori P, La Bruna M, Papalia GF, Giurazza G, Caria C, Paciotti M, Russo F, "
-                         "Franceschetti E, Longo UG, Papalia R. (2026). Spine alignment influences shoulder "
-                         "range of motion and scapular orientation: A systematic review from the FP-UCBM "
-                         "Shoulder Study Group. J Exp Orthop. PMC13086636.",
-                citation_support="Spine alignment measurably shapes shoulder mechanics: \"greater thoracic "
-                                 "kyphosis is associated with … reduced shoulder abduction … and flexion,\" "
-                                 "so a lifter substituting trunk lean for shoulder range of motion is "
-                                 "trading a spine-alignment fault for pressing mechanics.",
+                citation="Soriano MA, Suchomel TJ, Comfort P. \"Weightlifting Overhead Pressing Derivatives: "
+                         "A Review of the Literature.\" Sports Med (2019) PMC6548056.",
+                citation_support="The review recounts the press degenerating into the \"continental press\" "
+                                 "with a quick backbend, and that a long list of lower-back injuries from the "
+                                 "accentuated backbend drove the IWF to eliminate the press -- naming lumbar "
+                                 "hyperextension as the lower-back injury mechanism in overhead pressing.",
             )
         )
     return detections
 
 
 def rule_asymmetric_press(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
-    """Flag frames where one elbow presses meaningfully higher than the other,
-    a proxy for the scapular/shoulder-girdle asymmetry (scapular dyskinesis) linked
-    to elevated shoulder-injury risk."""
+    """Flag frames where one wrist presses meaningfully higher than the other (normalized by
+    shoulder width), a proxy for the scapular/shoulder-girdle asymmetry (scapular dyskinesis)
+    linked to elevated shoulder-injury risk."""
     observable_asymmetry = ctx.view_type in {"front", "rear"}
     asymmetry_mask = [
         frame.valid
-        and np.isfinite(frame.m("elbow_height_asymmetry"))
-        and frame.m("elbow_height_asymmetry") > 0.05
+        and np.isfinite(frame.m("wrist_height_asymmetry"))
+        and frame.m("wrist_height_asymmetry") > 0.15
         for frame in core
     ]
     detections: list[PoseRuleDetection] = []
     for start, end in contiguous_true_segments(asymmetry_mask, ctx.min_frames):
         segment = core[start : end + 1]
-        values = [frame.m("elbow_height_asymmetry") for frame in segment]
+        values = [frame.m("wrist_height_asymmetry") for frame in segment]
         max_asymmetry = float(np.nanmax(values))
-        severity = severity_from_range(max_asymmetry, 0.05, 0.15, lower_is_worse=False)
+        severity = severity_from_range(max_asymmetry, 0.15, 0.30, lower_is_worse=False)
         detections.append(
             build_detection(
                 fault_id="ohp_asymmetric_press",
@@ -351,11 +385,11 @@ def rule_asymmetric_press(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
                 confidence=severity * (1.0 if observable_asymmetry else 0.65),
                 observability="high" if observable_asymmetry else "medium",
                 evidence={
-                    "max_elbow_height_asymmetry": round(max_asymmetry, 4),
-                    "threshold": 0.05,
-                    "primary_label": "elbow height asymmetry",
+                    "max_wrist_height_asymmetry": round(max_asymmetry, 4),
+                    "threshold": 0.15,
+                    "primary_label": "wrist height asymmetry",
                     "primary_value": round(max_asymmetry, 4),
-                    "primary_threshold": 0.05,
+                    "primary_threshold": 0.15,
                 },
                 citation="Abdelraouf OR, Abdel-Aziem AA, Alkhamees NH, Ibrahim ZM, Aboelela EM, Dawood RS, "
                          "Ashour AA. (2026). Acute Effects of High-Load Training to Failure vs. Non-Failure "
