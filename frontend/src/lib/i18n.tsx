@@ -336,6 +336,30 @@ const en: Dict = {
   "auth.signUpBtn": "Create account",
   "auth.or": "or",
   "auth.google": "Continue with Google",
+  "auth.lineBtn": "Continue with LINE",
+
+  // Camera-in-LIFF fallback + the /liff/diag device check page
+  "camera.liffHint":
+    "The LINE in-app browser couldn't open the camera on this device. Tap the ⋯ menu and choose \"Open in browser\" to play with the camera.",
+  "diag.title": "LIFF device check",
+  "diag.subtitle":
+    "Open this page inside LINE on your phone to verify login and camera support before rolling out the LIFF app.",
+  "diag.env": "Environment",
+  "diag.session": "Login session",
+  "diag.signedIn": "Signed in",
+  "diag.signedOut": "Not signed in",
+  "diag.camera": "Live camera (getUserMedia)",
+  "diag.probeBtn": "Test camera",
+  "diag.probing": "Testing…",
+  "diag.cameraOk": "Camera works in this browser.",
+  "diag.pose": "Live pose (camera + MediaPipe)",
+  "diag.poseBtn": "Test camera + pose",
+  "diag.poseGood": "Smooth — the live-camera games should be playable here.",
+  "diag.poseMarginal": "Runs, but slowly — expect a degraded game experience.",
+  "diag.poseBad": "Too slow — keep live-camera features out of LIFF on this device.",
+  "diag.poseNoLandmarks":
+    "Camera and model both ran, but no person was detected — aim the camera at yourself and retest.",
+  "diag.capture": "Video file capture (tap to confirm the camera recorder opens)",
   "auth.noAccount": "New here?",
   "auth.toSignup": "Create an account",
   "auth.haveAccount": "Already have an account?",
@@ -358,6 +382,7 @@ const en: Dict = {
   "account.signout": "Sign out",
   "account.menu": "Account menu",
   "account.settings": "Settings",
+  "account.lineSigningIn": "Signing in with LINE…",
 
   // Movements menu
   "movements.title": "Movement library",
@@ -384,6 +409,7 @@ const en: Dict = {
   "settings.email": "Email",
   "settings.provider": "Signed in with",
   "settings.provider.google": "Google",
+  "settings.provider.line": "LINE",
   "settings.provider.email": "Email & password",
   "settings.model": "Coach model",
   "settings.modelDesc": "Choose which LLM answers your follow-up questions. Applies to new messages.",
@@ -911,6 +937,28 @@ const zhHant: Dict = {
   "auth.signUpBtn": "建立帳號",
   "auth.or": "或",
   "auth.google": "使用 Google 繼續",
+  "auth.lineBtn": "使用 LINE 繼續",
+
+  // LIFF 內相機的備援提示 + /liff/diag 裝置檢測頁
+  "camera.liffHint":
+    "LINE 內建瀏覽器在此裝置無法開啟相機。請點右上角「⋯」選單,選擇「用瀏覽器開啟」再使用相機功能。",
+  "diag.title": "LIFF 裝置檢測",
+  "diag.subtitle": "請在手機的 LINE 內開啟本頁,以在正式導入 LIFF 前確認登入與相機支援程度。",
+  "diag.env": "執行環境",
+  "diag.session": "登入 Session",
+  "diag.signedIn": "已登入",
+  "diag.signedOut": "未登入",
+  "diag.camera": "即時相機 (getUserMedia)",
+  "diag.probeBtn": "測試相機",
+  "diag.probing": "測試中…",
+  "diag.cameraOk": "此瀏覽器可正常使用相機。",
+  "diag.pose": "即時姿態(相機 + MediaPipe)",
+  "diag.poseBtn": "測試相機＋姿態",
+  "diag.poseGood": "流暢——此裝置可在 LIFF 內玩即時相機遊戲。",
+  "diag.poseMarginal": "跑得動但偏慢——遊戲體驗會打折。",
+  "diag.poseBad": "太慢——此裝置的即時相機功能建議留在外部瀏覽器。",
+  "diag.poseNoLandmarks": "相機與模型都正常,但未偵測到人——請將相機對準自己再測一次。",
+  "diag.capture": "影片檔案拍攝(點擊確認能否開啟相機錄影)",
   "auth.noAccount": "還沒有帳號？",
   "auth.toSignup": "建立帳號",
   "auth.haveAccount": "已經有帳號了？",
@@ -932,6 +980,7 @@ const zhHant: Dict = {
   "account.signout": "登出",
   "account.menu": "帳號選單",
   "account.settings": "設定",
+  "account.lineSigningIn": "LINE 登入中…",
 
   // Movements menu
   "movements.title": "動作庫",
@@ -970,6 +1019,7 @@ const zhHant: Dict = {
   "settings.email": "電子郵件",
   "settings.provider": "登入方式",
   "settings.provider.google": "Google",
+  "settings.provider.line": "LINE",
   "settings.provider.email": "電子郵件與密碼",
   "settings.model": "教練模型",
   "settings.modelDesc": "選擇回答你追問的 LLM 模型，套用於之後的新訊息。",

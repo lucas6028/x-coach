@@ -10,6 +10,8 @@ import { loadLeaderboard, saveScore, type SixSevenEntry } from "../lib/sixseven/
 import { estimateKcal, EFFORT } from "../lib/calories";
 import { addCalories } from "../lib/calorieStore";
 import { waitForVideoFrame } from "../lib/videoFrame";
+import { CameraError, getCameraStream } from "../lib/camera";
+import { isInLiffClient } from "../lib/liff";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
 import { createPoseLandmarker, drawScene } from "../components/sixseven/sixSevenDetector";
 
@@ -193,7 +195,9 @@ export default function SixSeven() {
       // camera — kick it off in parallel with the getUserMedia permission/stream so the two waits
       // overlap instead of stacking.
       const landmarkerPromise = createPoseLandmarker();
-      const stream = await navigator.mediaDevices.getUserMedia({
+      // Timeout-wrapped: inside the LINE (LIFF) in-app browser on iOS getUserMedia can hang
+      // forever — the wrapper turns that into a catchable error (see lib/camera).
+      const stream = await getCameraStream({
         video: { facingMode: "user", width: 640, height: 480 },
         audio: false,
       });
@@ -246,7 +250,10 @@ export default function SixSeven() {
       setStarting(false);
       // Show the localized message; keep the raw DOMException in the console for debugging.
       console.error("six-seven: failed to start", e);
-      setError(t("six.error"));
+      // A hung/missing camera inside the LINE in-app browser gets a specific escape-hatch
+      // hint (open in a real browser) instead of the generic failure text.
+      const liffCameraDead = e instanceof CameraError && (await isInLiffClient());
+      setError(liffCameraDead ? t("camera.liffHint") : t("six.error"));
     }
   }, [beginCountdown, teardown, t]);
 

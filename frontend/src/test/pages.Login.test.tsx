@@ -19,6 +19,7 @@ function makeAuth(overrides: Partial<ReturnType<typeof useAuth>> = {}) {
     signInWithPassword: vi.fn().mockResolvedValue(undefined),
     signUpWithPassword: vi.fn().mockResolvedValue({ needsConfirmation: false }),
     signInWithGoogle: vi.fn().mockResolvedValue(undefined),
+    signInWithLine: vi.fn().mockResolvedValue(undefined),
     signOut: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } as ReturnType<typeof useAuth>;
@@ -103,6 +104,26 @@ describe("Login", () => {
     renderLogin();
     await userEvent.click(screen.getByRole("button", { name: /Continue with Google/i }));
     expect(auth.signInWithGoogle).toHaveBeenCalled();
+  });
+
+  it("starts LINE sign-in", async () => {
+    const auth = makeAuth();
+    mockUseAuth.mockReturnValue(auth);
+    renderLogin();
+    await userEvent.click(screen.getByRole("button", { name: /Continue with LINE/i }));
+    expect(auth.signInWithLine).toHaveBeenCalled();
+  });
+
+  it("shows an error when LINE sign-in fails", async () => {
+    const auth = makeAuth({
+      signInWithLine: vi.fn().mockRejectedValue(new Error("LINE login is not configured.")),
+    });
+    mockUseAuth.mockReturnValue(auth);
+    renderLogin();
+    await userEvent.click(screen.getByRole("button", { name: /Continue with LINE/i }));
+    await waitFor(() =>
+      expect(screen.getByText("LINE login is not configured.")).toBeInTheDocument()
+    );
   });
 
   it("warns and disables submit when auth is not configured", () => {
