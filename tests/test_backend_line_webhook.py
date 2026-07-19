@@ -157,3 +157,87 @@ class SummaryForLineUserTests(unittest.TestCase):
             sys.modules, {"supabase": _fake_supabase_module(client)}
         ):
             self.assertIsNone(line_bot.summary_for_line_user("Uabc123"))
+
+
+class FormatSummaryTests(unittest.TestCase):
+    def _format(self, summary: dict, **setting_overrides) -> str:
+        with mock.patch.object(
+            line_bot, "get_settings", return_value=_settings(**setting_overrides)
+        ):
+            return line_bot.format_summary(summary)
+
+    def test_full_summary_has_counts_faults_and_link(self) -> None:
+        text = self._format(dict(_SUMMARY))
+        self.assertIn("累積分析：12 次", text)
+        # 2026-07-19T13:03Z is 21:03 in UTC+8.
+        self.assertIn("2026-07-19 21:03", text)
+        self.assertIn("側面", text)
+        self.assertIn("3 個問題", text)
+        self.assertIn("1. 膝蓋內夾 ×7", text)
+        self.assertIn("2. 深度不足 ×5", text)
+        self.assertIn("https://liff.line.me/1234567890-Abcdefgh", text)
+
+    def test_unknown_fault_id_falls_back_to_english_name(self) -> None:
+        summary = {
+            "total": 1,
+            "latest": None,
+            "top_faults": [{"id": "brand_new_fault", "name": "Brand New Fault", "count": 2}],
+        }
+        self.assertIn("Brand New Fault ×2", self._format(summary))
+
+    def test_no_faults_omits_the_fault_section(self) -> None:
+        text = self._format({"total": 2, "latest": None, "top_faults": []})
+        self.assertNotIn("最常出現的問題", text)
+        self.assertIn("累積分析：2 次", text)
+
+    def test_blank_liff_id_omits_the_link(self) -> None:
+        text = self._format(dict(_SUMMARY), line_liff_id="")
+        self.assertNotIn("liff.line.me", text)
+
+    def test_unknown_view_type_and_bad_timestamp_degrade_gracefully(self) -> None:
+        summary = {
+            "total": 1,
+            "latest": {"created_at": "not-a-date", "view_type": "weird", "fault_count": None},
+            "top_faults": [],
+        }
+        text = self._format(summary)
+        self.assertIn("未知時間", text)
+        self.assertIn("未知", text)
+        self.assertIn("0 個問題", text)
+
+    def test_missing_keys_do_not_raise(self) -> None:
+        self.assertIn("累積分析：0 次", self._format({}))
+
+    def test_missing_created_at_and_naive_timestamp_are_handled(self) -> None:
+        # Not in the brief: closes two branches _format_time otherwise leaves uncovered
+        # (non-string `created_at`, and a naive timestamp with no offset).
+        missing = {
+            "total": 1,
+            "latest": {"created_at": None, "view_type": "side", "fault_count": 1},
+            "top_faults": [],
+        }
+        self.assertIn("未知時間", self._format(missing))
+
+        naive = {
+            "total": 1,
+            "latest": {"created_at": "2026-07-19T13:03:00", "view_type": "side", "fault_count": 1},
+            "top_faults": [],
+        }
+        # A naive timestamp is treated as UTC before converting to the UTC+8 display tz.
+        self.assertIn("2026-07-19 21:03", self._format(naive))
+
+
+class StaticMessageTests(unittest.TestCase):
+    def test_unbound_message_points_at_line_sign_in(self) -> None:
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()):
+            text = line_bot.unbound_message()
+        self.assertIn("LINE 登入", text)
+        self.assertIn("https://liff.line.me/1234567890-Abcdefgh", text)
+
+    def test_empty_message_mentions_no_records(self) -> None:
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()):
+            self.assertIn("還沒有分析紀錄", line_bot.empty_message())
+
+    def test_help_message_lists_the_keyword(self) -> None:
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()):
+            self.assertIn("摘要", line_bot.help_message())
