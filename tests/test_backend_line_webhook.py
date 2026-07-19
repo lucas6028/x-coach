@@ -16,6 +16,8 @@ import types
 import unittest
 from unittest import mock
 
+import httpx
+
 from backend.app.services import line_bot
 from backend.app.settings import Settings
 
@@ -241,3 +243,119 @@ class StaticMessageTests(unittest.TestCase):
     def test_help_message_lists_the_keyword(self) -> None:
         with mock.patch.object(line_bot, "get_settings", return_value=_settings()):
             self.assertIn("摘要", line_bot.help_message())
+
+
+def _text_event(text: str, user_id: str = "Uabc123", reply_token: str = "rt-1") -> dict:
+    return {
+        "type": "message",
+        "replyToken": reply_token,
+        "source": {"type": "user", "userId": user_id},
+        "message": {"type": "text", "id": "m1", "text": text},
+    }
+
+
+class HandleEventsTests(unittest.TestCase):
+    def _handle(self, payload: dict, summary_return=..., summary_side_effect=None) -> list[dict]:
+        """Patch ``summary_for_line_user`` and run ``handle_events`` under it.
+
+        A plain ``mock.patch.object(..., side_effect=X, return_value=Y)`` call is used
+        rather than juggling ``**kwargs`` conditionally: passing ``return_value=None``
+        alongside a real ``side_effect`` is harmless (Mock only consults ``return_value``
+        when ``side_effect`` is unset/None), so there is no need to omit either kwarg — one
+        straightforward call covers every case the tests below exercise.
+        """
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()), mock.patch.object(
+            line_bot,
+            "summary_for_line_user",
+            side_effect=summary_side_effect,
+            return_value=None if summary_return is ... else summary_return,
+        ):
+            return line_bot.handle_events(payload)
+
+    def test_keyword_returns_the_summary(self) -> None:
+        replies = self._handle({"events": [_text_event("我的訓練摘要")]}, summary_return=dict(_SUMMARY))
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(replies[0]["reply_token"], "rt-1")
+        self.assertIn("累積分析：12 次", replies[0]["text"])
+
+    def test_short_keyword_and_whitespace_and_case_are_normalised(self) -> None:
+        replies = self._handle({"events": [_text_event("  Summary  ")]}, summary_return=dict(_SUMMARY))
+        self.assertIn("你的訓練摘要", replies[0]["text"])
+
+    def test_unknown_account_returns_the_sign_in_reply(self) -> None:
+        replies = self._handle({"events": [_text_event("摘要")]}, summary_return=None)
+        self.assertIn("還沒有找到你的 x-coach 帳號", replies[0]["text"])
+
+    def test_zero_analyses_returns_the_empty_reply(self) -> None:
+        replies = self._handle(
+            {"events": [_text_event("摘要")]},
+            summary_return={"total": 0, "latest": None, "top_faults": []},
+        )
+        self.assertIn("還沒有分析紀錄", replies[0]["text"])
+
+    def test_unknown_text_returns_help(self) -> None:
+        replies = self._handle({"events": [_text_event("你好")]}, summary_return=dict(_SUMMARY))
+        self.assertIn("傳「摘要」", replies[0]["text"])
+
+    def test_non_text_and_non_message_events_are_ignored(self) -> None:
+        payload = {
+            "events": [
+                {"type": "follow", "replyToken": "rt", "source": {"userId": "U1"}},
+                {
+                    "type": "message",
+                    "replyToken": "rt",
+                    "source": {"userId": "U1"},
+                    "message": {"type": "sticker", "id": "s1"},
+                },
+                "not-a-dict",
+            ]
+        }
+        self.assertEqual(self._handle(payload, summary_return=dict(_SUMMARY)), [])
+
+    def test_events_without_reply_token_or_user_id_are_skipped(self) -> None:
+        payload = {
+            "events": [
+                _text_event("摘要", reply_token=""),
+                {"type": "message", "replyToken": "rt", "source": {}, "message": {"type": "text", "text": "摘要"}},
+            ]
+        }
+        self.assertEqual(self._handle(payload, summary_return=dict(_SUMMARY)), [])
+
+    def test_missing_events_key_returns_nothing(self) -> None:
+        self.assertEqual(self._handle({}, summary_return=dict(_SUMMARY)), [])
+
+    def test_rpc_failure_falls_back_to_an_apology_and_keeps_other_events(self) -> None:
+        payload = {"events": [_text_event("摘要", reply_token="rt-1"), _text_event("你好", reply_token="rt-2")]}
+        replies = self._handle(payload, summary_side_effect=RuntimeError("db down"))
+        self.assertEqual(len(replies), 2)
+        self.assertIn("暫時查不到", replies[0]["text"])
+        self.assertIn("傳「摘要」", replies[1]["text"])
+
+
+class ReplyTests(unittest.TestCase):
+    def test_posts_a_text_message_with_the_bearer_token(self) -> None:
+        response = mock.Mock(status_code=200)
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()), mock.patch.object(
+            line_bot.httpx, "post", return_value=response
+        ) as post:
+            line_bot.reply("rt-1", "嗨")
+        self.assertEqual(post.call_args[0][0], line_bot.LINE_REPLY_URL)
+        _, kwargs = post.call_args
+        self.assertEqual(kwargs["headers"]["Authorization"], "Bearer chan-token")
+        self.assertEqual(
+            kwargs["json"],
+            {"replyToken": "rt-1", "messages": [{"type": "text", "text": "嗨"}]},
+        )
+
+    def test_non_200_is_swallowed(self) -> None:
+        response = mock.Mock(status_code=400)
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()), mock.patch.object(
+            line_bot.httpx, "post", return_value=response
+        ):
+            line_bot.reply("rt-1", "嗨")  # must not raise
+
+    def test_network_error_is_swallowed(self) -> None:
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()), mock.patch.object(
+            line_bot.httpx, "post", side_effect=httpx.ConnectError("boom")
+        ):
+            line_bot.reply("rt-1", "嗨")  # must not raise

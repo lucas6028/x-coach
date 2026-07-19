@@ -24,6 +24,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
+
 from backend.app.settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -196,3 +198,73 @@ def help_message() -> str:
         ["傳「摘要」或點下方選單，就能看到你的訓練摘要。"],
         "打開 x-coach",
     )
+
+
+_REPLY_TIMEOUT_S = 10.0
+
+# Text that means "show me my summary". The rich-menu button is configured as a *message*
+# action sending "我的訓練摘要", so the menu and typed keywords share one code path. Compared
+# after stripping and lower-casing (lower-casing is a no-op for the Chinese entries).
+SUMMARY_KEYWORDS = frozenset({"我的訓練摘要", "摘要", "訓練", "紀錄", "summary"})
+
+
+def _reply_text_for(line_user_id: str) -> str:
+    """Decide what to say to this user, degrading to an apology if the lookup fails."""
+    try:
+        summary = summary_for_line_user(line_user_id)
+    except Exception:  # noqa: BLE001 — a webhook must answer, never propagate.
+        logger.exception("LINE bot: training-summary lookup failed")
+        return "暫時查不到你的訓練摘要，請稍後再試一次。"
+    if summary is None:
+        return unbound_message()
+    if _safe_int(summary.get("total")) == 0:
+        return empty_message()
+    return format_summary(summary)
+
+
+def handle_events(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Turn a webhook payload into the replies to send.
+
+    Returns planned replies instead of sending them so the decision logic stays a pure-ish
+    function (one mocked seam) and the router owns all the I/O. Non-text and malformed events
+    are skipped silently: LINE delivers many event types we don't answer.
+    """
+    replies: list[dict[str, str]] = []
+    for event in payload.get("events") or []:
+        if not isinstance(event, dict) or event.get("type") != "message":
+            continue
+        message = event.get("message")
+        if not isinstance(message, dict) or message.get("type") != "text":
+            continue
+        reply_token = event.get("replyToken")
+        source = event.get("source")
+        line_user_id = source.get("userId") if isinstance(source, dict) else None
+        if not reply_token or not line_user_id:
+            continue
+
+        text = str(message.get("text") or "").strip().lower()
+        answer = _reply_text_for(str(line_user_id)) if text in SUMMARY_KEYWORDS else help_message()
+        replies.append({"reply_token": str(reply_token), "text": answer})
+    return replies
+
+
+def reply(reply_token: str, text: str) -> None:
+    """Send one text message back through LINE's reply API; failures are logged, never raised.
+
+    The reply token is single-use and expires ~1 minute after the event, so a failed reply is
+    not retried — and the webhook has already been acknowledged either way.
+    """
+    settings = get_settings()
+    try:
+        response = httpx.post(
+            LINE_REPLY_URL,
+            headers={"Authorization": f"Bearer {settings.line_messaging_access_token}"},
+            json={"replyToken": reply_token, "messages": [{"type": "text", "text": text}]},
+            timeout=_REPLY_TIMEOUT_S,
+        )
+    except httpx.HTTPError:
+        logger.warning("LINE bot: reply request failed")
+        return
+    if response.status_code != 200:
+        # Never log the body or the token — it can carry user-identifying content.
+        logger.warning("LINE bot: reply rejected with status %s", response.status_code)
