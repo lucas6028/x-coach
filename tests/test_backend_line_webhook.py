@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import sys
 import types
 import unittest
 from unittest import mock
@@ -102,3 +103,57 @@ class VerifySignatureTests(unittest.TestCase):
     def test_non_ascii_signature_fails(self) -> None:
         with mock.patch.object(line_bot, "get_settings", return_value=_settings()):
             self.assertFalse(line_bot.verify_signature(b"{}", "不是-base64-簽章"))
+
+
+def _fake_supabase_module(client: mock.Mock) -> types.ModuleType:
+    """A fake ``supabase`` package whose ``create_client`` returns ``client``."""
+    module = types.ModuleType("supabase")
+
+    def create_client(url: str, key: str):  # noqa: ARG001 — signature parity
+        return client
+
+    module.create_client = create_client  # type: ignore[attr-defined]
+    return module
+
+
+def _rpc_client(data) -> mock.Mock:
+    client = mock.Mock()
+    client.rpc.return_value.execute.return_value = types.SimpleNamespace(data=data)
+    return client
+
+
+_SUMMARY = {
+    "total": 12,
+    "latest": {"created_at": "2026-07-19T13:03:11.5+00:00", "view_type": "side", "fault_count": 3},
+    "top_faults": [
+        {"id": "knees_inward", "name": "Knees Inward / Knee Valgus", "count": 7},
+        {"id": "shallow_depth", "name": "Shallow Depth", "count": 5},
+    ],
+}
+
+
+class SummaryForLineUserTests(unittest.TestCase):
+    def test_returns_rpc_payload(self) -> None:
+        client = _rpc_client(dict(_SUMMARY))
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()), mock.patch.dict(
+            sys.modules, {"supabase": _fake_supabase_module(client)}
+        ):
+            result = line_bot.summary_for_line_user("Uabc123")
+        self.assertEqual(result["total"], 12)
+        client.rpc.assert_called_once_with(
+            "line_training_summary", {"p_line_sub": "Uabc123"}
+        )
+
+    def test_null_payload_returns_none(self) -> None:
+        client = _rpc_client(None)
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()), mock.patch.dict(
+            sys.modules, {"supabase": _fake_supabase_module(client)}
+        ):
+            self.assertIsNone(line_bot.summary_for_line_user("Uabc123"))
+
+    def test_unexpected_payload_shape_returns_none(self) -> None:
+        client = _rpc_client([1, 2, 3])
+        with mock.patch.object(line_bot, "get_settings", return_value=_settings()), mock.patch.dict(
+            sys.modules, {"supabase": _fake_supabase_module(client)}
+        ):
+            self.assertIsNone(line_bot.summary_for_line_user("Uabc123"))

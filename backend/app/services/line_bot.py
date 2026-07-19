@@ -21,6 +21,7 @@ import base64
 import hashlib
 import hmac
 import logging
+from typing import Any
 
 from backend.app.settings import get_settings
 
@@ -47,3 +48,31 @@ def verify_signature(raw_body: bytes, signature: str | None) -> bool:
     digest = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).digest()
     expected = base64.b64encode(digest).decode("ascii")
     return hmac.compare_digest(expected, signature)
+
+
+# The SECURITY DEFINER function granted to service_role (see the matching migration). It is
+# the ONLY data the bot can reach: one user's aggregate summary, keyed by their LINE user id.
+SUMMARY_RPC = "line_training_summary"
+
+
+def _service_client() -> Any:
+    """Build a service_role Supabase client (needed to call the summary RPC).
+
+    Deferred import, as in ``line_auth._admin_client``: keeps the module light and lets unit
+    tests fake the ``supabase`` package without it installed.
+    """
+    from supabase import create_client  # deferred heavy import (gotrue/postgrest/...)
+
+    settings = get_settings()
+    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+
+
+def summary_for_line_user(line_user_id: str) -> dict[str, Any] | None:
+    """Return this LINE user's training summary, or ``None`` if they have no x-coach account.
+
+    The RPC returns SQL NULL for an unknown ``sub``; PostgREST surfaces that as ``None``. Any
+    other shape is treated as "unknown" rather than trusted.
+    """
+    response = _service_client().rpc(SUMMARY_RPC, {"p_line_sub": line_user_id}).execute()
+    data = getattr(response, "data", None)
+    return data if isinstance(data, dict) else None
