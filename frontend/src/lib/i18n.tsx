@@ -154,7 +154,7 @@ const en: Dict = {
   "fault.knees_forward": "Knees Forward",
   "fault.shallow_depth": "Shallow Depth",
   "fault.excessive_forward_lean": "Excessive Forward Lean",
-  "fault.heel_lift": "Heel Lift",
+  "fault.heel_rise": "Heel Rise",
   "fault.butt_wink": "Butt Wink",
   "fault.asymmetric_shift": "Asymmetric Shift",
 
@@ -755,7 +755,7 @@ const zhHant: Dict = {
   "fault.knees_forward": "膝蓋前移",
   "fault.shallow_depth": "深度不足",
   "fault.excessive_forward_lean": "軀幹過度前傾",
-  "fault.heel_lift": "腳跟離地",
+  "fault.heel_rise": "腳跟離地",
   "fault.butt_wink": "骨盆後傾",
   "fault.asymmetric_shift": "左右不對稱",
 
