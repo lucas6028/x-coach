@@ -56,6 +56,15 @@ describe("faultLabel", () => {
     const t = realT("en");
     expect(faultLabel(t, "some_new_fault")).toBe("Some New Fault");
   });
+
+  // The label keys must be the fault_id the detector actually emits: pose_rule_detector
+  // emits "heel_rise", and this key was "heel_lift" for a while — close enough to read as
+  // correct, but it silently fell through to the title-cased fallback, so the zh UI showed
+  // "Heel Rise" instead of 腳跟離地.
+  it("keys the heel fault on the detector's fault_id in both languages", () => {
+    expect(faultLabel(realT("en"), "heel_rise")).toBe("Heel Rise");
+    expect(faultLabel(realT("zh-Hant"), "heel_rise")).toBe("腳跟離地");
+  });
 });
 
 describe("viewLabel", () => {
