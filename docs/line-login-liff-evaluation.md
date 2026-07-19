@@ -104,7 +104,10 @@ Created 2026-07-15 · Updated 2026-07-16
    - discovery：`https://access.line.me/.well-known/openid-configuration`
    - issuer：`https://access.line.me`；authorize：`access.line.me/oauth2/v2.1/authorize`
    - token：`api.line.me/oauth2/v2.1/token`；JWKS：`api.line.me/oauth2/v2.1/certs`
-   - ID token 簽章：**ES256**（非對稱）；`sub` 為 **pairwise**（每個 channel 一組）
+   - ID token 簽章：**ES256**；`sub` 為 **pairwise（每個 provider 一組，同 provider 下的
+     channel 共用同一個 user ID）**——這正是 Messaging API bot 能直接用 webhook 的
+     `source.userId` 對到登入帳號的原因，見
+     https://developers.line.biz/en/docs/messaging-api/getting-user-ids/
    - claims 含 `name`、`picture`（Supabase 會映到 `user_metadata`，前端 `profile.ts` 直接吃得到）
 
 4. **LIFF 執行環境限制：**
