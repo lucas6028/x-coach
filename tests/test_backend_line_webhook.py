@@ -11,13 +11,17 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import sys
 import types
 import unittest
 from unittest import mock
 
 import httpx
+from fastapi.testclient import TestClient
 
+from backend.app.main import app
+from backend.app.routers import line_webhook
 from backend.app.services import line_bot
 from backend.app.settings import Settings
 
@@ -359,3 +363,61 @@ class ReplyTests(unittest.TestCase):
             line_bot.httpx, "post", side_effect=httpx.ConnectError("boom")
         ):
             line_bot.reply("rt-1", "嗨")  # must not raise
+
+
+class WebhookRouteTests(unittest.TestCase):
+    def _post(self, body: dict, *, signature: str | None = ..., settings=None):
+        raw = json.dumps(body).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if signature is ...:
+            headers["X-Line-Signature"] = _sign(raw)
+        elif signature is not None:
+            headers["X-Line-Signature"] = signature
+        with mock.patch.object(
+            line_webhook, "get_settings", return_value=settings or _settings()
+        ), mock.patch.object(line_bot, "get_settings", return_value=settings or _settings()):
+            with TestClient(app) as client:
+                return client.post("/api/line/webhook", content=raw, headers=headers)
+
+    def test_unconfigured_is_503(self) -> None:
+        response = self._post({"events": []}, settings=_settings(line_messaging_configured=False))
+        self.assertEqual(response.status_code, 503)
+
+    def test_bad_signature_is_400(self) -> None:
+        response = self._post({"events": []}, signature="wrong")
+        self.assertEqual(response.status_code, 400)
+
+    def test_missing_signature_is_400(self) -> None:
+        response = self._post({"events": []}, signature=None)
+        self.assertEqual(response.status_code, 400)
+
+    def test_valid_event_replies_and_returns_200(self) -> None:
+        with mock.patch.object(
+            line_bot, "handle_events", return_value=[{"reply_token": "rt-1", "text": "嗨"}]
+        ), mock.patch.object(line_bot, "reply") as reply:
+            response = self._post({"events": [_text_event("摘要")]})
+        self.assertEqual(response.status_code, 200)
+        reply.assert_called_once_with("rt-1", "嗨")
+
+    def test_non_text_event_returns_200_without_replying(self) -> None:
+        with mock.patch.object(line_bot, "reply") as reply:
+            response = self._post({"events": [{"type": "follow", "replyToken": "rt"}]})
+        self.assertEqual(response.status_code, 200)
+        reply.assert_not_called()
+
+    def test_malformed_json_after_valid_signature_is_still_200(self) -> None:
+        raw = b"not json"
+        headers = {"X-Line-Signature": _sign(raw), "Content-Type": "application/json"}
+        with mock.patch.object(
+            line_webhook, "get_settings", return_value=_settings()
+        ), mock.patch.object(line_bot, "get_settings", return_value=_settings()):
+            with TestClient(app) as client:
+                response = client.post("/api/line/webhook", content=raw, headers=headers)
+        self.assertEqual(response.status_code, 200)
+
+    def test_reply_failure_is_still_200(self) -> None:
+        with mock.patch.object(
+            line_bot, "handle_events", return_value=[{"reply_token": "rt-1", "text": "嗨"}]
+        ), mock.patch.object(line_bot, "reply", side_effect=RuntimeError("boom")):
+            response = self._post({"events": [_text_event("摘要")]})
+        self.assertEqual(response.status_code, 200)

@@ -20,6 +20,7 @@ from backend.app.routers import (
     chat,
     conversations,
     knowledge,
+    line_webhook,
     videos,
 )
 from backend.app.settings import chat_models, default_chat_model, get_settings
@@ -46,6 +47,7 @@ app.include_router(chat.router)
 app.include_router(conversations.router)
 app.include_router(admin.router)
 app.include_router(auth_line.router)
+app.include_router(line_webhook.router)
 
 
 @app.get("/api/health", tags=["meta"])
