@@ -116,8 +116,11 @@ ngrok http 5173
 - **合成 email**:LIFF 橋接建立的使用者 auth email 是 `line_<sub>@line.invalid`
   (deterministic、永不可達、不會撞真實帳號)。管理員列表會看到這種地址;
   真名/頭像在 `user_metadata`(`full_name` / `avatar_url`),前端顯示正常。
-- **pairwise sub**:LINE 的 `sub` 是「每個 channel 一組」。dev 與 prod 用不同 channel
-  會產生**不同帳號**;正式上線前就決定好 channel,別讓使用者資料分家。
+- **provider-scoped sub**:LINE 的使用者 ID(OIDC `sub` / Messaging API 的 `source.userId`)
+  是「每個 provider 一組」,同一個 provider 底下所有 channel(LINE Login、LIFF、Messaging
+  API bot)共用同一個值 —— 不是「每個 channel 一組」。dev 與 prod **若掛在同一個 provider**
+  下,會共用同一組使用者資料(帳號不會分家,但也會**混在一起**);要讓 dev/prod 互相隔離,
+  必須各自建一個獨立的 **Provider**,而不是在同一個 provider 底下開不同 channel。
   web 與 App 內都走同一條橋接、以 `sub` 衍生同一個合成 email,所以**只要 LIFF app 掛在
   與 `LINE_CHANNEL_ID` 相同的 LINE Login channel 底下**,同一人兩種進入點就是同一個帳號。
 - **一次性 reload 保險**:LIFF 內 ID token 過期時會 `liff.login()` 重載一次;同一瀏覽器
@@ -134,3 +137,32 @@ python3 scripts/run_backend_coverage.py --fail-under 95
 yarn test
 yarn test:coverage
 ```
+
+## 8. LINE Messaging API bot(聊天室查訓練摘要)
+
+> 硬前提:Messaging API channel 必須建在**與 LINE Login channel 相同的 Provider** 底下。
+> LINE 的 user ID 是每個 provider 一組,同 provider 下的 channel 共用同一個值 —— 這是 bot
+> 能用 webhook 的 `source.userId` 直接對到登入帳號、不需要綁定流程的唯一原因。
+
+1. LINE Developers Console → 選到現有 Login channel 所屬的 Provider → **Create a new channel**
+   → **Messaging API**(會同時建立一個 LINE 官方帳號)。
+2. **Basic settings** → 複製 **Channel secret** → 填入 `.env` 的 `LINE_MESSAGING_CHANNEL_SECRET`。
+3. **Messaging API** 分頁 → **Channel access token (long-lived)** → Issue → 填入
+   `LINE_MESSAGING_ACCESS_TOKEN`。
+4. 同一分頁 → **Webhook URL** 填 `https://<ngrok-host>/api/line/webhook` → 開啟 **Use webhook**
+   → 按 **Verify**(後端要先啟動;未設定環境變數會回 503)。
+5. 在 LINE Official Account Manager 關閉「自動回應訊息」與「加入好友的歡迎訊息」,
+   否則會與 bot 的回覆打架。
+6. **圖文選單(Rich menu)**:LINE Official Account Manager → 建立圖文選單 → 動作型別選
+   **傳送文字**,文字填 `我的訓練摘要`。
+   ⚠️ 不可選「連結(URI/LIFF)」—— 那不會觸發 webhook,也就拿不到 `replyToken`。
+7. `.env` 的 `LINE_LIFF_ID` 填既有 LIFF app id(可留空,只是回覆訊息會少一個連結)。
+8. 在 Supabase SQL editor 執行 `db/migrations/20260720000000_line_training_summary.sql`。
+
+### 手動驗證
+
+- 用 **service_role** key 呼叫 `select public.line_training_summary('<你的 LINE sub>')`:
+  回傳 `{"total": ..., "latest": ..., "top_faults": [...]}`,數字與 x-coach History 頁一致。
+- 用 **anon** key 呼叫同一支函式:應被 Postgres 拒絕(permission denied)。
+- 沒登入過 x-coach 的 LINE 帳號敲 bot:得到引導登入的訊息,且 Supabase 的
+  `auth.users` **沒有**多出任何一列。
