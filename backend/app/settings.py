@@ -45,6 +45,18 @@ class Settings(BaseSettings):
     line_channel_id: str = ""
     supabase_service_role_key: str = ""
 
+    # LINE Messaging API bot (the official account chat room). A SEPARATE channel from the
+    # Login channel above — its own secret (webhook signature) and access token (reply API).
+    # Both channels must live under the SAME LINE provider: that is what makes the webhook's
+    # source.userId identical to the Login ID token's ``sub`` (which line_auth stores in
+    # user_metadata.line_sub), so the bot can find the account with no binding flow.
+    # Leave unset to keep POST /api/line/webhook disabled (503). See services/line_bot.
+    line_messaging_channel_secret: str = ""
+    line_messaging_access_token: str = ""
+    # LIFF app id, used only to build the "open x-coach" deep link in bot replies. Optional:
+    # when blank the link line is omitted.
+    line_liff_id: str = ""
+
     # LLM conversational-coaching layer, served over an OpenAI-compatible chat-completions API. The
     # provider is deliberately NOT baked into the names: the transport speaks only the plain OpenAI
     # dialect, so these ``LLM_*`` vars point at any compatible endpoint — OpenRouter (the default
@@ -87,6 +99,21 @@ class Settings(BaseSettings):
         """True when the LIFF→Supabase bridge can run: LINE channel id + service_role key,
         on top of the base Supabase config (the mint needs both anon and admin clients)."""
         return bool(self.line_channel_id and self.supabase_service_role_key and self.auth_configured)
+
+    @property
+    def line_messaging_configured(self) -> bool:
+        """True when the bot can verify webhook signatures, reply, and read the summary.
+
+        The service_role key is required because the webhook has no user JWT: it reads the
+        summary through the ``line_training_summary`` SECURITY DEFINER function, which is
+        granted to service_role only.
+        """
+        return bool(
+            self.line_messaging_channel_secret
+            and self.line_messaging_access_token
+            and self.supabase_service_role_key
+            and self.auth_configured
+        )
 
 
 # Used only if ``LLM_MODELS`` is misconfigured to empty, so the picker is never empty.
