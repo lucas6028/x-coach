@@ -421,3 +421,22 @@ class WebhookRouteTests(unittest.TestCase):
         ), mock.patch.object(line_bot, "reply", side_effect=RuntimeError("boom")):
             response = self._post({"events": [_text_event("摘要")]})
         self.assertEqual(response.status_code, 200)
+
+    def test_one_bad_reply_does_not_skip_the_rest_of_the_events(self) -> None:
+        # line_bot.reply only swallows httpx.HTTPError itself; a non-httpx exception on the
+        # first event's reply must not stop the router from replying to the second event.
+        planned = [
+            {"reply_token": "rt-1", "text": "first"},
+            {"reply_token": "rt-2", "text": "second"},
+        ]
+        with mock.patch.object(
+            line_bot, "handle_events", return_value=planned
+        ), mock.patch.object(
+            line_bot, "reply", side_effect=[RuntimeError("boom"), None]
+        ) as reply:
+            response = self._post({"events": [_text_event("摘要"), _text_event("摘要")]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            reply.call_args_list,
+            [mock.call("rt-1", "first"), mock.call("rt-2", "second")],
+        )
