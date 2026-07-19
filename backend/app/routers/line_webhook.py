@@ -45,7 +45,14 @@ async def line_webhook(request: Request) -> dict[str, bool]:
     try:
         payload = json.loads(raw_body.decode("utf-8"))
         for planned in line_bot.handle_events(payload):
-            line_bot.reply(planned["reply_token"], planned["text"])
+            try:
+                line_bot.reply(planned["reply_token"], planned["text"])
+            except Exception:  # noqa: BLE001 — one bad reply must not skip the rest of the events.
+                # ``line_bot.reply`` only catches httpx.HTTPError itself; anything else (a bad
+                # reply dict, an unexpected exception type) must not abort the loop, or every
+                # event after the failing one in this webhook request goes unanswered.
+                # Never log the reply token/text/userId here — same reasoning as below.
+                logger.exception("LINE bot: reply failed for one event")
     except Exception:  # noqa: BLE001 — a signed event is acknowledged no matter what.
         # Never log the raw body/payload here: it can carry a LINE userId or reply text.
         logger.exception("LINE bot: webhook handling failed")

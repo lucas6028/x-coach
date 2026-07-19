@@ -29,9 +29,17 @@ begin
         return null;
     end if;
 
+    -- Key the lookup on the synthetic auth email, NOT on raw_user_meta_data->>'line_sub'.
+    -- user_metadata is writable by the signed-in user themselves (supabase.auth.updateUser),
+    -- so any x-coach account could set its own line_sub to someone else's LINE user id; with
+    -- two rows matching, `limit 1` with no ORDER BY would pick arbitrarily and could hand the
+    -- bot's reply to the wrong person. The synthetic email is derived deterministically by
+    -- services/line_auth.synthetic_email (line_<sub, stripped+lowercased>@line.invalid) and
+    -- Supabase's find-or-create already depends on its uniqueness, so it is the actual
+    -- identity key for a LINE-login account — reproduce that derivation exactly here.
     select u.id into v_user_id
     from auth.users u
-    where u.raw_user_meta_data ->> 'line_sub' = p_line_sub
+    where u.email = 'line_' || lower(trim(p_line_sub)) || '@line.invalid'
     limit 1;
 
     -- No x-coach account for this LINE user: the bot turns this into a "sign in first" reply.
