@@ -21,6 +21,7 @@ import base64
 import hashlib
 import hmac
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from backend.app.settings import get_settings
@@ -76,3 +77,122 @@ def summary_for_line_user(line_user_id: str) -> dict[str, Any] | None:
     response = _service_client().rpc(SUMMARY_RPC, {"p_line_sub": line_user_id}).execute()
     data = getattr(response, "data", None)
     return data if isinstance(data, dict) else None
+
+
+# Replies are read in Taiwan; fix the display offset rather than depending on a tz database
+# (zoneinfo needs the `tzdata` package on Windows, which is not in the lean CI dependency set).
+_DISPLAY_TZ = timezone(timedelta(hours=8))
+
+# Localised labels, kept in step with the frontend's i18n keys (`fault.*`, `view.*` in
+# frontend/src/lib/i18n.tsx) so the chat room and the web app name the same thing the same way.
+FAULT_LABELS: dict[str, str] = {
+    "knees_inward": "膝蓋內夾",
+    "knees_forward": "膝蓋前移",
+    "shallow_depth": "深度不足",
+    "excessive_forward_lean": "軀幹過度前傾",
+    "heel_rise": "腳跟離地",
+    "butt_wink": "骨盆後傾",
+    "asymmetric_shift": "左右不對稱",
+}
+VIEW_LABELS: dict[str, str] = {
+    "front": "正面",
+    "front_oblique": "正面斜角",
+    "side": "側面",
+    "rear": "背面",
+    "rear_oblique": "背面斜角",
+    "left": "左側",
+    "right": "右側",
+    "unknown": "未知",
+}
+
+
+def _liff_link() -> str:
+    """The deep link into the LIFF app, or "" when no LIFF id is configured."""
+    liff_id = (getattr(get_settings(), "line_liff_id", "") or "").strip()
+    return f"https://liff.line.me/{liff_id}" if liff_id else ""
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Best-effort ``int()``: the RPC payload is trusted but not guaranteed, and a webhook
+    that has already been acknowledged must never raise on a malformed field (e.g. a count
+    that arrives as ``None``, a non-numeric string, or some other unexpected type)."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _format_time(raw: Any) -> str:
+    """Render a PostgREST ISO timestamp in UTC+8, or "未知時間" if it can't be parsed."""
+    if not isinstance(raw, str) or not raw:
+        return "未知時間"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return "未知時間"
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(_DISPLAY_TZ).strftime("%Y-%m-%d %H:%M")
+
+
+def _fault_label(fault: dict[str, Any]) -> str:
+    """Localised fault name, falling back to the English name for ids we don't know yet."""
+    fault_id = str(fault.get("id") or "")
+    return FAULT_LABELS.get(fault_id) or str(fault.get("name") or fault_id or "未知問題")
+
+
+def _with_link(lines: list[str], call_to_action: str) -> str:
+    link = _liff_link()
+    if link:
+        lines += ["", f"{call_to_action} 👉 {link}"]
+    return "\n".join(lines)
+
+
+def format_summary(summary: dict[str, Any]) -> str:
+    """Render one training summary as a single LINE text message.
+
+    Every field is defensive: the RPC shape is trusted, but a malformed row must degrade into
+    a readable message rather than raise inside a webhook that has already been acknowledged.
+    """
+    lines = ["📊 你的訓練摘要", "", f"累積分析：{_safe_int(summary.get('total'))} 次"]
+
+    latest = summary.get("latest")
+    if isinstance(latest, dict):
+        view = VIEW_LABELS.get(str(latest.get("view_type") or "unknown"), "未知")
+        faults = _safe_int(latest.get("fault_count"))
+        lines.append(
+            f"最近一次：{_format_time(latest.get('created_at'))}"
+            f"（{view}視角，偵測到 {faults} 個問題）"
+        )
+
+    top = [f for f in (summary.get("top_faults") or []) if isinstance(f, dict)]
+    if top:
+        lines += ["", "最常出現的問題"]
+        for rank, fault in enumerate(top, start=1):
+            lines.append(f"{rank}. {_fault_label(fault)} ×{_safe_int(fault.get('count'))}")
+
+    return _with_link(lines, "打開 x-coach 看完整報告")
+
+
+def unbound_message() -> str:
+    """Reply for a LINE user with no matching x-coach account."""
+    return _with_link(
+        ["還沒有找到你的 x-coach 帳號。", "請先用 LINE 登入 x-coach，之後就能在這裡查詢訓練摘要。"],
+        "前往登入",
+    )
+
+
+def empty_message() -> str:
+    """Reply for a known user who has no analyses yet."""
+    return _with_link(
+        ["你還沒有分析紀錄。", "上傳一支深蹲影片做第一次分析，之後就能在這裡看到摘要。"],
+        "開始分析",
+    )
+
+
+def help_message() -> str:
+    """Reply for text we don't recognise."""
+    return _with_link(
+        ["傳「摘要」或點下方選單，就能看到你的訓練摘要。"],
+        "打開 x-coach",
+    )
