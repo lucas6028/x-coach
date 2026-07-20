@@ -3,6 +3,7 @@ import { Link, Navigate, useLocation } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import {
   ArrowRight,
+  CircleNotch,
   Eye,
   TreeStructure,
   Brain,
@@ -16,7 +17,6 @@ import PosePreview from "./PosePreview";
 import MovementShowcase from "./MovementShowcase";
 import { LANGS, useI18n, type Lang } from "../lib/i18n";
 import { useLiffContext } from "../lib/liffContext";
-import { LumenLoader } from "../components/LumenLoader";
 
 const SECTION = "mx-auto w-full max-w-6xl px-5 sm:px-8";
 
@@ -564,6 +564,7 @@ function Layout({ children }: { children: ReactNode }) {
 }
 
 export default function Landing() {
+  const { t } = useI18n();
   const { ready, isInClient } = useLiffContext();
   const location = useLocation();
 
@@ -578,15 +579,22 @@ export default function Landing() {
   // behave exactly as before. Rendering the marketing page itself during this window isn't an
   // option either — the LIFF endpoint URL is the site root, so every real LINE launch would hit
   // this page and flash it for the ~1s the SDK takes to confirm.
+  //
+  // A neutral spinner, not LumenLoader's "scan" narration (Reading pose / Checking mechanics /
+  // Lighting the why): this fires before any video exists, so the analysis-pipeline copy would
+  // describe work that isn't happening. Same idiom as RequireAuth's session-check placeholder,
+  // so the app's waits read as one system.
   if (!ready && isInClient) {
     return (
-      <div className="grid min-h-[100dvh] place-items-center bg-[#0d0f10]">
-        <LumenLoader variant="scan" />
+      <div className="grid min-h-[100dvh] place-items-center bg-[#0d0f10] text-zinc-500" role="status">
+        <CircleNotch size={24} className="animate-spin" />
+        <span className="sr-only">{t("loader.neutral")}</span>
       </div>
     );
   }
   // Inside LINE the marketing page is dead weight — the user arrived from a rich menu to use
-  // the app, and the LIFF endpoint URL points at /app anyway. This covers a stray "/" hit.
+  // the app, and the LIFF endpoint URL is the site root (see the comment above), so every
+  // real LINE launch lands here and needs this redirect, not just a stray "/" hit.
   // Preserve the query string: it can carry liff.state, which LINE appends on a LIFF redirect.
   if (isInClient) return <Navigate to={`/app${location.search}`} replace />;
   return (

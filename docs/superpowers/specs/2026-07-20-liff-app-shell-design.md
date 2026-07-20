@@ -141,8 +141,9 @@ Header 的 session 狀態 pill。
 
 - **Header / Sidebar** —— 由 §2 的分流自然消失，不需要額外程式碼。
 - **Landing** —— `Landing` 頂端 `if (isInClient) return <Navigate to="/app" replace />`。
-  真正的進入點仍是 LINE console 把 LIFF endpoint URL 設成 `.../app`；這行是保險，處理
-  「使用者在 LINE 內點到根網址」的情況。
+  LIFF endpoint URL 設定在網站根目錄（見 §7、`docs/line-login-liff-setup.md` §9），所以
+  一般啟動每次都會先落在這裡；這行不是保險用的邊角處理，而是每次 in-client 啟動都要走的
+  導向路徑。
 - **Login** —— in-client 時同樣 `<Navigate to="/app" replace />`。靜默登入已在背景跑，
   再顯示登入按鈕只會讓人以為沒登入。
 - **語言 / 主題切換** —— in-client 時 Header 不存在，所以本來就沒地方放；移進 `Settings`

@@ -111,6 +111,7 @@ const en: Dict = {
   "loader.step1": "Reading pose",
   "loader.step2": "Checking mechanics",
   "loader.step3": "Lighting the why",
+  "loader.neutral": "Loading…",
 
   // Library picker
   "library.title": "Sample Library",
@@ -718,6 +719,7 @@ const zhHant: Dict = {
   "loader.step1": "讀取姿勢",
   "loader.step2": "對照力學",
   "loader.step3": "照亮原因",
+  "loader.neutral": "載入中…",
 
   // Library picker
   "library.title": "範例資料庫",

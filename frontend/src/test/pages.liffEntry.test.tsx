@@ -130,6 +130,13 @@ describe("entry points — guess says in-client, SDK corrects to web", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.queryByText(/^studio/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open the demo/i })).not.toBeInTheDocument();
+    // Fix: this fires on every LINE cold start before any video exists, so the wait must not
+    // narrate the analysis pipeline (LumenLoader "scan" copy) — that describes work that isn't
+    // happening yet. A neutral "Loading…" replaces it.
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Reading pose|Checking mechanics|Lighting the why/i)
+    ).not.toBeInTheDocument();
     // Once the SDK corrects the guess: the real marketing page, never the studio.
     await waitFor(() =>
       expect(screen.getAllByRole("link", { name: /Open the demo/i }).length).toBeGreaterThan(0)
@@ -142,6 +149,11 @@ describe("entry points — guess says in-client, SDK corrects to web", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
     expect(screen.queryByText(/^studio/)).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: /sign in/i })).not.toBeInTheDocument();
+    // Same fix as Landing: neutral copy, not the analysis-pipeline narration.
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Reading pose|Checking mechanics|Lighting the why/i)
+    ).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("heading", { name: /sign in/i })).toBeInTheDocument());
     expect(screen.queryByText(/^studio/)).not.toBeInTheDocument();
   });
