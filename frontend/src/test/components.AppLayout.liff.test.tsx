@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 // Drive the branch through the real provider, with lib/liff (the SDK edge) faked.
 const { liffState } = vi.hoisted(() => ({
@@ -75,6 +76,38 @@ describe("AppLayout — inside the LINE app", () => {
     // not stranding the user with the four tabs and no way to start a second analysis.
     expect(screen.getByRole("button", { name: /New analysis/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Library/i })).toBeInTheDocument();
+  });
+
+  // End-to-end for the Fix 1 blocker: a real click, through a real router, actually lands the
+  // user back on the studio — not just "the prop exists and got called" (covered above and in
+  // components.LiffAppShell.test.tsx), but that AppLayout's own navigate("/app") fallback (used
+  // here since this render passes no onNewAnalysis) fires for real off a non-studio page.
+  it("clicking the header's New analysis action navigates into the studio from a non-studio page", async () => {
+    render(
+      <MemoryRouter initialEntries={["/history"]}>
+        <LiffProvider>
+          <AuthProvider>
+            <I18nProvider>
+              <Routes>
+                <Route
+                  path="/history"
+                  element={
+                    <AppLayout title="My records">
+                      <p>history body</p>
+                    </AppLayout>
+                  }
+                />
+                <Route path="/app" element={<p>studio</p>} />
+              </Routes>
+            </I18nProvider>
+          </AuthProvider>
+        </LiffProvider>
+      </MemoryRouter>
+    );
+    await waitFor(() => expect(screen.getByRole("navigation")).toBeInTheDocument());
+    expect(screen.getByText("history body")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /New analysis/i }));
+    await waitFor(() => expect(screen.getByText("studio")).toBeInTheDocument());
   });
 });
 
