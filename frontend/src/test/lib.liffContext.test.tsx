@@ -1,14 +1,21 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 
 // The provider is the unit under test; lib/liff is its (already-tested) dependency.
 const { liffState } = vi.hoisted(() => ({
-  liffState: { configured: true, sdk: null as unknown },
+  // `hang: true` makes initLiff() return a promise that never settles (never-resolves
+  // resilience test); `reject: true` makes it reject (defense-in-depth, since the real
+  // initLiff() never actually rejects — see lib/liff.ts).
+  liffState: { configured: true, sdk: null as unknown, hang: false, reject: false },
 }));
 
 vi.mock("../lib/liff", () => ({
   isLiffConfigured: () => liffState.configured,
-  initLiff: () => Promise.resolve(liffState.sdk),
+  initLiff: () => {
+    if (liffState.hang) return new Promise(() => {});
+    if (liffState.reject) return Promise.reject(new Error("boom"));
+    return Promise.resolve(liffState.sdk);
+  },
 }));
 
 import { LiffProvider, useLiffContext } from "../lib/liffContext";
@@ -35,12 +42,15 @@ const REAL_UA = window.navigator.userAgent;
 beforeEach(() => {
   liffState.configured = true;
   liffState.sdk = { isInClient: () => true };
+  liffState.hang = false;
+  liffState.reject = false;
   stubUserAgent(REAL_UA);
   window.history.replaceState({}, "", "/app");
 });
 
 afterEach(() => {
   stubUserAgent(REAL_UA);
+  vi.useRealTimers();
 });
 
 describe("LiffProvider — optimistic guess before init resolves", () => {
@@ -93,6 +103,52 @@ describe("LiffProvider — correction once the SDK answers", () => {
     await waitFor(() =>
       expect(screen.getByText("ready=true inClient=false")).toBeInTheDocument()
     );
+  });
+});
+
+// Fix: neither of these may strand `ready` at false forever — on the app's entry route
+// (Landing/Login) that now means a permanent spinner, not just a stale guess.
+describe("LiffProvider — settles ready even when the SDK-side callback misbehaves", () => {
+  it("degrades to plain web when liff.isInClient() throws", async () => {
+    stubUserAgent("Mozilla/5.0 (iPhone) Line/14.2.0"); // optimistic guess: in-client
+    liffState.sdk = {
+      isInClient: () => {
+        throw new Error("boom");
+      },
+    };
+    renderProbe();
+    expect(screen.getByText("ready=false inClient=true")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("ready=true inClient=false")).toBeInTheDocument()
+    );
+  });
+
+  it("degrades to plain web when initLiff() itself rejects", async () => {
+    stubUserAgent("Mozilla/5.0 (iPhone) Line/14.2.0"); // optimistic guess: in-client
+    liffState.reject = true;
+    renderProbe();
+    expect(screen.getByText("ready=false inClient=true")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("ready=true inClient=false")).toBeInTheDocument()
+    );
+  });
+
+  it("degrades to plain web via the timeout when initLiff() never settles", () => {
+    vi.useFakeTimers();
+    stubUserAgent("Mozilla/5.0 (iPhone) Line/14.2.0"); // optimistic guess: in-client
+    liffState.hang = true;
+    renderProbe();
+    expect(screen.getByText("ready=false inClient=true")).toBeInTheDocument();
+    // Still pending well before the timeout — proves the settle came from the race, not
+    // from some other timer firing early.
+    act(() => {
+      vi.advanceTimersByTime(5_999);
+    });
+    expect(screen.getByText("ready=false inClient=true")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByText("ready=true inClient=false")).toBeInTheDocument();
   });
 });
 
