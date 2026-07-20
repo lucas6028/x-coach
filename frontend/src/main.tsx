@@ -22,6 +22,7 @@ const SixSeven = lazy(() => import("./pages/SixSeven"));
 const FruitNinja = lazy(() => import("./pages/FruitNinja"));
 import { I18nProvider } from "./lib/i18n";
 import { AuthProvider } from "./lib/auth";
+import { LiffProvider } from "./lib/liffContext";
 import { initLiff } from "./lib/liff";
 import "./index.css";
 
@@ -35,73 +36,75 @@ void initLiff();
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <I18nProvider>
-          <Routes>
-            <Route path="/" element={<Landing />} />
-            <Route path="/app" element={<App />} />
-            <Route path="/games" element={<Games />} />
-            <Route
-              path="/67"
-              element={
-                <Suspense fallback={null}>
-                  <SixSeven />
-                </Suspense>
-              }
-            />
-            <Route
-              path="/ninja"
-              element={
-                <Suspense fallback={null}>
-                  <FruitNinja />
-                </Suspense>
-              }
-            />
-            <Route path="/login" element={<Login />} />
-            {/* LIFF device check (Phase 0 of the LINE rollout): open inside LINE on a phone. */}
-            <Route path="/liff/diag" element={<LiffDiag />} />
-            <Route
-              path="/history"
-              element={
-                <RequireAuth>
-                  <History />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/movements"
-              element={
-                <RequireAuth>
-                  <Movements />
-                </RequireAuth>
-              }
-            />
-            <Route
-              path="/settings"
-              element={
-                <RequireAuth>
-                  <Settings />
-                </RequireAuth>
-              }
-            />
-            <Route path="/admin/login" element={<AdminLogin />} />
-            <Route
-              path="/admin"
-              element={
-                <RequireAuth redirectTo="/admin/login">
-                  <AdminLayout />
-                </RequireAuth>
-              }
-            >
-              <Route index element={<AdminOverview />} />
-              <Route path="users" element={<AdminUsers />} />
-              <Route path="settings/llm" element={<AdminSettingsLlm />} />
-              <Route path="settings/rag" element={<AdminSettingsRag />} />
-              <Route path="settings/analyze" element={<AdminSettingsAnalyze />} />
-            </Route>
-          </Routes>
-        </I18nProvider>
-      </AuthProvider>
+      <LiffProvider>
+        <AuthProvider>
+          <I18nProvider>
+            <Routes>
+              <Route path="/" element={<Landing />} />
+              <Route path="/app" element={<App />} />
+              <Route path="/games" element={<Games />} />
+              <Route
+                path="/67"
+                element={
+                  <Suspense fallback={null}>
+                    <SixSeven />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="/ninja"
+                element={
+                  <Suspense fallback={null}>
+                    <FruitNinja />
+                  </Suspense>
+                }
+              />
+              <Route path="/login" element={<Login />} />
+              {/* LIFF device check (Phase 0 of the LINE rollout): open inside LINE on a phone. */}
+              <Route path="/liff/diag" element={<LiffDiag />} />
+              <Route
+                path="/history"
+                element={
+                  <RequireAuth>
+                    <History />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/movements"
+                element={
+                  <RequireAuth>
+                    <Movements />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/settings"
+                element={
+                  <RequireAuth>
+                    <Settings />
+                  </RequireAuth>
+                }
+              />
+              <Route path="/admin/login" element={<AdminLogin />} />
+              <Route
+                path="/admin"
+                element={
+                  <RequireAuth redirectTo="/admin/login">
+                    <AdminLayout />
+                  </RequireAuth>
+                }
+              >
+                <Route index element={<AdminOverview />} />
+                <Route path="users" element={<AdminUsers />} />
+                <Route path="settings/llm" element={<AdminSettingsLlm />} />
+                <Route path="settings/rag" element={<AdminSettingsRag />} />
+                <Route path="settings/analyze" element={<AdminSettingsAnalyze />} />
+              </Route>
+            </Routes>
+          </I18nProvider>
+        </AuthProvider>
+      </LiffProvider>
     </BrowserRouter>
   </React.StrictMode>
 );
