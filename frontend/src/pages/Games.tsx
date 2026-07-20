@@ -6,6 +6,7 @@ import {
   GameController,
   HandWaving,
   Knife,
+  Lightning,
   Trophy,
   type Icon,
 } from "@phosphor-icons/react";
@@ -13,6 +14,7 @@ import AppLayout from "../components/AppLayout";
 import { useI18n } from "../lib/i18n";
 import { loadCalories } from "../lib/calorieStore";
 import { bestScore as bestNinjaScore } from "../lib/ninja/leaderboard";
+import { bestScore as bestBlastScore } from "../lib/blast/leaderboard";
 import { loadLeaderboard as loadSixBoard } from "../lib/sixseven/leaderboard";
 import type { GameId } from "../lib/calories";
 
@@ -63,6 +65,18 @@ export default function Games() {
       tagKey: "six.badge",
       best: bestSix,
       bestLabelKey: "games.stat.bestCount",
+    },
+    {
+      id: "blast",
+      to: "/blast",
+      emoji: "⚡",
+      gradient: "from-sky-500/25 via-indigo-400/15 to-fuchsia-300/10",
+      icon: Lightning,
+      titleKey: "blast.title",
+      descKey: "games.blast.desc",
+      tagKey: "blast.badge",
+      best: bestBlastScore(),
+      bestLabelKey: "games.stat.bestScore",
     },
   ];
 

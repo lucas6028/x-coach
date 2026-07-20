@@ -18,6 +18,7 @@ import Games from "./pages/Games";
 import LiffDiag from "./pages/LiffDiag";
 import RequireAuth from "./components/RequireAuth";
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
+const MemeBlast = lazy(() => import("./pages/MemeBlast"));
 const SixSeven = lazy(() => import("./pages/SixSeven"));
 const FruitNinja = lazy(() => import("./pages/FruitNinja"));
 import { I18nProvider } from "./lib/i18n";
@@ -41,6 +42,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Route path="/" element={<Landing />} />
             <Route path="/app" element={<App />} />
             <Route path="/games" element={<Games />} />
+            <Route
+              path="/blast"
+              element={
+                <Suspense fallback={null}>
+                  <MemeBlast />
+                </Suspense>
+              }
+            />
             <Route
               path="/67"
               element={

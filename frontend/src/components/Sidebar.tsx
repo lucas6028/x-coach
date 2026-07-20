@@ -36,7 +36,8 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
   // re-probes the endpoint; a non-admin (or an errored probe) leaves it false and shows no link.
 
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
-  const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
+  const onGames =
+    pathname === "/games" || pathname === "/67" || pathname === "/ninja" || pathname === "/blast";
   const navBase =
     "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors";
   // Borderless, softly-tinted active pill (the reference's sidebar look) — no outline ring.

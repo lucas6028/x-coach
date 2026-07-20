@@ -5,22 +5,26 @@ import Games from "../pages/Games";
 import { addCalories, clearCalories } from "../lib/calorieStore";
 import { saveScore as saveNinja, clearLeaderboard as clearNinja } from "../lib/ninja/leaderboard";
 import { saveScore as saveSix, clearLeaderboard as clearSix } from "../lib/sixseven/leaderboard";
+import { saveScore as saveBlast, clearLeaderboard as clearBlast } from "../lib/blast/leaderboard";
 
 describe("Games hub", () => {
   beforeEach(() => {
     clearCalories();
     clearNinja();
     clearSix();
+    clearBlast();
   });
 
-  it("lists both games with play links into their routes", () => {
+  it("lists every game with play links into their routes", () => {
     renderWithProviders(<Games />);
     expect(screen.getByText("Fruit Ninja")).toBeInTheDocument();
     expect(screen.getByText("67")).toBeInTheDocument();
+    expect(screen.getByText("Meme Blaster")).toBeInTheDocument();
     const links = screen.getAllByRole("link");
     const hrefs = links.map((l) => l.getAttribute("href"));
     expect(hrefs).toContain("/ninja");
     expect(hrefs).toContain("/67");
+    expect(hrefs).toContain("/blast");
   });
 
   it("shows the empty calorie state before any round", () => {
@@ -39,6 +43,7 @@ describe("Games hub", () => {
     addCalories("sixseven", 5);
     saveNinja({ name: "Me", score: 1500, bestCombo: 8, ts: 1 });
     saveSix({ name: "Me", count: 42, bestCombo: 6, ts: 1 });
+    saveBlast({ name: "Me", score: 2400, hits: 15, bestCombo: 7, ts: 1 });
 
     renderWithProviders(<Games />);
     // 20 + 5 across 2 rounds.
@@ -47,5 +52,6 @@ describe("Games hub", () => {
     // Per-game bests surface on the cards.
     expect(screen.getByText("1,500")).toBeInTheDocument();
     expect(screen.getByText("42")).toBeInTheDocument();
+    expect(screen.getByText("2,400")).toBeInTheDocument();
   });
 });

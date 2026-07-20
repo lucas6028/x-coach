@@ -72,7 +72,7 @@ describe("Sidebar — games hub active state", () => {
       </MemoryRouter>
     );
 
-  it.each(["/games", "/67", "/ninja"])("highlights the Games entry on %s", (path) => {
+  it.each(["/games", "/67", "/ninja", "/blast"])("highlights the Games entry on %s", (path) => {
     renderAt(path);
     const link = screen.getByRole("link", { name: /Games/i });
     expect(link.className).toContain("text-primary");
