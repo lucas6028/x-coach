@@ -192,6 +192,65 @@ NLF 的 subject 層增益（+0.034）方向一致但 n=9 撐不到顯著，第 6
 
 產物：`correctness_loso_hmr_parametric_{3d2d,3d}.json`、配對 `correctness_loso_hmr3d_vs_mediapipe.json`、逐動作 `correctness_loso_per_exercise_hmr.json`（含 hmr3d / nlf3d / mediapipe / vp3dlift 四欄，皆 3d-only 同流程）。重現：Kaggle 抽取 HMR2.0/4DHumans 原始 3D → `python -m src.rehab24.nlf_skeleton_features`（同一特徵管線，--raw-dir 指向 hmr_raw3d）→ `python -m src.rehab24.loso_cross_validation --feature-dir …hmr_parametric_3d_skeleton_features`；配對 `python -m src.rehab24.paired_loso`；逐動作 `python scripts/rehab24/loso_per_exercise.py --sources mediapipe=mediapipe_skeleton_features hmr3d=hmr_parametric_3d_skeleton_features nlf3d=nlf_parametric_3d_skeleton_features vp3dlift=vp3d_lifted_skeleton_features --summary-output data/REHAB24-6/processed/correctness_loso_per_exercise_hmr.json`。
 
+## MediaPipe model complexity 對照（Lite / Full / Heavy）——為「手機端該選哪個 variant」而做
+
+先前所有 MediaPipe 結果都只跑過 **complexity=2（Heavy）**（`src/pose/process_videos.py:50` 甚至寫死 2）。
+產品端問題是「使用者手機上該選、可選哪個 BlazePose variant」，故補跑 complexity=0（Lite）
+與 1（Full）。三組走**完全相同**的流程：同一份 `manifest.csv`、同一組 subject-wise split、
+同 seed=42、同 `--normalize-features`，只換 `--model-complexity`。
+
+### 固定切分 test（selected threshold）
+
+| Variant | complexity | threshold | **bal_acc** | accuracy | macro_f1 | recall | specificity | precision |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|
+| **Lite** | 0 | 0.315 | 0.663 | 0.659 | 0.659 | 0.602 | **0.724** | **0.714** |
+| **Full** | 1 | 0.255 | **0.686** | **0.689** | **0.686** | **0.729** | 0.642 | 0.700 |
+| **Heavy** | 2 | 0.326 | 0.665 | 0.667 | 0.665 | 0.695 | 0.634 | 0.685 |
+
+Heavy 這欄是**重跑重現**的（threshold/precision/recall 與本文件開頭 Heavy 那列逐欄一致），
+確認整條管線是決定性的、三欄可以放心並列。
+
+### 結論
+
+1. **變體選擇對 correctness 準確度幾乎沒有影響。** 全距僅 **0.023**（0.663–0.686），且
+   **非單調**——Full 最高、Heavy 中間、Lite 最低。「更貴的模型沒有更準」這個形狀本身
+   就是雜訊的特徵，而非能力排序。對照本文件的標尺：固定切分相對 LOSO 有 0.03–0.06
+   樂觀偏差、LOSO 折間 std ±0.08，0.023 完全埋在裡面。**不應把 Full 的 +0.02 當成真增益**。
+2. **真正有差的是操作點，不是能力。** Lite 偏保守（specificity 0.724 / precision 0.714 最高，
+   但 recall 只有 0.602），Full 偏敏感（recall 0.729 最高、specificity 掉到 0.642）。三者
+   selected threshold 本身就落在不同位置（0.315 / 0.255 / 0.326），所以這個位移**應以調
+   threshold 處理，不是靠換更大的模型**——本實驗顯示換模型換不到。
+3. **與既有結論一致**：squat（Ex6）本就是單目最強的一格（見「各動作拆解」第 1 點），
+   瓶頸在深度與 2D 品質，而非 BlazePose 的模型容量。Lite→Heavy 是同一家族的容量縮放，
+   碰不到那個瓶頸。
+4. **產品意涵（手機端）**：**選 Lite**——準確度上分不出高下，卻換到最快的推論與最小的
+   下載體積。前端小遊戲已在用 Lite（`frontend/src/components/poseLandmarker.ts:9`），這組
+   數字說明若未來把 correctness 判斷搬到端上，同樣可以用 Lite。代價是漏抓率較高
+   （recall 0.602），要靠降 threshold 補。
+5. **注意這是單一固定切分**（只測 P8/P9 兩位受試者），不是本文件其他比較採用的
+   LOSO mean±std。三者既已擠在 0.023 內，LOSO 大機率同樣是「打平」，**未跑**。
+
+⚠️ **工程注意事項**：`train_correctness_classifier.py` 的 `--output-path` /
+`--predictions-output` / `--summary-output` 預設檔名**不隨 `--feature-dir` 變動**，
+不顯式指定就會覆蓋掉前一次 run 的 artifact（本次即因此覆蓋過 Heavy 的一組，已重跑復原）。
+跑任何新 feature source 時務必三個輸出旗標都帶上。
+
+產物：`data/REHAB24-6/processed/correctness_{metrics,predictions,classifier}_mediapipe_{lite,full,heavy}.{json,csv,pt}`、
+特徵 `mediapipe_{lite,full}_skeleton_features/`（各 2144 筆，與 Heavy 同 feature_dim=2970）。重現：
+
+```powershell
+# 抽特徵（--num-workers 4：本機 12 核，10 會因 XNNPACK 執行緒過度訂閱而吃滿 CPU 反變慢）
+.venv\Scripts\python.exe scripts/rehab24/extract_mediapipe_skeleton_features.py `
+  --model-complexity 0 --num-workers 4 `
+  --output-dir data/REHAB24-6/processed/mediapipe_lite_skeleton_features
+# 訓練（三個輸出旗標必填，見上方警告）
+.venv\Scripts\python.exe scripts/rehab24/train_correctness_classifier.py `
+  --feature-dir data/REHAB24-6/processed/mediapipe_lite_skeleton_features `
+  --output-path      data/REHAB24-6/processed/correctness_classifier_mediapipe_lite.pt `
+  --predictions-output data/REHAB24-6/processed/correctness_predictions_mediapipe_lite.csv `
+  --summary-output   data/REHAB24-6/processed/correctness_metrics_mediapipe_lite.json
+```
+
 ## 過擬合程度（train@0.5 → test selected，固定切分）
 
 | 設定 | Train bal_acc (0.5) | Test bal_acc (selected) | 落差 |
@@ -230,4 +289,4 @@ NLF 的 subject 層增益（+0.034）方向一致但 n=9 撐不到顯著，第 6
 ## 備註
 
 - 原始 log 中三個區塊的 test selected-threshold 行各重複列印一次（數值一致），疑為 log 寫了兩遍，不影響結論。
-- 資料來源：`result.md`（Vicon / VideoMAE / Fuse 三組設定的完整 train/val/test metrics）；MediaPipe 一組為後續以 `scripts/rehab24/extract_mediapipe_skeleton_features.py` 抽取（complexity=2、stride=1 全保真，130 支影片）後，用 `train_correctness_classifier.py --feature-dir .../mediapipe_skeleton_features` 訓練所得（feature_dim=2970，train=1434 / val=212 / test=498）。
+- 資料來源：`result.md`（Vicon / VideoMAE / Fuse 三組設定的完整 train/val/test metrics）；MediaPipe 一組為後續以 `scripts/rehab24/extract_mediapipe_skeleton_features.py` 抽取（complexity=2、stride=1 全保真，130 支影片）後，用 `train_correctness_classifier.py --feature-dir .../mediapipe_skeleton_features` 訓練所得（feature_dim=2970，train=1434 / val=212 / test=498）。complexity=0/1（Lite/Full）的對照見「MediaPipe model complexity 對照」一節。
