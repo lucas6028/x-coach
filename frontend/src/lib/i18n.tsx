@@ -22,6 +22,7 @@ const en: Dict = {
   "nav.games": "Games",
   "nav.hide": "Hide navigation",
   "nav.show": "Show navigation",
+  "nav.tabBar": "Primary navigation",
   "sidebar.version": "Prototype v0.1",
   "sidebar.tagline": "Pose · Rules · GraphRAG",
 
@@ -628,6 +629,7 @@ const zhHant: Dict = {
   "nav.games": "小遊戲",
   "nav.hide": "隱藏導覽列",
   "nav.show": "顯示導覽列",
+  "nav.tabBar": "主要導覽",
   "sidebar.version": "原型 v0.1",
   "sidebar.tagline": "姿態 · 規則 · GraphRAG",
 
