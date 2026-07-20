@@ -41,14 +41,37 @@ export function LiffProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isLiffConfigured()) return;
     let cancelled = false;
-    // Awaits the promise main.tsx already kicked off — initLiff() memoizes, so this is a
-    // subscription to the in-flight init, not a second one.
-    void initLiff().then((liff) => {
+    // Any LIFF-side failure degrades to plain web (this module's doc comment, lib/liff.ts).
+    // initLiff() itself never rejects, but two paths can still strand `ready` at false forever
+    // if left unguarded: `liff.isInClient()` throwing inside the callback below, or the dynamic
+    // `import("@line/liff")` never settling on a bad network. On the app's entry route that
+    // would now mean a permanent spinner, so both paths must settle `ready`. Race pattern
+    // matches lib/camera.ts's `getCameraStream` — same idiom, same "clean up the timer" care.
+    const settle = (isInClient: boolean) => {
       if (cancelled) return;
-      setValue({ ready: true, isInClient: Boolean(liff?.isInClient()) });
-    });
+      cancelled = true;
+      clearTimeout(timer);
+      setValue({ ready: true, isInClient });
+    };
+    // Comfortably longer than the ~1-1.5s init this is designed around (per the module doc
+    // comment) so it essentially never fires in practice, but short enough that a real hang
+    // doesn't leave a human staring at a spinner: 6s.
+    const timer = setTimeout(() => settle(false), 6_000);
+    initLiff().then(
+      (liff) => {
+        let isInClient = false;
+        try {
+          isInClient = Boolean(liff?.isInClient());
+        } catch {
+          // liff.isInClient() itself threw — degrade to plain web, same as any other LIFF failure.
+        }
+        settle(isInClient);
+      },
+      () => settle(false)
+    );
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, []);
 
