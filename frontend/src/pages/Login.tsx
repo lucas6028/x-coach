@@ -14,6 +14,7 @@ import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
+import { useLiffContext } from "../lib/liffContext";
 
 type Mode = "signin" | "signup";
 
@@ -73,6 +74,7 @@ export default function Login() {
   const location = useLocation();
   const { user, configured, signInWithPassword, signUpWithPassword, signInWithGoogle, signInWithLine } =
     useAuth();
+  const { isInClient } = useLiffContext();
 
   const from = (location.state as { from?: string } | null)?.from ?? "/app";
 
@@ -85,6 +87,9 @@ export default function Login() {
 
   // Already authenticated: skip the form.
   if (user) return <Navigate to={from} replace />;
+  // Inside LINE the silent LIFF token exchange (see lib/auth's auto-login effect) is already
+  // running — showing a sign-in form would suggest it failed.
+  if (isInClient) return <Navigate to="/app" replace />;
 
   const isSignup = mode === "signup";
 

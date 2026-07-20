@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import {
   ArrowRight,
@@ -15,6 +15,7 @@ import Reveal from "./Reveal";
 import PosePreview from "./PosePreview";
 import MovementShowcase from "./MovementShowcase";
 import { LANGS, useI18n, type Lang } from "../lib/i18n";
+import { useLiffContext } from "../lib/liffContext";
 
 const SECTION = "mx-auto w-full max-w-6xl px-5 sm:px-8";
 
@@ -562,6 +563,10 @@ function Layout({ children }: { children: ReactNode }) {
 }
 
 export default function Landing() {
+  const { isInClient } = useLiffContext();
+  // Inside LINE the marketing page is dead weight — the user arrived from a rich menu to use
+  // the app, and the LIFF endpoint URL points at /app anyway. This covers a stray "/" hit.
+  if (isInClient) return <Navigate to="/app" replace />;
   return (
     <Layout>
       <Defs />
