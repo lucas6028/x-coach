@@ -15,7 +15,6 @@ import { motion, useReducedMotion } from "motion/react";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import { useLiffContext } from "../lib/liffContext";
-import { LumenLoader } from "../components/LumenLoader";
 
 type Mode = "signin" | "signup";
 
@@ -91,11 +90,14 @@ export default function Login() {
   // Same reasoning as Landing: the in-client guess is a synchronous heuristic, not a confirmed
   // LIFF context (see lib/liffContext) — a shared link opened in LINE's in-app browser matches
   // the guess but isn't really LIFF. Hold on a neutral loading state rather than firing the
-  // irreversible redirect below on an unconfirmed guess.
+  // irreversible redirect below on an unconfirmed guess. Same idiom as RequireAuth's
+  // session-check placeholder (not LumenLoader's "scan" analysis narration — nothing in the
+  // analysis pipeline is running here), so the app's waits read as one system.
   if (!ready && isInClient) {
     return (
-      <div className="grid min-h-[100dvh] place-items-center bg-background-dark">
-        <LumenLoader variant="scan" />
+      <div className="grid min-h-[100dvh] place-items-center bg-background-dark text-muted" role="status">
+        <CircleNotch size={24} className="animate-spin" />
+        <span className="sr-only">{t("loader.neutral")}</span>
       </div>
     );
   }
