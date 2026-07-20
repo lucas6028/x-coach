@@ -15,6 +15,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import { useLiffContext } from "../lib/liffContext";
+import { LumenLoader } from "../components/LumenLoader";
 
 type Mode = "signin" | "signup";
 
@@ -74,7 +75,7 @@ export default function Login() {
   const location = useLocation();
   const { user, configured, signInWithPassword, signUpWithPassword, signInWithGoogle, signInWithLine } =
     useAuth();
-  const { isInClient } = useLiffContext();
+  const { ready, isInClient } = useLiffContext();
 
   const from = (location.state as { from?: string } | null)?.from ?? "/app";
 
@@ -87,9 +88,21 @@ export default function Login() {
 
   // Already authenticated: skip the form.
   if (user) return <Navigate to={from} replace />;
+  // Same reasoning as Landing: the in-client guess is a synchronous heuristic, not a confirmed
+  // LIFF context (see lib/liffContext) — a shared link opened in LINE's in-app browser matches
+  // the guess but isn't really LIFF. Hold on a neutral loading state rather than firing the
+  // irreversible redirect below on an unconfirmed guess.
+  if (!ready && isInClient) {
+    return (
+      <div className="grid min-h-[100dvh] place-items-center bg-background-dark">
+        <LumenLoader variant="scan" />
+      </div>
+    );
+  }
   // Inside LINE the silent LIFF token exchange (see lib/auth's auto-login effect) is already
-  // running — showing a sign-in form would suggest it failed.
-  if (isInClient) return <Navigate to="/app" replace />;
+  // running — showing a sign-in form would suggest it failed. Preserve the query string for the
+  // same reason as Landing: LINE can append liff.state here too on a direct /login deep link.
+  if (isInClient) return <Navigate to={`/app${location.search}`} replace />;
 
   const isSignup = mode === "signup";
 
