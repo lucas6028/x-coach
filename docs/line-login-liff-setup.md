@@ -169,18 +169,23 @@ yarn test:coverage
 
 ## 9. LIFF App Shell(LINE App 內的分頁式介面,2026-07-20)
 
-在 LINE App 內,SPA 改渲染 `LiffAppShell`(底部分頁:分析 / 歷史 / 遊戲 / 設定,對應
+在 LINE App 內,SPA 改渲染 `LiffAppShell`(底部分頁:分析 / 我的紀錄 / 小遊戲 / 設定,對應
 路由 `/app`、`/history`、`/games`、`/settings`),取代一般網頁的 navbar + sidebar。
 偵測邏輯在 `frontend/src/lib/liffContext.tsx`(`LiffProvider` / `useLiffContext()`);
-`AppLayout` 依 `isInClient` 分流,頁面元件本身不需要知道 LIFF 的存在。
+`AppLayout` 依 `isInClient` 分流,套用這層 shell 換裝時頁面元件不需要知道 LIFF 的存在——
+但 `Landing.tsx`、`Login.tsx`、`Games.tsx` 為了各自的理由(in-client 導向、相機提示)仍直接
+呼叫 `useLiffContext()`。
 
 需要的 console 設定:
 
-- LIFF app **Endpoint URL** → `https://<host>/app`(shell 也會在 in-client 時把 `/` 與
-  `/login` 導向 `/app`,但 Endpoint URL 才是真正的進入點)。
+- LIFF app **Endpoint URL** → 網站根目錄 `https://<host>/`,**不要**填 `/app`:LIFF 的
+  URL 轉發是把深連結多出來的路徑接在 Endpoint URL「既有的完整路徑」後面,不是只接在
+  origin 後面——若填 `/app`,`https://liff.line.me/{liffId}/history` 會解析成
+  `https://<host>/app/history`,但 SPA 沒有這條路由。填根目錄後,一般啟動(不帶額外路徑)
+  仍會落在工作室:in-client 時 `Landing.tsx` 的 `isInClient` 分支會把 `/` 導向 `/app`。
 - LIFF app **Size** → `Full`(沿用 §1 既有設定)。
 - 不需要新增 scope。`liff.sendMessages()` / share target picker 是之後的階段才會用到,
   屆時才需要 `chat_message.write` 權限與 share-target-picker 開關。
 
 圖文選單(Rich menu)的項目可以深連結到 `/app`、`/history`、`/games`、`/settings` 中的
-任一路由 —— SPA 既有的路由會直接處理。
+任一路由——填根目錄後這些深連結會直接解析成對應的 SPA 路由。
