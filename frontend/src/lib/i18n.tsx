@@ -36,6 +36,8 @@ const en: Dict = {
   "games.totalSub": "Estimated across {n} rounds",
   "games.totalSubOne": "Estimated across 1 round",
   "games.totalEmpty": "Play a round to start burning.",
+  "games.liffCameraHint":
+    "The live camera may not work inside LINE. If a game won't start, tap ⋮ at the top right and choose \"Open in browser\".",
   "games.play": "Play",
   "games.stat.bestScore": "best",
   "games.stat.bestCount": "best 67s",
@@ -640,6 +642,8 @@ const zhHant: Dict = {
   "games.totalSub": "估計自 {n} 場遊戲",
   "games.totalSubOne": "估計自 1 場遊戲",
   "games.totalEmpty": "玩一場開始燃燒吧。",
+  "games.liffCameraHint":
+    "在 LINE 內即時相機可能無法使用。若遊戲開不起來，請點右上角 ⋮ 選「用其他瀏覽器開啟」。",
   "games.play": "開始遊玩",
   "games.stat.bestScore": "最高分",
   "games.stat.bestCount": "最多 67",
