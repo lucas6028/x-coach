@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { Link, Navigate } from "react-router-dom";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { motion, useReducedMotion } from "motion/react";
 import {
   ArrowRight,
@@ -16,6 +16,7 @@ import PosePreview from "./PosePreview";
 import MovementShowcase from "./MovementShowcase";
 import { LANGS, useI18n, type Lang } from "../lib/i18n";
 import { useLiffContext } from "../lib/liffContext";
+import { LumenLoader } from "../components/LumenLoader";
 
 const SECTION = "mx-auto w-full max-w-6xl px-5 sm:px-8";
 
@@ -563,10 +564,31 @@ function Layout({ children }: { children: ReactNode }) {
 }
 
 export default function Landing() {
-  const { isInClient } = useLiffContext();
+  const { ready, isInClient } = useLiffContext();
+  const location = useLocation();
+
+  // The in-client guess is a synchronous heuristic (LINE user agent / liff.state query params —
+  // see lib/liffContext), not a confirmed LIFF context. Sharing the site URL in a LINE chat opens
+  // it in LINE's in-app browser too, which matches the same user-agent signal, but
+  // liff.isInClient() answers false there because it isn't actually a LIFF app context. A shell
+  // swap on a wrong guess is just a visible flash; redirecting off the marketing page on one is
+  // an irreversible navigation with no way back (Header's brand lockup points at /app, not "/").
+  // So: while the guess says in-client but the SDK hasn't confirmed yet, hold on a neutral
+  // loading state instead of committing to either the marketing page or the redirect. Once ready,
+  // behave exactly as before. Rendering the marketing page itself during this window isn't an
+  // option either — the LIFF endpoint URL is the site root, so every real LINE launch would hit
+  // this page and flash it for the ~1s the SDK takes to confirm.
+  if (!ready && isInClient) {
+    return (
+      <div className="grid min-h-[100dvh] place-items-center bg-[#0d0f10]">
+        <LumenLoader variant="scan" />
+      </div>
+    );
+  }
   // Inside LINE the marketing page is dead weight — the user arrived from a rich menu to use
   // the app, and the LIFF endpoint URL points at /app anyway. This covers a stray "/" hit.
-  if (isInClient) return <Navigate to="/app" replace />;
+  // Preserve the query string: it can carry liff.state, which LINE appends on a LIFF redirect.
+  if (isInClient) return <Navigate to={`/app${location.search}`} replace />;
   return (
     <Layout>
       <Defs />
