@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import type { Analysis } from "../api";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
+import LiffAppShell from "./LiffAppShell";
+import { useLiffContext } from "../lib/liffContext";
 
 // Fixed expanded width — the sidebar is no longer drag-resizable; it only toggles
 // between this and the 64px icon rail.
@@ -27,7 +29,8 @@ interface Props {
 // The shared app shell: collapsible/resizable desktop sidebar, off-canvas mobile drawer, and the
 // top navbar (Header). Every signed-in page (studio, history, settings) renders its content as
 // `children` so the sidebar + navbar stay identical across the app. Only the home/landing and the
-// pre-auth login gateway opt out.
+// pre-auth login gateway opt out. Inside the LINE in-app browser this delegates to LiffAppShell
+// instead (see lib/liffContext).
 export default function AppLayout({
   children,
   analysis = null,
@@ -38,6 +41,7 @@ export default function AppLayout({
   initialSidebarOpen = true,
 }: Props) {
   const navigate = useNavigate();
+  const { isInClient } = useLiffContext();
   // Desktop sidebar is a fixed-width rail; it only toggles between expanded and the icon rail.
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const [mobileNav, setMobileNav] = useState(false);
@@ -46,6 +50,11 @@ export default function AppLayout({
   const openLibrary = onOpenLibrary ?? (() => navigate("/app"));
   // Off the studio, "New analysis" routes into the studio; the studio resets in place.
   const newAnalysis = onNewAnalysis ?? (() => navigate("/app"));
+
+  // Inside the LINE app the whole web chrome is replaced by the app shell: bottom tabs instead
+  // of a sidebar, no marketing navbar. Every page renders through here, so this one branch
+  // converts the entire app without any page knowing about LIFF.
+  if (isInClient) return <LiffAppShell title={title}>{children}</LiffAppShell>;
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-background-dark text-content overflow-hidden">
