@@ -7,10 +7,12 @@ import {
   HandWaving,
   Knife,
   Trophy,
+  Warning,
   type Icon,
 } from "@phosphor-icons/react";
 import AppLayout from "../components/AppLayout";
 import { useI18n } from "../lib/i18n";
+import { useLiffContext } from "../lib/liffContext";
 import { loadCalories } from "../lib/calorieStore";
 import { bestScore as bestNinjaScore } from "../lib/ninja/leaderboard";
 import { loadLeaderboard as loadSixBoard } from "../lib/sixseven/leaderboard";
@@ -35,6 +37,7 @@ interface GameCard {
 export default function Games() {
   const { t } = useI18n();
   const reduce = useReducedMotion();
+  const { isInClient } = useLiffContext();
 
   const totals = loadCalories();
   const bestSix = loadSixBoard()[0]?.count ?? 0;
@@ -83,6 +86,15 @@ export default function Games() {
             {t("games.heading")}
           </h2>
           <p className="mt-3 max-w-xl leading-relaxed text-muted">{t("games.sub")}</p>
+
+          {/* Inside LINE, getUserMedia can hang on iOS (see lib/camera). The games already
+              recover from that after the fact; this warns before the player commits. */}
+          {isInClient && (
+            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-amber-500/25 bg-amber-500/[0.07] p-4">
+              <Warning size={20} weight="fill" className="mt-0.5 shrink-0 text-amber-400" />
+              <p className="text-sm leading-relaxed text-muted">{t("games.liffCameraHint")}</p>
+            </div>
+          )}
 
           {/* Lifetime calorie total across every game. */}
           <div className="mt-7 flex items-center gap-4 rounded-2xl border border-orange-500/20 bg-gradient-to-br from-orange-500/[0.08] to-amber-400/[0.04] p-5">
