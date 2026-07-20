@@ -166,3 +166,21 @@ yarn test:coverage
 - 用 **anon** key 呼叫同一支函式:應被 Postgres 拒絕(permission denied)。
 - 沒登入過 x-coach 的 LINE 帳號敲 bot:得到引導登入的訊息,且 Supabase 的
   `auth.users` **沒有**多出任何一列。
+
+## 9. LIFF App Shell(LINE App 內的分頁式介面,2026-07-20)
+
+在 LINE App 內,SPA 改渲染 `LiffAppShell`(底部分頁:分析 / 歷史 / 遊戲 / 設定,對應
+路由 `/app`、`/history`、`/games`、`/settings`),取代一般網頁的 navbar + sidebar。
+偵測邏輯在 `frontend/src/lib/liffContext.tsx`(`LiffProvider` / `useLiffContext()`);
+`AppLayout` 依 `isInClient` 分流,頁面元件本身不需要知道 LIFF 的存在。
+
+需要的 console 設定:
+
+- LIFF app **Endpoint URL** → `https://<host>/app`(shell 也會在 in-client 時把 `/` 與
+  `/login` 導向 `/app`,但 Endpoint URL 才是真正的進入點)。
+- LIFF app **Size** → `Full`(沿用 §1 既有設定)。
+- 不需要新增 scope。`liff.sendMessages()` / share target picker 是之後的階段才會用到,
+  屆時才需要 `chat_message.write` 權限與 share-target-picker 開關。
+
+圖文選單(Rich menu)的項目可以深連結到 `/app`、`/history`、`/games`、`/settings` 中的
+任一路由 —— SPA 既有的路由會直接處理。
