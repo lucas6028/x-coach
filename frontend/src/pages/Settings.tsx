@@ -7,6 +7,8 @@ import { useI18n } from "../lib/i18n";
 import { getStoredModel, setStoredModel } from "../lib/model";
 import { avatarUrl, displayName, initial } from "../lib/profile";
 import ModelIcon, { modelLabel } from "../components/ModelIcon";
+import LanguageToggle from "../components/LanguageToggle";
+import ThemeToggle from "../components/ThemeToggle";
 
 type ClearState =
   | { kind: "idle" }
@@ -115,6 +117,25 @@ export default function Settings() {
                 <dd className="min-w-0 truncate text-sm text-muted">{providerLabel}</dd>
               </div>
             </dl>
+          </div>
+        </section>
+
+        {/* Appearance — language and theme. The web navbar carries the same two toggles, but
+            inside the LINE app there is no navbar (see components/LiffAppShell), so this is
+            the only place they exist there. */}
+        <section className="mt-10">
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-faint">
+            {t("settings.appearance")}
+          </h2>
+          <div className="mt-3 divide-y divide-border-dark overflow-hidden rounded-2xl border border-border-dark bg-surface-dark">
+            <div className="flex items-center justify-between gap-4 p-4">
+              <span className="text-sm text-content">{t("settings.language")}</span>
+              <LanguageToggle />
+            </div>
+            <div className="flex items-center justify-between gap-4 p-4">
+              <span className="text-sm text-content">{t("settings.theme")}</span>
+              <ThemeToggle />
+            </div>
           </div>
         </section>
 

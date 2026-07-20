@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
@@ -96,5 +96,25 @@ describe("Settings", () => {
     await userEvent.click(screen.getByRole("button", { name: /clear all/i }));
     await userEvent.click(screen.getByRole("button", { name: /yes, delete everything/i }));
     expect(await screen.findByText(/Couldn't clear your analyses/i)).toBeInTheDocument();
+  });
+});
+
+describe("Settings — appearance", () => {
+  it("shows the appearance section with language and theme controls", async () => {
+    renderSettings();
+    expect(await screen.findByText("Appearance")).toBeInTheDocument();
+    expect(screen.getByText("Language")).toBeInTheDocument();
+    expect(screen.getByText("Theme")).toBeInTheDocument();
+  });
+
+  it("switches language from within Settings", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    // AppLayout also renders the web Header, which carries its own LanguageToggle — so scope
+    // to the Settings section's copy rather than matching on the icon-only trigger button alone.
+    const languageRow = (await screen.findByText("Language")).closest("div")!;
+    await user.click(within(languageRow).getByRole("button"));
+    await user.click(await screen.findByRole("menuitemradio", { name: /繁體中文/i }));
+    expect(screen.getByText("外觀")).toBeInTheDocument();
   });
 });

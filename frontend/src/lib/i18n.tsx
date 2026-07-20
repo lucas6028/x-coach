@@ -403,6 +403,9 @@ const en: Dict = {
   // Settings page
   "settings.title": "Settings",
   "settings.subtitle": "Manage your account.",
+  "settings.appearance": "Appearance",
+  "settings.language": "Language",
+  "settings.theme": "Theme",
   "settings.backToStudio": "Back to studio",
   "settings.profile": "Profile",
   "settings.name": "Name",
@@ -1013,6 +1016,9 @@ const zhHant: Dict = {
   // Settings page
   "settings.title": "設定",
   "settings.subtitle": "管理你的帳號。",
+  "settings.appearance": "外觀",
+  "settings.language": "語言",
+  "settings.theme": "主題",
   "settings.backToStudio": "返回工作室",
   "settings.profile": "個人資料",
   "settings.name": "名稱",
