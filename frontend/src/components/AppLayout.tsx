@@ -53,8 +53,17 @@ export default function AppLayout({
 
   // Inside the LINE app the whole web chrome is replaced by the app shell: bottom tabs instead
   // of a sidebar, no marketing navbar. Every page renders through here, so this one branch
-  // converts the entire app without any page knowing about LIFF.
-  if (isInClient) return <LiffAppShell title={title}>{children}</LiffAppShell>;
+  // converts the entire app without any page knowing about LIFF. openLibrary/newAnalysis are the
+  // same resolved actions the (now-hidden) Sidebar would have gotten — without threading them
+  // through, the shell's four tabs would be the whole app and there'd be no way to start a
+  // second analysis without leaving LINE.
+  if (isInClient) {
+    return (
+      <LiffAppShell title={title} onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis}>
+        {children}
+      </LiffAppShell>
+    );
+  }
 
   return (
     <div className="h-[100dvh] w-full flex flex-col bg-background-dark text-content overflow-hidden">

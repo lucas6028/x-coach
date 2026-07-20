@@ -45,9 +45,12 @@ describe("AppLayout — inside the LINE app", () => {
   it("renders the tab bar and drops the sidebar", async () => {
     renderLayout();
     await waitFor(() => expect(screen.getByRole("navigation")).toBeInTheDocument());
-    // The web sidebar's signature entries are gone.
+    // The web sidebar itself (its version of "New analysis" — a full-width, labelled button —
+    // and its version-tag footer) is gone. The shell header carries its own icon-only "New
+    // analysis" action instead (see the "header actions" describe block below), so this only
+    // checks the sidebar's own labelled rendering is absent, not the accessible name.
     expect(screen.queryByText("Prototype v0.1")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /New analysis/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("New analysis")).not.toBeInTheDocument();
     // The tab bar's four destinations are present.
     expect(screen.getByRole("link", { name: /Analyse/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Settings/i })).toBeInTheDocument();
@@ -62,6 +65,16 @@ describe("AppLayout — inside the LINE app", () => {
   it("still renders the page body", async () => {
     renderLayout();
     await waitFor(() => expect(screen.getByText("page body")).toBeInTheDocument());
+  });
+
+  it("threads the studio's new-analysis/library actions into the shell header", async () => {
+    renderLayout();
+    await waitFor(() => expect(screen.getByRole("navigation")).toBeInTheDocument());
+    // Off the studio (this render uses title="My records"), AppLayout's own fallback routes both
+    // into /app — the point here is just that the shell actually renders and wires the actions,
+    // not stranding the user with the four tabs and no way to start a second analysis.
+    expect(screen.getByRole("button", { name: /New analysis/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Library/i })).toBeInTheDocument();
   });
 });
 

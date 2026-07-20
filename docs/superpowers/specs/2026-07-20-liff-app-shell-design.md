@@ -133,8 +133,9 @@ Header 的 session 狀態 pill。
 **Safe area：** tab bar 用 `pb-[env(safe-area-inset-bottom)]`；`main` 補一段等同
 「tab bar 高度 + inset」的下留白，避免內容被蓋住。
 
-**Movements 與 Admin：** 不佔 tab 位，但路由照常可達 —— rich menu、直接連結、或從分析頁
-進入都能開。這是刻意的：四個 tab 是拇指可及的主要動線，不是完整的網站地圖。
+**Movements 與 Admin：** 不佔 tab 位，但路由照常可達 —— 僅限 rich menu 或在 app 外開啟的
+直接連結；in-client 時 app 內沒有連到這兩個路由的連結（Sidebar 的對應連結只在網頁版渲染）。
+這是刻意的：四個 tab 是拇指可及的主要動線，不是完整的網站地圖。
 
 ### 3.3 隱藏網頁專屬 chrome
 
