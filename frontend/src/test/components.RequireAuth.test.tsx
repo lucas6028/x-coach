@@ -54,4 +54,30 @@ describe("RequireAuth", () => {
     renderGuard();
     expect(screen.getByText("secret content")).toBeInTheDocument();
   });
+
+  // Fix 4: inside LINE, lib/auth's silent token exchange runs with `loading` already false but
+  // `lineAuthenticating` still true. Without this, tapping a guarded tab in that window bounced
+  // to /login — which itself redirects straight back to /app in-client, so the one screen that
+  // could explain the wait was unreachable.
+  it("shows the loading placeholder (not a redirect) while the LINE token exchange is in flight", () => {
+    mockUseAuth.mockReturnValue({
+      user: null,
+      loading: false,
+      lineAuthenticating: true,
+    } as ReturnType<typeof useAuth>);
+    renderGuard();
+    expect(screen.getByText("Checking your session…")).toBeInTheDocument();
+    expect(screen.queryByText("login page")).not.toBeInTheDocument();
+    expect(screen.queryByText("secret content")).not.toBeInTheDocument();
+  });
+
+  it("redirects to /login once the LINE exchange finishes with no session", () => {
+    mockUseAuth.mockReturnValue({
+      user: null,
+      loading: false,
+      lineAuthenticating: false,
+    } as ReturnType<typeof useAuth>);
+    renderGuard();
+    expect(screen.getByText("login page")).toBeInTheDocument();
+  });
 });
