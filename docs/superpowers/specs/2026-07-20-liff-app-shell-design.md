@@ -204,7 +204,14 @@ Landing / Login 的 in-client 導向可併入既有的 page 測試檔。CI 的�
 
 ## 7. 外部設定（非程式碼，實作後需手動完成）
 
-- LINE Developers console：LIFF app 的 endpoint URL 指向 `https://<host>/app`，size 設
-  `Full`。
+- LINE Developers console：LIFF app 的 endpoint URL 指向**網站根目錄** `https://<host>/`，
+  size 設 `Full`。
+
+  > 2026-07-20 修正：本節原本寫 `/app`，是錯的。LIFF 的深連結是把額外路徑接在 endpoint
+  > 的**完整路徑**後面，所以 endpoint 設 `/app` 時 `liff.line.me/{id}/history` 會解析成
+  > `/app/history` —— 這條路由不存在（`main.tsx` 是扁平路由、沒有 catch-all），圖文選單
+  > 會壞掉三個入口。改用根目錄後四個分頁都能深連結，而 §3.3 的「in-client 的 `/` 轉
+  > `/app`」剛好讓一般啟動仍然落在工作室。權威說明見
+  > `docs/line-login-liff-setup.md` §9。
 - 本 spec 不需要新的 scope；`sendMessages` / share target picker 所需的 scope 屬於後續
   的原生能力 spec。
