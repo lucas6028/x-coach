@@ -54,6 +54,20 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
             asyncio.run(analyze_router.analyze_pose("Squat", _GOOD_POSE, _upload("x.txt"), user=None))
         self.assertEqual(ctx.exception.status_code, 400)
 
+    def test_rejects_empty_file(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(analyze_router.analyze_pose("Squat", _GOOD_POSE, _upload(data=b""), user=None))
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_runtime_error_maps_to_422(self) -> None:
+        def boom(payload, *, movement, video_id=None):
+            raise RuntimeError("boom")
+
+        analysis_service.analyze_pose_payload = boom
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(analyze_router.analyze_pose("Squat", _GOOD_POSE, _upload(), user=None))
+        self.assertEqual(ctx.exception.status_code, 422)
+
     def test_runs_off_the_event_loop(self) -> None:
         seen: dict[str, threading.Thread] = {}
 
