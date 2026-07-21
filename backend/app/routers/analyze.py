@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from backend.app import config, settings
@@ -78,5 +79,61 @@ async def analyze(
             )
         except Exception:  # noqa: BLE001 — never lose a completed analysis to a storage error
             logger.exception("Failed to persist analysis (user=%s video=%s)", user.id, video_id)
+            result["analysis_id"] = None
+    return result
+
+
+@router.post("/analyze/pose")
+async def analyze_pose(
+    movement: str = Form(...),
+    pose: str = Form(...),
+    file: UploadFile = File(...),
+    user: CurrentUser | None = Depends(get_optional_user),
+) -> dict:
+    """Analyze a client-extracted pose JSON (no server-side MediaPipe).
+
+    The browser ran MediaPipe on the recorded/uploaded clip and posts the resulting pose JSON
+    alongside the raw video (still stored for replay/overlay). Routing/persistence mirror
+    ``/api/analyze`` so uploads and library clips still render identically.
+    """
+    suffix = Path(file.filename or "").suffix.lower() or ".mp4"
+    allowed = await run_in_threadpool(settings.allowed_upload_suffixes)
+    if suffix not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'.")
+
+    try:
+        payload = json.loads(pose)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Malformed pose JSON.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list):
+        raise HTTPException(status_code=400, detail="Pose JSON must have a 'frames' list.")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    video_id, _saved_path = await run_in_threadpool(analysis.save_upload, data, suffix=suffix)
+    del data
+    try:
+        async with _ANALYSIS_SEMAPHORE:
+            result = await run_in_threadpool(
+                analysis.analyze_pose_payload, payload, movement=movement, video_id=video_id
+            )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if user is not None:
+        try:
+            result["analysis_id"] = await run_in_threadpool(
+                store.persist_analysis,
+                token=user.token,
+                user_id=user.id,
+                video_id=video_id,
+                source="upload",
+                result=result,
+                filename=file.filename,
+            )
+        except Exception:  # noqa: BLE001 — never lose a completed analysis to a storage error
+            logger.exception("Failed to persist pose analysis (user=%s video=%s)", user.id, video_id)
             result["analysis_id"] = None
     return result
