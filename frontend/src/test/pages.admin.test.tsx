@@ -7,6 +7,7 @@ import {
   type AdminOverview,
   type AdminSettingsResponse,
   type AdminUserRow,
+  type LineStatus,
 } from "../api";
 import AdminLayout from "../pages/admin/AdminLayout";
 import AdminOverviewPage from "../pages/admin/AdminOverview";
@@ -50,6 +51,14 @@ const SAMPLE_OVERVIEW: AdminOverview = {
   stores: { labeled_videos: true, detections: false },
   total_users: 2,
   total_analyses: 7,
+};
+
+const SAMPLE_LINE_STATUS: LineStatus = {
+  messaging_configured: true,
+  login_configured: true,
+  channel_id: "2010629653",
+  quota: { type: "limited", used: 12, value: 200, remaining: 188 },
+  quota_error: null,
 };
 
 // Row "u1" is the signed-in admin (self, cannot self-demote); "u2" is a non-admin togglable user.
@@ -117,6 +126,7 @@ beforeEach(() => {
   vi.spyOn(api, "getAdminOverview").mockResolvedValue(SAMPLE_OVERVIEW);
   vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
   vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+  vi.spyOn(api, "getLineStatus").mockResolvedValue(SAMPLE_LINE_STATUS);
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -166,6 +176,45 @@ describe("AdminOverview", () => {
     expect(await screen.findByText("Total users")).toBeInTheDocument();
     expect(screen.getByText("7")).toBeInTheDocument(); // total analyses value
     expect(screen.getByText("1/2 ready")).toBeInTheDocument();
+  });
+
+  it("renders the LINE quota cards when messaging is configured with a limit", async () => {
+    renderAdmin("/admin");
+    expect(await screen.findByText("Push used this month")).toBeInTheDocument();
+    expect(screen.getByText("12 / 200")).toBeInTheDocument();
+    expect(screen.getByText("Free remaining")).toBeInTheDocument();
+    expect(screen.getByText("188")).toBeInTheDocument();
+  });
+
+  it("shows a dash and the no-cap note when the account has no monthly limit", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      quota: { type: "none", used: 9 },
+    });
+    renderAdmin("/admin");
+    expect(await screen.findByText("9")).toBeInTheDocument(); // used, no "/ limit"
+    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(
+      screen.getByText(/No monthly limit set in LINE Official Account Manager/i)
+    ).toBeInTheDocument();
+  });
+
+  it("shows the unreachable note when LINE can't be reached for quota", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      quota: null,
+      quota_error: "unreachable",
+    });
+    renderAdmin("/admin");
+    expect(await screen.findByText("Couldn't reach LINE for quota.")).toBeInTheDocument();
+  });
+
+  it("does not break the overview when the LINE status fetch fails", async () => {
+    vi.spyOn(api, "getLineStatus").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin");
+    // Main overview still renders; the LINE section simply renders nothing.
+    expect(await screen.findByText("Total users")).toBeInTheDocument();
+    expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
   });
 });
 

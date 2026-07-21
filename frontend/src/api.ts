@@ -276,6 +276,21 @@ export interface AdminOverview {
   total_analyses: number;
 }
 
+// LINE connection status + this month's push-message quota (admin-only; read-only). No secret here.
+export interface LineQuota {
+  type: "limited" | "none";
+  used: number;
+  value?: number; // present only when type === "limited"
+  remaining?: number; // present only when type === "limited"
+}
+export interface LineStatus {
+  messaging_configured: boolean;
+  login_configured: boolean;
+  channel_id: string;
+  quota: LineQuota | null;
+  quota_error: "unreachable" | null;
+}
+
 // Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
 // event line, or an unparseable data payload, is ignored (keep-alives / partial writes).
 function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
@@ -386,6 +401,9 @@ export const api = {
 
   // The system-status dashboard: health flags + user/analysis totals (admin-only). Auth auto-attached.
   getAdminOverview: () => getJSON<AdminOverview>("/api/admin/overview"),
+
+  // LINE connection status + push-quota usage (admin-only). Auth header auto-attached.
+  getLineStatus: () => getJSON<LineStatus>("/api/admin/line/status"),
 
   // Grant/revoke another user's admin role (admin-only). The backend rejects self-demotion (400).
   async setUserRole(userId: string, makeAdmin: boolean): Promise<{ ok: boolean }> {

@@ -523,6 +523,14 @@ const en: Dict = {
   "admin.overview.storesReady": "{ready}/{total} ready",
   "admin.overview.totalUsers": "Total users",
   "admin.overview.totalAnalyses": "Total analyses",
+  "admin.line.title": "LINE",
+  "admin.line.loginBridge": "LINE login bridge",
+  "admin.line.bot": "LINE bot",
+  "admin.line.pushUsed": "Push used this month",
+  "admin.line.remaining": "Free remaining",
+  "admin.line.unreachable": "Couldn't reach LINE for quota.",
+  "admin.line.noCapNote":
+    "No monthly limit set in LINE Official Account Manager, so remaining can't be shown. Set a monthly message limit there to track your free allowance.",
 
   // Admin panel P3 — user oversight
   "admin.users.title": "Users",
@@ -1139,6 +1147,14 @@ const zhHant: Dict = {
   "admin.overview.storesReady": "{ready}/{total} 就緒",
   "admin.overview.totalUsers": "使用者總數",
   "admin.overview.totalAnalyses": "分析總數",
+  "admin.line.title": "LINE",
+  "admin.line.loginBridge": "LINE 登入橋接",
+  "admin.line.bot": "LINE Bot",
+  "admin.line.pushUsed": "本月推播已用",
+  "admin.line.remaining": "剩餘免費額度",
+  "admin.line.unreachable": "無法取得 LINE 額度。",
+  "admin.line.noCapNote":
+    "未在 LINE Official Account Manager 設定每月上限,無法計算剩餘。請在該後台設定每月訊息上限,即可追蹤免費額度。",
 
   // 後台管理 P3 — 使用者監看
   "admin.users.title": "使用者",
