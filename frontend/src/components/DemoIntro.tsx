@@ -1,11 +1,13 @@
 import { Brain, FilmSlate, Graph, PersonSimpleRun, Sparkle, WarningCircle, type Icon } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { useI18n } from "../lib/i18n";
-import UploadDropzone from "./UploadDropzone";
+import CaptureStudio from "./CaptureStudio";
+import type { PoseTier } from "../lib/poseTier";
 import { LumenLoader } from "./LumenLoader";
 
 interface Props {
-  onFile: (file: File) => void;
+  onBlob: (blob: Blob, tier: PoseTier) => void;
+  onError: (msg: string) => void;
   onOpenLibrary: () => void;
   loading: boolean;
   statusMsg: string;
@@ -21,7 +23,7 @@ const STEPS: { Icon: Icon; titleKey: string; bodyKey: string }[] = [
 // The demo's pre-analysis onboarding. Theme-aware (uses semantic tokens so it
 // follows the app's light/dark toggle). Asymmetric split: actions on the left,
 // an expectation-setting "what comes back" panel on the right.
-export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, error }: Props) {
+export default function DemoIntro({ onBlob, onError, onOpenLibrary, loading, statusMsg, error }: Props) {
   const { t } = useI18n();
   const reduce = useReducedMotion();
 
@@ -47,7 +49,10 @@ export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, e
               // loader carries its own navy stage, so no wrapper card is needed.
               <LumenLoader variant="scan" caption={statusMsg} />
             ) : (
-              <UploadDropzone onFile={onFile} />
+              // Extraction-progress bar is a deferred follow-up (SP1 Task 9 note): the studio is
+              // never busy here — DemoIntro's own `loading` branch above already covers the
+              // whole waiting state with Lumen.
+              <CaptureStudio onBlob={onBlob} busy={false} progress={0} onError={onError} />
             )}
 
             <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-faint">
