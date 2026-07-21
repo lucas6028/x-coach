@@ -19,13 +19,21 @@ class AnalyzePosePayloadTests(unittest.TestCase):
             "metadata": {"fps": 30, "width": 100, "height": 200, "total_frames": 1},
             "frames": [{"frame_index": 0, "landmarks": [{"x": 0.1, "y": 0.2, "z": 0.0, "visibility": 0.9}] * 33}],
         }
-        svc._ANALYSIS_STRATEGIES["Squat"] = lambda pl, vid: {"detections": [], "video_id": vid}
+        received_paths: list = []
+
+        def _stub_strategy(pl, vid, path):
+            received_paths.append(path)
+            return {"detections": [], "video_id": vid}
+
+        svc._ANALYSIS_STRATEGIES["Squat"] = _stub_strategy
         result = svc.analyze_pose_payload(payload, movement="Squat", video_id="vid1")
         self.assertEqual(result["source"], "upload")
         self.assertEqual(result["video_id"], "vid1")
         self.assertIn("pose", result)
         self.assertEqual(result["pose"]["fps"], 30.0)
         self.assertEqual(len(result["pose"]["frames"]), 1)
+        self.assertEqual(len(received_paths), 1)
+        self.assertEqual(received_paths[0].name, "vid1.json")
 
     def test_unknown_movement_returns_coming_soon_without_detector(self) -> None:
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
