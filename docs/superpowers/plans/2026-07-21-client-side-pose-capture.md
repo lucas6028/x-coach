@@ -51,7 +51,7 @@
 
 ### Task 1: Squat verdict-agreement across MediaPipe complexity tiers
 
-Measurement spike (not TDD): its output decides `DEFAULT_ANALYSIS_TIER` in Task 4. Requires the local squat dataset under `data/Squat/`.
+Measurement spike (not TDD): its output decides `DEFAULT_ANALYSIS_TIER` in Task 4. Requires the local squat dataset under `data/Fitness-AQA/Squat/` (1739 clips present locally).
 
 **Files:**
 - Modify: `src/pose/process_videos.py:48-53`
@@ -113,7 +113,7 @@ from src.pose.pose_rule_detector import detect_pose_rules_from_json  # noqa: E40
 from src.pose.process_videos import process_video  # noqa: E402
 
 TIERS = {"lite": 0, "full": 1, "heavy": 2}
-SQUAT_VIDEOS = REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "videos"
+SQUAT_VIDEOS = REPO_ROOT / "data" / "Fitness-AQA" / "Squat" / "Labeled_Dataset" / "videos"
 
 
 def verdict_set(pose_json: Path) -> frozenset[str]:
