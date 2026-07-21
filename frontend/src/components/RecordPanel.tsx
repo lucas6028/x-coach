@@ -23,6 +23,10 @@ export default function RecordPanel({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const [recording, setRecording] = useState(false);
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const onRecordedRef = useRef(onRecorded);
+  onRecordedRef.current = onRecorded;
 
   useEffect(() => {
     let cancelled = false;
@@ -40,6 +44,7 @@ export default function RecordPanel({
         await waitForVideoFrame(video);
         const { createPoseLandmarker } = await import("./poseLandmarker");
         landmarker = await createPoseLandmarker(LIVE_OVERLAY_TIER);
+        if (cancelled) { landmarker.close(); return; }
         const draw = () => {
           if (cancelled) return;
           const canvas = canvasRef.current!;
@@ -63,8 +68,11 @@ export default function RecordPanel({
         };
         draw();
       } catch (err) {
+        if (cancelled) return; // unmounted mid-init: cleanup already stopped the stream
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
         const reason = err instanceof CameraError ? err.reason : "error";
-        onError(reason === "unsupported" || reason === "timeout"
+        onErrorRef.current(reason === "unsupported" || reason === "timeout"
           ? "此裝置無法在瀏覽器內開啟相機，請改用上傳。"
           : "相機啟動失敗，請改用上傳。");
       }
@@ -75,8 +83,12 @@ export default function RecordPanel({
       cancelAnimationFrame(raf);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       try { landmarker?.close(); } catch { /* noop */ }
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        recorderRef.current.onstop = null;
+        recorderRef.current.stop();
+      }
     };
-  }, [onError]);
+  }, []);
 
   const start = () => {
     const stream = streamRef.current;
@@ -84,7 +96,7 @@ export default function RecordPanel({
     chunks.current = [];
     const rec = new MediaRecorder(stream, { mimeType: pickMime() });
     rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
-    rec.onstop = () => onRecorded(new Blob(chunks.current, { type: rec.mimeType }));
+    rec.onstop = () => onRecordedRef.current(new Blob(chunks.current, { type: rec.mimeType }));
     rec.start();
     recorderRef.current = rec;
     setRecording(true);
