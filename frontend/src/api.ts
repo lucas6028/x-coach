@@ -1,6 +1,7 @@
 // Typed client for the x-coach FastAPI backend. URLs are relative; Vite proxies /api -> :8000.
 
 import { supabase } from "./lib/supabase";
+import type { PoseJson } from "./lib/poseExtract";
 
 export interface VideoMeta {
   fps: number;
@@ -524,6 +525,24 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     const res = await fetch("/api/analyze", {
+      method: "POST",
+      body: form,
+      headers: await authHeader(),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
+    }
+    return (await res.json()) as Analysis;
+  },
+
+  async analyzePose(movement: string, pose: PoseJson, video: Blob): Promise<Analysis> {
+    const form = new FormData();
+    form.append("movement", movement);
+    form.append("pose", JSON.stringify(pose));
+    const ext = video.type.includes("mp4") ? "mp4" : "webm";
+    form.append("file", video, `capture.${ext}`);
+    const res = await fetch("/api/analyze/pose", {
       method: "POST",
       body: form,
       headers: await authHeader(),
