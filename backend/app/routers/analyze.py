@@ -24,6 +24,30 @@ router = APIRouter(prefix="/api", tags=["analyze"])
 _ANALYSIS_SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_ANALYSES)
 
 
+def _validate_pose_landmarks(payload: dict) -> None:
+    """Reject structurally malformed landmark entries before they reach the pose pipeline.
+
+    Landmark COUNT is not validated here — a ``landmarks`` list with fewer than 33
+    well-formed entries is legitimate (the detector treats it as "no pose"). Only
+    structural malformation (non-dict frames/landmarks, missing/non-numeric fields)
+    is rejected. ``world_landmarks`` is intentionally not checked: the detector never
+    reads it.
+    """
+    for frame in payload.get("frames", []):
+        if not isinstance(frame, dict):
+            raise HTTPException(status_code=400, detail="Malformed pose frame.")
+        lms = frame.get("landmarks")
+        if lms is None:
+            continue
+        if not isinstance(lms, list):
+            raise HTTPException(status_code=400, detail="Malformed pose landmarks.")
+        for lm in lms:
+            if not isinstance(lm, dict) or not all(
+                isinstance(lm.get(k), (int, float)) for k in ("x", "y", "z", "visibility")
+            ):
+                raise HTTPException(status_code=400, detail="Malformed pose landmarks.")
+
+
 @router.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
@@ -107,6 +131,7 @@ async def analyze_pose(
         raise HTTPException(status_code=400, detail="Malformed pose JSON.") from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list):
         raise HTTPException(status_code=400, detail="Pose JSON must have a 'frames' list.")
+    _validate_pose_landmarks(payload)
 
     data = await file.read()
     if not data:

@@ -49,6 +49,12 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
             asyncio.run(analyze_router.analyze_pose("Squat", json.dumps({"metadata": {}}), _upload(), user=None))
         self.assertEqual(ctx.exception.status_code, 400)
 
+    def test_rejects_malformed_landmarks(self) -> None:
+        bad = json.dumps({"metadata": {}, "frames": [{"landmarks": [{"x": 1}]}]})
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(analyze_router.analyze_pose("Squat", bad, _upload(), user=None))
+        self.assertEqual(ctx.exception.status_code, 400)
+
     def test_rejects_unsupported_suffix(self) -> None:
         with self.assertRaises(HTTPException) as ctx:
             asyncio.run(analyze_router.analyze_pose("Squat", _GOOD_POSE, _upload("x.txt"), user=None))
