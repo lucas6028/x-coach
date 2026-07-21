@@ -27,6 +27,7 @@ _DEFAULT_TESTS = [
     "tests/test_chat_endpoint.py",
     "tests/test_backend_line_auth.py",
     "tests/test_backend_line_webhook.py",
+    "tests/test_backend_admin_line.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]
