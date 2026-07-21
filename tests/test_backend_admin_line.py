@@ -99,3 +99,78 @@ class LineQuotaFetchTests(unittest.TestCase):
         with mock.patch.object(line_quota, "get_settings", return_value=_stub_settings()), \
              mock.patch.object(line_quota.httpx, "get", side_effect=responses):
             self.assertIsNone(line_quota.fetch_quota())
+
+
+def _settings(**overrides) -> Settings:
+    """A real Settings whose LINE properties compute correctly (mirrors the webhook test helper)."""
+    values = {
+        "supabase_url": "https://proj.supabase.co",
+        "supabase_anon_key": "anon-key",
+        "supabase_service_role_key": "service-key",
+        "line_channel_id": "2010629653",
+        "line_messaging_channel_secret": "secret",
+        "line_messaging_access_token": "token",
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+class AdminLineStatusRouteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+        line_quota.clear_cache()
+        self.addCleanup(line_quota.clear_cache)
+
+    def _get(self, *, quota, settings_obj):
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=settings_obj), \
+             mock.patch.object(line_quota, "fetch_quota", return_value=quota):
+            return self.client.get("/api/admin/line/status")
+
+    def test_configured_with_limited_quota(self) -> None:
+        quota = {"type": "limited", "used": 12, "value": 200, "remaining": 188}
+        resp = self._get(quota=quota, settings_obj=_settings())
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["messaging_configured"])
+        self.assertTrue(body["login_configured"])
+        self.assertEqual(body["channel_id"], "2010629653")
+        self.assertEqual(body["quota"], quota)
+        self.assertIsNone(body["quota_error"])
+
+    def test_configured_but_line_unreachable_sets_error(self) -> None:
+        resp = self._get(quota=None, settings_obj=_settings())
+        body = resp.json()
+        self.assertIsNone(body["quota"])
+        self.assertEqual(body["quota_error"], "unreachable")
+
+    def test_not_configured_skips_line_and_has_no_error(self) -> None:
+        settings_obj = _settings(line_messaging_access_token="")  # -> messaging_configured False
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=settings_obj), \
+             mock.patch.object(line_quota, "fetch_quota") as fq:
+            resp = self.client.get("/api/admin/line/status")
+        body = resp.json()
+        self.assertFalse(body["messaging_configured"])
+        self.assertIsNone(body["quota"])
+        self.assertIsNone(body["quota_error"])
+        fq.assert_not_called()  # unconfigured => never call LINE
+
+    def test_response_carries_no_secret(self) -> None:
+        resp = self._get(quota={"type": "none", "used": 3}, settings_obj=_settings())
+        blob = resp.text
+        self.assertNotIn("token", blob)   # access token / channel secret never serialised
+        self.assertNotIn("secret", blob)
+        self.assertNotIn("service-key", blob)
+
+    def test_forbidden_for_non_admin(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=False):
+            resp = self.client.get("/api/admin/line/status")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop override -> real dependency runs
+        resp = self.client.get("/api/admin/line/status")
+        self.assertEqual(resp.status_code, 401)
