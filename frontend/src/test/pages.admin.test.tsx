@@ -216,6 +216,23 @@ describe("AdminOverview", () => {
     expect(await screen.findByText("Total users")).toBeInTheDocument();
     expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
   });
+
+  it("shows only the connection-status cards when LINE is not configured", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      messaging_configured: false,
+      login_configured: false,
+      channel_id: "",
+      quota: null,
+      quota_error: null,
+    });
+    renderAdmin("/admin");
+    // The two LINE connection cards render (both "Not configured"), but no quota UI appears.
+    expect(await screen.findByText("LINE login bridge")).toBeInTheDocument();
+    expect(screen.getByText("LINE bot")).toBeInTheDocument();
+    expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
+    expect(screen.queryByText("Free remaining")).not.toBeInTheDocument();
+    expect(screen.queryByText("Couldn't reach LINE for quota.")).not.toBeInTheDocument();
+  });
 });
 
 describe("AdminUsers", () => {

@@ -286,6 +286,8 @@ export interface LineQuota {
 export interface LineStatus {
   messaging_configured: boolean;
   login_configured: boolean;
+  // The LINE *Login* channel id (non-secret). NOTE: this is a DIFFERENT channel from the Messaging
+  // bot — do not render it under the bot-status card. Currently surfaced for status only, not displayed.
   channel_id: string;
   quota: LineQuota | null;
   quota_error: "unreachable" | null;
