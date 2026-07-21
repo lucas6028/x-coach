@@ -96,12 +96,14 @@ def analyze_video_file(source_path: Path, *, video_id: str | None = None) -> dic
     return result
 
 
-def _squat_strategy(payload: dict[str, Any], video_id: str) -> dict[str, Any]:
+def _squat_strategy(payload: dict[str, Any], video_id: str, pose_json_path: Path) -> dict[str, Any]:
     # Deferred import: the detector drags in numpy/networkx; keep module import light.
     from src.pose.pose_rule_detector import detect_pose_rules_from_payload
 
     return detect_pose_rules_from_payload(
         payload,
+        pose_json_path=pose_json_path,  # enables camera-view estimation (side-view knees_forward gating,
+                                        # full confidence for knees_inward / excessive_forward_lean)
         video_id=video_id,
         include_retrieval=True,
         graph_file=config.KG_GRAPH_FILE,
@@ -111,7 +113,7 @@ def _squat_strategy(payload: dict[str, Any], video_id: str) -> dict[str, Any]:
 
 
 # The seam SP2 extends: register a per-movement detector strategy under its canonical name.
-_ANALYSIS_STRATEGIES: dict[str, Callable[[dict[str, Any], str], dict[str, Any]]] = {
+_ANALYSIS_STRATEGIES: dict[str, Callable[[dict[str, Any], str, Path], dict[str, Any]]] = {
     "Squat": _squat_strategy,
 }
 
@@ -137,7 +139,13 @@ def analyze_pose_payload(
             "retrievals": [],
             "pose": pose_block,
         }
-    result = strategy(payload, vid)
+    # Persist the client pose JSON so the detector can estimate camera view from it. Without a
+    # path, detect_pose_rules_from_payload treats view as "unknown" and suppresses/downweights the
+    # view-dependent squat faults (knees_forward on side view, knees_inward, excessive_forward_lean).
+    config.ensure_runtime_dirs()
+    pose_json_path = config.UPLOAD_POSE_DIR / f"{vid}.json"
+    pose_json_path.write_text(json.dumps(payload), encoding="utf-8")
+    result = strategy(payload, vid, pose_json_path)
     result = _strip_frame_metrics(result)
     result["pose"] = pose_block
     result["source"] = "upload"
