@@ -1,9 +1,9 @@
 import type { PoseTier } from "../lib/poseTier";
 
 const TIERS: { tier: PoseTier; label: string; hint: string }[] = [
-  { tier: "lite", label: "Lite", hint: "最快，預設" },
+  { tier: "lite", label: "Lite", hint: "最快" },
   { tier: "full", label: "Full", hint: "較準" },
-  { tier: "heavy", label: "Heavy", hint: "最準，較慢" },
+  { tier: "heavy", label: "Heavy", hint: "最準，預設" },
 ];
 
 // Chooses the model tier for the OFFLINE analysis extraction only. The live recording overlay is
