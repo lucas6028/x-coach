@@ -7,6 +7,8 @@ import CoachTray from "./components/CoachTray";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
+import { extractPoseFromBlob } from "./lib/poseExtract";
+import type { PoseTier } from "./lib/poseTier";
 import { useI18n } from "./lib/i18n";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -55,13 +57,16 @@ export default function App() {
     }
   }, [t]);
 
-  const runUpload = useCallback(async (file: File) => {
+  // Client-side capture path: extraction happens in-browser (extractPoseFromBlob), then the pose
+  // JSON + original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
+  const runPoseAnalysis = useCallback(async (blob: Blob, tier: PoseTier) => {
     setLoading(true);
     setError("");
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
     try {
-      const data = await api.analyzeUpload(file);
+      const pose = await extractPoseFromBlob(blob, tier);
+      const data = await api.analyzePose("Squat", pose, blob);
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;
@@ -138,7 +143,8 @@ export default function App() {
     >
       {!hasResult ? (
         <DemoIntro
-          onFile={runUpload}
+          onBlob={runPoseAnalysis}
+          onError={setError}
           onOpenLibrary={() => setPickerOpen(true)}
           loading={loading}
           statusMsg={statusMsg}
