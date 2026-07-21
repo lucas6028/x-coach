@@ -15,8 +15,8 @@ describe("poseTier", () => {
   });
 
   it("round-trips a saved tier and ignores garbage", () => {
-    saveAnalysisTier("heavy");
-    expect(loadAnalysisTier()).toBe("heavy");
+    saveAnalysisTier("lite");
+    expect(loadAnalysisTier()).toBe("lite");
     localStorage.setItem("xcoach.poseTier", "bogus");
     expect(loadAnalysisTier()).toBe(DEFAULT_ANALYSIS_TIER);
   });
