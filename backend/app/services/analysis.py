@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from backend.app import config
 
@@ -92,6 +92,54 @@ def analyze_video_file(source_path: Path, *, video_id: str | None = None) -> dic
     )
     result = _strip_frame_metrics(result)
     result["pose"] = build_pose_block(pose_json_path)
+    result["source"] = "upload"
+    return result
+
+
+def _squat_strategy(payload: dict[str, Any], video_id: str) -> dict[str, Any]:
+    # Deferred import: the detector drags in numpy/networkx; keep module import light.
+    from src.pose.pose_rule_detector import detect_pose_rules_from_payload
+
+    return detect_pose_rules_from_payload(
+        payload,
+        video_id=video_id,
+        include_retrieval=True,
+        graph_file=config.KG_GRAPH_FILE,
+        rag_db_dir=config.RAG_DB_DIR,
+        movement="Squat",
+    )
+
+
+# The seam SP2 extends: register a per-movement detector strategy under its canonical name.
+_ANALYSIS_STRATEGIES: dict[str, Callable[[dict[str, Any], str], dict[str, Any]]] = {
+    "Squat": _squat_strategy,
+}
+
+
+def analyze_pose_payload(
+    payload: dict[str, Any], *, movement: str, video_id: str | None = None
+) -> dict[str, Any]:
+    """Analyze a client-supplied pose JSON payload — no server-side MediaPipe.
+
+    Routes by movement to a detector strategy. Movements without a strategy yet return a
+    skeleton-only 'analysis pending' result (the video is still stored by the caller).
+    """
+    vid = video_id or f"upload_{uuid.uuid4().hex[:12]}"
+    pose_block = build_pose_block_from_payload(payload)
+    strategy = _ANALYSIS_STRATEGIES.get(movement)
+    if strategy is None:
+        return {
+            "video_id": vid,
+            "source": "upload",
+            "analysis_pending": True,
+            "movement": movement,
+            "detections": [],
+            "retrievals": [],
+            "pose": pose_block,
+        }
+    result = strategy(payload, vid)
+    result = _strip_frame_metrics(result)
+    result["pose"] = pose_block
     result["source"] = "upload"
     return result
 
