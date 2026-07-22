@@ -10,6 +10,7 @@ import Settings from "./pages/Settings";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminOverview from "./pages/admin/AdminOverview";
+import AdminLine from "./pages/admin/AdminLine";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminSettingsLlm from "./pages/admin/AdminSettingsLlm";
 import AdminSettingsRag from "./pages/admin/AdminSettingsRag";
@@ -96,6 +97,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 }
               >
                 <Route index element={<AdminOverview />} />
+                <Route path="line" element={<AdminLine />} />
                 <Route path="users" element={<AdminUsers />} />
                 <Route path="settings/llm" element={<AdminSettingsLlm />} />
                 <Route path="settings/rag" element={<AdminSettingsRag />} />

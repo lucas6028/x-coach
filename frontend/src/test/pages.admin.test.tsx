@@ -11,6 +11,7 @@ import {
 } from "../api";
 import AdminLayout from "../pages/admin/AdminLayout";
 import AdminOverviewPage from "../pages/admin/AdminOverview";
+import AdminLinePage from "../pages/admin/AdminLine";
 import AdminUsers from "../pages/admin/AdminUsers";
 import AdminSettingsLlm from "../pages/admin/AdminSettingsLlm";
 import AdminSettingsRag from "../pages/admin/AdminSettingsRag";
@@ -102,6 +103,7 @@ function renderAdmin(path: string) {
         <Routes>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminOverviewPage />} />
+            <Route path="line" element={<AdminLinePage />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="settings/llm" element={<AdminSettingsLlm />} />
             <Route path="settings/rag" element={<AdminSettingsRag />} />
@@ -142,10 +144,11 @@ afterEach(() => vi.restoreAllMocks());
 describe("AdminLayout gate", () => {
   it("renders the admin nav for an admin", async () => {
     renderAdmin("/admin");
-    // The nav lists all five admin destinations (plus the back-to-app link). The rail is rendered in
+    // The nav lists all six admin destinations (plus the back-to-app link). The rail is rendered in
     // both the desktop shell and the (off-canvas) mobile drawer, so each link appears more than once.
     expect((await screen.findAllByRole("link", { name: "Users" })).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "LLM chat" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "LINE" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "Back to app" }).length).toBeGreaterThan(0);
     expect(
       screen.queryByText("You don't have access to the admin panel.")
@@ -187,8 +190,27 @@ describe("AdminOverview", () => {
     expect(screen.getByText("1/2 ready")).toBeInTheDocument();
   });
 
-  it("renders the LINE quota cards when messaging is configured with a limit", async () => {
+  it("no longer fetches the LINE status (moved to its own page)", async () => {
     renderAdmin("/admin");
+    await screen.findByText("Total users");
+    expect(api.getLineStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("AdminLine", () => {
+  it("renders the page header", async () => {
+    renderAdmin("/admin/line");
+    expect(await screen.findByRole("heading", { name: "LINE" })).toBeInTheDocument();
+  });
+
+  it("shows a load error when the LINE status fetch fails", async () => {
+    vi.spyOn(api, "getLineStatus").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("Couldn't load the LINE status.")).toBeInTheDocument();
+  });
+
+  it("renders the LINE quota cards when messaging is configured with a limit", async () => {
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Push used this month")).toBeInTheDocument();
     expect(screen.getByText("12 / 200")).toBeInTheDocument();
     expect(screen.getByText("Free remaining")).toBeInTheDocument();
@@ -200,7 +222,7 @@ describe("AdminOverview", () => {
       ...SAMPLE_LINE_STATUS,
       quota: { type: "none", used: 9 },
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("9")).toBeInTheDocument(); // used, no "/ limit"
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(
@@ -214,16 +236,8 @@ describe("AdminOverview", () => {
       quota: null,
       quota_error: "unreachable",
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Couldn't reach LINE for quota.")).toBeInTheDocument();
-  });
-
-  it("does not break the overview when the LINE status fetch fails", async () => {
-    vi.spyOn(api, "getLineStatus").mockRejectedValue(new Error("500 boom"));
-    renderAdmin("/admin");
-    // Main overview still renders; the LINE section simply renders nothing.
-    expect(await screen.findByText("Total users")).toBeInTheDocument();
-    expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
   });
 
   it("shows only the connection-status cards when LINE is not configured", async () => {
@@ -240,7 +254,7 @@ describe("AdminOverview", () => {
       delivery: null,
       delivery_error: null,
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     // The two LINE connection cards render (both "Not configured"), but no quota UI appears.
     expect(await screen.findByText("LINE login bridge")).toBeInTheDocument();
     expect(screen.getByText("LINE bot")).toBeInTheDocument();
@@ -253,7 +267,7 @@ describe("AdminOverview", () => {
   });
 
   it("renders the bot info, webhook, and delivery cards", async () => {
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("x-coach")).toBeInTheDocument();
     expect(screen.getByText("@xcoach")).toBeInTheDocument();
     expect(screen.getByText("Webhook")).toBeInTheDocument();
@@ -267,7 +281,7 @@ describe("AdminOverview", () => {
       ...SAMPLE_LINE_STATUS,
       bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "chat", mark_as_read_mode: "auto" },
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText(/won't receive message events/i)).toBeInTheDocument();
   });
 
@@ -276,7 +290,7 @@ describe("AdminOverview", () => {
       ...SAMPLE_LINE_STATUS,
       delivery: { date: "20260720", reply: null, push: null },
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect((await screen.findAllByText("Not ready yet")).length).toBeGreaterThan(0);
   });
 
@@ -285,7 +299,7 @@ describe("AdminOverview", () => {
       result: { success: true, status_code: 200, reason: "OK", detail: "200" },
       error: null,
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
     await waitFor(() => expect(testFn).toHaveBeenCalled());
     expect(await screen.findByText(/Reachable \(200\)/i)).toBeInTheDocument();
@@ -293,7 +307,7 @@ describe("AdminOverview", () => {
 
   it("shows an error when the webhook test can't reach LINE", async () => {
     vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error: "unreachable" });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
     expect(await screen.findByText("Couldn't reach LINE.")).toBeInTheDocument();
   });
@@ -303,7 +317,7 @@ describe("AdminOverview", () => {
       result: { success: false, status_code: 500, reason: "ERROR", detail: "500" },
       error: null,
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
     const msg = await screen.findByText(/Failed/i);
     expect(msg.textContent).toContain("500");
@@ -311,13 +325,13 @@ describe("AdminOverview", () => {
   });
 
   it("never fires the webhook test on page load — only on an explicit click", async () => {
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     await screen.findByRole("button", { name: "Test webhook" });
     expect(api.testLineWebhook).not.toHaveBeenCalled();
   });
 
   it("renders the delivery date under the reply/push count cards", async () => {
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Replies yesterday")).toBeInTheDocument();
     expect(screen.getByText("Counts for 2026-07-20")).toBeInTheDocument();
   });
@@ -330,7 +344,7 @@ describe("AdminOverview", () => {
       webhook: null,
       webhook_error: "unreachable",
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText(/Couldn't read the webhook setting/i)).toBeInTheDocument();
     // The active probe is the only way left to learn WHY, so it must survive the failed read.
     expect(screen.getByRole("button", { name: "Test webhook" })).toBeInTheDocument();
@@ -342,7 +356,7 @@ describe("AdminOverview", () => {
       bot_info: null,
       bot_info_error: "unreachable",
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Official account")).toBeInTheDocument();
     expect(screen.getByText(/Couldn't read the official-account info/i)).toBeInTheDocument();
   });
@@ -353,7 +367,7 @@ describe("AdminOverview", () => {
       delivery: null,
       delivery_error: "unreachable",
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText(/Couldn't read yesterday's delivery counts/i)).toBeInTheDocument();
   });
 
@@ -366,7 +380,7 @@ describe("AdminOverview", () => {
     // Reporting a bad token or a rate limit as "couldn't reach LINE" sends the admin chasing
     // connectivity — the diagnostics tool would be the source of the misdiagnosis.
     vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
     expect(await screen.findByText(pattern)).toBeInTheDocument();
     expect(screen.queryByText("Couldn't reach LINE.")).not.toBeInTheDocument();
