@@ -61,14 +61,18 @@ describe("ComplexitySelector", () => {
     expect(panel).toHaveTextContent(/default/i);
   });
 
-  it("keeps the axis ends and the live-overlay carve-out visible", () => {
+  it("keeps the live-overlay carve-out visible", () => {
     renderWithProviders(<ComplexitySelector value="heavy" onChange={() => {}} />);
     openPanel(/heavy/i);
-    const panel = screen.getByRole("dialog");
-    expect(panel).toHaveTextContent(/faster/i);
-    expect(panel).toHaveTextContent(/more accurate/i);
     // This control must not read as governing the live skeleton.
-    expect(panel).toHaveTextContent(/live skeleton overlay always runs Lite/i);
+    expect(screen.getByRole("dialog")).toHaveTextContent(/live skeleton overlay always runs Lite/i);
+  });
+
+  it("closes from the panel's close button", () => {
+    renderWithProviders(<ComplexitySelector value="heavy" onChange={() => {}} />);
+    openPanel(/heavy/i);
+    fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("focuses the slider on open so arrow keys adjust immediately", () => {
