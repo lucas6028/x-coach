@@ -39,7 +39,7 @@ def _stub_settings(token: str = "chan-token") -> types.SimpleNamespace:
     return types.SimpleNamespace(line_messaging_access_token=token)
 
 
-class LineQuotaFetchTests(unittest.TestCase):
+class LineAdminQuotaTests(unittest.TestCase):
     def setUp(self) -> None:
         line_admin.clear_cache()
         self.addCleanup(line_admin.clear_cache)
@@ -101,6 +101,89 @@ class LineQuotaFetchTests(unittest.TestCase):
             self.assertIsNone(line_admin.fetch_quota())
 
 
+class LineBotInfoWebhookDeliveryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        line_admin.clear_cache()
+        self.addCleanup(line_admin.clear_cache)
+
+    def _patch_get(self, responses):
+        return mock.patch.object(line_admin.httpx, "get", side_effect=responses)
+
+    def _settings_stub(self, token="chan-token"):
+        return mock.patch.object(line_admin, "get_settings",
+                                 return_value=types.SimpleNamespace(line_messaging_access_token=token))
+
+    def test_bot_info_happy(self) -> None:
+        payload = {"displayName": "x-coach", "basicId": "@xcoach", "premiumId": None,
+                   "chatMode": "bot", "markAsReadMode": "auto"}
+        with self._settings_stub(), self._patch_get([_FakeResp(payload)]):
+            self.assertEqual(line_admin.fetch_bot_info(), {
+                "display_name": "x-coach", "basic_id": "@xcoach", "premium_id": None,
+                "chat_mode": "bot", "mark_as_read_mode": "auto"})
+
+    def test_bot_info_no_token_returns_none(self) -> None:
+        with self._settings_stub(token=""), self._patch_get([]) as g:
+            self.assertIsNone(line_admin.fetch_bot_info())
+        g.assert_not_called()
+
+    def test_bot_info_non_200_returns_none(self) -> None:
+        with self._settings_stub(), self._patch_get([_FakeResp({}, ok=False)]):
+            self.assertIsNone(line_admin.fetch_bot_info())
+
+    def test_webhook_happy(self) -> None:
+        with self._settings_stub(), self._patch_get([_FakeResp({"endpoint": "https://x/api/line/webhook", "active": True})]):
+            self.assertEqual(line_admin.fetch_webhook(), {"endpoint": "https://x/api/line/webhook", "active": True})
+
+    def test_webhook_missing_endpoint_returns_none(self) -> None:
+        with self._settings_stub(), self._patch_get([_FakeResp({"active": True})]):
+            self.assertIsNone(line_admin.fetch_webhook())
+
+    def test_delivery_ready_counts(self) -> None:
+        with self._settings_stub(), \
+             mock.patch.object(line_admin, "_yesterday_yyyymmdd", return_value="20260720"), \
+             self._patch_get([_FakeResp({"status": "ready", "success": 12}),
+                              _FakeResp({"status": "ready", "success": 3})]):
+            self.assertEqual(line_admin.fetch_delivery(), {"date": "20260720", "reply": 12, "push": 3})
+
+    def test_delivery_unready_yields_none_counts(self) -> None:
+        with self._settings_stub(), \
+             mock.patch.object(line_admin, "_yesterday_yyyymmdd", return_value="20260720"), \
+             self._patch_get([_FakeResp({"status": "unready"}), _FakeResp({"status": "unready"})]):
+            self.assertEqual(line_admin.fetch_delivery(), {"date": "20260720", "reply": None, "push": None})
+
+    def test_readonly_cache_hits_avoid_second_call(self) -> None:
+        with self._settings_stub(), self._patch_get([_FakeResp({"endpoint": "https://x", "active": False})]):
+            first = line_admin.fetch_webhook()
+        with mock.patch.object(line_admin.httpx, "get") as g2:
+            second = line_admin.fetch_webhook()
+        self.assertEqual(first, second)
+        g2.assert_not_called()
+
+    def test_webhook_no_token_returns_none(self) -> None:
+        # Not in the brief: closes _fetch_webhook's "no token" branch (mirrors bot_info's).
+        with self._settings_stub(token=""), self._patch_get([]) as g:
+            self.assertIsNone(line_admin.fetch_webhook())
+        g.assert_not_called()
+
+    def test_webhook_read_failure_returns_none(self) -> None:
+        # Not in the brief: closes _fetch_webhook's except-on-read-failure branch.
+        with self._settings_stub(), self._patch_get([_FakeResp({}, ok=False)]):
+            self.assertIsNone(line_admin.fetch_webhook())
+
+    def test_delivery_no_token_returns_none(self) -> None:
+        # Not in the brief: closes _fetch_delivery's "no token" branch.
+        with self._settings_stub(token=""), self._patch_get([]) as g:
+            self.assertIsNone(line_admin.fetch_delivery())
+        g.assert_not_called()
+
+    def test_delivery_read_failure_returns_none(self) -> None:
+        # Not in the brief: closes _fetch_delivery's except-on-read-failure branch.
+        with self._settings_stub(), \
+             mock.patch.object(line_admin, "_yesterday_yyyymmdd", return_value="20260720"), \
+             self._patch_get([_FakeResp({}, ok=False)]):
+            self.assertIsNone(line_admin.fetch_delivery())
+
+
 def _settings(**overrides) -> Settings:
     """A real Settings whose LINE properties compute correctly (mirrors the webhook test helper)."""
     values = {
@@ -124,9 +207,14 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         self.addCleanup(line_admin.clear_cache)
 
     def _get(self, *, quota, settings_obj):
+        # bot_info/webhook/delivery are stubbed to None here (unexercised by these quota-focused
+        # tests) so the route never falls through to a real, unmocked LINE call.
         with mock.patch.object(store, "is_admin", return_value=True), \
              mock.patch("backend.app.settings.get_settings", return_value=settings_obj), \
-             mock.patch.object(line_admin, "fetch_quota", return_value=quota):
+             mock.patch.object(line_admin, "fetch_quota", return_value=quota), \
+             mock.patch.object(line_admin, "fetch_bot_info", return_value=None), \
+             mock.patch.object(line_admin, "fetch_webhook", return_value=None), \
+             mock.patch.object(line_admin, "fetch_delivery", return_value=None):
             return self.client.get("/api/admin/line/status")
 
     def test_configured_with_limited_quota(self) -> None:
@@ -174,3 +262,28 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         app.dependency_overrides.clear()  # drop override -> real dependency runs
         resp = self.client.get("/api/admin/line/status")
         self.assertEqual(resp.status_code, 401)
+
+    def test_status_includes_bot_info_webhook_delivery(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
+             mock.patch.object(line_admin, "fetch_quota", return_value={"type": "none", "used": 1}), \
+             mock.patch.object(line_admin, "fetch_bot_info", return_value={"display_name": "x", "basic_id": "@x", "premium_id": None, "chat_mode": "bot", "mark_as_read_mode": "auto"}), \
+             mock.patch.object(line_admin, "fetch_webhook", return_value={"endpoint": "https://x", "active": True}), \
+             mock.patch.object(line_admin, "fetch_delivery", return_value={"date": "20260720", "reply": 4, "push": 0}):
+            body = self.client.get("/api/admin/line/status").json()
+        self.assertEqual(body["bot_info"]["chat_mode"], "bot")
+        self.assertTrue(body["webhook"]["active"])
+        self.assertEqual(body["delivery"]["reply"], 4)
+
+    def test_status_not_configured_nulls_new_keys_and_skips_line(self) -> None:
+        settings_obj = _settings(line_messaging_access_token="")
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=settings_obj), \
+             mock.patch.object(line_admin, "fetch_bot_info") as bi, \
+             mock.patch.object(line_admin, "fetch_webhook") as wh, \
+             mock.patch.object(line_admin, "fetch_delivery") as dl:
+            body = self.client.get("/api/admin/line/status").json()
+        self.assertIsNone(body["bot_info"])
+        self.assertIsNone(body["webhook"])
+        self.assertIsNone(body["delivery"])
+        bi.assert_not_called(); wh.assert_not_called(); dl.assert_not_called()

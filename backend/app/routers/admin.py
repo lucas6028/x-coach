@@ -252,14 +252,19 @@ def admin_line_status(user: CurrentUser = Depends(get_admin_user)) -> dict:
     read LINE's quota endpoints, and the channel secret / service_role key are never touched.
     ``channel_id`` is the non-secret LINE Login channel id, surfaced only so an admin can confirm
     which channel is wired. When messaging isn't configured we skip the LINE call entirely; when it
-    is configured but the read fails, ``quota`` is ``None`` and ``quota_error`` flags it.
+    is configured but the read fails, ``quota`` is ``None`` and ``quota_error`` flags it. ``bot_info``,
+    ``webhook``, and ``delivery`` follow the same configured-gated, None-on-failure shape.
     """
     s = settings.get_settings()
-    quota = line_admin.fetch_quota() if s.line_messaging_configured else None
+    configured = s.line_messaging_configured
+    quota = line_admin.fetch_quota() if configured else None
     return {
-        "messaging_configured": s.line_messaging_configured,
+        "messaging_configured": configured,
         "login_configured": s.line_login_configured,
         "channel_id": s.line_channel_id,
         "quota": quota,
-        "quota_error": "unreachable" if (s.line_messaging_configured and quota is None) else None,
+        "quota_error": "unreachable" if (configured and quota is None) else None,
+        "bot_info": line_admin.fetch_bot_info() if configured else None,
+        "webhook": line_admin.fetch_webhook() if configured else None,
+        "delivery": line_admin.fetch_delivery() if configured else None,
     }
