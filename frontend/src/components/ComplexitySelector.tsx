@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { CaretDown, Gauge, X } from "@phosphor-icons/react";
 import { useI18n } from "../lib/i18n";
 import { DEFAULT_ANALYSIS_TIER, type PoseTier } from "../lib/poseTier";
@@ -23,6 +23,9 @@ export default function ComplexitySelector({
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  // Non-null only while a pointer drag is in flight: the raw fractional position, so the knob
+  // tracks the finger continuously instead of teleporting between stops. Released -> nearest stop.
+  const [dragPos, setDragPos] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   const sliderRef = useRef<HTMLInputElement>(null);
 
@@ -46,9 +49,45 @@ export default function ComplexitySelector({
   }, [open]);
 
   const index = Math.max(0, TIERS.indexOf(value));
-  // Position along the axis: first tier at 0%, last at 100%. Percentages resolve against the
-  // knob-inset inner rail, so the knob never hangs off either end of the track.
-  const pct = (index / (TIERS.length - 1)) * 100;
+  const last = TIERS.length - 1;
+  // Where the knob is drawn: the live drag position, else the committed tier. Percentages resolve
+  // against the knob-inset inner rail, so the knob never hangs off either end of the track.
+  const shown = dragPos ?? index;
+  const pct = (shown / last) * 100;
+  const dragging = dragPos !== null;
+
+  const clampTier = (i: number) => TIERS[Math.min(last, Math.max(0, i))];
+
+  // End of a drag: land on whichever stop is closest to where the finger let go.
+  const commit = () => {
+    if (dragPos === null) return;
+    const nearest = clampTier(Math.round(dragPos));
+    setDragPos(null);
+    if (nearest !== value) onChange(nearest);
+  };
+
+  const step = (delta: number) => {
+    setDragPos(null);
+    const next = clampTier(index + delta);
+    if (next !== value) onChange(next);
+  };
+
+  // The input's own step is fine-grained so dragging is smooth, which would make arrow keys crawl
+  // a hundredth of a tier at a time — so the keyboard is handled here in whole tiers instead.
+  const onSliderKeyDown = (e: ReactKeyboardEvent) => {
+    const byKey: Record<string, () => void> = {
+      ArrowRight: () => step(1),
+      ArrowUp: () => step(1),
+      ArrowLeft: () => step(-1),
+      ArrowDown: () => step(-1),
+      Home: () => step(-last),
+      End: () => step(last),
+    };
+    const handler = byKey[e.key];
+    if (!handler) return;
+    e.preventDefault();
+    handler();
+  };
 
   return (
     <div ref={ref} className="relative">
@@ -96,23 +135,31 @@ export default function ComplexitySelector({
                 free and the value is exposed as role="slider" — the drawn parts are presentation
                 only, which is also the only way to use the app's tokens (::-webkit-slider-thumb
                 cannot be styled portably). */}
-            <div className="relative mt-4 h-10 rounded-full bg-track/50">
-              <div className="absolute inset-y-0 left-5 right-5">
+            <div className="relative mt-4 h-7">
+              <div className="absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 rounded-full bg-track/50" />
+              {/* Knob travel is inset by half a knob so it stays fully on the rail at both ends. */}
+              <div className="absolute inset-y-0 left-2.5 right-2.5">
                 <div
-                  className="absolute inset-y-0 -left-5 rounded-full bg-primary"
-                  style={{ width: `calc(${pct}% + 1.25rem)` }}
+                  className={`absolute top-1/2 -left-2.5 h-2.5 -translate-y-1/2 rounded-full bg-primary ${
+                    dragging ? "" : "transition-[width] duration-150 ease-out"
+                  }`}
+                  style={{ width: `calc(${pct}% + 0.625rem)` }}
                 />
                 {TIERS.map((tier, i) => (
                   <span
                     key={tier}
-                    className={`absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${
-                      i <= index ? "bg-primary-content/50" : "bg-content/25"
+                    className={`absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${
+                      i <= shown ? "bg-primary-content/60" : "bg-content/30"
                     }`}
-                    style={{ left: `${(i / (TIERS.length - 1)) * 100}%` }}
+                    style={{ left: `${(i / last) * 100}%` }}
                   />
                 ))}
+                {/* Knob: only slightly wider than the rail, and sharing its centre line, so the two
+                    read as one control rather than a ball parked on a bar. */}
                 <div
-                  className="absolute top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-card ring-1 ring-black/10"
+                  className={`absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-white shadow-card ${
+                    dragging ? "" : "transition-[left] duration-150 ease-out"
+                  }`}
                   style={{ left: `${pct}%` }}
                 />
               </div>
@@ -120,12 +167,19 @@ export default function ComplexitySelector({
                 ref={sliderRef}
                 type="range"
                 min={0}
-                max={TIERS.length - 1}
-                step={1}
-                value={index}
-                onChange={(e) => onChange(TIERS[Number(e.target.value)])}
+                max={last}
+                step={0.01}
+                value={shown}
+                onChange={(e) => setDragPos(Number(e.target.value))}
+                onKeyDown={onSliderKeyDown}
+                // Every way a drag can end. commit() is idempotent, so overlapping events are fine.
+                onPointerUp={commit}
+                onPointerCancel={commit}
+                onMouseUp={commit}
+                onTouchEnd={commit}
+                onBlur={commit}
                 aria-label={t("tier.label")}
-                aria-valuetext={TIER_NAME[value]}
+                aria-valuetext={TIER_NAME[clampTier(Math.round(shown))]}
                 className="absolute inset-0 h-full w-full cursor-pointer appearance-none rounded-full bg-transparent opacity-0"
               />
             </div>

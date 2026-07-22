@@ -23,11 +23,50 @@ describe("ComplexitySelector", () => {
     expect(slider).toHaveAttribute("max", "2");
   });
 
-  it("reports the tier the slider is dragged to", () => {
+  it("reports the tier the slider is dragged to, once the drag ends", () => {
     const onChange = vi.fn();
     renderWithProviders(<ComplexitySelector value="lite" onChange={onChange} />);
     openPanel(/lite/i);
-    fireEvent.change(screen.getByRole("slider"), { target: { value: "2" } });
+    const slider = screen.getByRole("slider");
+
+    // Mid-drag the knob moves freely but nothing is committed yet — the tier only changes when
+    // the finger lifts, so a drag across the track doesn't fire every tier it passes over.
+    fireEvent.change(slider, { target: { value: "1.2" } });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.mouseUp(slider);
+    expect(onChange).toHaveBeenCalledWith("full");
+  });
+
+  it("snaps to the nearest tier when released between two", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<ComplexitySelector value="lite" onChange={onChange} />);
+    openPanel(/lite/i);
+    const slider = screen.getByRole("slider");
+
+    // 1.6 is past the midpoint between Full and Heavy -> Heavy, not a truncation to Full.
+    fireEvent.change(slider, { target: { value: "1.6" } });
+    fireEvent.mouseUp(slider);
+    expect(onChange).toHaveBeenCalledWith("heavy");
+  });
+
+  it("moves a whole tier per arrow key despite the fine drag step", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<ComplexitySelector value="lite" onChange={onChange} />);
+    openPanel(/lite/i);
+    fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowRight" });
+    // A fine step would have crawled to 0.01 and stayed on Lite.
+    expect(onChange).toHaveBeenCalledWith("full");
+  });
+
+  it("does not run past either end of the axis", () => {
+    const onChange = vi.fn();
+    renderWithProviders(<ComplexitySelector value="lite" onChange={onChange} />);
+    openPanel(/lite/i);
+    fireEvent.keyDown(screen.getByRole("slider"), { key: "ArrowLeft" });
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(screen.getByRole("slider"), { key: "End" });
     expect(onChange).toHaveBeenCalledWith("heavy");
   });
 

@@ -49,6 +49,7 @@ describe("CaptureStudio", () => {
     renderWithProviders(<CaptureStudio onBlob={onBlob} busy={false} progress={0} onError={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /precision/i }));
     fireEvent.change(screen.getByRole("slider"), { target: { value: "0" } });
+    fireEvent.mouseUp(screen.getByRole("slider"));
     fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     fireEvent.click(screen.getByText("fake-record"));
     expect(onBlob).toHaveBeenCalledWith(expect.any(Blob), "lite");
