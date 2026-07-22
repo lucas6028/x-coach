@@ -23,14 +23,14 @@ afterEach(() => {
 describe("CaptureStudio", () => {
   it("defaults to upload mode and can switch to record", () => {
     renderWithProviders(<CaptureStudio onBlob={() => {}} busy={false} progress={0} />);
-    fireEvent.click(screen.getByRole("tab", { name: /錄影/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     expect(screen.getByText("fake-record")).toBeInTheDocument();
   });
 
   it("hands a recorded blob + selected tier to onBlob", () => {
     const onBlob = vi.fn();
     renderWithProviders(<CaptureStudio onBlob={onBlob} busy={false} progress={0} />);
-    fireEvent.click(screen.getByRole("tab", { name: /錄影/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     fireEvent.click(screen.getByText("fake-record"));
     expect(onBlob).toHaveBeenCalledWith(expect.any(Blob), DEFAULT_ANALYSIS_TIER);
   });
@@ -38,7 +38,7 @@ describe("CaptureStudio", () => {
   it("resets to upload mode and reports the error when RecordPanel fails", () => {
     const onError = vi.fn();
     renderWithProviders(<CaptureStudio onBlob={() => {}} busy={false} progress={0} onError={onError} />);
-    fireEvent.click(screen.getByRole("tab", { name: /錄影/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     fireEvent.click(screen.getByText("fake-error"));
     expect(onError).toHaveBeenCalledWith("cam fail");
     expect(screen.queryByText("fake-error")).not.toBeInTheDocument();
@@ -47,8 +47,9 @@ describe("CaptureStudio", () => {
   it("hands the selected non-default tier to onBlob", () => {
     const onBlob = vi.fn();
     renderWithProviders(<CaptureStudio onBlob={onBlob} busy={false} progress={0} onError={vi.fn()} />);
-    fireEvent.click(screen.getByRole("radio", { name: /lite/i }));
-    fireEvent.click(screen.getByRole("tab", { name: /錄影/ }));
+    fireEvent.click(screen.getByRole("button", { name: /precision/i }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "Lite" }));
+    fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     fireEvent.click(screen.getByText("fake-record"));
     expect(onBlob).toHaveBeenCalledWith(expect.any(Blob), "lite");
   });
