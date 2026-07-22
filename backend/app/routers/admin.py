@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.app import config, settings
 from backend.app.auth import CurrentUser, get_admin_user, get_current_user
-from backend.app.services import line_quota, runtime_config, store
+from backend.app.services import line_admin, runtime_config, store
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -248,14 +248,14 @@ def admin_overview(user: CurrentUser = Depends(get_admin_user)) -> dict:
 def admin_line_status(user: CurrentUser = Depends(get_admin_user)) -> dict:
     """LINE connection status + this month's push-message quota (admin-only; read-only).
 
-    Never returns a secret: the channel access token is used server-side (in ``line_quota``) to
+    Never returns a secret: the channel access token is used server-side (in ``line_admin``) to
     read LINE's quota endpoints, and the channel secret / service_role key are never touched.
     ``channel_id`` is the non-secret LINE Login channel id, surfaced only so an admin can confirm
     which channel is wired. When messaging isn't configured we skip the LINE call entirely; when it
     is configured but the read fails, ``quota`` is ``None`` and ``quota_error`` flags it.
     """
     s = settings.get_settings()
-    quota = line_quota.fetch_quota() if s.line_messaging_configured else None
+    quota = line_admin.fetch_quota() if s.line_messaging_configured else None
     return {
         "messaging_configured": s.line_messaging_configured,
         "login_configured": s.line_login_configured,

@@ -1,4 +1,4 @@
-"""Unit tests for services/line_quota + GET /api/admin/line/status.
+"""Unit tests for services/line_admin + GET /api/admin/line/status.
 
 Mirrors tests/test_backend_line_webhook.py: unittest.TestCase, external HTTP (LINE's quota
 endpoints) mocked at the httpx.get seam, get_settings patched to a lightweight stand-in, and
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.auth import CurrentUser, get_current_user
 from backend.app.main import app
-from backend.app.services import line_quota, store
+from backend.app.services import line_admin, store
 from backend.app.settings import Settings
 
 
@@ -41,14 +41,14 @@ def _stub_settings(token: str = "chan-token") -> types.SimpleNamespace:
 
 class LineQuotaFetchTests(unittest.TestCase):
     def setUp(self) -> None:
-        line_quota.clear_cache()
-        self.addCleanup(line_quota.clear_cache)
+        line_admin.clear_cache()
+        self.addCleanup(line_admin.clear_cache)
 
     def _run(self, quota_payload, consumption_payload, *, token="chan-token"):
         responses = [_FakeResp(quota_payload), _FakeResp(consumption_payload)]
-        with mock.patch.object(line_quota, "get_settings", return_value=_stub_settings(token)), \
-             mock.patch.object(line_quota.httpx, "get", side_effect=responses) as g:
-            return line_quota.fetch_quota(), g
+        with mock.patch.object(line_admin, "get_settings", return_value=_stub_settings(token)), \
+             mock.patch.object(line_admin.httpx, "get", side_effect=responses) as g:
+            return line_admin.fetch_quota(), g
 
     def test_limited_computes_remaining(self) -> None:
         result, _ = self._run({"type": "limited", "value": 200}, {"totalUsage": 12})
@@ -63,16 +63,16 @@ class LineQuotaFetchTests(unittest.TestCase):
         self.assertEqual(result["remaining"], 0)
 
     def test_missing_token_returns_none_without_calling_line(self) -> None:
-        with mock.patch.object(line_quota, "get_settings", return_value=_stub_settings("")), \
-             mock.patch.object(line_quota.httpx, "get") as g:
-            self.assertIsNone(line_quota.fetch_quota())
+        with mock.patch.object(line_admin, "get_settings", return_value=_stub_settings("")), \
+             mock.patch.object(line_admin.httpx, "get") as g:
+            self.assertIsNone(line_admin.fetch_quota())
         g.assert_not_called()
 
     def test_non_200_returns_none(self) -> None:
         responses = [_FakeResp({"type": "limited", "value": 200}, ok=False)]
-        with mock.patch.object(line_quota, "get_settings", return_value=_stub_settings()), \
-             mock.patch.object(line_quota.httpx, "get", side_effect=responses):
-            self.assertIsNone(line_quota.fetch_quota())
+        with mock.patch.object(line_admin, "get_settings", return_value=_stub_settings()), \
+             mock.patch.object(line_admin.httpx, "get", side_effect=responses):
+            self.assertIsNone(line_admin.fetch_quota())
 
     def test_malformed_consumption_returns_none(self) -> None:
         result, _ = self._run({"type": "limited", "value": 200}, {"totalUsage": "oops"})
@@ -81,8 +81,8 @@ class LineQuotaFetchTests(unittest.TestCase):
     def test_ttl_cache_hits_avoid_second_line_call(self) -> None:
         result1, g = self._run({"type": "limited", "value": 200}, {"totalUsage": 12})
         # Second call within TTL must NOT re-hit LINE (httpx.get called twice total for the first read).
-        with mock.patch.object(line_quota.httpx, "get") as g2:
-            result2 = line_quota.fetch_quota()
+        with mock.patch.object(line_admin.httpx, "get") as g2:
+            result2 = line_admin.fetch_quota()
         self.assertEqual(result1, result2)
         g2.assert_not_called()
 
@@ -96,9 +96,9 @@ class LineQuotaFetchTests(unittest.TestCase):
         # Not in the brief: closes `_get`'s "unexpected LINE quota payload" branch — a 200
         # response whose JSON body isn't a dict (e.g. LINE returns a bare list/array).
         responses = [_FakeResp([1, 2, 3])]
-        with mock.patch.object(line_quota, "get_settings", return_value=_stub_settings()), \
-             mock.patch.object(line_quota.httpx, "get", side_effect=responses):
-            self.assertIsNone(line_quota.fetch_quota())
+        with mock.patch.object(line_admin, "get_settings", return_value=_stub_settings()), \
+             mock.patch.object(line_admin.httpx, "get", side_effect=responses):
+            self.assertIsNone(line_admin.fetch_quota())
 
 
 def _settings(**overrides) -> Settings:
@@ -120,13 +120,13 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         self.client = TestClient(app)
         app.dependency_overrides[get_current_user] = lambda: CurrentUser(id="u1", token="tok")
         self.addCleanup(app.dependency_overrides.clear)
-        line_quota.clear_cache()
-        self.addCleanup(line_quota.clear_cache)
+        line_admin.clear_cache()
+        self.addCleanup(line_admin.clear_cache)
 
     def _get(self, *, quota, settings_obj):
         with mock.patch.object(store, "is_admin", return_value=True), \
              mock.patch("backend.app.settings.get_settings", return_value=settings_obj), \
-             mock.patch.object(line_quota, "fetch_quota", return_value=quota):
+             mock.patch.object(line_admin, "fetch_quota", return_value=quota):
             return self.client.get("/api/admin/line/status")
 
     def test_configured_with_limited_quota(self) -> None:
@@ -150,7 +150,7 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         settings_obj = _settings(line_messaging_access_token="")  # -> messaging_configured False
         with mock.patch.object(store, "is_admin", return_value=True), \
              mock.patch("backend.app.settings.get_settings", return_value=settings_obj), \
-             mock.patch.object(line_quota, "fetch_quota") as fq:
+             mock.patch.object(line_admin, "fetch_quota") as fq:
             resp = self.client.get("/api/admin/line/status")
         body = resp.json()
         self.assertFalse(body["messaging_configured"])
