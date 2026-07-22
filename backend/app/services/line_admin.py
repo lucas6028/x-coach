@@ -191,27 +191,51 @@ def fetch_delivery() -> dict[str, Any] | None:
     return _cached("delivery", _fetch_delivery)
 
 
-def test_webhook() -> dict[str, Any] | None:
+def _request_error_kind(exc: Exception) -> str:
+    """Classify a failed LINE request so the admin gets a diagnosis, not a generic "unreachable".
+
+    A diagnostics panel that reports every failure as a network problem sends the admin chasing
+    connectivity when the real cause is a revoked token or a rate limit, so the HTTP status LINE
+    answered with is preserved rather than swallowed. Anything without a status (DNS, timeout,
+    connection reset) is a genuine transport failure.
+    """
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status in (401, 403):
+        return "unauthorized"
+    if status == 429:
+        return "rate_limited"
+    if status == 404:
+        return "no_endpoint"
+    return "unreachable"
+
+
+def test_webhook() -> tuple[dict[str, Any] | None, str | None]:
     """Actively ask LINE to POST a test event to the configured webhook; report the outcome.
 
     Has a SIDE EFFECT (LINE delivers a test event to the webhook), so this is never called on a plain
-    status read — only on an explicit admin action. NOT cached. Returns None on any transport failure;
-    ``success`` reflects whether the webhook itself answered LINE with 200.
+    status read — only on an explicit admin action. NOT cached.
+
+    Returns ``(result, error)`` with exactly one side non-None: on success ``result`` carries LINE's
+    verdict (``success`` reflects whether the webhook itself answered LINE with 200); on failure
+    ``error`` is the kind from :func:`_request_error_kind`. This is the one read that reports WHY it
+    failed — the cached status reads only report THAT they failed.
     """
     token = _token()
     if not token:
-        return None
+        return None, "not_configured"
     try:
         data = _post(LINE_WEBHOOK_TEST_URL, token)
-    except Exception:  # noqa: BLE001
-        logger.warning("LINE webhook test: request failed")
-        return None
-    return {
+    except Exception as exc:  # noqa: BLE001
+        kind = _request_error_kind(exc)
+        logger.warning("LINE webhook test: request failed (%s)", kind)
+        return None, kind
+    result = {
         "success": bool(data.get("success")),
         "status_code": _safe_int(data.get("statusCode")),
         "reason": data.get("reason") if isinstance(data.get("reason"), str) else None,
         "detail": data.get("detail") if isinstance(data.get("detail"), str) else None,
     }
+    return result, None
 
 
 def clear_cache() -> None:

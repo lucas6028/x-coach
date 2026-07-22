@@ -252,21 +252,34 @@ def admin_line_status(user: CurrentUser = Depends(get_admin_user)) -> dict:
     read LINE's quota endpoints, and the channel secret / service_role key are never touched.
     ``channel_id`` is the non-secret LINE Login channel id, surfaced only so an admin can confirm
     which channel is wired. When messaging isn't configured we skip the LINE call entirely; when it
-    is configured but the read fails, ``quota`` is ``None`` and ``quota_error`` flags it. ``bot_info``,
-    ``webhook``, and ``delivery`` follow the same configured-gated, None-on-failure shape.
+    is configured but a read fails, that field is ``None`` and its ``*_error`` companion flags it.
+
+    EVERY nullable read gets an error companion: without one the UI can't tell "not configured" from
+    "the read failed", so it renders nothing — silently hiding the exact misconfiguration this panel
+    exists to surface (a dead webhook would erase its own card, and with it the Test button).
     """
     s = settings.get_settings()
     configured = s.line_messaging_configured
     quota = line_admin.fetch_quota() if configured else None
+    bot_info = line_admin.fetch_bot_info() if configured else None
+    webhook = line_admin.fetch_webhook() if configured else None
+    delivery = line_admin.fetch_delivery() if configured else None
+
+    def unreachable(value: object | None) -> str | None:
+        return "unreachable" if (configured and value is None) else None
+
     return {
         "messaging_configured": configured,
         "login_configured": s.line_login_configured,
         "channel_id": s.line_channel_id,
         "quota": quota,
-        "quota_error": "unreachable" if (configured and quota is None) else None,
-        "bot_info": line_admin.fetch_bot_info() if configured else None,
-        "webhook": line_admin.fetch_webhook() if configured else None,
-        "delivery": line_admin.fetch_delivery() if configured else None,
+        "quota_error": unreachable(quota),
+        "bot_info": bot_info,
+        "bot_info_error": unreachable(bot_info),
+        "webhook": webhook,
+        "webhook_error": unreachable(webhook),
+        "delivery": delivery,
+        "delivery_error": unreachable(delivery),
     }
 
 
@@ -276,9 +289,12 @@ def admin_line_webhook_test(user: CurrentUser = Depends(get_admin_user)) -> dict
 
     This has a side effect (LINE delivers a test event), so it is a distinct POST triggered only by an
     explicit admin action — never by the status read. Returns no secret.
+
+    ``error`` names the failure kind (``unauthorized`` / ``rate_limited`` / ``no_endpoint`` /
+    ``unreachable``): this is the panel's one active probe, so it is where an admin gets told WHY.
     """
     s = settings.get_settings()
     if not s.line_messaging_configured:
         return {"result": None, "error": "not_configured"}
-    result = line_admin.test_webhook()
-    return {"result": result, "error": "unreachable" if result is None else None}
+    result, error = line_admin.test_webhook()
+    return {"result": result, "error": error}

@@ -305,9 +305,16 @@ export interface LineWebhookTestResult {
   reason: string | null;
   detail: string | null;
 }
+// The active probe reports WHY it failed; the passive status reads only report THAT they did.
+export type LineWebhookTestError =
+  | "not_configured"
+  | "unauthorized"
+  | "rate_limited"
+  | "no_endpoint"
+  | "unreachable";
 export interface LineWebhookTestResponse {
   result: LineWebhookTestResult | null;
-  error: "not_configured" | "unreachable" | null;
+  error: LineWebhookTestError | null;
 }
 export interface LineStatus {
   messaging_configured: boolean;
@@ -315,11 +322,17 @@ export interface LineStatus {
   // The LINE *Login* channel id (non-secret). NOTE: this is a DIFFERENT channel from the Messaging
   // bot — do not render it under the bot-status card. Currently surfaced for status only, not displayed.
   channel_id: string;
+  // Each nullable read carries an error companion: null + no error means "not configured", null +
+  // "unreachable" means the read failed. Without the companion a failed read is indistinguishable
+  // from an unconfigured one and the card silently disappears.
   quota: LineQuota | null;
   quota_error: "unreachable" | null;
   bot_info: LineBotInfo | null;
+  bot_info_error: "unreachable" | null;
   webhook: LineWebhook | null;
+  webhook_error: "unreachable" | null;
   delivery: LineDelivery | null;
+  delivery_error: "unreachable" | null;
 }
 
 // Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no

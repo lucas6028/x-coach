@@ -21,15 +21,24 @@ from backend.app.settings import Settings
 
 
 class _FakeResp:
-    """A stand-in httpx.Response: .raise_for_status() optionally raises, .json() returns payload."""
+    """A stand-in httpx.Response: .raise_for_status() optionally raises, .json() returns payload.
 
-    def __init__(self, payload, *, ok: bool = True) -> None:
+    ``status`` carries a REAL status code on the raised HTTPStatusError (a bare Mock response would
+    make every ``exc.response.status_code`` comparison silently False, so error-kind classification
+    would test as "unreachable" no matter what LINE answered).
+    """
+
+    def __init__(self, payload, *, ok: bool = True, status: int = 500) -> None:
         self._payload = payload
         self._ok = ok
+        self._status = status
 
     def raise_for_status(self) -> None:
         if not self._ok:
-            raise httpx.HTTPStatusError("bad", request=mock.Mock(), response=mock.Mock())
+            request = httpx.Request("GET", "https://api.line.me/")
+            raise httpx.HTTPStatusError(
+                "bad", request=request, response=httpx.Response(self._status, request=request)
+            )
 
     def json(self):
         return self._payload
@@ -314,6 +323,34 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         self.assertIsNone(body["webhook"])
         self.assertIsNone(body["delivery"])
         bi.assert_not_called(); wh.assert_not_called(); dl.assert_not_called()
+        # Unconfigured is NOT an error — the companions stay null so the UI can tell the two apart.
+        self.assertIsNone(body["bot_info_error"])
+        self.assertIsNone(body["webhook_error"])
+        self.assertIsNone(body["delivery_error"])
+
+    def test_configured_but_reads_fail_sets_every_error_companion(self) -> None:
+        # Without these companions a failed read is indistinguishable from an unconfigured one, and
+        # the UI drops each card silently — hiding the misconfiguration the panel exists to surface.
+        resp = self._get(quota=None, settings_obj=_settings())
+        body = resp.json()
+        self.assertIsNone(body["bot_info"])
+        self.assertIsNone(body["webhook"])
+        self.assertIsNone(body["delivery"])
+        self.assertEqual(body["bot_info_error"], "unreachable")
+        self.assertEqual(body["webhook_error"], "unreachable")
+        self.assertEqual(body["delivery_error"], "unreachable")
+
+    def test_successful_reads_leave_error_companions_null(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
+             mock.patch.object(line_admin, "fetch_quota", return_value={"type": "none", "used": 1}), \
+             mock.patch.object(line_admin, "fetch_bot_info", return_value={"display_name": "x", "basic_id": "@x", "premium_id": None, "chat_mode": "bot", "mark_as_read_mode": "auto"}), \
+             mock.patch.object(line_admin, "fetch_webhook", return_value={"endpoint": "https://x", "active": True}), \
+             mock.patch.object(line_admin, "fetch_delivery", return_value={"date": "20260720", "reply": 4, "push": 0}):
+            body = self.client.get("/api/admin/line/status").json()
+        self.assertIsNone(body["bot_info_error"])
+        self.assertIsNone(body["webhook_error"])
+        self.assertIsNone(body["delivery_error"])
 
 
 class LineWebhookTestTests(unittest.TestCase):
@@ -325,7 +362,7 @@ class LineWebhookTestTests(unittest.TestCase):
         payload = {"success": True, "statusCode": 200, "reason": "OK", "detail": "200"}
         with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp(payload)):
             self.assertEqual(line_admin.test_webhook(),
-                             {"success": True, "status_code": 200, "reason": "OK", "detail": "200"})
+                             ({"success": True, "status_code": 200, "reason": "OK", "detail": "200"}, None))
 
     def test_failure_result(self) -> None:
         # LINE answered (200 from LINE's own endpoint) but reports the webhook itself failed —
@@ -333,15 +370,39 @@ class LineWebhookTestTests(unittest.TestCase):
         payload = {"success": False, "statusCode": 500, "reason": "ERROR", "detail": "500"}
         with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp(payload)):
             self.assertEqual(line_admin.test_webhook(),
-                             {"success": False, "status_code": 500, "reason": "ERROR", "detail": "500"})
+                             ({"success": False, "status_code": 500, "reason": "ERROR", "detail": "500"}, None))
 
-    def test_transport_failure_returns_none(self) -> None:
-        with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp({}, ok=False)):
-            self.assertIsNone(line_admin.test_webhook())
+    def _error_kind(self, status: int) -> str | None:
+        with self._settings_stub(), \
+             mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp({}, ok=False, status=status)):
+            result, error = line_admin.test_webhook()
+        self.assertIsNone(result)
+        return error
 
-    def test_no_token_returns_none(self) -> None:
+    def test_expired_token_reports_unauthorized_not_unreachable(self) -> None:
+        # The whole point of the classification: a revoked/expired channel access token must NOT be
+        # reported as a network problem, or the admin goes chasing connectivity instead of the token.
+        self.assertEqual(self._error_kind(401), "unauthorized")
+        self.assertEqual(self._error_kind(403), "unauthorized")
+
+    def test_rate_limit_reports_rate_limited(self) -> None:
+        self.assertEqual(self._error_kind(429), "rate_limited")
+
+    def test_unset_endpoint_reports_no_endpoint(self) -> None:
+        self.assertEqual(self._error_kind(404), "no_endpoint")
+
+    def test_other_status_falls_back_to_unreachable(self) -> None:
+        self.assertEqual(self._error_kind(500), "unreachable")
+
+    def test_transport_failure_without_response_is_unreachable(self) -> None:
+        # A DNS/timeout/connection error carries no response at all — the genuine "unreachable".
+        with self._settings_stub(), \
+             mock.patch.object(line_admin.httpx, "post", side_effect=httpx.ConnectError("no route")):
+            self.assertEqual(line_admin.test_webhook(), (None, "unreachable"))
+
+    def test_no_token_returns_not_configured(self) -> None:
         with self._settings_stub(token=""), mock.patch.object(line_admin.httpx, "post") as p:
-            self.assertIsNone(line_admin.test_webhook())
+            self.assertEqual(line_admin.test_webhook(), (None, "not_configured"))
         p.assert_not_called()
 
 
@@ -360,15 +421,23 @@ class AdminLineWebhookTestRouteTests(unittest.TestCase):
     def test_unreachable(self) -> None:
         with mock.patch.object(store, "is_admin", return_value=True), \
              mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
-             mock.patch.object(line_admin, "test_webhook", return_value=None):
+             mock.patch.object(line_admin, "test_webhook", return_value=(None, "unreachable")):
             body = self.client.post("/api/admin/line/webhook-test").json()
         self.assertEqual(body, {"result": None, "error": "unreachable"})
+
+    def test_error_kind_reaches_the_client(self) -> None:
+        # The router must pass the specific kind through, not re-flatten it to "unreachable".
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
+             mock.patch.object(line_admin, "test_webhook", return_value=(None, "unauthorized")):
+            body = self.client.post("/api/admin/line/webhook-test").json()
+        self.assertEqual(body, {"result": None, "error": "unauthorized"})
 
     def test_success(self) -> None:
         result = {"success": True, "status_code": 200, "reason": "OK", "detail": "200"}
         with mock.patch.object(store, "is_admin", return_value=True), \
              mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
-             mock.patch.object(line_admin, "test_webhook", return_value=result):
+             mock.patch.object(line_admin, "test_webhook", return_value=(result, None)):
             body = self.client.post("/api/admin/line/webhook-test").json()
         self.assertEqual(body, {"result": result, "error": None})
 

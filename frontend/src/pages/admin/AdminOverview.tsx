@@ -16,11 +16,22 @@ import {
   api,
   type AdminOverview as AdminOverviewData,
   type LineStatus,
+  type LineWebhookTestError,
   type LineWebhookTestResponse,
 } from "../../api";
 import { useI18n } from "../../lib/i18n";
 
 type Status = "loading" | "ready" | "error";
+
+// The webhook test is the panel's one ACTIVE probe, so it's where an admin learns WHY a read failed.
+// Collapsing 401/429/404 into "couldn't reach LINE" would send them chasing connectivity instead.
+const WEBHOOK_TEST_ERROR_KEY: Record<LineWebhookTestError, string> = {
+  not_configured: "admin.line.webhookTestNotConfigured",
+  unauthorized: "admin.line.webhookTestUnauthorized",
+  rate_limited: "admin.line.webhookTestRateLimited",
+  no_endpoint: "admin.line.webhookTestNoEndpoint",
+  unreachable: "admin.line.webhookTestError",
+};
 
 // "yyyymmdd" (LINE's delivery-date format) -> "YYYY-MM-DD". Falls back to the raw value if it
 // doesn't match the expected shape rather than rendering something misleading.
@@ -164,7 +175,9 @@ function LineSection() {
       return;
     }
     setTesting(false);
-    if (!res.result) {
+    if (res.error) {
+      setTestMsg(t(WEBHOOK_TEST_ERROR_KEY[res.error] ?? "admin.line.webhookTestError"));
+    } else if (!res.result) {
       setTestMsg(t("admin.line.webhookTestError"));
     } else if (res.result.success) {
       setTestMsg(t("admin.line.webhookReachable", { code: res.result.status_code ?? 0 }));
@@ -231,32 +244,48 @@ function LineSection() {
       </div>
       {q && !limited ? <p className="mt-3 text-xs text-muted">{t("admin.line.noCapNote")}</p> : null}
 
-      {data.bot_info ? (
+      {/* Each card renders whenever its read was ATTEMPTED (data or error) — never only on success.
+          A card that vanishes on failure hides the very misconfiguration this panel is for. */}
+      {data.bot_info || data.bot_info_error ? (
         <div className="mt-3 rounded-2xl border border-border-dark bg-surface-dark p-4">
           <div className="flex items-center gap-1.5 text-faint">
             <Robot size={16} weight="duotone" />
             <span className="text-xs font-medium">{t("admin.line.oaName")}</span>
           </div>
-          <p className="mt-2 text-base font-semibold text-content">{data.bot_info.display_name}</p>
-          <p className="text-xs text-muted">{data.bot_info.basic_id}</p>
-          {data.bot_info.chat_mode !== "bot" ? (
-            <p className="mt-2 text-xs font-medium text-danger">{t("admin.line.chatModeWarn")}</p>
-          ) : null}
+          {data.bot_info ? (
+            <>
+              <p className="mt-2 text-base font-semibold text-content">{data.bot_info.display_name}</p>
+              <p className="text-xs text-muted">{data.bot_info.basic_id}</p>
+              {data.bot_info.chat_mode !== "bot" ? (
+                <p className="mt-2 text-xs font-medium text-danger">{t("admin.line.chatModeWarn")}</p>
+              ) : null}
+            </>
+          ) : (
+            <p className="mt-2 text-xs text-muted">{t("admin.line.botInfoUnavailable")}</p>
+          )}
         </div>
       ) : null}
 
-      {data.webhook ? (
+      {data.webhook || data.webhook_error ? (
         <div className="mt-3 rounded-2xl border border-border-dark bg-surface-dark p-4">
           <div className="flex items-center gap-1.5 text-faint">
             <Plugs size={16} weight="duotone" />
             <span className="text-xs font-medium">{t("admin.line.webhook")}</span>
           </div>
-          <p className="mt-2 truncate text-sm text-content" title={data.webhook.endpoint}>
-            {data.webhook.endpoint}
-          </p>
-          <p className={`text-xs font-medium ${data.webhook.active ? "text-secondary" : "text-danger"}`}>
-            {data.webhook.active ? t("admin.line.webhookActive") : t("admin.line.webhookInactive")}
-          </p>
+          {data.webhook ? (
+            <>
+              <p className="mt-2 truncate text-sm text-content" title={data.webhook.endpoint}>
+                {data.webhook.endpoint}
+              </p>
+              <p className={`text-xs font-medium ${data.webhook.active ? "text-secondary" : "text-danger"}`}>
+                {data.webhook.active ? t("admin.line.webhookActive") : t("admin.line.webhookInactive")}
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 text-xs text-muted">{t("admin.line.webhookUnavailable")}</p>
+          )}
+          {/* Deliberately OUTSIDE the data.webhook branch: when the passive read failed, this active
+              probe is the only way left to find out whether it's the token, the endpoint, or LINE. */}
           <button
             type="button"
             onClick={runWebhookTest}
@@ -270,23 +299,31 @@ function LineSection() {
       ) : null}
 
       {data.delivery ? (
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          <OverviewCard
-            icon={<PaperPlaneTilt size={16} weight="duotone" />}
-            label={t("admin.line.replyYesterday")}
-            value={data.delivery.reply === null ? t("admin.line.deliveryUnready") : String(data.delivery.reply)}
-          />
-          <OverviewCard
-            icon={<PaperPlaneTilt size={16} weight="duotone" />}
-            label={t("admin.line.pushYesterday")}
-            value={data.delivery.push === null ? t("admin.line.deliveryUnready") : String(data.delivery.push)}
-          />
+        <>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <OverviewCard
+              icon={<PaperPlaneTilt size={16} weight="duotone" />}
+              label={t("admin.line.replyYesterday")}
+              value={data.delivery.reply === null ? t("admin.line.deliveryUnready") : String(data.delivery.reply)}
+            />
+            <OverviewCard
+              icon={<PaperPlaneTilt size={16} weight="duotone" />}
+              label={t("admin.line.pushYesterday")}
+              value={data.delivery.push === null ? t("admin.line.deliveryUnready") : String(data.delivery.push)}
+            />
+          </div>
+          <p className="mt-2 text-xs text-faint">
+            {t("admin.line.deliveryDate", { date: formatDeliveryDate(data.delivery.date) })}
+          </p>
+        </>
+      ) : data.delivery_error ? (
+        <div className="mt-3 rounded-2xl border border-border-dark bg-surface-dark p-4">
+          <div className="flex items-center gap-1.5 text-faint">
+            <PaperPlaneTilt size={16} weight="duotone" />
+            <span className="text-xs font-medium">{t("admin.line.replyYesterday")}</span>
+          </div>
+          <p className="mt-2 text-xs text-muted">{t("admin.line.deliveryUnavailable")}</p>
         </div>
-      ) : null}
-      {data.delivery ? (
-        <p className="mt-2 text-xs text-faint">
-          {t("admin.line.deliveryDate", { date: formatDeliveryDate(data.delivery.date) })}
-        </p>
       ) : null}
     </div>
   );

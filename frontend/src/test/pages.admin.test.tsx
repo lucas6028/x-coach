@@ -60,8 +60,11 @@ const SAMPLE_LINE_STATUS: LineStatus = {
   quota: { type: "limited", used: 12, value: 200, remaining: 188 },
   quota_error: null,
   bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "bot", mark_as_read_mode: "auto" },
+  bot_info_error: null,
   webhook: { endpoint: "https://x-coach.app/api/line/webhook", active: true },
+  webhook_error: null,
   delivery: { date: "20260720", reply: 4, push: 3 },
+  delivery_error: null,
 };
 
 // Row "u1" is the signed-in admin (self, cannot self-demote); "u2" is a non-admin togglable user.
@@ -231,8 +234,11 @@ describe("AdminOverview", () => {
       quota: null,
       quota_error: null,
       bot_info: null,
+      bot_info_error: null,
       webhook: null,
+      webhook_error: null,
       delivery: null,
+      delivery_error: null,
     });
     renderAdmin("/admin");
     // The two LINE connection cards render (both "Not configured"), but no quota UI appears.
@@ -241,6 +247,9 @@ describe("AdminOverview", () => {
     expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
     expect(screen.queryByText("Free remaining")).not.toBeInTheDocument();
     expect(screen.queryByText("Couldn't reach LINE for quota.")).not.toBeInTheDocument();
+    // Unconfigured must NOT masquerade as a failed read: no "couldn't read" notes, no Test button.
+    expect(screen.queryByRole("button", { name: "Test webhook" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't read/i)).not.toBeInTheDocument();
   });
 
   it("renders the bot info, webhook, and delivery cards", async () => {
@@ -311,6 +320,56 @@ describe("AdminOverview", () => {
     renderAdmin("/admin");
     expect(await screen.findByText("Replies yesterday")).toBeInTheDocument();
     expect(screen.getByText("Counts for 2026-07-20")).toBeInTheDocument();
+  });
+
+  // A failed read must FLAG itself, never erase its own card — otherwise the panel hides the exact
+  // misconfiguration it exists to diagnose, and the admin reads "broken" as "never shipped".
+  it("keeps the webhook card and its Test button when the webhook read failed", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      webhook: null,
+      webhook_error: "unreachable",
+    });
+    renderAdmin("/admin");
+    expect(await screen.findByText(/Couldn't read the webhook setting/i)).toBeInTheDocument();
+    // The active probe is the only way left to learn WHY, so it must survive the failed read.
+    expect(screen.getByRole("button", { name: "Test webhook" })).toBeInTheDocument();
+  });
+
+  it("flags a failed bot-info read instead of dropping the card", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      bot_info: null,
+      bot_info_error: "unreachable",
+    });
+    renderAdmin("/admin");
+    expect(await screen.findByText("Official account")).toBeInTheDocument();
+    expect(screen.getByText(/Couldn't read the official-account info/i)).toBeInTheDocument();
+  });
+
+  it("flags a failed delivery read instead of dropping the counts", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      delivery: null,
+      delivery_error: "unreachable",
+    });
+    renderAdmin("/admin");
+    expect(await screen.findByText(/Couldn't read yesterday's delivery counts/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["unauthorized" as const, /rejected the channel access token/i],
+    ["rate_limited" as const, /rate-limited/i],
+    ["no_endpoint" as const, /No webhook endpoint is set/i],
+    ["not_configured" as const, /isn't configured on this server/i],
+  ])("names the cause when the webhook test fails with %s", async (error, pattern) => {
+    // Reporting a bad token or a rate limit as "couldn't reach LINE" sends the admin chasing
+    // connectivity — the diagnostics tool would be the source of the misdiagnosis.
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error });
+    renderAdmin("/admin");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    expect(await screen.findByText(pattern)).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't reach LINE.")).not.toBeInTheDocument();
   });
 });
 
