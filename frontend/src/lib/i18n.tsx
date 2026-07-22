@@ -539,11 +539,12 @@ const en: Dict = {
   "admin.line.webhookTest": "Test webhook",
   "admin.line.webhookTesting": "Testing…",
   "admin.line.webhookReachable": "Reachable ({code})",
-  "admin.line.webhookFailed": "Failed ({reason})",
+  "admin.line.webhookFailed": "Failed ({code}: {reason})",
   "admin.line.webhookTestError": "Couldn't reach LINE.",
   "admin.line.replyYesterday": "Replies yesterday",
   "admin.line.pushYesterday": "Pushes yesterday",
   "admin.line.deliveryUnready": "Not ready yet",
+  "admin.line.deliveryDate": "Counts for {date}",
 
   // Admin panel P3 — user oversight
   "admin.users.title": "Users",
@@ -1176,11 +1177,12 @@ const zhHant: Dict = {
   "admin.line.webhookTest": "測試 webhook",
   "admin.line.webhookTesting": "測試中…",
   "admin.line.webhookReachable": "連得到（{code}）",
-  "admin.line.webhookFailed": "失敗（{reason}）",
+  "admin.line.webhookFailed": "失敗（{code}：{reason}）",
   "admin.line.webhookTestError": "無法連到 LINE。",
   "admin.line.replyYesterday": "昨日回覆",
   "admin.line.pushYesterday": "昨日推播",
   "admin.line.deliveryUnready": "資料尚未就緒",
+  "admin.line.deliveryDate": "統計日期 {date}",
 
   // 後台管理 P3 — 使用者監看
   "admin.users.title": "使用者",

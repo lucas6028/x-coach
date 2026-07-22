@@ -288,6 +288,30 @@ describe("AdminOverview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
     expect(await screen.findByText("Couldn't reach LINE.")).toBeInTheDocument();
   });
+
+  it("shows the status code and reason when the webhook test reports success: false", async () => {
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+      result: { success: false, status_code: 500, reason: "ERROR", detail: "500" },
+      error: null,
+    });
+    renderAdmin("/admin");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    const msg = await screen.findByText(/Failed/i);
+    expect(msg.textContent).toContain("500");
+    expect(msg.textContent).toContain("ERROR");
+  });
+
+  it("never fires the webhook test on page load — only on an explicit click", async () => {
+    renderAdmin("/admin");
+    await screen.findByRole("button", { name: "Test webhook" });
+    expect(api.testLineWebhook).not.toHaveBeenCalled();
+  });
+
+  it("renders the delivery date under the reply/push count cards", async () => {
+    renderAdmin("/admin");
+    expect(await screen.findByText("Replies yesterday")).toBeInTheDocument();
+    expect(screen.getByText("Counts for 2026-07-20")).toBeInTheDocument();
+  });
 });
 
 describe("AdminUsers", () => {

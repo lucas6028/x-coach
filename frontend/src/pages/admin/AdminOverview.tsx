@@ -22,6 +22,13 @@ import { useI18n } from "../../lib/i18n";
 
 type Status = "loading" | "ready" | "error";
 
+// "yyyymmdd" (LINE's delivery-date format) -> "YYYY-MM-DD". Falls back to the raw value if it
+// doesn't match the expected shape rather than rendering something misleading.
+function formatDeliveryDate(yyyymmdd: string): string {
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(yyyymmdd);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : yyyymmdd;
+}
+
 // Read-only health + usage dashboard (mirrors /api/health + totals). Admin-only; gated by AdminLayout.
 export default function AdminOverview() {
   const { t } = useI18n();
@@ -162,7 +169,12 @@ function LineSection() {
     } else if (res.result.success) {
       setTestMsg(t("admin.line.webhookReachable", { code: res.result.status_code ?? 0 }));
     } else {
-      setTestMsg(t("admin.line.webhookFailed", { reason: res.result.reason ?? "" }));
+      setTestMsg(
+        t("admin.line.webhookFailed", {
+          code: res.result.status_code ?? 0,
+          reason: res.result.reason ?? "",
+        })
+      );
     }
   }
 
@@ -270,6 +282,11 @@ function LineSection() {
             value={data.delivery.push === null ? t("admin.line.deliveryUnready") : String(data.delivery.push)}
           />
         </div>
+      ) : null}
+      {data.delivery ? (
+        <p className="mt-2 text-xs text-faint">
+          {t("admin.line.deliveryDate", { date: formatDeliveryDate(data.delivery.date) })}
+        </p>
       ) : null}
     </div>
   );

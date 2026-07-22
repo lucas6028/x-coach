@@ -247,7 +247,19 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         fq.assert_not_called()  # unconfigured => never call LINE
 
     def test_response_carries_no_secret(self) -> None:
-        resp = self._get(quota={"type": "none", "used": 3}, settings_obj=_settings())
+        # Populate bot_info/webhook/delivery with realistic values (not None) so this test actually
+        # demonstrates the no-secret guarantee for those fields, not just for an empty shape.
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
+             mock.patch.object(line_admin, "fetch_quota", return_value={"type": "none", "used": 3}), \
+             mock.patch.object(line_admin, "fetch_bot_info", return_value={
+                 "display_name": "x-coach", "basic_id": "@xcoach", "premium_id": None,
+                 "chat_mode": "bot", "mark_as_read_mode": "auto"}), \
+             mock.patch.object(line_admin, "fetch_webhook", return_value={
+                 "endpoint": "https://x-coach.app/api/line/webhook", "active": True}), \
+             mock.patch.object(line_admin, "fetch_delivery", return_value={
+                 "date": "20260720", "reply": 4, "push": 0}):
+            resp = self.client.get("/api/admin/line/status")
         blob = resp.text
         self.assertNotIn("token", blob)   # access token / channel secret never serialised
         self.assertNotIn("secret", blob)
@@ -275,6 +287,21 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         self.assertTrue(body["webhook"]["active"])
         self.assertEqual(body["delivery"]["reply"], 4)
 
+    def test_status_never_triggers_the_webhook_test(self) -> None:
+        # Regression guard: the webhook test has a side effect (LINE delivers a live test event to
+        # the production webhook), so a plain status GET must never invoke it — only the explicit
+        # POST /webhook-test action may.
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
+             mock.patch.object(line_admin, "fetch_quota", return_value={"type": "none", "used": 1}), \
+             mock.patch.object(line_admin, "fetch_bot_info", return_value=None), \
+             mock.patch.object(line_admin, "fetch_webhook", return_value=None), \
+             mock.patch.object(line_admin, "fetch_delivery", return_value=None), \
+             mock.patch.object(line_admin, "test_webhook") as tw:
+            resp = self.client.get("/api/admin/line/status")
+        self.assertEqual(resp.status_code, 200)
+        tw.assert_not_called()
+
     def test_status_not_configured_nulls_new_keys_and_skips_line(self) -> None:
         settings_obj = _settings(line_messaging_access_token="")
         with mock.patch.object(store, "is_admin", return_value=True), \
@@ -299,6 +326,14 @@ class LineWebhookTestTests(unittest.TestCase):
         with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp(payload)):
             self.assertEqual(line_admin.test_webhook(),
                              {"success": True, "status_code": 200, "reason": "OK", "detail": "200"})
+
+    def test_failure_result(self) -> None:
+        # LINE answered (200 from LINE's own endpoint) but reports the webhook itself failed —
+        # this is the feature's primary diagnostic outcome and must assemble success: False correctly.
+        payload = {"success": False, "statusCode": 500, "reason": "ERROR", "detail": "500"}
+        with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp(payload)):
+            self.assertEqual(line_admin.test_webhook(),
+                             {"success": False, "status_code": 500, "reason": "ERROR", "detail": "500"})
 
     def test_transport_failure_returns_none(self) -> None:
         with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp({}, ok=False)):
