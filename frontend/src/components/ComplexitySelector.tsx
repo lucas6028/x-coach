@@ -135,29 +135,29 @@ export default function ComplexitySelector({
                 free and the value is exposed as role="slider" — the drawn parts are presentation
                 only, which is also the only way to use the app's tokens (::-webkit-slider-thumb
                 cannot be styled portably). */}
-            <div className="relative mt-4 h-7">
-              <div className="absolute inset-x-0 top-1/2 h-2.5 -translate-y-1/2 rounded-full bg-track/50" />
+            <div className="relative mt-4 h-8">
+              <div className="absolute inset-x-0 top-1/2 h-4 -translate-y-1/2 rounded-full bg-track/50" />
               {/* Knob travel is inset by half a knob so it stays fully on the rail at both ends. */}
-              <div className="absolute inset-y-0 left-2.5 right-2.5">
+              <div className="absolute inset-y-0 left-3 right-3">
                 <div
-                  className={`absolute top-1/2 -left-2.5 h-2.5 -translate-y-1/2 rounded-full bg-primary ${
+                  className={`absolute top-1/2 -left-3 h-4 -translate-y-1/2 rounded-full bg-primary ${
                     dragging ? "" : "transition-[width] duration-150 ease-out"
                   }`}
-                  style={{ width: `calc(${pct}% + 0.625rem)` }}
+                  style={{ width: `calc(${pct}% + 0.75rem)` }}
                 />
                 {TIERS.map((tier, i) => (
                   <span
                     key={tier}
-                    className={`absolute top-1/2 h-1 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full ${
+                    className={`absolute top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full ${
                       i <= shown ? "bg-primary-content/60" : "bg-content/30"
                     }`}
                     style={{ left: `${(i / last) * 100}%` }}
                   />
                 ))}
-                {/* Knob: only slightly wider than the rail, and sharing its centre line, so the two
-                    read as one control rather than a ball parked on a bar. */}
+                {/* Knob: proud of the rail by only a few px on each side, and sharing its centre
+                    line, so the two read as one control rather than a ball parked on a bar. */}
                 <div
-                  className={`absolute top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-white shadow-card ${
+                  className={`absolute top-1/2 h-6 w-6 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-white shadow-card ${
                     dragging ? "" : "transition-[left] duration-150 ease-out"
                   }`}
                   style={{ left: `${pct}%` }}
