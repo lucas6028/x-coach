@@ -32,6 +32,7 @@ LINE_BOT_INFO_URL = "https://api.line.me/v2/bot/info"
 LINE_WEBHOOK_ENDPOINT_URL = "https://api.line.me/v2/bot/channel/webhook/endpoint"
 LINE_DELIVERY_REPLY_URL = "https://api.line.me/v2/bot/message/delivery/reply"
 LINE_DELIVERY_PUSH_URL = "https://api.line.me/v2/bot/message/delivery/push"
+LINE_WEBHOOK_TEST_URL = "https://api.line.me/v2/bot/channel/webhook/test"
 _TIMEOUT_S = 10.0
 _TTL_SECONDS = 60.0
 
@@ -64,12 +65,22 @@ def _safe_int(value: Any) -> int | None:
 
 
 def _get(url: str, token: str) -> dict[str, Any]:
-    """GET a LINE quota endpoint; return its JSON dict. Raises on non-200 or non-dict payload."""
+    """GET a LINE endpoint; return its JSON dict. Raises on non-200 or non-dict payload."""
     resp = httpx.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=_TIMEOUT_S)
     resp.raise_for_status()
     data = resp.json()
     if not isinstance(data, dict):
         raise ValueError("unexpected LINE quota payload")
+    return data
+
+
+def _post(url: str, token: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
+    """POST to a LINE endpoint; return its JSON dict. Raises on non-200 or non-dict payload."""
+    resp = httpx.post(url, headers={"Authorization": f"Bearer {token}"}, json=json or {}, timeout=_TIMEOUT_S)
+    resp.raise_for_status()
+    data = resp.json()
+    if not isinstance(data, dict):
+        raise ValueError("unexpected LINE payload")
     return data
 
 
@@ -125,10 +136,11 @@ def _fetch_bot_info() -> dict[str, Any] | None:
     except Exception:  # noqa: BLE001 — any failure means "unavailable"; never propagate.
         logger.warning("LINE bot info: read failed")
         return None
+    premium_id = data.get("premiumId")
     return {
         "display_name": str(data.get("displayName") or ""),
         "basic_id": str(data.get("basicId") or ""),
-        "premium_id": data.get("premiumId") if isinstance(data.get("premiumId"), str) else None,
+        "premium_id": premium_id if isinstance(premium_id, str) else None,
         "chat_mode": str(data.get("chatMode") or ""),
         "mark_as_read_mode": str(data.get("markAsReadMode") or ""),
     }
@@ -177,6 +189,29 @@ def fetch_webhook() -> dict[str, Any] | None:
 def fetch_delivery() -> dict[str, Any] | None:
     """Yesterday's reply/push delivery counts, or None. 60s TTL cache."""
     return _cached("delivery", _fetch_delivery)
+
+
+def test_webhook() -> dict[str, Any] | None:
+    """Actively ask LINE to POST a test event to the configured webhook; report the outcome.
+
+    Has a SIDE EFFECT (LINE delivers a test event to the webhook), so this is never called on a plain
+    status read — only on an explicit admin action. NOT cached. Returns None on any transport failure;
+    ``success`` reflects whether the webhook itself answered LINE with 200.
+    """
+    token = _token()
+    if not token:
+        return None
+    try:
+        data = _post(LINE_WEBHOOK_TEST_URL, token)
+    except Exception:  # noqa: BLE001
+        logger.warning("LINE webhook test: request failed")
+        return None
+    return {
+        "success": bool(data.get("success")),
+        "status_code": _safe_int(data.get("statusCode")),
+        "reason": data.get("reason") if isinstance(data.get("reason"), str) else None,
+        "detail": data.get("detail") if isinstance(data.get("detail"), str) else None,
+    }
 
 
 def clear_cache() -> None:

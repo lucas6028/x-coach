@@ -287,3 +287,62 @@ class AdminLineStatusRouteTests(unittest.TestCase):
         self.assertIsNone(body["webhook"])
         self.assertIsNone(body["delivery"])
         bi.assert_not_called(); wh.assert_not_called(); dl.assert_not_called()
+
+
+class LineWebhookTestTests(unittest.TestCase):
+    def _settings_stub(self, token="chan-token"):
+        return mock.patch.object(line_admin, "get_settings",
+                                 return_value=types.SimpleNamespace(line_messaging_access_token=token))
+
+    def test_success_result(self) -> None:
+        payload = {"success": True, "statusCode": 200, "reason": "OK", "detail": "200"}
+        with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp(payload)):
+            self.assertEqual(line_admin.test_webhook(),
+                             {"success": True, "status_code": 200, "reason": "OK", "detail": "200"})
+
+    def test_transport_failure_returns_none(self) -> None:
+        with self._settings_stub(), mock.patch.object(line_admin.httpx, "post", return_value=_FakeResp({}, ok=False)):
+            self.assertIsNone(line_admin.test_webhook())
+
+    def test_no_token_returns_none(self) -> None:
+        with self._settings_stub(token=""), mock.patch.object(line_admin.httpx, "post") as p:
+            self.assertIsNone(line_admin.test_webhook())
+        p.assert_not_called()
+
+
+class AdminLineWebhookTestRouteTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        app.dependency_overrides[get_current_user] = lambda: CurrentUser(id="u1", token="tok")
+        self.addCleanup(app.dependency_overrides.clear)
+
+    def test_not_configured(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings(line_messaging_access_token="")):
+            body = self.client.post("/api/admin/line/webhook-test").json()
+        self.assertEqual(body, {"result": None, "error": "not_configured"})
+
+    def test_unreachable(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
+             mock.patch.object(line_admin, "test_webhook", return_value=None):
+            body = self.client.post("/api/admin/line/webhook-test").json()
+        self.assertEqual(body, {"result": None, "error": "unreachable"})
+
+    def test_success(self) -> None:
+        result = {"success": True, "status_code": 200, "reason": "OK", "detail": "200"}
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch("backend.app.settings.get_settings", return_value=_settings()), \
+             mock.patch.object(line_admin, "test_webhook", return_value=result):
+            body = self.client.post("/api/admin/line/webhook-test").json()
+        self.assertEqual(body, {"result": result, "error": None})
+
+    def test_forbidden_for_non_admin(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=False):
+            resp = self.client.post("/api/admin/line/webhook-test")
+        self.assertEqual(resp.status_code, 403)
+
+    def test_requires_auth(self) -> None:
+        app.dependency_overrides.clear()
+        resp = self.client.post("/api/admin/line/webhook-test")
+        self.assertEqual(resp.status_code, 401)

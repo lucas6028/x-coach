@@ -268,3 +268,17 @@ def admin_line_status(user: CurrentUser = Depends(get_admin_user)) -> dict:
         "webhook": line_admin.fetch_webhook() if configured else None,
         "delivery": line_admin.fetch_delivery() if configured else None,
     }
+
+
+@router.post("/line/webhook-test")
+def admin_line_webhook_test(user: CurrentUser = Depends(get_admin_user)) -> dict:
+    """Ask LINE to POST a test event to the configured webhook and report the result (admin-only).
+
+    This has a side effect (LINE delivers a test event), so it is a distinct POST triggered only by an
+    explicit admin action — never by the status read. Returns no secret.
+    """
+    s = settings.get_settings()
+    if not s.line_messaging_configured:
+        return {"result": None, "error": "not_configured"}
+    result = line_admin.test_webhook()
+    return {"result": result, "error": "unreachable" if result is None else None}
