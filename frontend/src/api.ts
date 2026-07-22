@@ -283,6 +283,32 @@ export interface LineQuota {
   value?: number; // present only when type === "limited"
   remaining?: number; // present only when type === "limited"
 }
+export interface LineBotInfo {
+  display_name: string;
+  basic_id: string;
+  premium_id: string | null;
+  chat_mode: string; // "bot" | "chat" (string; chat mode means the webhook gets no message events)
+  mark_as_read_mode: string;
+}
+export interface LineWebhook {
+  endpoint: string;
+  active: boolean;
+}
+export interface LineDelivery {
+  date: string; // yyyymmdd the counts are for (yesterday, OA timezone)
+  reply: number | null; // null when LINE's data for that day isn't ready
+  push: number | null;
+}
+export interface LineWebhookTestResult {
+  success: boolean;
+  status_code: number | null;
+  reason: string | null;
+  detail: string | null;
+}
+export interface LineWebhookTestResponse {
+  result: LineWebhookTestResult | null;
+  error: "not_configured" | "unreachable" | null;
+}
 export interface LineStatus {
   messaging_configured: boolean;
   login_configured: boolean;
@@ -291,6 +317,9 @@ export interface LineStatus {
   channel_id: string;
   quota: LineQuota | null;
   quota_error: "unreachable" | null;
+  bot_info: LineBotInfo | null;
+  webhook: LineWebhook | null;
+  delivery: LineDelivery | null;
 }
 
 // Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
@@ -406,6 +435,17 @@ export const api = {
 
   // LINE connection status + push-quota usage (admin-only). Auth header auto-attached.
   getLineStatus: () => getJSON<LineStatus>("/api/admin/line/status"),
+
+  // Ask LINE to POST a test event to the webhook and report the outcome (admin-only). Side-effecting,
+  // so it is a POST triggered only by the admin's explicit click — never on a status read.
+  async testLineWebhook(): Promise<LineWebhookTestResponse> {
+    const res = await fetch("/api/admin/line/webhook-test", {
+      method: "POST",
+      headers: { ...(await authHeader()) },
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/admin/line/webhook-test`);
+    return (await res.json()) as LineWebhookTestResponse;
+  },
 
   // Grant/revoke another user's admin role (admin-only). The backend rejects self-demotion (400).
   async setUserRole(userId: string, makeAdmin: boolean): Promise<{ ok: boolean }> {

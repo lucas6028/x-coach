@@ -4,12 +4,20 @@ import {
   ChatCircleText,
   Database,
   Gauge,
+  PaperPlaneTilt,
+  Plugs,
+  Robot,
   ShieldCheck,
   SlidersHorizontal,
   Users,
   WarningCircle,
 } from "@phosphor-icons/react";
-import { api, type AdminOverview as AdminOverviewData, type LineStatus } from "../../api";
+import {
+  api,
+  type AdminOverview as AdminOverviewData,
+  type LineStatus,
+  type LineWebhookTestResponse,
+} from "../../api";
 import { useI18n } from "../../lib/i18n";
 
 type Status = "loading" | "ready" | "error";
@@ -134,6 +142,30 @@ function LineSection() {
     };
   }, []);
 
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<string | null>(null);
+
+  async function runWebhookTest() {
+    setTesting(true);
+    setTestMsg(null);
+    let res: LineWebhookTestResponse;
+    try {
+      res = await api.testLineWebhook();
+    } catch {
+      setTesting(false);
+      setTestMsg(t("admin.line.webhookTestError"));
+      return;
+    }
+    setTesting(false);
+    if (!res.result) {
+      setTestMsg(t("admin.line.webhookTestError"));
+    } else if (res.result.success) {
+      setTestMsg(t("admin.line.webhookReachable", { code: res.result.status_code ?? 0 }));
+    } else {
+      setTestMsg(t("admin.line.webhookFailed", { reason: res.result.reason ?? "" }));
+    }
+  }
+
   if (status !== "ready" || !data) return null;
 
   const q = data.quota;
@@ -186,6 +218,59 @@ function LineSection() {
         ) : null}
       </div>
       {q && !limited ? <p className="mt-3 text-xs text-muted">{t("admin.line.noCapNote")}</p> : null}
+
+      {data.bot_info ? (
+        <div className="mt-3 rounded-2xl border border-border-dark bg-surface-dark p-4">
+          <div className="flex items-center gap-1.5 text-faint">
+            <Robot size={16} weight="duotone" />
+            <span className="text-xs font-medium">{t("admin.line.oaName")}</span>
+          </div>
+          <p className="mt-2 text-base font-semibold text-content">{data.bot_info.display_name}</p>
+          <p className="text-xs text-muted">{data.bot_info.basic_id}</p>
+          {data.bot_info.chat_mode !== "bot" ? (
+            <p className="mt-2 text-xs font-medium text-danger">{t("admin.line.chatModeWarn")}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {data.webhook ? (
+        <div className="mt-3 rounded-2xl border border-border-dark bg-surface-dark p-4">
+          <div className="flex items-center gap-1.5 text-faint">
+            <Plugs size={16} weight="duotone" />
+            <span className="text-xs font-medium">{t("admin.line.webhook")}</span>
+          </div>
+          <p className="mt-2 truncate text-sm text-content" title={data.webhook.endpoint}>
+            {data.webhook.endpoint}
+          </p>
+          <p className={`text-xs font-medium ${data.webhook.active ? "text-secondary" : "text-danger"}`}>
+            {data.webhook.active ? t("admin.line.webhookActive") : t("admin.line.webhookInactive")}
+          </p>
+          <button
+            type="button"
+            onClick={runWebhookTest}
+            disabled={testing}
+            className="mt-3 rounded-lg border border-border-dark px-3 py-1.5 text-xs font-medium text-content disabled:opacity-50"
+          >
+            {testing ? t("admin.line.webhookTesting") : t("admin.line.webhookTest")}
+          </button>
+          {testMsg ? <p className="mt-2 text-xs text-muted">{testMsg}</p> : null}
+        </div>
+      ) : null}
+
+      {data.delivery ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <OverviewCard
+            icon={<PaperPlaneTilt size={16} weight="duotone" />}
+            label={t("admin.line.replyYesterday")}
+            value={data.delivery.reply === null ? t("admin.line.deliveryUnready") : String(data.delivery.reply)}
+          />
+          <OverviewCard
+            icon={<PaperPlaneTilt size={16} weight="duotone" />}
+            label={t("admin.line.pushYesterday")}
+            value={data.delivery.push === null ? t("admin.line.deliveryUnready") : String(data.delivery.push)}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

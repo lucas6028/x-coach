@@ -59,6 +59,9 @@ const SAMPLE_LINE_STATUS: LineStatus = {
   channel_id: "2010629653",
   quota: { type: "limited", used: 12, value: 200, remaining: 188 },
   quota_error: null,
+  bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "bot", mark_as_read_mode: "auto" },
+  webhook: { endpoint: "https://x-coach.app/api/line/webhook", active: true },
+  delivery: { date: "20260720", reply: 4, push: 3 },
 };
 
 // Row "u1" is the signed-in admin (self, cannot self-demote); "u2" is a non-admin togglable user.
@@ -127,6 +130,9 @@ beforeEach(() => {
   vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
   vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
   vi.spyOn(api, "getLineStatus").mockResolvedValue(SAMPLE_LINE_STATUS);
+  vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+    result: { success: true, status_code: 200, reason: "OK", detail: "200" }, error: null,
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -224,6 +230,9 @@ describe("AdminOverview", () => {
       channel_id: "",
       quota: null,
       quota_error: null,
+      bot_info: null,
+      webhook: null,
+      delivery: null,
     });
     renderAdmin("/admin");
     // The two LINE connection cards render (both "Not configured"), but no quota UI appears.
@@ -232,6 +241,52 @@ describe("AdminOverview", () => {
     expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
     expect(screen.queryByText("Free remaining")).not.toBeInTheDocument();
     expect(screen.queryByText("Couldn't reach LINE for quota.")).not.toBeInTheDocument();
+  });
+
+  it("renders the bot info, webhook, and delivery cards", async () => {
+    renderAdmin("/admin");
+    expect(await screen.findByText("x-coach")).toBeInTheDocument();
+    expect(screen.getByText("@xcoach")).toBeInTheDocument();
+    expect(screen.getByText("Webhook")).toBeInTheDocument();
+    expect(screen.getByText("Replies yesterday")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument(); // reply count
+    expect(screen.getByText("3")).toBeInTheDocument(); // push count
+  });
+
+  it("warns when the bot is in chat mode (webhook won't receive events)", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "chat", mark_as_read_mode: "auto" },
+    });
+    renderAdmin("/admin");
+    expect(await screen.findByText(/won't receive message events/i)).toBeInTheDocument();
+  });
+
+  it("shows 'not ready yet' when delivery counts are unavailable", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      delivery: { date: "20260720", reply: null, push: null },
+    });
+    renderAdmin("/admin");
+    expect((await screen.findAllByText("Not ready yet")).length).toBeGreaterThan(0);
+  });
+
+  it("runs the webhook test and shows a reachable result", async () => {
+    const testFn = vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+      result: { success: true, status_code: 200, reason: "OK", detail: "200" },
+      error: null,
+    });
+    renderAdmin("/admin");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    await waitFor(() => expect(testFn).toHaveBeenCalled());
+    expect(await screen.findByText(/Reachable \(200\)/i)).toBeInTheDocument();
+  });
+
+  it("shows an error when the webhook test can't reach LINE", async () => {
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error: "unreachable" });
+    renderAdmin("/admin");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    expect(await screen.findByText("Couldn't reach LINE.")).toBeInTheDocument();
   });
 });
 

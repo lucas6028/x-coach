@@ -531,6 +531,19 @@ const en: Dict = {
   "admin.line.unreachable": "Couldn't reach LINE for quota.",
   "admin.line.noCapNote":
     "No monthly limit set in LINE Official Account Manager, so remaining can't be shown. Set a monthly message limit there to track your free allowance.",
+  "admin.line.oaName": "Official account",
+  "admin.line.chatModeWarn": "Chat mode — the webhook won't receive message events",
+  "admin.line.webhook": "Webhook",
+  "admin.line.webhookActive": "Active",
+  "admin.line.webhookInactive": "Inactive",
+  "admin.line.webhookTest": "Test webhook",
+  "admin.line.webhookTesting": "Testing…",
+  "admin.line.webhookReachable": "Reachable ({code})",
+  "admin.line.webhookFailed": "Failed ({reason})",
+  "admin.line.webhookTestError": "Couldn't reach LINE.",
+  "admin.line.replyYesterday": "Replies yesterday",
+  "admin.line.pushYesterday": "Pushes yesterday",
+  "admin.line.deliveryUnready": "Not ready yet",
 
   // Admin panel P3 — user oversight
   "admin.users.title": "Users",
@@ -1155,6 +1168,19 @@ const zhHant: Dict = {
   "admin.line.unreachable": "無法取得 LINE 額度。",
   "admin.line.noCapNote":
     "未在 LINE Official Account Manager 設定每月上限,無法計算剩餘。請在該後台設定每月訊息上限,即可追蹤免費額度。",
+  "admin.line.oaName": "官方帳號",
+  "admin.line.chatModeWarn": "聊天模式 — webhook 不會收到訊息事件",
+  "admin.line.webhook": "Webhook",
+  "admin.line.webhookActive": "運作中",
+  "admin.line.webhookInactive": "未啟用",
+  "admin.line.webhookTest": "測試 webhook",
+  "admin.line.webhookTesting": "測試中…",
+  "admin.line.webhookReachable": "連得到（{code}）",
+  "admin.line.webhookFailed": "失敗（{reason}）",
+  "admin.line.webhookTestError": "無法連到 LINE。",
+  "admin.line.replyYesterday": "昨日回覆",
+  "admin.line.pushYesterday": "昨日推播",
+  "admin.line.deliveryUnready": "資料尚未就緒",
 
   // 後台管理 P3 — 使用者監看
   "admin.users.title": "使用者",
