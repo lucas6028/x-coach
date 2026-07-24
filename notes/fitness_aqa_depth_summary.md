@@ -266,9 +266,22 @@ knees_forward、OHP knees、lumbar、torso_angle,以及各 combined),ΔAUC 全�
   的非重現則是事後、且已被深度比例量測否證,故不採用。
 - OHP elbows 弱任務(AUC 0.66、單線索 0.58)使它 inconclusive;需要更強訊號的 mediolateral
   錯誤資料才能真正檢驗跨動作。
-- BarbellRow 與 OHP 目前為 NLF-only(深度隔離主結果已足);MediaPipe 深度品質對照 OHP
-  進行中、BarbellRow 待補。RTMPose 一律略過。
+- BarbellRow 目前為 NLF-only(深度隔離主結果已足);MediaPipe 深度品質對照待補。RTMPose 略過。
 - 影片/逐幀 granularity 不同,只比同模型深度差,不比跨任務絕對值。
+
+### OHP 四臂完成:偵測器品質驅動,深度(真/啟發式)皆無效——與深蹲一致
+
+OHP MediaPipe 補齊後的四臂結果(test n=339):**顯著的差全部來自偵測器品質**,深度(無論
+真 NLF 或啟發式 MediaPipe)對任何 OHP 錯誤都沒有增益。
+
+| OHP 錯誤 | nlf_2d−mediapipe_2d(偵測器) | nlf_3d−nlf_2d(真深度) | mp_3d−mp_2d(啟發式深度) |
+|---|---:|---:|---:|
+| knees | **+0.118**(p<.001) | −0.035 | +0.020 |
+| elbows | +0.060(ns,弱任務) | +0.013(ns) | −0.020 |
+| combined | **+0.084**(p=.031) | +0.002 | −0.005 |
+
+這和深蹲/shallow 的結論一模一樣:**決定分數的是「用 NLF/RTMPose 還是 MediaPipe」,不是
+「有沒有 z 通道」**。跨深蹲 + OHP,唯一一個深度顯著為正的仍只有深蹲 valgus。
 
 ## 執行紀錄
 
