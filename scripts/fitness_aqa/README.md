@@ -66,3 +66,30 @@ many millimetres or degrees wrong a 2D reading is — only whether the verdict c
 Sanity check before trusting any 3D lift: the 2D arms should cluster together. If
 `nlf_2d` beats `mediapipe_2d` by a lot, something in the pipeline differs beyond depth
 and the 3D gap is not interpretable.
+
+## Consolidated Squat (all fault types)
+
+The shallow scripts above cover the frame-level depth verdict. The video-level faults —
+`knees_forward` (anterior knee travel, sagittal) and `knees_inward` (valgus, frontal) —
+plus their union `combined`, are handled by a parallel set that shares `cue_features` and
+`depth_classify` but adds a video-level aggregator (`src/fitness_aqa/video_features.py`:
+per-frame cues → mean/std/percentiles over the whole clip and a pose-derived bottom
+phase).
+
+```powershell
+# per-video pose over the labelled clips (CPU, ~30 min; two MediaPipe arms)
+.venv\Scripts\python.exe scripts/fitness_aqa/run_squat_video_pose.py --backend mediapipe --stride 3
+
+# NLF over the same clips runs on Kaggle (.kaggle_tmp/squat_nlf*, ~1.8h P100), then:
+.venv\Scripts\python.exe scripts/fitness_aqa/ingest_squat_nlf.py --nlf-dir .kaggle_tmp/squat_nlf/out
+
+# classify all three faults; per-fault within-model depth delta is the payload
+.venv\Scripts\python.exe scripts/fitness_aqa/run_squat_depth_classification.py
+```
+
+Label safety: the knees labels are temporal spans marking *where* the fault is; they are
+**never** used to select frames (that would leak the answer). Frame pools are the whole
+clip or a hip-height-derived bottom phase only. RTMPose over full videos (~28h CPU) is
+deliberately skipped — `nlf_2d` is the strong-2D arm; run it on a GPU box for a second
+2D reference if wanted. Granularity caveat: video-level BA is not comparable to the
+frame-level shallow BA; compare the **within-model depth deltas**, which are.
