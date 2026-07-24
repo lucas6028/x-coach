@@ -54,20 +54,29 @@ def _summarise(values: np.ndarray) -> np.ndarray:
     return out.reshape(-1)
 
 
-def video_feature(joints: np.ndarray, detected: np.ndarray, mode: str,
-                  bottom_fraction: float = 0.4) -> np.ndarray:
-    """(F, 17, C) joints + (F,) detected mask -> (len(FEATURE_NAMES),) video feature.
+def feature_names(cue_module=cf) -> tuple[str, ...]:
+    """Video-level feature names for a given per-frame cue module."""
+    return tuple(f"{pool}__{cue}__{stat}"
+                 for pool in POOLS for cue in cue_module.FEATURE_NAMES for stat in STATS)
 
-    ``bottom_fraction`` of the detected frames with the lowest hips form the bottom pool.
-    Returns all-NaN if no frame was detected (the caller drops such videos from every arm).
+
+def video_feature(joints: np.ndarray, detected: np.ndarray, mode: str,
+                  bottom_fraction: float = 0.4, cue_module=cf) -> np.ndarray:
+    """(F, 17, C) joints + (F,) detected mask -> video feature for ``cue_module``.
+
+    ``bottom_fraction`` of the detected frames with the lowest hips form the bottom pool
+    (the squat dip -- also where OHP knee-bend shows, since the hips drop). Returns all-NaN
+    if no frame was detected (the caller drops such videos from every arm). ``cue_module``
+    defaults to the squat cues; pass ``movement_cues`` for OHP.
     """
     joints = np.asarray(joints, dtype=np.float64)
     detected = np.asarray(detected, dtype=bool)
+    n_out = len(feature_names(cue_module))
     valid = detected & np.isfinite(joints).all(axis=(1, 2))
     if not valid.any():
-        return np.full(len(FEATURE_NAMES), np.nan)
+        return np.full(n_out, np.nan)
 
-    cues = cf.compute_features(joints[valid], mode)          # (V, n_cue)
+    cues = cue_module.compute_features(joints[valid], mode)   # (V, n_cue)
     hip_h = _hip_height(joints[valid], mode)                  # (V,)
 
     n_bottom = max(1, int(round(bottom_fraction * cues.shape[0])))
@@ -78,13 +87,14 @@ def video_feature(joints: np.ndarray, detected: np.ndarray, mode: str,
 
 
 def build_matrix(per_video: dict[str, tuple[np.ndarray, np.ndarray]], mode: str,
-                 video_ids: list[str]) -> tuple[np.ndarray, np.ndarray]:
+                 video_ids: list[str], cue_module=cf) -> tuple[np.ndarray, np.ndarray]:
     """video_ids -> (N, D) features and (N,) detected mask, in the given id order.
 
     ``per_video[vid] = (joints (F,17,C), detected (F,))``. A missing or fully-undetected
     video yields an all-NaN row and ``detected=False``.
     """
-    feats = np.full((len(video_ids), len(FEATURE_NAMES)), np.nan)
+    n_out = len(feature_names(cue_module))
+    feats = np.full((len(video_ids), n_out), np.nan)
     ok = np.zeros(len(video_ids), bool)
     for i, vid in enumerate(video_ids):
         if vid not in per_video:
@@ -92,6 +102,6 @@ def build_matrix(per_video: dict[str, tuple[np.ndarray, np.ndarray]], mode: str,
         joints, detected = per_video[vid]
         if joints.shape[0] == 0 or not np.asarray(detected, bool).any():
             continue
-        feats[i] = video_feature(joints, detected, mode)
+        feats[i] = video_feature(joints, detected, mode, cue_module=cue_module)
         ok[i] = np.isfinite(feats[i]).all()
     return feats, ok

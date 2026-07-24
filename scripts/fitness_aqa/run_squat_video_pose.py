@@ -32,7 +32,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.fitness_aqa import squat_dataset as sq  # noqa: E402
 
 DEFAULT_OUT = sq.DEFAULT_SQUAT_ROOT / "derived" / "video_pose"
-VIDEOS_ZIP = sq.DEFAULT_SQUAT_ROOT / "videos.zip"
+DEFAULT_VIDEOS_ZIP = sq.DEFAULT_SQUAT_ROOT / "videos.zip"
 LOWER_BODY_LANDMARKS = [23, 24, 25, 26, 27, 28]
 
 
@@ -47,12 +47,12 @@ def sampled_frames(cap, stride: int, max_frames: int) -> list[int]:
     return idxs
 
 
-def iter_videos(video_ids: list[str], root: Path):
+def iter_videos(video_ids: list[str], videos_zip: Path):
     """Yield (video_id, cv2.VideoCapture) reading straight from videos.zip via a temp file."""
     import cv2
     import tempfile
 
-    with zipfile.ZipFile(VIDEOS_ZIP) as z:
+    with zipfile.ZipFile(videos_zip) as z:
         names = {Path(n).stem: n for n in z.namelist() if n.endswith(".mp4")}
         for vid in video_ids:
             if vid not in names:
@@ -68,7 +68,7 @@ def iter_videos(video_ids: list[str], root: Path):
                 Path(tmp).unlink(missing_ok=True)
 
 
-def run_mediapipe(video_ids: list[str], root: Path, out_dir: Path, stride: int, max_frames: int,
+def run_mediapipe(video_ids: list[str], videos_zip: Path, out_dir: Path, stride: int, max_frames: int,
                   model_complexity: int, detection_conf: float) -> None:
     import cv2
     from mediapipe.python.solutions import pose as mp_pose
@@ -77,7 +77,7 @@ def run_mediapipe(video_ids: list[str], root: Path, out_dir: Path, stride: int, 
 
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
-    for n, (vid, cap) in enumerate(iter_videos(video_ids, root), 1):
+    for n, (vid, cap) in enumerate(iter_videos(video_ids, videos_zip), 1):
         op = out_dir / f"{vid}.npz"
         if op.exists() and op.stat().st_size > 500:
             continue
@@ -126,7 +126,10 @@ def run_mediapipe(video_ids: list[str], root: Path, out_dir: Path, stride: int, 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--backend", default="mediapipe", choices=["mediapipe"])
-    p.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    p.add_argument("--dataset", default="squat", choices=["squat", "ohp"],
+                   help="which video-level dataset to pose (squat or ohp)")
+    p.add_argument("--out", type=Path, default=None)
+    p.add_argument("--videos-zip", type=Path, default=None)
     p.add_argument("--stride", type=int, default=3)
     p.add_argument("--max-frames", type=int, default=60)
     p.add_argument("--model-complexity", type=int, default=1, choices=[0, 1, 2])
@@ -134,12 +137,20 @@ def main() -> None:
     p.add_argument("--limit", type=int, default=0)
     args = p.parse_args()
 
-    video_ids = sorted(set(sum((sq.load_split(s) for s in sq.SPLITS), [])))
+    if args.dataset == "ohp":
+        from src.fitness_aqa import ohp_dataset as ds
+    else:
+        ds = sq
+    videos_zip = args.videos_zip or (ds.DEFAULT_OHP_ROOT if args.dataset == "ohp"
+                                     else sq.DEFAULT_SQUAT_ROOT) / "videos.zip"
+    out_dir = args.out or (ds.DEFAULT_OHP_ROOT if args.dataset == "ohp"
+                           else sq.DEFAULT_SQUAT_ROOT) / "derived" / "video_pose"
+
+    video_ids = sorted(set(sum((ds.load_split(s) for s in ds.SPLITS), [])))
     if args.limit:
         video_ids = video_ids[:args.limit]
-    print(f"{len(video_ids)} labelled videos | backend={args.backend} stride={args.stride} "
-          f"-> {args.out}", flush=True)
-    run_mediapipe(video_ids, sq.DEFAULT_SQUAT_ROOT, args.out, args.stride, args.max_frames,
+    print(f"{len(video_ids)} {args.dataset} videos | stride={args.stride} -> {out_dir}", flush=True)
+    run_mediapipe(video_ids, videos_zip, out_dir, args.stride, args.max_frames,
                   args.model_complexity, args.detection_conf)
 
 

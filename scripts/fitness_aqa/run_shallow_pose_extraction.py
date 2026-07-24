@@ -48,7 +48,7 @@ LOWER_BODY_LANDMARKS = [23, 24, 25, 26, 27, 28]  # BlazePose hips, knees, ankles
 
 
 def run_mediapipe(sample_ids: list[str], root: Path, out_dir: Path, min_visibility: float,
-                  model_complexity: int, detection_conf: float) -> None:
+                  model_complexity: int, detection_conf: float, iter_crops=sd.iter_crops) -> None:
     from mediapipe.python.solutions import pose as mp_pose  # lazy: heavy optional dep
 
     from src.fit3d import mediapipe_baseline as mpb
@@ -67,7 +67,7 @@ def run_mediapipe(sample_ids: list[str], root: Path, out_dir: Path, min_visibili
     import cv2
 
     t0 = time.time()
-    for k, (sid, img) in enumerate(sd.iter_crops(sample_ids, root), 1):
+    for k, (sid, img) in enumerate(iter_crops(sample_ids, root), 1):
         res = pose.process(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
         wl = getattr(res, "pose_world_landmarks", None)
         il = getattr(res, "pose_landmarks", None)
@@ -105,7 +105,7 @@ def run_mediapipe(sample_ids: list[str], root: Path, out_dir: Path, min_visibili
 
 
 def run_rtmpose(sample_ids: list[str], root: Path, out_dir: Path, mode: str, device: str,
-                score_thr: float) -> None:
+                score_thr: float, iter_crops=sd.iter_crops) -> None:
     from rtmlib import Wholebody  # lazy: heavy optional dep
 
     from src.fit3d import twod_baseline as tb
@@ -118,7 +118,7 @@ def run_rtmpose(sample_ids: list[str], root: Path, out_dir: Path, mode: str, dev
     detected = np.zeros(n, bool)
 
     t0 = time.time()
-    for k, (sid, img) in enumerate(sd.iter_crops(sample_ids, root), 1):
+    for k, (sid, img) in enumerate(iter_crops(sample_ids, root), 1):
         keypoints, scores = detector(img)
         if keypoints is None or len(keypoints) == 0:
             continue
@@ -137,7 +137,8 @@ def run_rtmpose(sample_ids: list[str], root: Path, out_dir: Path, mode: str, dev
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--backend", required=True, choices=["mediapipe", "rtmpose"])
-    p.add_argument("--root", type=Path, default=sd.DEFAULT_SHALLOW_ROOT)
+    p.add_argument("--dataset", default="shallow", choices=["shallow", "brow"])
+    p.add_argument("--root", type=Path, default=None)
     p.add_argument("--out", type=Path, default=DEFAULT_OUT)
     p.add_argument("--limit", type=int, default=0, help="process only the first N samples (smoke test)")
     p.add_argument("--min-visibility", type=float, default=0.0,
@@ -150,17 +151,26 @@ def main() -> None:
     p.add_argument("--score-thr", type=float, default=0.3)
     args = p.parse_args()
 
-    manifest = sd.load_manifest(args.root)
-    sample_ids = [r["id"] for r in manifest]
+    if args.dataset == "brow":
+        from src.fitness_aqa import barbellrow_dataset as bd
+        root = args.root or bd.DEFAULT_BROW_ROOT
+        out = args.out if args.out != DEFAULT_OUT else root / "derived" / "pose"
+        sample_ids = bd.all_sample_ids(root)
+        iter_crops = bd.iter_crops
+    else:
+        root = args.root or sd.DEFAULT_SHALLOW_ROOT
+        out = args.out
+        sample_ids = [r["id"] for r in sd.load_manifest(root)]
+        iter_crops = sd.iter_crops
     if args.limit:
         sample_ids = sample_ids[:args.limit]
-    print(f"{len(sample_ids)} labelled crops | backend={args.backend} -> {args.out}", flush=True)
+    print(f"{len(sample_ids)} {args.dataset} crops | backend={args.backend} -> {out}", flush=True)
 
     if args.backend == "mediapipe":
-        run_mediapipe(sample_ids, args.root, args.out, args.min_visibility, args.model_complexity,
-                      args.detection_conf)
+        run_mediapipe(sample_ids, root, out, args.min_visibility, args.model_complexity,
+                      args.detection_conf, iter_crops=iter_crops)
     else:
-        run_rtmpose(sample_ids, args.root, args.out, args.mode, args.device, args.score_thr)
+        run_rtmpose(sample_ids, root, out, args.mode, args.device, args.score_thr, iter_crops=iter_crops)
     print("=== extraction done ===", flush=True)
 
 
