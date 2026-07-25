@@ -1365,6 +1365,35 @@ RAG 語料庫來源(作者/標題/期刊以 `data/paper_metadata.json` 為權威
 - **對側骨盆下掉**(高抬腿、弓步)是強力的*傷害關聯*訊號(Bramah 2018);但**不**主張它是
   髖外展肌無力的直接讀數,那一點仍有爭議(McCarney 2020)。
 
+**視角判定(view estimation)的方向性限制(2026-07-25,於 `body_axis_extent` 改為方向感知的
+身體延伸量測時新增;以下四點以 `src/pose/view_estimation.py` 模組 docstring 內的版本為準):**
+
+1. `signed_orientation`(`sign(left.x - right.x)`)是影像座標系上的左右順序,其正面/背面意義
+   只在**直立**受試者身上經過驗證。對於水平的身體,正面軸不再對應到影像的 x 軸,因此
+   `front`/`rear`/`*_oblique` 這幾個標籤在該情境下不具任何經驗證的意義。不要用它們去為水平動作
+   (例如伏地挺身)的規則設閘門。
+2. `estimate_view_for_pose` 在正式環境路徑(`src/pose/pose_rule_detector.py`)中是以
+   `allow_front=False` 呼叫的,因此 `front` 與 `front_oblique` 在那裡永遠不會被觸及;下游只會
+   輸出 `side`、`rear`、`rear_oblique`、`unknown` 這四種。
+3. `_visible_midpoint` 要求一對關鍵點的**左右兩側**都高於 0.35 可見度才會被納入身體軸線計算。
+   只要一側肩膀被遮擋——或是腳踝與髖部這一對關鍵點不完整——就會讓 `body_axis_extent` 悄悄退回
+   修正前的垂直方向替代值,而不是真正的身體軸線,而且不會出現 NaN,也不會有任何其他訊號提示。
+   實測:在一個水平姿勢的測試素材中,把第 12 號關鍵點(右肩)的可見度強制設為 0.1,量到的軸線
+   延伸值是 0.070,而不是預期的 ~0.60(低了 8.6 倍)。這不是回歸——這個退回值就是 2026-07-25
+   修正之前的行為,對直立深蹲而言是正確的——但它會在最容易觸發的情境下,悄悄地把方向感知修正的
+   效果抵銷掉:矢狀面(側面)視角正是遠側關鍵點最常被遮擋的視角。
+4. 當一支影片完全沒有方向性證據(`front_score == rear_score == 0.0`),但仍靠軀幹寬度證據單獨
+   跨過證據門檻時,`score_view` 的分支階梯會把它判成 `rear_oblique` 而不是 `unknown`——因為在
+   `allow_front=False` 下,`front_score >= rear_score` 這個分支在兩者平手(0.0 對 0.0)時會被
+   無條件採用。往下游看,`rear_oblique` 落在 `src/pose/movements/squat.py` 裡
+   `rule_knees_inward` 的 `observable_alignment` 閘門集合內(舊的 `side` 判定不在其中),而該
+   閘門沒有信心下限——於是一支毫無證據的影片,`knees_inward` 反而可能得到 **confidence 1.000 /
+   observability "high"** 而不是被排除在外,相對於這次改動之前的 **confidence 0.650 /
+   "medium"**。**此次刻意不修正**:在該閘門加上信心下限會改變深蹲規則的輸出,而
+   `tests/test_movement_registry.py` 釘住了「動作註冊表路徑」與 `pose_rule_detector.py` 內
+   legacy oracle 逐位元組相同的比對測試,若不同步套用相同修改,該閘門測試就會失敗。這是已知、
+   有實測數字佐證的缺陷,等待後續獨立處理,不是被忽略。
+
 ## 8. 後續步驟
 
 1. 使用者審閱本規格。

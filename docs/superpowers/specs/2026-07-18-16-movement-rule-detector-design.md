@@ -1382,6 +1382,40 @@ These are stated rather than papered over, per the spec's honesty requirement:
   (Bramah 2018); it is **not** asserted as a direct readout of hip-abductor weakness, which is
   contested (McCarney 2020).
 
+**View-estimation orientation limits (2026-07-25, added when `body_axis_extent` made body-extent
+measurement orientation-aware; see `src/pose/view_estimation.py` module docstring for the
+authoritative version of these four):**
+
+1. `signed_orientation` (`sign(left.x - right.x)`) is an image-space left/right ordering whose
+   front/rear meaning is validated only for UPRIGHT subjects. For a horizontal body the frontal
+   axis no longer maps onto image x, so `front`/`rear`/`*_oblique` labels carry no validated
+   meaning there. Do not gate a horizontal-movement rule (e.g. push-up) on them.
+2. `estimate_view_for_pose` is called with `allow_front=False` in the production path
+   (`src/pose/pose_rule_detector.py`), so `front` and `front_oblique` are unreachable there;
+   only `side`, `rear`, `rear_oblique`, and `unknown` are ever emitted downstream.
+3. `_visible_midpoint` requires BOTH the left and right landmark of a pair above 0.35
+   visibility to contribute to the body axis. One occluded shoulder — or an incomplete ankle
+   AND hip pair — silently reverts `body_axis_extent` to the pre-fix vertical fallback instead
+   of the true body axis, with no NaN and no other signal raised. Measured: on a horizontal
+   fixture with landmark 12 (right shoulder) forced to visibility 0.1, the axis extent returned
+   0.070 instead of ~0.60 (8.6x low). Not a regression — the fallback is the pre-2026-07-25
+   behavior, correct for upright squats — but it silently undoes the orientation-aware fix
+   exactly in the view most likely to trigger it: a sagittal (side) view is precisely where
+   far-side landmarks are most often occluded.
+4. When a clip carries no orientation evidence at all (`front_score == rear_score == 0.0`) but
+   still clears the evidence floor on torso-width alone, `score_view`'s branch ladder resolves
+   it to `rear_oblique` rather than `unknown`, because with `allow_front=False` the
+   `front_score >= rear_score` branch is taken unconditionally on the tie. Downstream,
+   `rear_oblique` sits inside `rule_knees_inward`'s `observable_alignment` gate in
+   `src/pose/movements/squat.py` (the old `side` verdict did not), and that gate has no
+   confidence floor — so an evidence-free clip can score `knees_inward` at **confidence 1.000 /
+   observability "high"** instead of being excluded, versus **confidence 0.650 / "medium"**
+   before this change. **Deliberately NOT fixed here**: a confidence floor on that gate would
+   change squat rule output, and `tests/test_movement_registry.py` pins a byte-for-byte
+   comparison of the registry path against the legacy oracle in `pose_rule_detector.py`, which
+   would need the identical change in lockstep or the gate test fails. This is a known, measured
+   defect awaiting a scoped follow-up, not an oversight.
+
 ## 8. Next steps
 
 1. User review of this spec.
