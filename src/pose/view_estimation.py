@@ -296,7 +296,13 @@ def estimate_view_for_pose(
 
     orientation_score = mean_finite([signal["orientation_score"] for signal in valid_signals], default=0.0)
     face_visibility = mean_finite([signal["face_visibility"] for signal in valid_signals], default=0.0)
-    torso_width_ratio = mean_finite([signal["torso_width_ratio"] for signal in valid_signals], default=0.0)
+    # NaN, not 0.0: a 0.0 width ratio reads as "maximally narrow" in
+    # narrow_body_signal and manufactures a high-confidence `side` verdict from
+    # clips that carry no width evidence at all. score_view already treats a
+    # non-finite ratio as "no evidence" (both width signals fall to 0.0).
+    torso_width_ratio = mean_finite(
+        [signal["torso_width_ratio"] for signal in valid_signals], default=np.nan
+    )
     z_asymmetry_value = mean_finite([signal["z_asymmetry"] for signal in valid_signals], default=0.0)
 
     view_type, confidence, front_score, rear_score, side_score, oblique_score = score_view(

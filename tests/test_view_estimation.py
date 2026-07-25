@@ -199,6 +199,20 @@ class ScoreViewTests(unittest.TestCase):
         view_type, *_ = score_view(1.0, 0.5, 0.30, 0.0, valid_frame_ratio=0.8, allow_front=False)
         self.assertEqual(view_type, "rear_oblique")
 
+    def test_absent_width_evidence_does_not_score_as_side(self) -> None:
+        # A clip where torso width is unmeasurable in every frame must NOT be called
+        # "side": narrow_body_signal previously read the 0.0 default as maximally narrow
+        # and returned side @ 0.9 with no width evidence at all.
+        view_type, confidence, _front, _rear, side_score, _oblique = score_view(
+            orientation_score=0.0,
+            face_visibility=0.5,
+            torso_width_ratio=float("nan"),
+            z_asymmetry_value=0.0,
+            valid_frame_ratio=1.0,
+        )
+        self.assertNotEqual(view_type, "side")
+        self.assertLess(side_score, 0.62)
+
 
 class EstimateViewForPoseTests(unittest.TestCase):
     def setUp(self):
@@ -224,6 +238,15 @@ class EstimateViewForPoseTests(unittest.TestCase):
         self.assertEqual(estimate.valid_frame_count, 6)
         self.assertEqual(estimate.video_id, "vid42")
         self.assertTrue(0.0 <= estimate.view_confidence <= 1.0)
+
+    def test_degenerate_all_coincident_landmarks_is_not_side(self) -> None:
+        # Mirrors data/runtime/pose_json/vid1.json: every landmark at the same point,
+        # so shoulder/hip widths are 0 and body extent is 0 -> torso_width_ratio NaN in
+        # every frame. This produced `side` @ conf 0.9 before the fix.
+        landmarks = [{"x": 0.1, "y": 0.2, "z": 0.0, "visibility": 0.9} for _ in range(33)]
+        payload = {"metadata": {}, "frames": [{"frame_index": 0, "landmarks": landmarks}]}
+        estimate = estimate_view_for_pose(self._write(payload))
+        self.assertNotEqual(estimate.view_type, "side")
 
 
 class JsonLoaderTests(unittest.TestCase):
