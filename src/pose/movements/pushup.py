@@ -1,12 +1,21 @@
 # Push-up raw metrics, phase segmentation, and the cited fault rules built on them.
 #
 # THE METRIC LAYER CONTAINS NO THRESHOLDS -- `pushup_compute_raw` / `pushup_assign_phases`
-# compute scale-free per-frame metrics and a phase label only. Every threshold in this file
-# lives in a `rule_*` function and is copied from
-# docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md (Push-up section).
-# Like OHP's, NONE of them has been validated against labeled push-up video (spec §8.4):
-# they are spec-derived, not measured. `rule_hip_sag` and `rule_shallow_depth` are the only
-# rules present so far; head drop, elbow flare and scapular winging arrive with Task 7.
+# compute scale-free per-frame metrics and a phase label only. Every number that decides
+# anything lives in a `rule_*` function, and those numbers come in TWO CATEGORIES that must
+# not be conflated:
+#
+#   FIRE THRESHOLDS (+/-0.06 hip offset, 100 deg elbow) are COPIED FROM
+#   docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md (Push-up section).
+#
+#   SEVERITY RAMP ENDPOINTS (0.15, 140 deg) are RULE-LEVEL CHOICES MADE HERE. The spec states
+#   no severity ramp for either push-up fault -- it has no `Severity ramp` line in its Push-up
+#   section and the strings "0.15" and "140" do not occur there. Each rule's docstring gives
+#   the reasoning for the endpoint it picked. They are ranking curves, not cited quantities.
+#
+# Like OHP's, NONE of these numbers -- either category -- has been validated against labeled
+# push-up video (spec §8.4). `rule_hip_sag` and `rule_shallow_depth` are the only rules
+# present so far; head drop, elbow flare and scapular winging arrive with Task 7.
 #
 # ---------------------------------------------------------------------------------------
 # MODULE-WIDE SILENCE RISK -- one dropped landmark silences EVERY push-up rule, not one.
@@ -118,7 +127,11 @@ from src.pose.geometry import (
     contiguous_true_segments, severity_from_range, distance,
 )
 from src.pose.movements.base import CoreFrame, RuleContext
-from src.pose.pose_rule_detector import PoseRuleDetection, build_detection
+from src.pose.pose_rule_detector import (
+    SIDE_VIEW_CONF_THRESHOLD,
+    PoseRuleDetection,
+    build_detection,
+)
 
 # MediaPipe indices not already exported by src.pose.geometry.
 LEFT_ELBOW = 13
@@ -482,9 +495,22 @@ def rule_hip_sag(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetect
     """Flag a broken plank line: the hips drop toward the floor (SAG) or rise above the line
     (PIKE) by more than 0.06 of the shoulder-to-ankle length.
 
-    THRESHOLD PROVENANCE. 0.06 and the 0.06 -> 0.15 severity ramp are copied from the spec
-    (`pushup_hip_sag`), which flags sag "by offset > ~0.06 of body length" and pike "by the
-    same margin". Unvalidated against labeled push-up video, like every threshold here.
+    THRESHOLD PROVENANCE -- TWO DIFFERENT CATEGORIES, DO NOT CONFLATE THEM.
+
+      FIRE THRESHOLDS +/-0.06: FROM THE SPEC. `pushup_hip_sag` flags sag "by offset > ~0.06
+      of body length" and pike "by the same margin". These are the spec's numbers.
+
+      SEVERITY RAMP 0.06 -> 0.15: A RULE-LEVEL CHOICE MADE HERE. The spec states NO severity
+      ramp for this fault -- it has no `Severity ramp` line, and the strings "0.15" and "140"
+      appear nowhere in its entire Push-up section. (The Squat section DOES state ramps
+      explicitly, e.g. "Severity ramp 0.82 -> 0.70", so the absence is meaningful rather than a
+      formatting quirk.) 0.15 is chosen as ~2.5x the fire threshold, so severity reaches 1.0
+      at an offset two and a half times the one that merely earns a flag; nothing in the
+      literature or the spec fixes that multiple. Treat it as a display/ranking curve, not as a
+      cited quantity.
+
+    Neither category has been validated against labeled push-up video (spec section 8.4), but
+    only the first can claim spec provenance at all.
 
     DIRECTION IS PART OF THE VERDICT. Sag and pike share one `fault_id` per the spec, but the
     coaching cue is the exact opposite ("brace, lift the hips" vs "drop the hips"), so
@@ -532,16 +558,35 @@ def rule_hip_sag(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetect
     src/pose/movements/overhead_press.py. Oblique views keep the module's standard reduced
     confidence.
 
-    THE VIEW GATE KEYS OFF THE CLASSIFIED VIEW LABEL, NOT THE TRUE CAMERA ANGLE. The inflation
-    it guards against is a continuous function of the real angle, so a clip MISCLASSIFIED as
-    `side` is not covered by it: it earns `observability="high"` and undiscounted confidence
-    however weak `ctx.view_confidence` is. No `SIDE_VIEW_CONF_THRESHOLD` floor is applied,
-    matching the structural model this rule follows (`rule_excessive_back_lean` does not gate
-    on confidence either); adding one would go beyond the spec's observability lines and change
-    behaviour, so it is recorded as a limit rather than silently patched."""
+    THE VIEW GATE KEYS OFF THE CLASSIFIED VIEW LABEL, NOT THE TRUE CAMERA ANGLE, so a WEAKLY
+    CLASSIFIED `side` label must not buy the full-confidence treatment. `ctx.view_confidence`
+    is therefore required to reach `SIDE_VIEW_CONF_THRESHOLD` (0.20, the existing shared
+    constant in src.pose.pose_rule_detector -- no new number) before `side` counts as
+    `high`/undiscounted.
+
+    This follows the two OTHER rules that refuse rather than degrade -- `rule_forward_head`
+    (overhead_press.py) and squat's `rule_knees_forward` -- both of which pair their hard gate
+    with exactly this floor. That is the apt reference class, because like them this rule makes
+    a DIRECTIONAL claim (sag vs pike) that a bad view can invert.
+
+    It is applied as a TIER DOWNGRADE, not as silence, and that is where this rule legitimately
+    differs from those two: they are sagittal-only, so outside sagittal they have no reading at
+    all and must return []. Hip sag additionally has a readable middle tier (obliques), so the
+    faithful analogue of "this side label is not trustworthy" is "treat it as an unclassified
+    view" -- medium observability, 0.65 confidence -- rather than discarding a measurement that
+    the oblique branch would have accepted anyway. The floor can only ever LOWER a confidence;
+    it can never create a detection.
+
+    Inert in production today: `view_estimation.score_view` only emits `"side"` at
+    `side_score >= 0.62`, well above 0.20, so no current clip can be affected. It is adopted
+    for consistency with the sibling hard-gated rules and to close the misclassification gap,
+    not to change today's behaviour, and `test_a_weakly_classified_side_view_is_downgraded`
+    exercises it directly."""
     if ctx.view_type in HEAD_ON_VIEWS:
         return []
-    observable_sag = ctx.view_type == "side"
+    observable_sag = (
+        ctx.view_type == "side" and ctx.view_confidence >= SIDE_VIEW_CONF_THRESHOLD
+    )
 
     sag_mask = [
         frame.valid
@@ -601,7 +646,7 @@ def rule_hip_sag(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetect
                                  "abdominal wall and back extensor musculature\" and \"their impact "
                                  "on spinal loading by calculating spinal compression and torque "
                                  "generation in the L4-5 area,\" finding push-up form drives large "
-                                 "differences in L4-5 spine compression (the one-arm push-up produced "
+                                 "differences in L4-L5 spine compression (the one-arm push-up produced "
                                  "\"the highest spine compression\"). This establishes that push-up "
                                  "trunk posture governs lumbar load; a sagging (hyperextended) trunk "
                                  "is the posture that raises passive lumbar loading. Note: the paper "
@@ -615,14 +660,24 @@ def rule_hip_sag(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetect
 def rule_shallow_depth(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Flag a partial rep: at the bottom of the descent the elbows never bend past 100 deg.
 
-    THRESHOLD PROVENANCE -- THE SPEC GIVES A BAND, THIS TAKES ITS CONSERVATIVE END. The spec
-    (`pushup_shallow_depth`) flags "min elbow flexion angle > ~100-110 deg (a full rep reaches
-    roughly <= 90 deg)". 100 is the LOW end of that band and is therefore the strictest
-    criterion for firing -- a rep must be shallower than 100 deg to be flagged at all, so
-    fewer borderline reps are called faults. Picking 110 instead would flag every rep between
-    100 and 110 as well. 100 is chosen for that fewer-false-positives reason; no number
-    outside the spec's band is used, and the severity ramp 100 -> 140 is the spec's own.
-    Unvalidated against labeled push-up video.
+    THRESHOLD PROVENANCE -- TWO DIFFERENT CATEGORIES, DO NOT CONFLATE THEM.
+
+      FIRE THRESHOLD 100 deg: FROM THE SPEC, taking the conservative end of its band. The spec
+      (`pushup_shallow_depth`) flags "min elbow flexion angle > ~100-110 deg (a full rep
+      reaches roughly <= 90 deg)". 100 is the LOW end of that band and therefore the strictest
+      criterion for firing -- a rep must be shallower than 100 deg to be flagged at all, so
+      fewer borderline reps are called faults. Picking 110 instead would flag every rep between
+      100 and 110 as well. No number outside the spec's band is used.
+
+      SEVERITY RAMP 100 -> 140 deg: A RULE-LEVEL CHOICE MADE HERE. The spec states NO severity
+      ramp for this fault; "140" appears nowhere in its Push-up section. 140 deg is chosen
+      because it is far past the spec's own description of a complete rep ("a full rep reaches
+      roughly <= 90 deg") -- an elbow that never bends below 140 deg has travelled well under
+      half the useful range, which is where "maximally shallow" reasonably saturates. That
+      reasoning is an argument, not a measurement, and no source fixes the number.
+
+    Neither category has been validated against labeled push-up video (spec section 8.4), but
+    only the first can claim spec provenance at all.
 
     Scoped to the `bottom` phase, per the spec's "at the bottom frame", and following the
     squat detector's `rule_shallow_depth`, which gates on `phase == "bottom"` the same way.

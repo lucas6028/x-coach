@@ -910,6 +910,26 @@ class PushupHipSagRuleTests(unittest.TestCase):
         self.assertAlmostEqual(detection.severity, 0.5, places=6)
         self.assertAlmostEqual(detection.confidence, 0.5 * 0.65, places=6)
 
+    def test_a_weakly_classified_side_view_is_downgraded_not_trusted(self) -> None:
+        # The view gate keys off the LABEL, so a weakly-classified `side` must not buy the
+        # full-confidence treatment -- it is treated as an unclassified view instead. Inert in
+        # production (score_view only emits `side` at side_score >= 0.62), so this test is the
+        # only place the floor is exercised.
+        strong = rule_hip_sag(_rule_frames(hip_offset_ratio=0.105), _ctx("side", view_confidence=0.62))[0]
+        self.assertEqual(strong.observability, "high")
+        self.assertAlmostEqual(strong.confidence, 0.5, places=6)
+        # Just below the shared SIDE_VIEW_CONF_THRESHOLD (0.20).
+        weak = rule_hip_sag(_rule_frames(hip_offset_ratio=0.105), _ctx("side", view_confidence=0.19))[0]
+        self.assertEqual(weak.observability, "medium")
+        self.assertAlmostEqual(weak.confidence, 0.5 * 0.65, places=6)
+        # The floor only ever LOWERS confidence -- it never suppresses the detection, and it
+        # never changes the fault itself.
+        self.assertAlmostEqual(weak.severity, strong.severity, places=6)
+        self.assertEqual(weak.evidence["direction"], strong.evidence["direction"])
+        # Exactly at the floor is on the trusted side.
+        at_floor = rule_hip_sag(_rule_frames(hip_offset_ratio=0.105), _ctx("side", view_confidence=0.20))[0]
+        self.assertEqual(at_floor.observability, "high")
+
     def test_citation_is_copied_from_the_spec(self) -> None:
         detection = rule_hip_sag(_rule_frames(hip_offset_ratio=0.12), _ctx())[0]
         self.assertEqual(
@@ -919,6 +939,10 @@ class PushupHipSagRuleTests(unittest.TestCase):
         )
         self.assertIn("spinal compression and torque generation in the L4-5 area",
                       detection.citation_support)
+        # The spec writes "L4-5 area" inside the quoted material but "L4-L5 spine compression"
+        # in its own prose. Round 1 silently dropped the second L here, and the assertions
+        # above did not cover that phrase -- so it is asserted explicitly now.
+        self.assertIn("large differences in L4-L5 spine compression", detection.citation_support)
         self.assertIn("the highest spine compression", detection.citation_support)
         self.assertIn("inferred from the loading mechanism", detection.citation_support)
 
