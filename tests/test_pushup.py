@@ -119,7 +119,9 @@ def pushup_frame(
                             rather than degenerate. It moves both wrists equally, so it does
                             not disturb `hand_width_ratio`, and the elbow angles are
                             constructed from whatever wrist position results, so it does not
-                            disturb those either.
+                            disturb those either. `hand_drop=0.0` reproduces the original
+                            round-0 geometry exactly, for diffing behaviour against commits
+                            ed40e087 / 20c1204a.
     """
     right_angle = elbow_angle if right_elbow_angle is None else right_elbow_angle
     half_hand = hand_width_ratio * _SHOULDER_WIDTH / 2.0
@@ -276,6 +278,21 @@ class PushupPlankMetricTests(unittest.TestCase):
         self.assertGreater(raw["hip_offset_ratio"], 0.0)
         self.assertGreater(raw["hand_offset_ratio"], 0.0)
 
+    def test_offsets_track_each_frame_independently_across_a_clip(self) -> None:
+        # `hip_offset_ratio` / `hand_offset_ratio` are computed by a closure defined inside
+        # the per-frame loop, capturing that frame's normal, shoulder_mid and axis_length.
+        # Every other offset test uses a single frame or a constant offset, so nothing else
+        # would notice if the closure leaked one frame's geometry into another's. Here the
+        # sag CHANGES every frame and swings through zero into a pike.
+        offsets = [0.06, 0.03, 0.0, -0.03, -0.06, 0.09]
+        frames = [pushup_frame(hip_offset=o, frame_index=i) for i, o in enumerate(offsets)]
+        raw = pushup_compute_raw(frames, 30.0)
+        self.assertEqual(len(raw), len(offsets))
+        for item, offset in zip(raw, offsets):
+            self.assertAlmostEqual(item["hip_offset_ratio"], offset / 0.60, places=5)
+            # The hands do not move, so their offset must be identical on every frame.
+            self.assertAlmostEqual(item["hand_offset_ratio"], 0.1 / 0.6, places=5)
+
     def test_body_axis_tilt_is_zero_for_a_horizontal_body(self) -> None:
         raw = pushup_compute_raw([pushup_frame()], 30.0)[0]
         self.assertAlmostEqual(raw["body_axis_tilt_deg"], 0.0, places=6)
@@ -314,12 +331,15 @@ class PushupHandWidthTests(unittest.TestCase):
 
 
 class PushupNeckLineTests(unittest.TestCase):
-    def test_neck_line_angle_grows_as_the_head_leaves_the_torso_line(self) -> None:
+    def test_neck_line_angle_grows_as_the_head_leaves_the_body_axis(self) -> None:
         neutral = pushup_compute_raw([pushup_frame()], 30.0)[0]
         dropped = pushup_compute_raw([pushup_frame(ear_offset=0.03)], 30.0)[0]
         self.assertAlmostEqual(neutral["neck_line_angle_deg"], 0.0, places=4)
-        # Exact by construction: ear sits 0.08 ahead of the shoulder along the body axis and
-        # 0.03 groundward of it, against a torso vector that runs straight down the axis.
+        # Exact by construction: the ear sits 0.08 along the BODY AXIS from the shoulder and
+        # 0.03 off it, so the angle is atan2(0.03, 0.08). NOTE this expected value coincides
+        # with the old shoulder->hip-chord reference only because hip_offset is 0 here, which
+        # makes chord and axis the same line; `test_hip_sag_does_not_manufacture_neck_deviation`
+        # is what pins the two apart.
         expected = math.degrees(math.atan2(0.03, _SHOULDER_X - _EAR_X))
         self.assertAlmostEqual(dropped["neck_line_angle_deg"], expected, places=4)
 
