@@ -29,8 +29,12 @@ construction). Four limits remain and are NOT fixed by that change:
    `max(front, rear, side) >= 0.20` floor on torso-width evidence alone, `score_view`'s branch
    ladder resolves it to `rear_oblique` rather than `unknown`: with `allow_front=False` (the
    production default), the `front_score >= rear_score` branch is taken on the 0.0 == 0.0 tie
-   and unconditionally assigns `rear_oblique` -- it does not consult `oblique_score` or
-   `OBLIQUE_THRESHOLD` at all in that branch. Downstream in `src/pose/movements/squat.py`, `rear_oblique` sits inside
+   and unconditionally assigns `view_type = "rear_oblique"` without consulting `oblique_score`
+   or `OBLIQUE_THRESHOLD` for that choice. `confidence`, however, DOES consult `oblique_score`
+   in this branch (`confidence = max(front_score, side_score, oblique_score) * 0.70`), and it
+   can be the deciding term -- e.g. `torso_width_ratio=0.17, z_asymmetry=0.1` yields
+   `oblique_score=0.582 > side_score=0.570`, so `confidence=0.582*0.70=0.407` is set by
+   `oblique_score`, not `side_score`. Downstream in `src/pose/movements/squat.py`, `rear_oblique` sits inside
    `rule_knees_inward`'s `observable_alignment` gate (the old `side` verdict did not), and that
    gate carries no confidence floor -- so an evidence-free clip can score `knees_inward` at
    confidence 1.000 / observability "high" instead of being excluded. This is a known,
