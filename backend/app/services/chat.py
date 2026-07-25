@@ -119,6 +119,26 @@ def _fmt_list(items: Any) -> str:
     return ", ".join(str(x) for x in items if x)
 
 
+def _resolve_movement(context: dict[str, Any]) -> str:
+    """The movement name to interpolate into the system prompt, straight from client input.
+
+    Falls back to the pipeline default so a client predating ``ChatContext.movement`` still gets
+    a coherent prompt rather than an empty movement name.
+
+    THIS VALUE IS UNVALIDATED AND GOES STRAIGHT INTO THE SYSTEM PROMPT, twice, as the opening two
+    sentences immediately ahead of the ``GROUNDING RULES`` block (see ``_system_preamble``). That
+    is deliberate, not an oversight: every other field on ``ChatContext`` (``fault_name``,
+    ``evidence``, ``causes``, ``risks``, ``corrections``, ``rag_snippet``) already interpolates
+    unescaped into the same system prompt, and ``ChatMessage.content`` -- the user's own chat
+    turns -- reaches the same model with only a ``min_length=1`` check, a strictly easier
+    injection channel than this field. Validating ``movement`` alone would not close that
+    surface, only misrepresent it as closed. The endpoint is auth-gated (``get_current_user``),
+    so the blast radius of anything injected here is the calling user's own conversation, not
+    other users' data or other tenants.
+    """
+    return str(context.get("movement") or config.DEFAULT_ANALYSIS_MOVEMENT)
+
+
 def _build_system_prompt(context: dict[str, Any]) -> str:
     """Render the analysis ``context`` into the grounded system prompt.
 
@@ -146,9 +166,7 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
     same reason -- the analyze pipeline always emits it, so its absence means the payload did not
     say, and "we cannot tell" must not resolve to "everything is fine".
     """
-    # Falls back to the pipeline default so a client predating ChatContext.movement still gets a
-    # coherent prompt rather than an empty movement name.
-    movement = str(context.get("movement") or config.DEFAULT_ANALYSIS_MOVEMENT)
+    movement = _resolve_movement(context)
     lines: list[str] = [_system_preamble(movement), "ANALYSIS FACTS:"]
 
     view = context.get("view_type") or "unknown"
@@ -315,7 +333,7 @@ def suggest_followups(
     follow from; the grounded system prompt (same honesty rules as the answer) precedes the follow-up
     instruction, and a trailing user nudge keeps the request from ending on the assistant turn.
     """
-    movement = str(context.get("movement") or config.DEFAULT_ANALYSIS_MOVEMENT)
+    movement = _resolve_movement(context)
     system = _build_system_prompt(context) + "\n\n" + _followup_instruction(movement)
     convo = [
         {"role": "system", "content": system},
