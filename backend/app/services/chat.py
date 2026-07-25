@@ -111,6 +111,27 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
 
     Handles the clean-rep case (no ``faults``) distinctly so the model reinforces good form
     instead of being handed an empty fault list it might feel obliged to fill.
+
+    THE EMPTY FAULT LIST IS AMBIGUOUS, AND THE PROMPT MUST NOT RESOLVE IT OPTIMISTICALLY.
+    ``run_detector`` returns an empty ``detections`` list identically for "no faults found" and
+    "no frame was ever measurable" -- a clip cropped above the ankles, say, fails every rule's
+    validity gate and is byte-for-byte indistinguishable here from a flawless rep. Emitting the
+    CLEAN REP instruction in that case tells the model to congratulate the user on form nothing
+    measured, which is a fabricated claim of exactly the kind this prompt's honesty constraint
+    forbids everywhere else.
+
+    ``context["quality"]`` already carries the distinction -- ``buildChatContext`` ships the whole
+    quality dict (frontend/src/lib/grounding.ts) and ``ChatContext.quality`` accepts it -- it was
+    simply never surfaced, so the model could not recover it even in principle. Both
+    ``valid_frame_ratio`` and the CLEAN REP / NOT MEASURED branch now come from it.
+
+    THE CRITERION IS CATEGORICAL (exactly zero measurable frames), matching ``wasMeasured`` in
+    frontend/src/lib/quality.ts verbatim so the tray banner, the metrics HUD and the coach cannot
+    contradict each other. It is deliberately NOT a low-but-nonzero band: no "enough frames to
+    trust a verdict" threshold has been measured in this repo, and inventing one for a user-facing
+    verdict is not acceptable here. A MISSING ``valid_frame_ratio`` counts as UNMEASURED for the
+    same reason -- the analyze pipeline always emits it, so its absence means the payload did not
+    say, and "we cannot tell" must not resolve to "everything is fine".
     """
     lines: list[str] = [_SYSTEM_PREAMBLE, "ANALYSIS FACTS:"]
 
@@ -124,11 +145,23 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
     if isinstance(vis, (int, float)):
         lines.append(f"- Lower-body visibility: {vis:.2f}")
 
+    valid_ratio = quality.get("valid_frame_ratio")
+    measured = isinstance(valid_ratio, (int, float)) and valid_ratio > 0
+    if isinstance(valid_ratio, (int, float)):
+        lines.append(f"- Measurable frames: {valid_ratio:.0%} of the clip")
+
     faults = context.get("faults") or []
     fault_count = context.get("fault_count", len(faults))
     lines.append(f"- Faults detected: {fault_count}")
 
-    if not faults:
+    if not faults and not measured:
+        lines.append(
+            "- NOT MEASURED: no frame in this clip could be analysed, so the empty fault list "
+            "means the analysis never ran on any frame -- it does NOT mean the form was good. "
+            "Do NOT congratulate the user or comment on their form. Say plainly that the clip "
+            "could not be measured and suggest re-recording with the whole body in frame."
+        )
+    elif not faults:
         lines.append(
             "- This is a CLEAN REP: no faults were detected. Congratulate the user and "
             "reinforce what good form looks like; do not manufacture problems."

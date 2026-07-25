@@ -131,6 +131,10 @@ const en: Dict = {
   "feedback.title": "Coaching Feedback",
   "feedback.badge": "rule + GraphRAG",
   "feedback.noFaults": "No biomechanical faults detected. Clean rep.",
+  // Shown instead of the clean-rep banner when no frame was measurable: an empty fault list then
+  // means "never measured", not "nothing wrong". See lib/quality.ts.
+  "feedback.notMeasured":
+    "No frame in this clip could be measured, so no form verdict was produced. Re-record with your whole body in frame.",
   "feedback.graphragContext": "GraphRAG Context",
   "feedback.likelyCause": "Likely cause:",
   "feedback.injuryRisk": "Injury risk:",
@@ -748,6 +752,8 @@ const zhHant: Dict = {
   "feedback.title": "教練回饋",
   "feedback.badge": "規則 + GraphRAG",
   "feedback.noFaults": "未偵測到生物力學錯誤，標準動作。",
+  "feedback.notMeasured":
+    "這支影片沒有任何一個影格可供判讀，因此沒有產生動作評估結果。請確認全身都在畫面內後重新錄製。",
   "feedback.graphragContext": "GraphRAG 脈絡",
   "feedback.likelyCause": "可能原因：",
   "feedback.injuryRisk": "受傷風險：",
@@ -1258,7 +1264,12 @@ const zhHant: Dict = {
   "ninja.board.you": "你",
 };
 
-const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };
+// Exported so the suite can enforce key-set PARITY between the locales. Both dicts are typed
+// `Record<string, string>`, so TypeScript cannot catch a key added to one locale and forgotten in
+// the other: `t()` falls back to returning the raw key, and the zh UI silently renders
+// "metric.notMeasured" as literal text. That failure is invisible in review and in every
+// English-locale test — see `lib.i18n.test.ts`.
+export const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };
 
 export const LANGS: { value: Lang; short: string }[] = [
   { value: "en", short: "EN" },
