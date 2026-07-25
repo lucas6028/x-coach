@@ -68,6 +68,11 @@ describe("studio movement selection", () => {
     renderWithProviders(<App />, { route: "/app?movement=Push-up" });
     // In flight: "we don't know yet" must not render as "no".
     expect(screen.queryByText(/not.*analys|尚未/i)).toBeNull();
+    // AND the dropzone must not render either — a slow network must not let someone upload
+    // against a movement we have not confirmed. This pins the App-level wiring of
+    // `movementsLoaded` into DemoIntro, not just DemoIntro's own gate: without this assertion, a
+    // mis-wired `movementsLoaded={true}` passed from App would still leave this test green.
+    expect(document.querySelector('input[type="file"]')).toBeNull();
     resolve(LIVE);
     expect(await screen.findByLabelText(/movement/i)).toBeTruthy();
     expect(screen.queryByText(/not.*analys|尚未/i)).toBeNull();
