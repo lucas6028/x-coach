@@ -1359,3 +1359,21 @@ RAG 語料庫來源(作者/標題/期刊以 `data/paper_metadata.json` 為權威
 **狀態(2026-07-18):** 基礎已出貨(動作註冊表 + 引用 + 行為不變的深蹲遷移 + 過頭推舉),
 位於 `feat/movement-rule-detector-spec` 分支。**過頭推舉的門檻是由規格推導、尚未驗證**——
 目前沒有已標註的過頭推舉資料(§8.4)。其餘 14 個動作將沿用本框架,以逐動作的計畫接續進行。
+
+**狀態(2026-07-25):** 過頭推舉的 5 條規則已 **全數(5/5)** 實作於
+`src/pose/movements/overhead_press.py`(`ohp_incomplete_lockout`、`ohp_lumbar_hyperextension`、
+`ohp_asymmetric_press`、`ohp_insufficient_elevation`、`ohp_forward_head_barpath`)。實作與上文
+偵測啟發式有兩處刻意的偏離,程式碼內亦已註明:
+
+- `ohp_insufficient_elevation`——上文「約 0.5 個頭高」的寫法 **無法實作**:MediaPipe 的 33 個
+  關鍵點裡根本沒有可量測頭高的東西(鼻、眼、耳、嘴全部落在臉部範圍內,任兩點都跨不過整顆頭)。
+  實作改為 **替代準則**:以肩寬正規化的鼻部淨空高度,當
+  `(wrist_mean_y − nose_y) / shoulder_width > −0.15` 時觸發。這是 **替代,不是單位換算**——
+  沒有假設或引入任何「頭高對肩寬」的人體測量常數。
+- `ohp_forward_head_barpath`——實作為 **硬性視角閘門**,而非上文「側面中高、正面低」所隱含的
+  可觀察度降級。兩項線索都是純水平位移,方向在不知道受試者面向時無法判定,因此在
+  `{side, front_oblique}` 以外的視角 **完全不輸出偵測**,而不是輸出低信心的偵測:給錯方向比
+  沉默更糟。另外,它所用的肩寬正規化在被閘門允許的側面視角下條件最差(遠側肩被遮蔽時整條
+  規則會直接靜默)。
+
+兩條新門檻與既有三條一樣,尚未以標註資料驗證(§8.4)。
