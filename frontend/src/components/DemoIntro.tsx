@@ -1,6 +1,7 @@
 import { Brain, FilmSlate, Graph, PersonSimpleRun, Sparkle, WarningCircle, type Icon } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import { useI18n } from "../lib/i18n";
+import { movementLabel, useI18n } from "../lib/i18n";
+import type { AnalyzableMovement } from "../lib/movements";
 import UploadDropzone from "./UploadDropzone";
 import { LumenLoader } from "./LumenLoader";
 
@@ -10,6 +11,15 @@ interface Props {
   loading: boolean;
   statusMsg: string;
   error: string;
+  movements: AnalyzableMovement[];
+  movement: string;
+  onMovementChange: (movement: string) => void;
+  /** Non-empty when the requested movement is KNOWN not to be analyzable; the dropzone stays
+   *  hidden. Empty while the catalog is still in flight. */
+  movementError: string;
+  /** False until GET /api/movements settles. The dropzone waits, so a slow network cannot let
+   *  someone upload against a movement we have not confirmed. */
+  movementsLoaded: boolean;
 }
 
 const STEPS: { Icon: Icon; titleKey: string; bodyKey: string }[] = [
@@ -21,7 +31,18 @@ const STEPS: { Icon: Icon; titleKey: string; bodyKey: string }[] = [
 // The demo's pre-analysis onboarding. Theme-aware (uses semantic tokens so it
 // follows the app's light/dark toggle). Asymmetric split: actions on the left,
 // an expectation-setting "what comes back" panel on the right.
-export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, error }: Props) {
+export default function DemoIntro({
+  onFile,
+  onOpenLibrary,
+  loading,
+  statusMsg,
+  error,
+  movements,
+  movement,
+  onMovementChange,
+  movementError,
+  movementsLoaded,
+}: Props) {
   const { t } = useI18n();
   const reduce = useReducedMotion();
 
@@ -41,10 +62,47 @@ export default function DemoIntro({ onFile, onOpenLibrary, loading, statusMsg, e
           <p className="mt-4 max-w-md leading-relaxed text-muted">{t("demo.sub")}</p>
 
           <div className="mt-8 max-w-md">
-            {loading ? (
+            <div className="mb-4 flex items-center gap-2">
+              <label htmlFor="movement-select" className="text-sm font-medium text-muted">
+                {t("studio.movement")}
+              </label>
+              <select
+                id="movement-select"
+                value={movement}
+                onChange={(e) => onMovementChange(e.target.value)}
+                className="rounded-lg border border-border-dark bg-surface px-2.5 py-1.5 text-sm text-content"
+              >
+                {movements.map((m) => (
+                  <option key={m.name} value={m.name}>
+                    {movementLabel(t, m.name)}
+                  </option>
+                ))}
+                {/* Keep an unanalyzable URL-supplied movement visible rather than silently
+                    snapping the control to something the user did not choose. */}
+                {!movements.some((m) => m.name === movement) && (
+                  <option value={movement}>{movementLabel(t, movement)}</option>
+                )}
+              </select>
+              {movements.find((m) => m.name === movement)?.validated === false && (
+                <span
+                  title={t("movements.betaNote")}
+                  className="rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning ring-1 ring-warning/40"
+                >
+                  {t("movements.beta")}
+                </span>
+              )}
+            </div>
+
+            {movementError ? (
+              <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-content">
+                {movementError}
+              </p>
+            ) : loading || !movementsLoaded ? (
               // Analysis waiting state: Lumen takes over the upload target and narrates the
               // pipeline (read pose → check mechanics → surface the reason) while it runs. The
-              // loader carries its own navy stage, so no wrapper card is needed.
+              // loader carries its own navy stage, so no wrapper card is needed. The same loader
+              // also covers the brief window before GET /api/movements settles, so the dropzone
+              // never appears against an unconfirmed movement.
               <LumenLoader variant="scan" caption={statusMsg} />
             ) : (
               <UploadDropzone onFile={onFile} />

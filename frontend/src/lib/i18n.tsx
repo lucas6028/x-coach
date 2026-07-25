@@ -208,6 +208,11 @@ const en: Dict = {
   "demo.get3.body": "The retrieval path that links each symptom to its cause.",
   "demo.errorTitle": "That clip did not go through",
 
+  // Studio movement selector
+  "studio.movement": "Movement",
+  "studio.movementUnavailable":
+    "\"{movement}\" cannot be analysed yet. Pick one of the available movements.",
+
   // Theme toggle
   "theme.light": "Light",
   "theme.system": "System",
@@ -829,6 +834,10 @@ const zhHant: Dict = {
   "demo.get3.title": "知識圖譜",
   "demo.get3.body": "連結每個現象到其成因的檢索路徑。",
   "demo.errorTitle": "這段片段沒有成功處理",
+
+  // Studio movement selector
+  "studio.movement": "動作",
+  "studio.movementUnavailable": "「{movement}」尚未支援分析，請選擇其他已開放的動作。",
 
   // Theme toggle
   "theme.light": "淺色",

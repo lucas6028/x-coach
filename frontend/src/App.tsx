@@ -8,6 +8,7 @@ import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
 import { useI18n } from "./lib/i18n";
+import type { AnalyzableMovement } from "./lib/movements";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -55,15 +56,51 @@ export default function App() {
     }
   }, [t]);
 
+  const [movements, setMovements] = useState<AnalyzableMovement[]>([
+    { name: "Squat", validated: true },
+  ]);
+  // Tracked separately from the list itself: the seed value is a FALLBACK, not an answer, and
+  // treating it as one would flash "Push-up cannot be analysed yet" on every slow load before
+  // the real list arrives.
+  const [movementsLoaded, setMovementsLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMovements()
+      .then((ms) => {
+        if (!cancelled && ms.length) setMovements(ms);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setMovementsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The movement is user-asserted input, taken from the URL when the studio is entered from the
+  // /movements menu. Validate it against the fetched list BEFORE enabling the dropzone: the
+  // backend would 400 anyway, but only after the user picked and uploaded a file.
+  const requestedMovement = searchParams.get("movement");
+  const [movement, setMovement] = useState<string>(requestedMovement || "Squat");
+  useEffect(() => {
+    if (requestedMovement) setMovement(requestedMovement);
+  }, [requestedMovement]);
+
+  const known = movements.some((m) => m.name === movement);
+  // Only an ANSWERED "not analyzable" is an error. While the list is in flight we know nothing,
+  // and "we don't know yet" must not render as "no".
+  const movementError =
+    !movementsLoaded || known ? "" : t("studio.movementUnavailable", { movement });
+
   const runUpload = useCallback(async (file: File) => {
     setLoading(true);
     setError("");
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
     try {
-      // TODO(Task 11): send the user's chosen movement once the studio selector lands; until
-      // then every upload analyses as Squat, matching the backend's own default.
-      const data = await api.analyzeUpload(file, "Squat");
+      const data = await api.analyzeUpload(file, movement);
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;
@@ -79,7 +116,7 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t, setSearchParams]);
+  }, [t, setSearchParams, movement]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -145,6 +182,11 @@ export default function App() {
           loading={loading}
           statusMsg={statusMsg}
           error={error}
+          movements={movements}
+          movement={movement}
+          onMovementChange={setMovement}
+          movementError={movementError}
+          movementsLoaded={movementsLoaded}
         />
       ) : (
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden scrollbar-thin">
