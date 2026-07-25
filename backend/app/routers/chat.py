@@ -46,6 +46,9 @@ class ChatContext(BaseModel):
     """Compact grounding blob built by ``buildChatContext(analysis)`` on the client."""
 
     video_id: str | None = None
+    # Which detector produced this analysis. Optional so a client predating per-movement
+    # analysis still validates; _build_system_prompt falls back to the pipeline default.
+    movement: str | None = None
     view_type: str | None = None
     view_confidence: float | None = None
     fault_count: int = 0

@@ -110,8 +110,10 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("Do NOT invent", prompt)  # honesty constraint intact
 
     def test_clean_rep_has_no_fault_list_but_flags_clean(self) -> None:
+        # _CLEAN_CTX carries no `movement`, so `_build_system_prompt` falls back to the pipeline
+        # default (Squat) -- see TestChatPromptMovement for the movement-scoped wording itself.
         prompt = chat_service._build_system_prompt(_CLEAN_CTX)
-        self.assertIn("CLEAN REP", prompt)
+        self.assertIn("CLEAN Squat REP", prompt)
         self.assertNotIn("DETECTED FAULTS", prompt)
         self.assertIn("Faults detected: 0", prompt)
 
@@ -663,6 +665,42 @@ class ResolveChatModelTests(unittest.TestCase):
                 app_settings.resolve_chat_model("some/self-hosted-model"), "some/self-hosted-model"
             )
             self.assertEqual(app_settings.resolve_chat_model(None), "some/self-hosted-model")
+
+
+class TestChatPromptMovement(unittest.TestCase):
+    def _prompt(self, **context) -> str:
+        from backend.app.services.chat import _build_system_prompt
+
+        base = {"quality": {"valid_frame_ratio": 0.9}, "faults": [], "fault_count": 0}
+        base.update(context)
+        return _build_system_prompt(base)
+
+    def test_preamble_names_the_movement(self) -> None:
+        prompt = self._prompt(movement="Push-up")
+        self.assertIn("Push-up coach", prompt)
+        self.assertNotIn("squat coach", prompt.lower())
+
+    def test_clean_rep_branch_names_the_movement(self) -> None:
+        """The spec's section 9 mitigation: a measurable clip measured by the WRONG rules is
+        now reachable, so the clean verdict must be scoped to the movement the user asserted
+        rather than stated bare."""
+        prompt = self._prompt(movement="Overhead Press")
+        self.assertIn("CLEAN Overhead Press REP", prompt)
+
+    def test_unmeasured_branch_is_unchanged_by_movement(self) -> None:
+        """An unmeasured clip must still refuse to congratulate, whatever the movement."""
+        prompt = self._prompt(movement="Push-up", quality={"valid_frame_ratio": 0.0})
+        self.assertIn("NOT MEASURED", prompt)
+        self.assertNotIn("CLEAN", prompt)
+
+    def test_defaults_to_squat_for_an_older_client(self) -> None:
+        """A client that predates ChatContext.movement must still get a coherent prompt."""
+        self.assertIn("Squat coach", self._prompt())
+
+    def test_followup_instruction_names_the_movement(self) -> None:
+        from backend.app.services.chat import _followup_instruction
+
+        self.assertIn("THIS Push-up", _followup_instruction("Push-up"))
 
 
 if __name__ == "__main__":

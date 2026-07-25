@@ -29,6 +29,7 @@ import json
 from collections.abc import Iterator
 from typing import Any
 
+from backend.app import config
 from backend.app.settings import (
     chat_base_url,
     chat_temperature,
@@ -47,31 +48,43 @@ _REQUEST_TIMEOUT_S = 60.0
 # on screen regardless.
 _FOLLOWUP_TIMEOUT_S = 15.0
 
-_SYSTEM_PREAMBLE = (
-    "You are the x-coach squat coach. You explain an ALREADY-COMPUTED analysis of one squat "
-    "repetition and answer the user's follow-up questions about it.\n\n"
-    "GROUNDING RULES — these are absolute:\n"
-    "- Speak ONLY from the analysis facts given below. They are the single source of truth.\n"
-    "- Do NOT invent faults, causes, injury risks, corrective cues, measurements, or camera "
-    "views that are not listed. If the user asks about something not in the analysis, say it "
-    "was not detected or not measured in this rep — never fabricate it.\n"
-    "- Base any corrective advice on the retrieved corrections/cues for the detected faults.\n"
-    "- Be concise, specific, and encouraging. Reference the timecodes and phases when useful.\n"
-    "- Reply in the same language the user writes in.\n"
-    "- You may use light Markdown for readability — bold for key cues, short bulleted lists, and "
-    "inline code for measurements/timecodes. Formatting never loosens the grounding rules above.\n"
-)
+def _system_preamble(movement: str) -> str:
+    """The grounded preamble, scoped to the movement whose rules actually ran.
 
-# Appended to the grounded system prompt for the follow-up call. The full analysis grounding precedes
-# it, so a suggested question can never reference a fault, cue, or measurement outside the analysis —
-# the same honesty bar the answer holds.
-_FOLLOWUP_INSTRUCTION = (
-    "FOLLOW-UP TASK: The user has just read your answer. Propose EXACTLY TWO short follow-up "
-    "questions the user might naturally ask you next about THIS squat. Each is from the user's point "
-    "of view (addressed to you, the coach), grounded ONLY in the analysis facts above (never a "
-    "fault/cue/measurement not listed), at most ~12 words, in the user's language. Output ONLY a "
-    'compact JSON array of exactly two strings and nothing else — e.g. ["...", "..."].'
-)
+    The movement is named rather than assumed because it is now USER-ASSERTED input: the studio
+    lets the user pick, so a clip can be measured by rules that do not describe it (spec section
+    9). Naming it makes every claim true relative to the assertion the user made, and puts that
+    assertion in front of the model instead of leaving it implicit.
+    """
+    return (
+        f"You are the x-coach {movement} coach. You explain an ALREADY-COMPUTED analysis of one "
+        f"{movement} repetition and answer the user's follow-up questions about it.\n\n"
+        "GROUNDING RULES — these are absolute:\n"
+        "- Speak ONLY from the analysis facts given below. They are the single source of truth.\n"
+        "- Do NOT invent faults, causes, injury risks, corrective cues, measurements, or camera "
+        "views that are not listed. If the user asks about something not in the analysis, say it "
+        "was not detected or not measured in this rep — never fabricate it.\n"
+        "- Base any corrective advice on the retrieved corrections/cues for the detected faults.\n"
+        "- Be concise, specific, and encouraging. Reference the timecodes and phases when useful.\n"
+        "- Reply in the same language the user writes in.\n"
+        "- You may use light Markdown for readability — bold for key cues, short bulleted lists, "
+        "and inline code for measurements/timecodes. Formatting never loosens the grounding rules "
+        "above.\n"
+    )
+
+
+def _followup_instruction(movement: str) -> str:
+    """Appended to the grounded system prompt for the follow-up call. The full analysis grounding
+    precedes it, so a suggested question can never reference a fault, cue, or measurement outside
+    the analysis — the same honesty bar the answer holds."""
+    return (
+        "FOLLOW-UP TASK: The user has just read your answer. Propose EXACTLY TWO short follow-up "
+        f"questions the user might naturally ask you next about THIS {movement}. Each is from the "
+        "user's point of view (addressed to you, the coach), grounded ONLY in the analysis facts "
+        "above (never a fault/cue/measurement not listed), at most ~12 words, in the user's "
+        'language. Output ONLY a compact JSON array of exactly two strings and nothing else — '
+        'e.g. ["...", "..."].'
+    )
 
 # A short trailing *user* turn for the follow-up call. Without it the request array would end on the
 # assistant answer, which several OpenRouter-routed models continue (more prose) rather than treat as
@@ -133,7 +146,10 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
     same reason -- the analyze pipeline always emits it, so its absence means the payload did not
     say, and "we cannot tell" must not resolve to "everything is fine".
     """
-    lines: list[str] = [_SYSTEM_PREAMBLE, "ANALYSIS FACTS:"]
+    # Falls back to the pipeline default so a client predating ChatContext.movement still gets a
+    # coherent prompt rather than an empty movement name.
+    movement = str(context.get("movement") or config.DEFAULT_ANALYSIS_MOVEMENT)
+    lines: list[str] = [_system_preamble(movement), "ANALYSIS FACTS:"]
 
     view = context.get("view_type") or "unknown"
     conf = context.get("view_confidence")
@@ -163,8 +179,9 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
         )
     elif not faults:
         lines.append(
-            "- This is a CLEAN REP: no faults were detected. Congratulate the user and "
-            "reinforce what good form looks like; do not manufacture problems."
+            f"- This is a CLEAN {movement} REP: no {movement} faults were detected. "
+            "Congratulate the user and reinforce what good form looks like; do not manufacture "
+            "problems."
         )
     else:
         lines.append("")
@@ -298,7 +315,8 @@ def suggest_followups(
     follow from; the grounded system prompt (same honesty rules as the answer) precedes the follow-up
     instruction, and a trailing user nudge keeps the request from ending on the assistant turn.
     """
-    system = _build_system_prompt(context) + "\n\n" + _FOLLOWUP_INSTRUCTION
+    movement = str(context.get("movement") or config.DEFAULT_ANALYSIS_MOVEMENT)
+    system = _build_system_prompt(context) + "\n\n" + _followup_instruction(movement)
     convo = [
         {"role": "system", "content": system},
         *messages,  # the conversation, ending on the assistant answer these questions follow from
