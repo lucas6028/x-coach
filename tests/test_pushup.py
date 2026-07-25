@@ -70,6 +70,16 @@ _EAR_X = 0.17
 _AXIS_LENGTH = _ANKLE_X - _SHOULDER_X   # 0.60
 
 
+def _rotate_about(
+    point: tuple[float, float], pivot: tuple[float, float], radians: float
+) -> tuple[float, float]:
+    """Rotate `point` about `pivot` by `radians`. Used by the `head_follows="chord"` knob to
+    swing the head with the torso segment instead of translating it."""
+    cos_t, sin_t = math.cos(radians), math.sin(radians)
+    dx, dy = point[0] - pivot[0], point[1] - pivot[1]
+    return (pivot[0] + dx * cos_t - dy * sin_t, pivot[1] + dx * sin_t + dy * cos_t)
+
+
 def _rotate(point: tuple[float, float], degrees: float) -> tuple[float, float]:
     """Rotate a point about the image centre (0.5, 0.5) by `degrees`. Used to prove the
     plank metrics are measured PERPENDICULAR to the body axis rather than vertically in
@@ -92,6 +102,7 @@ def pushup_frame(
     right_elbow_angle: float | None = None,
     tilt_deg: float = 0.0,
     hand_drop: float = 0.10,
+    head_follows: str = "axis",
 ) -> dict:
     """Build one push-up frame in which EVERY asserted metric is controlled by construction.
 
@@ -122,7 +133,21 @@ def pushup_frame(
                             disturb those either. `hand_drop=0.0` reproduces the original
                             round-0 geometry exactly, for diffing behaviour against commits
                             ed40e087 / 20c1204a.
+      head_follows       -- WHICH SEGMENT THE HEAD IS MODELLED AS RIDING ON, when the hips
+                            sag. This is a modeling assumption, not a fault knob, and neither
+                            setting is "the correct one" -- see `_neck_line_angle`'s docstring
+                            and `test_neck_reference_assumption_is_visible`.
+                              "axis"  (default) the head keeps its orientation relative to the
+                                      shoulder-mid -> ankle-mid body axis; `ear_offset` simply
+                                      translates it. This is what `neck_line_angle_deg`
+                                      assumes, so a pure sag reads 0.
+                              "chord" the head rotates WITH the shoulder->hip torso segment as
+                                      the hips drop. Under this model the axis-referenced
+                                      metric reports sag-proportional deviation with no head
+                                      fault present.
     """
+    if head_follows not in {"axis", "chord"}:
+        raise ValueError(f"head_follows must be 'axis' or 'chord', got {head_follows!r}")
     right_angle = elbow_angle if right_elbow_angle is None else right_elbow_angle
     half_hand = hand_width_ratio * _SHOULDER_WIDTH / 2.0
 
@@ -134,6 +159,13 @@ def pushup_frame(
     right_ankle = (_ANKLE_X, _MID_Y + _HALF_WIDTH)
     left_ear = (_EAR_X, _MID_Y - _HALF_WIDTH + ear_offset)
     right_ear = (_EAR_X, _MID_Y + _HALF_WIDTH + ear_offset)
+    if head_follows == "chord":
+        # Swing each ear about its own shoulder by exactly the angle the shoulder->hip chord
+        # rotated through when the hips dropped, so the head stays neutral to the TORSO
+        # SEGMENT rather than to the body axis.
+        chord_rotation = math.atan2(hip_offset, _HIP_X - _SHOULDER_X)
+        left_ear = _rotate_about(left_ear, left_shoulder, chord_rotation)
+        right_ear = _rotate_about(right_ear, right_shoulder, chord_rotation)
     left_wrist = (_WRIST_X, _MID_Y + hand_drop - half_hand)
     right_wrist = (_WRIST_X, _MID_Y + hand_drop + half_hand)
     left_elbow = _elbow_xy(left_shoulder, left_wrist, elbow_angle, "left")
@@ -370,6 +402,68 @@ class PushupNeckLineTests(unittest.TestCase):
         )
         # ... and the sag is still detected, by the metric that owns it.
         self.assertGreater(with_sag["hip_offset_ratio"], 0.0)
+
+    def test_neck_reference_assumption_is_visible(self) -> None:
+        """DOCUMENTS a modeling assumption; does NOT assert it is correct.
+
+        `neck_line_angle_deg` references the head to the BODY AXIS, which decouples it from
+        hip sag EXACTLY ONLY IF the head stays neutral to that axis. If a lifter's head
+        instead rides the shoulder->hip TORSO SEGMENT, rotating with it as the hips drop, the
+        same metric reports sag-proportional deviation with no head fault present -- the same
+        magnitudes the chord reference used to invent, just penalising the opposite posture.
+        Which model is right is an EMPIRICAL question and no data in this repo can settle it;
+        both branches below are therefore recorded as behaviour, not as pass/fail on realism.
+        See `_neck_line_angle`'s docstring for the segment-kinematics argument for `axis`."""
+        # Head neutral to the AXIS (what the metric assumes): a sag is invisible to the neck.
+        for hip_offset in (0.06, 0.09, 0.15):
+            axis_raw = pushup_compute_raw(
+                [pushup_frame(hip_offset=hip_offset, head_follows="axis")], 30.0
+            )[0]
+            self.assertAlmostEqual(axis_raw["neck_line_angle_deg"], 0.0, places=4)
+
+        # Head neutral to the CHORD: the metric reads deviation that is purely the sag.
+        # Exact by construction -- atan2(hip_offset, hip_x - shoulder_x) = atan2(sag, 0.30).
+        for hip_offset in (0.06, 0.09, 0.15):
+            chord_raw = pushup_compute_raw(
+                [pushup_frame(hip_offset=hip_offset, head_follows="chord")], 30.0
+            )[0]
+            expected = math.degrees(math.atan2(hip_offset, _HIP_X - _SHOULDER_X))
+            self.assertAlmostEqual(chord_raw["neck_line_angle_deg"], expected, places=4)
+        # Pinned as literals too, so the magnitudes stay legible to a future reader.
+        self.assertAlmostEqual(
+            pushup_compute_raw(
+                [pushup_frame(hip_offset=0.06, head_follows="chord")], 30.0
+            )[0]["neck_line_angle_deg"], 11.30993, places=4)
+        self.assertAlmostEqual(
+            pushup_compute_raw(
+                [pushup_frame(hip_offset=0.15, head_follows="chord")], 30.0
+            )[0]["neck_line_angle_deg"], 26.56505, places=4)
+
+        # With NO sag the two models are indistinguishable -- the chord IS the axis.
+        for follows in ("axis", "chord"):
+            straight = pushup_compute_raw(
+                [pushup_frame(hip_offset=0.0, head_follows=follows)], 30.0
+            )[0]
+            self.assertAlmostEqual(straight["neck_line_angle_deg"], 0.0, places=4)
+
+    def test_neck_line_angle_is_nan_when_the_body_axis_degenerates(self) -> None:
+        # Behaviour CHANGE from the chord reference, previously untested: with the ankles
+        # collapsed onto the shoulders there is no body axis, so the axis-referenced neck
+        # angle is NaN where the old chord version still returned a finite number. Refusing is
+        # the right call -- with no axis there is no line for the head to deviate from -- but
+        # it is a change, so it is pinned rather than left implicit.
+        frame = pushup_frame(ear_offset=0.03)
+        for ankle, shoulder in ((27, 11), (28, 12)):
+            frame["landmarks"][ankle] = dict(frame["landmarks"][shoulder])
+        raw = pushup_compute_raw([frame], 30.0)[0]
+        self.assertTrue(raw["valid"])
+        self.assertFalse(np.isfinite(raw["neck_line_angle_deg"]))
+        # The other axis-dependent metrics go with it, for the same reason.
+        self.assertFalse(np.isfinite(raw["hip_offset_ratio"]))
+        self.assertFalse(np.isfinite(raw["hand_offset_ratio"]))
+        self.assertFalse(np.isfinite(raw["body_axis_tilt_deg"]))
+        # Metrics that do not need the axis are unaffected.
+        self.assertAlmostEqual(raw["hand_width_ratio"], 1.0, places=5)
 
     def test_neck_line_angle_is_unsigned(self) -> None:
         # Documented limitation: a head LIFTED off the torso line reads the same as a head
