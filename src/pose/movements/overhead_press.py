@@ -1,14 +1,18 @@
 # Thresholds in this module are spec-derived (docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md), NOT validated against labeled OHP data (spec §8.4).
 #
-# MODULE-WIDE SILENCE RISK -- far-shoulder occlusion silences ALL FIVE OHP rules, not one:
+# MODULE-WIDE SILENCE RISK -- one occluded shoulder silences ALL FIVE OHP rules, not one:
 # `ohp_compute_raw` puts BOTH shoulders (plus both elbows, wrists and hips) in its `required`
-# tuple, so if the far shoulder is occluded in a hard sagittal view `visible_point` returns
-# None, the frame is marked `valid=False`, and every rule below masks on `frame.valid`. The
-# whole OHP detector therefore goes silent on that frame -- incomplete lockout, back lean,
-# asymmetry, elevation and forward head alike. This is the failure mode most likely to bite
-# on real side-view video, and it has not been exercised against any (the unit fixtures keep
-# both shoulders fully visible). It is a validity-gate effect, NOT a NaN-normalizer effect:
-# the frame is discarded before any metric is read.
+# tuple, so if EITHER shoulder is dropped by `visible_point` the frame is marked `valid=False`,
+# and every rule below masks on `frame.valid`. The whole OHP detector therefore goes silent on
+# that frame -- incomplete lockout, back lean, asymmetry, elevation and forward head alike.
+# This is a validity-gate effect, NOT a NaN-normalizer effect: the frame is discarded before
+# any metric is read, so it is VIEW-INDEPENDENT -- occluding either shoulder from any view
+# does it (which is exactly what `test_occluded_far_shoulder_silences_every_ohp_rule` proves,
+# on a synthetic frame, not on sagittal geometry).
+# A hard sagittal view is merely the case where it is most LIKELY to happen, because the far
+# shoulder is the one real video tends to hide. That real-world scenario has NOT been
+# exercised: every unit fixture keeps both shoulders fully visible, so the rate at which this
+# silences real side-view OHP video is unknown.
 from __future__ import annotations
 
 from typing import Sequence
