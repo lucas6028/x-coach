@@ -1178,10 +1178,10 @@ class StoreSummarizeTests(unittest.TestCase):
             "detections": [{"fault_id": "a"}, {"fault_id": "b"}],
             "pipeline_version": "rules-v3",
         }
-        self.assertEqual(store._summarize(result), ("rear", 2, "rules-v3"))
+        self.assertEqual(store._summarize(result), ("rear", 2, "rules-v3", None))
 
     def test_summarize_handles_missing(self) -> None:
-        self.assertEqual(store._summarize({}), (None, 0, None))
+        self.assertEqual(store._summarize({}), (None, 0, None, None))
 
 
 class StoreUserClientTests(unittest.TestCase):
