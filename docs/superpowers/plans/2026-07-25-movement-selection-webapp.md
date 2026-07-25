@@ -1281,7 +1281,7 @@ Supabase before deploying."
 
 - [ ] **Step 8: Tell the user about the manual migration**
 
-This migration is not applied automatically. Report to the user that `db/migrations/20260725000000_analysis_movement.sql` must be run against Supabase before deploy, and that until then the history badge falls back to `result.movement`.
+This migration is not applied automatically. Report to the user that `db/migrations/20260725000000_analysis_movement.sql` must be run against Supabase before deploy, and that until then it is not merely a degraded fallback: `store.py` writes the `movement` column unconditionally, so against an unmigrated database `POST /api/analyze` silently loses every persisted row (postgrest raises, `analyze.py`'s broad exception guard swallows it, the response is still 200 with `analysis_id: null` and only a log line survives), and `GET /api/analyses` hard-500s for every signed-in user (no exception handling around that `select`).
 
 ---
 

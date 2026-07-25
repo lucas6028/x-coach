@@ -245,10 +245,14 @@ result
   └─► CoachTray / MetricsCards                               (verdict names the movement)
 ```
 
-The library path (`services/library.py`) is untouched and keeps passing
-`DEFAULT_ANALYSIS_MOVEMENT`. It nonetheless gets `result["movement"] = "Squat"` for free from the
-shared `detect_pose_rules_from_payload`, so history badges and chat grounding work for library
-clips with no special case.
+The library path (`services/library.py`) is untouched. `load_analysis` does **not** call
+`detect_pose_rules_from_payload` — it reads a precomputed detection JSON straight off disk via
+`detection_path(video_id)` and only calls `retrieve_contexts_for_detections(movement=
+DEFAULT_ANALYSIS_MOVEMENT)` when that JSON is missing `retrievals`. So library clips carry no
+`movement` key at all (precomputed JSONs predate this field). The correct outcome — history
+badges and chat grounding still working — comes entirely from the `?? "Squat"` fallbacks on the
+consuming side (frontend `movementLabel(t, analysis.movement ?? "Squat")`, `ChatContext.movement`
+defaulting to `DEFAULT_ANALYSIS_MOVEMENT`), not from the detector attaching the field.
 
 ## 7. Error handling
 
