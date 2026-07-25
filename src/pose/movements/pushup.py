@@ -5,17 +5,29 @@
 # anything lives in a `rule_*` function, and those numbers come in TWO CATEGORIES that must
 # not be conflated:
 #
-#   FIRE THRESHOLDS (+/-0.06 hip offset, 100 deg elbow) are COPIED FROM
+#   FIRE THRESHOLDS (+/-0.06 hip offset, 100 deg elbow, 15 deg neck deviation, 1.6 hand-width
+#   ratio) are COPIED FROM
 #   docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md (Push-up section).
 #
-#   SEVERITY RAMP ENDPOINTS (0.15, 140 deg) are RULE-LEVEL CHOICES MADE HERE. The spec states
-#   no severity ramp for either push-up fault -- it has no `Severity ramp` line in its Push-up
-#   section and the strings "0.15" and "140" do not occur there. Each rule's docstring gives
-#   the reasoning for the endpoint it picked. They are ranking curves, not cited quantities.
+#   SEVERITY RAMP ENDPOINTS (0.15, 140 deg, 35 deg, 2.2) are RULE-LEVEL CHOICES MADE HERE. The
+#   spec states no severity ramp for ANY push-up fault -- its Push-up section carries no
+#   `Severity ramp` line at all, while the Squat/Lunge/Deadlift sections do (e.g. "Severity ramp
+#   0.82 -> 0.70"), so the absence is meaningful rather than a formatting quirk. Verified by
+#   FIXED-STRING grep over the section: "0.15", "140", "2.2" and "0.25" do not occur in it, and
+#   "35" occurs ONLY inside the DOI string "10.1249/01.mss.0000189317.08635.1b", never as a
+#   quantity. Each rule's docstring gives the reasoning for the endpoint it picked. They are
+#   ranking curves, not cited quantities.
 #
-# Like OHP's, NONE of these numbers -- either category -- has been validated against labeled
-# push-up video (spec §8.4). `rule_hip_sag` and `rule_shallow_depth` are the only rules
-# present so far; head drop, elbow flare and scapular winging arrive with Task 7.
+#   A THIRD CATEGORY, introduced by `rule_elbow_flare`: MEASURABILITY GATES (0.25 wrist
+#   separation). Not a fault threshold at all -- it asks whether the metric means anything in
+#   this camera geometry rather than whether the lifter did something wrong. It is rule-level,
+#   and honestly labelled as INERT in that rule's docstring.
+#
+# Like OHP's, NONE of these numbers -- any category -- has been validated against labeled
+# push-up video (spec §8.4). All five of the spec's push-up rules are now present:
+# `rule_hip_sag`, `rule_shallow_depth`, `rule_head_drop`, `rule_elbow_flare` and
+# `rule_scapular_winging` -- the last of which is PERMANENTLY SILENT by design (see its
+# docstring: MediaPipe has no scapular landmarks, so the spec rates it observability `none`).
 #
 # ---------------------------------------------------------------------------------------
 # MODULE-WIDE SILENCE RISK -- one dropped landmark silences EVERY push-up rule, not one.
@@ -165,6 +177,7 @@ PUSHUP_METRIC_KEYS: tuple[str, ...] = (
     "plank_angle_deviation_deg",
     "hand_width_ratio",
     "neck_line_angle_deg",
+    "neck_line_signed_deg",
     "body_axis_tilt_deg",
 )
 
@@ -183,6 +196,21 @@ PUSHUP_ACTIVE_PHASES = {"descent", "bottom", "ascent"}
 # than imported from overhead_press: the two modules happen to agree today, but they are
 # answering different spec lines and must be free to diverge.
 DEPTH_OBSERVABLE_VIEWS = {"side", "front_oblique"}
+
+# Views in which the spec rates the neck-line angle `medium` (its TOP tier for that fault --
+# it is never rated `high` from any view). Deliberately a SEPARATE constant from
+# DEPTH_OBSERVABLE_VIEWS despite holding the same members today: it answers a different spec
+# line ("observability: medium -- `side` / `front_oblique`; low from `front`/`rear`") and must
+# be free to diverge from it.
+NECK_OBSERVABLE_VIEWS = {"side", "front_oblique"}
+
+# Phases in which `rule_head_drop` judges the neck. NARROWER than PUSHUP_ACTIVE_PHASES, and a
+# RULE-LEVEL CALL: the spec scopes `pushup_head_drop` to no phase at all. `setup` is excluded
+# structurally (it DEFINES the per-clip baseline, so it would read ~0 by construction), and
+# `ascent` is excluded because the spec describes the fault as the chin "reach[ing] for the
+# floor ahead of the chest" -- a descent/bottom event. A head that drops only on the way back
+# up is therefore missed; that is the cost of the narrowing, stated rather than hidden.
+HEAD_DROP_PHASES = {"descent", "bottom"}
 
 # Views from which the spec rates hip sag near-`none`. See `rule_hip_sag` for why these are
 # hard-gated to silence rather than emitted at reduced confidence.
@@ -292,8 +320,10 @@ def _neck_line_angle(
     primary view for this cue.
 
     UNSIGNED (it is an angle between two vectors): a head DROPPED toward the floor and a head
-    LIFTED away from it give the same number. Task 7 baselines this per clip; recovering the
-    direction is an open item for that task, not something this module invents."""
+    LIFTED away from it give the same number. `_signed_neck_line_angle` is the directional
+    companion added for `rule_head_drop` -- same magnitude, plus the side of the axis the head
+    sits on. This unsigned form is kept because it needs no groundward reference and therefore
+    survives a rolled/inverted camera, which the signed form does not."""
     if axis is None:
         return np.nan
     ear_point = visible_point(points, ear, dims=2)
@@ -308,6 +338,68 @@ def _neck_line_angle(
         return np.nan
     cosine = float(np.clip(float(np.dot(head_vector, axis)) / denominator, -1.0, 1.0))
     return float(np.degrees(np.arccos(cosine)))
+
+
+def _signed_neck_line_angle(
+    points: np.ndarray | None,
+    ear: int,
+    shoulder: int,
+    axis: np.ndarray | None,
+    normal: np.ndarray | None,
+) -> float:
+    """DIRECTIONAL companion to `_neck_line_angle`: identical magnitude, plus the sign that says
+    WHICH SIDE of the body axis the head sits on.
+
+        POSITIVE = the ear sits GROUNDWARD of the shoulder    -> head DROPPED toward the floor
+        NEGATIVE = the ear sits skyward of the shoulder       -> head LIFTED off the line
+
+    WHY THIS EXISTS. `rule_head_drop` flags a deviation from a per-clip setup baseline, and on
+    the UNSIGNED metric that construction is not merely non-directional, it is ACTIVELY
+    INVERTED. Worked example: a lifter whose setup baseline is +5 deg (head very slightly
+    dropped) then LIFTS the head to -15 deg. Unsigned, that reads 15; deviation from the
+    unsigned baseline is 15 - 5 = +10 and grows with the lift, so a big enough head LIFT fires
+    as a head DROP. The spec's fault is directional ("the head ... drops so the neck leaves the
+    straight line"), so the direction has to be recoverable at the metric layer; it is not
+    reconstructible at the rule layer, which sees only `CoreFrame.m(key)` scalars.
+
+    HOW THE SIGN IS OBTAINED. Decompose the ear->shoulder vector in the frame formed by the
+    body axis and `_groundward_normal(axis)` -- the SAME normal `hip_offset_ratio` uses -- and
+    take `atan2` of the two components. Because the normal is a unit vector orthogonal to the
+    axis, `|signed| == unsigned` exactly, per side. (Across sides that identity can break:
+    both metrics average their two sides with `mean_finite`, so a clip whose left and right
+    readings disagree in SIGN averages toward 0 signed while the unsigned mean stays large.
+    Anatomically the two ears are close together, so this is a landmark-error regime, not a
+    posture regime -- averaging toward "no directional evidence" is the desired failure.)
+
+    INHERITS THE GROUNDWARD ASSUMPTION, AND THEREFORE THE INVERSION GUARD. The sign is only
+    meaningful while the module's idea of groundward really is groundward; a rolled or
+    180-degree-rotated clip flips it, turning a head lift into a confident head drop. That is
+    the same exposure `hip_offset_ratio` has, so it takes the same remedy: `rule_head_drop`
+    requires `hand_offset_ratio > 0.0` before it will emit. See the SIGN CONVENTION note at the
+    top of this module.
+
+    Every other property is inherited from `_neck_line_angle` unchanged -- body-axis reference
+    (not the shoulder->hip chord), the head-neutral-to-the-axis modeling assumption, per-side
+    computation so a sagittal single-ear clip still reads, and NaN whenever the axis, the
+    normal or either landmark is unavailable."""
+    if axis is None or normal is None:
+        return np.nan
+    ear_point = visible_point(points, ear, dims=2)
+    shoulder_point = visible_point(points, shoulder, dims=2)
+    if ear_point is None or shoulder_point is None:
+        return np.nan
+    head_vector = np.asarray(shoulder_point, dtype=np.float64) - np.asarray(
+        ear_point, dtype=np.float64
+    )
+    axis_length = float(np.linalg.norm(axis))
+    denominator = float(np.linalg.norm(head_vector)) * axis_length
+    if not np.isfinite(denominator) or denominator <= 1e-8:
+        return np.nan
+    along = float(np.dot(head_vector, axis)) / axis_length
+    # `normal` is already a unit vector, so this IS the perpendicular component. Negated
+    # because `head_vector` runs ear -> shoulder: a groundward EAR makes it point skyward.
+    across = float(np.dot(head_vector, normal))
+    return float(np.degrees(np.arctan2(-across, along)))
 
 
 def pushup_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
@@ -363,7 +455,11 @@ def pushup_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
         body_axis_tilt_deg = np.nan
         # `axis` stays None unless it is genuinely measurable, so every consumer below --
         # including the neck angle, which references it -- inherits the NaN path for free.
+        # `normal` is hoisted out of the block below for the same reason: the SIGNED neck angle
+        # needs the very same groundward normal `hip_offset_ratio` uses, and must go NaN
+        # wherever that normal is unavailable rather than fall back to some other reference.
         axis: np.ndarray | None = None
+        normal: np.ndarray | None = None
         axis_length = np.nan
         if shoulder_mid is not None and ankle_mid is not None:
             candidate = np.asarray(ankle_mid, dtype=np.float64) - np.asarray(
@@ -427,6 +523,12 @@ def pushup_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
                 _neck_line_angle(points, RIGHT_EAR, RIGHT_SHOULDER, axis),
             ]
         )
+        neck_line_signed_deg = mean_finite(
+            [
+                _signed_neck_line_angle(points, LEFT_EAR, LEFT_SHOULDER, axis, normal),
+                _signed_neck_line_angle(points, RIGHT_EAR, RIGHT_SHOULDER, axis, normal),
+            ]
+        )
 
         raw.append(
             {
@@ -442,6 +544,7 @@ def pushup_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
                 "plank_angle_deviation_deg": plank_angle_deviation_deg,
                 "hand_width_ratio": hand_width_ratio,
                 "neck_line_angle_deg": neck_line_angle_deg,
+                "neck_line_signed_deg": neck_line_signed_deg,
                 "body_axis_tilt_deg": body_axis_tilt_deg,
             }
         )
@@ -744,3 +847,381 @@ def rule_shallow_depth(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRule
             )
         )
     return detections
+
+
+def rule_head_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag the head leaving the plank line: during the descent/bottom the neck deviates
+    GROUNDWARD from the lifter's OWN setup posture by more than 15 deg.
+
+    THRESHOLD PROVENANCE -- TWO DIFFERENT CATEGORIES, DO NOT CONFLATE THEM.
+
+      FIRE THRESHOLD 15 deg: FROM THE SPEC. `pushup_head_drop` flags the head deviating from
+      the torso line "by > ~15 deg". That is the spec's number, used unmodified.
+
+      SEVERITY RAMP 15 -> 35 deg: A RULE-LEVEL CHOICE MADE HERE. The spec states NO severity
+      ramp for this fault -- its Push-up section has no `Severity ramp` line, and a FIXED-STRING
+      grep finds "35" in that section only inside the DOI "10.1249/01.mss.0000189317.08635.1b",
+      never as a quantity. The module has no ramp convention to appeal to either (hip sag runs
+      2.5x its fire threshold, shallow depth 1.4x), so the multiple is genuinely unfixed. 35 deg
+      was picked because it is a bit over 2x the flag threshold -- a head more than a third of a
+      right angle off the line the lifter themselves set is plainly gross rather than marginal
+      -- and, stated plainly rather than dressed up, because it puts the ramp midpoint at
+      exactly 25.0 deg so one exact-severity test pins BOTH endpoints. Neither reason is a
+      measurement. Treat it as a display/ranking curve, not a cited quantity.
+
+    SPEC DEVIATION 1 -- PER-CLIP BASELINE INSTEAD OF AN ABSOLUTE ANGLE. The spec's heuristic
+    reads as an absolute criterion ("flag when the head deviates below the torso line ... by
+    > ~15 deg") but supplies no absolute reference for what 0 deg is. It cannot: the ear-to-
+    shoulder vector's resting angle varies with neck length, ear position, hairline and camera
+    height, so an absolute cut would fault some anatomies at rest and excuse others at extremes.
+    This rule therefore measures the deviation from the MEAN neck angle over the clip's own
+    `setup` frames. That is not an invention of this task -- it mirrors the spec's OWN
+    construction for the squat's heel rise ("Establish a `setup` baseline (mean over setup
+    frames)") and the implementation of it already in this repo, `rule_heel_rise` in
+    src/pose/movements/squat.py, right down to using the mean rather than the median.
+
+      HONEST COST, which is the direct consequence of baselining: the rule measures CHANGE, not
+      POSTURE. A lifter who sets up with their head already dropped and simply holds it there
+      reads a deviation of ~0 and is never flagged. The spec's absolute phrasing would have
+      caught that lifter; the price of catching them is faulting long-necked lifters at rest,
+      and this rule chooses the false-negative side. It is pinned by
+      `test_a_head_drop_held_from_setup_is_invisible`, so it stays a known limitation rather
+      than a surprise.
+
+      SECOND HONEST COST, inherited from the framework: the baseline reads the SMOOTHED metric.
+      `run_detector` runs a centred median (window 5) over every metric key before the rules
+      see it, so near the clip's start the setup-phase values are blended with the first
+      descent frames -- the baseline is slightly contaminated by the very motion it is meant to
+      be independent of. `rule_heel_rise` has exactly this property and shipped with it; it is
+      documented here rather than fixed, because fixing it means rules reading unsmoothed
+      metrics, which is a framework change, not a rule change.
+
+      If the clip has NO usable setup frames (none valid, or the neck angle NaN throughout the
+      setup window) the baseline is NaN and the rule emits nothing. Refusing matches how the
+      whole module handles unmeasurable input; a fallback baseline of 0 would silently reinstate
+      the absolute criterion this deviation exists to avoid.
+
+    SPEC DEVIATION 2 -- A SIGNED METRIC WAS ADDED TO SUPPORT THIS RULE. Task 5's
+    `neck_line_angle_deg` is UNSIGNED, and a baseline on an unsigned angle is not merely
+    non-directional, it is ACTIVELY INVERTED: with a baseline of +5 deg, a head LIFTED to
+    -15 deg reads unsigned 15 and deviation +10, i.e. a head lift reported as a head drop, more
+    severely the more the lifter lifts. `neck_line_signed_deg` (see `_signed_neck_line_angle`)
+    was therefore added to the metric layer, positive = groundward = dropped. The direction was
+    not reconstructible at the rule layer: rules see only `CoreFrame.m(key)` scalars, and the
+    groundward normal that carries the sign lives inside `pushup_compute_raw`.
+
+    INVERSION GUARD, SHARED WITH `rule_hip_sag`. The sign comes from the same groundward normal
+    `hip_offset_ratio` uses, so it has the same exposure: a rolled or 180-degree-rotated clip
+    inverts it and would report every head LIFT as a confident head DROP. The mask therefore
+    carries the identical `hand_offset_ratio > 0.0` guard -- the hands are planted on the floor,
+    so that ratio is positive in any genuine push-up -- and stays silent otherwise, NaN guard
+    included (`nan > 0.0` is False). See the SIGN CONVENTION note at the top of this module.
+
+    THE MODELING ASSUMPTION THIS RULE INHERITS, AND WHICH FAULT IT CONTAMINATES. The neck angle
+    is referenced to the BODY AXIS, which assumes the head stays neutral to that axis rather
+    than rotating with the shoulder->hip torso segment as the hips move. If a given lifter's
+    head in fact rides the torso segment, a plank fault with no head fault at all produces a
+    reading. MEASURED on the `head_follows="chord"` fixture, with the SIGN this rule reads:
+
+        hip_offset +0.06 (sag)  -> signed neck -11.31      -0.06 (pike) -> +11.31
+        hip_offset +0.09 (sag)  -> signed neck -16.70      -0.09 (pike) -> +16.70
+        hip_offset +0.15 (sag)  -> signed neck -26.57      -0.15 (pike) -> +26.57
+
+    So the contaminated direction is the OPPOSITE of the intuitive one, and the sign is what
+    reveals it: under the chord model a SAG rotates the head skyward relative to the axis, which
+    this drop-only rule reads as a LIFT and does not fire on -- it instead MASKS a genuine head
+    drop occurring at the same time (a false negative). The false POSITIVE belongs to a PIKE,
+    which needs to exceed about 0.09 of body length to forge the 15 deg threshold on its own.
+    Task 5's unsigned metric could not tell those two cases apart at all, so going signed
+    removed one contamination path and made the surviving one legible; it did not remove both.
+    The per-clip baseline does not cancel either, because the plank fault grows through the
+    descent while the baseline is fixed at setup. Pinned by
+    `test_a_chord_following_head_contaminates_the_pike_direction`, and stated as a limitation of
+    the metric rather than corrected -- correcting it needs a constant nobody has measured.
+
+    VIEW HANDLING follows the spec exactly, including its ceiling: `medium` on
+    `side`/`front_oblique` -- the spec never rates this fault `high` from ANY view -- and `low`
+    (with the module's standard 0.65 confidence discount) from head-on views, which the spec
+    rates `low` rather than `none`. Note `run_detector` sorts `low`-observability detections
+    behind everything else, so a head-on head-drop lands at the bottom of the list.
+
+      NO HARD GATE, unlike `rule_hip_sag`: a head-on view foreshortens the neck angle toward
+      zero, which degrades toward the un-faulted direction, so it is a weak signal rather than a
+      false-positive amplifier.
+
+      NO `SIDE_VIEW_CONF_THRESHOLD` CONFIDENCE FLOOR either, and that omission is deliberate
+      rather than an oversight. `rule_hip_sag` carries the floor because a mislabelled `side`
+      could be a head-on view in which its normalized offset INFLATES. Here the directional
+      hazard is camera ROLL, which the `hand_offset_ratio` guard already covers and which no
+      view label can see; view misclassification only moves the magnitude, and `side` and
+      `front_oblique` are treated identically anyway, so a floor would change nothing but a
+      cosmetic confidence number on a weakly-labelled `side`. An unjustified knob is worse than
+      none.
+
+    Neither threshold category has been validated against labeled push-up video (spec
+    section 8.4)."""
+    observable_neck = ctx.view_type in NECK_OBSERVABLE_VIEWS
+
+    setup_neck = [
+        frame.m("neck_line_signed_deg")
+        for frame in core
+        if frame.valid
+        and frame.phase == "setup"
+        and np.isfinite(frame.m("neck_line_signed_deg"))
+    ]
+    baseline = float(np.mean(setup_neck)) if setup_neck else np.nan
+
+    head_mask = [
+        frame.valid
+        and frame.phase in HEAD_DROP_PHASES
+        and frame.m("hand_offset_ratio") > 0.0
+        and np.isfinite(baseline)
+        and np.isfinite(frame.m("neck_line_signed_deg"))
+        and frame.m("neck_line_signed_deg") - baseline > 15.0
+        for frame in core
+    ]
+
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(head_mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        # Every frame in the segment passed a mask that required a finite baseline AND a finite
+        # neck angle, so no NaN can reach here.
+        values = [frame.m("neck_line_signed_deg") - baseline for frame in segment]
+        max_deviation = float(np.nanmax(values))
+        severity = severity_from_range(max_deviation, 15.0, 35.0, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="pushup_head_drop",
+                fault_name="Forward head / neck drop",
+                # Verified to resolve: graph_retrieval.resolve_nodes(..., movement="Push-up")
+                # returns "Forward Head Posture" for this string. NOTE that is the SHARED node
+                # (movement="shared"), not a `Push-up:`-scoped one -- sports_kg_v3 has no
+                # push-up-scoped head or neck node at all. Its one edge comes from
+                # "Overhead Press:Subacromial Impingement Syndrome", which is precisely the
+                # mechanism the spec's citation invokes. "Head Drop" and "Neck Drop" resolve to
+                # NOTHING, so neither is usable.
+                kg_query="Forward Head Posture",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=values,
+                severity=severity,
+                confidence=severity * (1.0 if observable_neck else _OFF_VIEW_CONFIDENCE),
+                observability="medium" if observable_neck else "low",
+                evidence={
+                    "max_neck_deviation_deg": round(max_deviation, 2),
+                    "setup_baseline_deg": round(baseline, 2),
+                    "threshold": 15.0,
+                    "primary_label": "neck deviation from the setup baseline",
+                    "primary_value": round(max_deviation, 2),
+                    "primary_threshold": 15.0,
+                },
+                citation="Lee S et al. J Phys Ther Sci (2013) PMC3820220 "
+                         "(form/neutral-alignment standard); mechanism corroborated by "
+                         "Al Hammadi MI et al. Cureus (2025) PMC12514857.",
+                citation_support="PMC3820220's protocol required that \"the head, spine, and "
+                                 "pelvis were positioned in a straight line, in a neutral "
+                                 "state\" with \"the cervical vertebrae in a neutral "
+                                 "position,\" defining neutral cervical alignment as correct "
+                                 "form; PMC12514857 lists \"forward head posture\" among the "
+                                 "postural factors that \"interfere with scapular movement ... "
+                                 "leading to a reduction in subacromial space,\" supplying the "
+                                 "injury rationale. Direct push-up-specific cervical-injury "
+                                 "evidence is thin, so this rule leans on the alignment "
+                                 "standard plus the general forward-posture->impingement "
+                                 "mechanism.",
+            )
+        )
+    return detections
+
+
+def rule_elbow_flare(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag hands planted well outside the shoulders: wrist-to-wrist distance exceeds 1.6x
+    shoulder width.
+
+    THRESHOLD PROVENANCE -- THREE DIFFERENT CATEGORIES HERE, NOT TWO.
+
+      FIRE THRESHOLD 1.6: FROM THE SPEC. `pushup_elbow_flare` defines hand-width ratio =
+      wrist-to-wrist (15<->16) / shoulder width (11<->12) and says "flag when ratio > ~1.6".
+
+      SEVERITY RAMP 1.6 -> 2.2: A RULE-LEVEL CHOICE MADE HERE. The spec states no severity ramp
+      for this fault, and a FIXED-STRING grep confirms "2.2" does not occur anywhere in its
+      Push-up section. (It DOES occur in tests/test_pushup.py as a fixture value predating this
+      rule -- that is not provenance and must not be cited as such.) 2.2 is chosen as the point
+      where the hands are more than twice shoulder width apart, i.e. the upper arm is closer to
+      straight out to the side than to tracking back; nothing in the literature fixes it.
+
+      MEASURABILITY GATE 0.25 (a third category, and the one most easily misread as a fault
+      threshold): "0.25" likewise does not occur in the spec's Push-up section. It does not ask
+      whether the lifter did something wrong -- it asks whether this camera geometry can answer
+      the question at all. See the next block, INCLUDING the part where it does not work.
+
+    WHY THE GATE IS ON MEASURABILITY RATHER THAN ON THE SPEC'S VIEW LABELS. The spec asks for a
+    `front`/`rear` view down the body's long axis. Two findings from Task 4
+    (src/pose/view_estimation.py's header) make gating on those labels unusable:
+    `signed_orientation` is an image-space left/right ordering whose front/rear meaning is
+    validated only for UPRIGHT subjects, so for a horizontal body the `front`/`rear`/`*_oblique`
+    labels carry no validated meaning ("Do not gate a horizontal-movement rule on them"); and
+    the production path calls `estimate_view_for_pose(allow_front=False)`, so `front` is never
+    emitted downstream at all. A positive gate on those labels would therefore be either
+    meaningless or permanently false. The measurable condition is used instead: the wrists must
+    be genuinely separated in the image, `distance(15, 16) > 0.25 * shoulder_width`, which --
+    since `hand_width_ratio` IS that quotient -- is written directly as
+    `hand_width_ratio > 0.25`.
+
+    THE GATE IS ARITHMETICALLY INERT TODAY, AND SAYING SO IS THE POINT. `hand_width_ratio > 1.6`
+    already implies `> 0.25`, so the term can never change an outcome while the fire threshold
+    sits at 1.6, and no fixture can distinguish it from any other value below 1.6. It is kept as
+    an explicit mask term so the measurability CONDITION stays legible, and so it becomes live
+    rather than forgotten if anyone ever lowers the fire threshold. It is listed as a knowingly
+    surviving mutant rather than pretended to be tested.
+
+    KNOWN GAP THE GATE DOES NOT CLOSE -- the ratio's real failure mode is not the one the gate
+    imagines. From a true sagittal view the wrists do overlap, but SO DO THE SHOULDERS: numerator
+    and denominator collapse together, the ratio becomes noise/noise, and it can land anywhere,
+    including far above 1.6. `_DEGENERATE_LENGTH` guards division by zero, not this. Closing it
+    needs the wrist span normalized by something that does NOT collapse sagittally (the
+    shoulder-to-ankle length would), which is not emitted today and is deliberately NOT invented
+    here -- a fabricated anthropometric constant in a FIRE gate is worse than a documented gap,
+    because it decides whether a verdict exists at all. The forged number is pinned by
+    `test_sagittal_collapse_can_forge_a_wide_ratio`, in the same idiom as
+    `test_visible_but_misplaced_landmark_is_trusted`.
+
+    WHAT DOES NARROW IT -- A NEGATIVE VIEW GATE, WHICH IS A DIFFERENT CLAIM FROM THE ONE TASK 4
+    FORBIDS. Task 4 discredits the front/rear/oblique DISTINCTION for a horizontal body; it does
+    not discredit the `side` verdict, which rests on `body_axis_extent` and which Task 3
+    explicitly validated FOR horizontal subjects. So while "is this a front view?" is
+    unanswerable, "is the camera confidently perpendicular to the body's long axis?" is
+    answerable -- and if it is, the wrists overlap and every reading here is the noise/noise case
+    above. This rule therefore stays SILENT on a confident `side` label, using the existing
+    shared `SIDE_VIEW_CONF_THRESHOLD` (0.20) and no new number. It is the exact mirror of
+    `rule_hip_sag`, which hard-gates `front`/`rear` because ITS metric inflates there; this one
+    inflates on `side`. The error direction is safe: a mislabelled clip is silenced, not falsely
+    fired, which is this module's stated preference.
+
+      THE GATE IS PARTIAL, and the docstring must not imply otherwise. Task 4's limit 3 records
+      that a genuine sagittal clip often FAILS to earn the `side` label -- one occluded far-side
+      shoulder silently reverts `body_axis_extent` to the vertical fallback -- so a real
+      sagittal clip labelled `unknown` still reaches this rule carrying a noise/noise ratio.
+      The gate narrows the hazard; the known-gap test above is what stands for the remainder.
+
+      IN PRODUCTION this makes the rule near-dead, and that is the honest outcome rather than a
+      defect: the spec calls `side` the primary useful push-up view and rates hand width
+      `low`/`none` from it, so a rule that needs a view the pipeline cannot confirm SHOULD be
+      quiet. It is registered (Task 8) so the fault is present and cited when a clip does arrive
+      from down the body's long axis.
+
+    PHASE SCOPE: `PUSHUP_ACTIVE_PHASES`, the same rule-level call `rule_hip_sag` makes for the
+    same reason -- during `setup` the lifter is still placing their hands, so a wide reading
+    there is not yet a fault. The spec scopes this fault to no phase.
+
+    OBSERVABILITY is a flat `medium` with no view discount. `medium` is the spec's CEILING for
+    this fault ("observability: medium -- `front`/`rear`"), and there is no honest basis for
+    tiering below it: the only label that would distinguish the tiers is the front/rear one Task
+    4 discredited, so discounting on it would be theatre. The one label that does carry
+    information, `side`, is handled by silence above rather than by a discount.
+
+    THE SPEC'S CORROBORATING SIGNAL IS NOT IMPLEMENTED: "If the upper arm is visible,
+    corroborate with the trunk-to-upper-arm angle ... exceeding ~65 deg". It is offered as
+    optional corroboration, not as a gate, and the metric layer emits no trunk-to-upper-arm
+    angle; adding one is out of this task's scope. Stated so its absence is a recorded choice.
+
+    Neither threshold category has been validated against labeled push-up video (spec
+    section 8.4)."""
+    # NEGATIVE view gate -- see the docstring. "Is this confidently a side view?" is answerable
+    # for a horizontal body (Task 3/4); "is this a front view?" is not.
+    if ctx.view_type == "side" and ctx.view_confidence >= SIDE_VIEW_CONF_THRESHOLD:
+        return []
+
+    flare_mask = [
+        frame.valid
+        and frame.phase in PUSHUP_ACTIVE_PHASES
+        and np.isfinite(frame.m("hand_width_ratio"))
+        # MEASURABILITY, not fault: the wrists must actually be separated in the image.
+        # Arithmetically implied by the 1.6 test below -- kept explicit, see the docstring.
+        and frame.m("hand_width_ratio") > 0.25
+        and frame.m("hand_width_ratio") > 1.6
+        for frame in core
+    ]
+
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(flare_mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        values = [frame.m("hand_width_ratio") for frame in segment]
+        widest = float(np.nanmax(values))
+        severity = severity_from_range(widest, 1.6, 2.2, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="pushup_elbow_flare",
+                fault_name="Flared elbows / excessive hand width",
+                # Verified to resolve: graph_retrieval.resolve_nodes(..., movement="Push-up")
+                # returns "Push-up:Elbow Valgus Torque" for this string, which carries an edge
+                # IN from "Hand Position" and OUT to "Elbow Injury" -- exactly the mechanism the
+                # spec's citation quantifies. The fault's own wording resolves badly: "Elbow
+                # Flare" and "Flared Elbows" resolve to NOTHING, and "Hand Positioning" resolves
+                # to "Push-up:Hand Positioning", a `Phase`-labelled node with no outgoing edges
+                # for retrieval to walk.
+                kg_query="Elbow Valgus Torque",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=values,
+                severity=severity,
+                confidence=severity,
+                observability="medium",
+                evidence={
+                    "max_hand_width_ratio": round(widest, 4),
+                    "threshold": 1.6,
+                    "primary_label": "hand width / shoulder width",
+                    "primary_value": round(widest, 4),
+                    "primary_threshold": 1.6,
+                },
+                citation="Donkers MJ, An KN, Chao EY, Morrey BF. J Biomech (1993). "
+                         "DOI 10.1016/0021-9290(93)90026-b.",
+                citation_support="Recording elbow forces in six hand positions, \"peak forces "
+                                 "exerted on the elbow joint along the forearm axis averaged "
+                                 "45% of the body weight for the 'normal' hand position and "
+                                 "were significantly decreased if hands were positioned either "
+                                 "'apart' or 'superior',\" while \"the maximum valgus torque at "
+                                 "the elbow opposed by the medial ligamentous structure ... was "
+                                 "significantly increased if the hand was positioned "
+                                 "superiorly\" (and rose 42% one-handed). Hand position "
+                                 "therefore strongly modulates elbow joint loading, justifying "
+                                 "a rule that flags hand placement deviating from a "
+                                 "shoulder-width baseline.",
+            )
+        )
+    return detections
+
+
+def rule_scapular_winging(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Registered but PERMANENTLY SILENT -- always returns [].
+
+    Scapular winging is a real, well-cited push-up fault (serratus anterior weakness lets the
+    scapula wing and over-internally-rotate, reducing subacromial space), but MediaPipe's 33
+    landmarks contain NO scapular border points -- no medial border, no inferior angle -- so it
+    cannot be measured from any view. The spec rates it observability `low`/`none`, calls the
+    one indirect proxy it can think of (gross upper-back rounding from a `rear` view) "not
+    trustworthy", and says in as many words: "Recommend NOT emitting a confident verdict".
+
+    IT IS REGISTERED RATHER THAN OMITTED so the spec and the code stay in 1:1 correspondence.
+    Anyone auditing "are all five push-up rules present?" finds it here, with its citation and
+    this explanation, instead of finding a gap and closing it by inventing an unvalidated proxy.
+    Silence is the verdict, and it is a cited one.
+
+    Note this is the ONE push-up fault for which the spec authorises silence. `rule_elbow_flare`
+    is also close to silent in production, but for a different and weaker reason (no view the
+    pipeline can confirm), so it is gated rather than stubbed -- do not merge the two patterns.
+
+    The signature takes `core`/`ctx` and ignores them so the function satisfies `RuleFn` and can
+    sit in a `MovementDetector.rules` tuple unchanged if the landmark model ever gains scapular
+    points.
+
+    Citation: Lee S, Lee D, Park J. J Phys Ther Sci (2013) PMC3820220; corroborated by
+    Abdollahi S et al. J Orthop Surg Res (2025) PMC12366113.
+
+    Citation support: PMC3820220 states "Weakening of the serratus anterior muscle leads to
+    excessive activation of the upper trapezius ... reducing the dynamic stability of the
+    scapula," which drives "a clash between the subacromion and the head of the humerus";
+    PMC12366113 similarly notes fatigue of the serratus anterior yields "increased internal
+    rotation and decreased posterior tilt of the scapula." The fault is biomechanically real and
+    important, but honestly not monocular-observable, hence observability `none`."""
+    return []
