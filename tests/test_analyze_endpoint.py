@@ -32,9 +32,10 @@ def _upload(filename: str = "clip.mp4", data: bytes = b"fake-video-bytes") -> Up
     return UploadFile(file=io.BytesIO(data), filename=filename)
 
 
-# These tests invoke ``analyze`` directly (not via FastAPI), so the ``user`` dependency is not
-# injected — pass ``user=None`` explicitly to drive the anonymous "demo" path (no persistence),
-# which is what these P0-concurrency / contract tests are asserting.
+# These tests invoke ``analyze`` directly (not via FastAPI), so neither the ``user`` dependency
+# nor the ``movement`` Form default is resolved by FastAPI's DI -- pass ``user=None`` to drive
+# the anonymous "demo" path (no persistence), and ``movement="Squat"`` explicitly since an
+# unresolved ``Form(...)`` sentinel would otherwise reach ``_validated_movement`` verbatim.
 
 
 class AnalyzeEndpointTests(unittest.TestCase):
@@ -58,13 +59,19 @@ class AnalyzeEndpointTests(unittest.TestCase):
     def test_rejects_unsupported_suffix(self) -> None:
         analysis_service.analyze_video_file = lambda *a, **k: {}
         with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(analyze_router.analyze(_upload("notes.txt"), user=None))
+            asyncio.run(
+                analyze_router.analyze(_upload("notes.txt"), movement="Squat", user=None)
+            )
         self.assertEqual(ctx.exception.status_code, 400)
 
     def test_rejects_empty_file(self) -> None:
         analysis_service.analyze_video_file = lambda *a, **k: {}
         with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(analyze_router.analyze(_upload("clip.mp4", data=b""), user=None))
+            asyncio.run(
+                analyze_router.analyze(
+                    _upload("clip.mp4", data=b""), movement="Squat", user=None
+                )
+            )
         self.assertEqual(ctx.exception.status_code, 400)
 
     def test_runtime_error_maps_to_422(self) -> None:
@@ -73,16 +80,16 @@ class AnalyzeEndpointTests(unittest.TestCase):
 
         analysis_service.analyze_video_file = boom
         with self.assertRaises(HTTPException) as ctx:
-            asyncio.run(analyze_router.analyze(_upload(), user=None))
+            asyncio.run(analyze_router.analyze(_upload(), movement="Squat", user=None))
         self.assertEqual(ctx.exception.status_code, 422)
 
     def test_returns_analysis_payload_unchanged(self) -> None:
-        analysis_service.analyze_video_file = lambda path, *, video_id=None: {
+        analysis_service.analyze_video_file = lambda path, *, video_id=None, movement=None: {
             "video_id": video_id,
             "source": "upload",
             "detections": [],
         }
-        result = asyncio.run(analyze_router.analyze(_upload(), user=None))
+        result = asyncio.run(analyze_router.analyze(_upload(), movement="Squat", user=None))
         self.assertEqual(result["video_id"], "upload_test")
         self.assertEqual(result["source"], "upload")
 
@@ -92,12 +99,12 @@ class AnalyzeEndpointTests(unittest.TestCase):
         """The blocking pipeline must execute in a worker thread, not the loop thread."""
         seen: dict[str, threading.Thread] = {}
 
-        def record_thread(path, *, video_id=None):
+        def record_thread(path, *, video_id=None, movement=None):
             seen["thread"] = threading.current_thread()
             return {"video_id": video_id, "source": "upload"}
 
         analysis_service.analyze_video_file = record_thread
-        asyncio.run(analyze_router.analyze(_upload(), user=None))
+        asyncio.run(analyze_router.analyze(_upload(), movement="Squat", user=None))
         self.assertIsNot(seen["thread"], threading.main_thread())
 
     def test_concurrent_analyses_are_bounded(self) -> None:
@@ -107,7 +114,7 @@ class AnalyzeEndpointTests(unittest.TestCase):
         release = threading.Event()
         state = {"active": 0, "peak": 0}
 
-        def blocking(path, *, video_id=None):
+        def blocking(path, *, video_id=None, movement=None):
             with lock:
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])
@@ -123,7 +130,11 @@ class AnalyzeEndpointTests(unittest.TestCase):
             # Bind a fresh semaphore (sized to `limit`) to this event loop.
             analyze_router._ANALYSIS_SEMAPHORE = asyncio.Semaphore(limit)
             tasks = [
-                asyncio.create_task(analyze_router.analyze(_upload(f"c{i}.mp4"), user=None))
+                asyncio.create_task(
+                    analyze_router.analyze(
+                        _upload(f"c{i}.mp4"), movement="Squat", user=None
+                    )
+                )
                 for i in range(limit + 3)
             ]
             loop = asyncio.get_running_loop()

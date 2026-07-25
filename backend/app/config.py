@@ -24,8 +24,9 @@ LABELS_DIR = LABELED_DIR / "Labels"
 KG_GRAPH_FILE = DATA_DIR / "kg" / "sports_kg_v3.graphml"
 RAG_DB_DIR = DATA_DIR / "rag" / "vector_db"
 
-# Transitional default for the analyze/library retrieval scope: the pose rule detector is
-# squat-only today, so retrieval seeds are scoped to Squat until per-movement detectors exist.
+# The FALLBACK movement, not a pin: it is what an omitted `movement` form field and the
+# pre-processed demo library (services/library.py) resolve to. Live analysis is chosen per
+# request from the detector registry -- see GET /api/movements.
 DEFAULT_ANALYSIS_MOVEMENT = "Squat"
 
 # Runtime scratch space for uploaded videos and their derived pose JSON (gitignored).

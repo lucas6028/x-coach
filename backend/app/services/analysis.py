@@ -63,7 +63,9 @@ def _strip_frame_metrics(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def analyze_video_file(source_path: Path, *, video_id: str | None = None) -> dict[str, Any]:
+def analyze_video_file(
+    source_path: Path, *, video_id: str | None = None, movement: str | None = None
+) -> dict[str, Any]:
     """Run the full pipeline on an arbitrary video file (the live-upload flow).
 
     Extracts pose to a runtime JSON path, runs rule detection with retrieval enrichment, and
@@ -88,7 +90,7 @@ def analyze_video_file(source_path: Path, *, video_id: str | None = None) -> dic
         include_retrieval=True,
         graph_file=config.KG_GRAPH_FILE,
         rag_db_dir=config.RAG_DB_DIR,
-        movement=config.DEFAULT_ANALYSIS_MOVEMENT,
+        movement=movement or config.DEFAULT_ANALYSIS_MOVEMENT,
     )
     result = _strip_frame_metrics(result)
     result["pose"] = build_pose_block(pose_json_path)

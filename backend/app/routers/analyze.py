@@ -6,7 +6,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 
 from backend.app import config, settings
@@ -23,12 +23,32 @@ router = APIRouter(prefix="/api", tags=["analyze"])
 _ANALYSIS_SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_ANALYSES)
 
 
+def _validated_movement(movement: str) -> str:
+    """Resolve a requested movement to its canonical name, or 400.
+
+    Rejecting HERE -- before save_upload and before pose extraction -- means a bad request
+    costs no compute. The registry lookup is case-insensitive (get_detector lowercases its
+    key), so the canonical spelling is what comes back.
+    """
+    from src.pose.movements import registry
+
+    try:
+        return registry.get_detector(movement).name
+    except KeyError:
+        known = ", ".join(d.name for d in registry.list_detectors())
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported movement '{movement}'. Analyzable movements: {known}.",
+        ) from None
+
+
 @router.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
+    movement: str = Form(config.DEFAULT_ANALYSIS_MOVEMENT),
     user: CurrentUser | None = Depends(get_optional_user),
 ) -> dict:
-    """Accept a squat video, extract pose, detect faults, and return the full analysis.
+    """Accept a video of a supported movement, extract pose, detect faults, and return the analysis.
 
     The pose pipeline is synchronous and CPU-bound, so the disk write and the analysis run in a
     worker thread via ``run_in_threadpool`` — this keeps the event loop responsive instead of
@@ -51,6 +71,8 @@ async def analyze(
     if suffix not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'.")
 
+    canonical_movement = await run_in_threadpool(_validated_movement, movement)
+
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
@@ -60,7 +82,10 @@ async def analyze(
     try:
         async with _ANALYSIS_SEMAPHORE:
             result = await run_in_threadpool(
-                analysis.analyze_video_file, saved_path, video_id=video_id
+                analysis.analyze_video_file,
+                saved_path,
+                video_id=video_id,
+                movement=canonical_movement,
             )
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
