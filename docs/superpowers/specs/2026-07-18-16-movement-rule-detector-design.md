@@ -1374,3 +1374,23 @@ These are stated rather than papered over, per the spec's honesty requirement:
 squat migration + Overhead Press) on branch `feat/movement-rule-detector-spec`. **OHP thresholds
 are spec-derived and unvalidated** — no labeled OHP data yet (§8.4). Remaining 14 movements follow
 as per-movement plans reusing this framework.
+
+**Status (2026-07-25):** All **5 of 5** OHP rules are now implemented in
+`src/pose/movements/overhead_press.py` (`ohp_incomplete_lockout`, `ohp_lumbar_hyperextension`,
+`ohp_asymmetric_press`, `ohp_insufficient_elevation`, `ohp_forward_head_barpath`). Two deviations
+from the detection heuristics written above, both deliberate and documented in-code:
+
+- `ohp_insufficient_elevation` — the "~0.5 head-heights" wording above is **not implementable**:
+  MediaPipe's 33 landmarks contain no head-height measure (nose, eyes, ears and mouth all lie
+  *within* the face, so no pair of them spans the head). The implementation **substitutes** a
+  shoulder-width-normalized nose-clearance criterion (fires when
+  `(wrist_mean_y − nose_y) / shoulder_width > −0.15`). This is a **substitution, not a unit
+  conversion** — no head-height-to-biacromial-width anthropometric constant was assumed.
+- `ohp_forward_head_barpath` — implemented as a **hard view gate** rather than the observability
+  downgrade implied by "medium–high `side`; low from `front`". Both cues are pure horizontal
+  offsets whose direction is unresolvable without knowing the subject's facing, so the rule
+  returns **no detections at all** outside `{side, front_oblique}` instead of low-confidence ones;
+  a wrong direction claim is worse than silence. Its shoulder-width normalizer is also weakly
+  conditioned in exactly the sagittal views it is gated to.
+
+Both new thresholds remain unvalidated, like the other three (§8.4).

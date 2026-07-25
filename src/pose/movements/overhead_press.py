@@ -22,6 +22,7 @@ LEFT_WRIST = 15
 RIGHT_WRIST = 16
 LEFT_EAR = 7
 RIGHT_EAR = 8
+NOSE = 0
 
 # Same generic "lower body" landmark set used across movements (src.pose.pose_rule_detector's
 # LOWER_BODY_LANDMARKS) for the framework-level lower_body_visibility quality field; OHP's own
@@ -48,12 +49,24 @@ OHP_METRIC_KEYS: tuple[str, ...] = (
     "elbow_height_asymmetry",
     "wrist_height_asymmetry",
     "shoulder_ear_gap",
+    "wrist_above_nose",
+    "ear_forward_offset",
+    "wrist_forward_offset",
 )
+
+# Views in which a sagittal-plane (anterior/posterior) offset is actually resolvable.
+# Same set `rule_excessive_back_lean` uses for its own sagittal cue.
+SAGITTAL_VIEWS = {"side", "front_oblique"}
 
 
 def _y(points: np.ndarray | None, index: int) -> float:
     point = visible_point(points, index, dims=2)
     return float(point[1]) if point is not None else np.nan
+
+
+def _x(points: np.ndarray | None, index: int) -> float:
+    point = visible_point(points, index, dims=2)
+    return float(point[0]) if point is not None else np.nan
 
 
 def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
@@ -98,11 +111,15 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
 
         shoulder_mid = midpoint(points, LEFT_SHOULDER, RIGHT_SHOULDER, dims=2)
         hip_mid = midpoint(points, LEFT_HIP, RIGHT_HIP, dims=2)
-        # Facing assumption: this sign convention treats the subject's anterior direction
-        # as +x (shoulders drifting toward +x relative to the hips reads as a backward
-        # lean). A subject facing the opposite way inverts the sign of every reading below.
-        # This is a known monocular limitation -- neither the sign nor the back-lean
-        # threshold (see rule_excessive_back_lean) has been validated on real data.
+        # Facing assumption (SINGLE convention for the whole module): the subject's
+        # POSTERIOR direction is +x, i.e. anterior is -x. That is what this formula
+        # already encodes -- shoulders drifting toward +x relative to the hips yields a
+        # positive torso_lean_signed_deg, which rule_excessive_back_lean reads as a
+        # BACKWARD lean (shoulders behind the hips). Every other sagittal offset in this
+        # module (see rule_forward_head_barpath) therefore measures "anterior" as
+        # shoulder_x - point_x. A subject facing the opposite way inverts the sign of
+        # every such reading. This is a known monocular limitation -- neither the sign
+        # nor any of the sagittal thresholds has been validated on real data.
         if shoulder_mid is not None and hip_mid is not None:
             torso_lean_signed_deg = float(
                 np.degrees(
@@ -139,6 +156,38 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
         right_gap = right_shoulder_y - right_ear_y if np.isfinite(right_ear_y) else np.nan
         shoulder_ear_gap = mean_finite([left_gap, right_gap])
 
+        normalizer_ok = np.isfinite(shoulder_width) and shoulder_width > 1e-6
+
+        # Wrist height relative to the NOSE (landmark 0), normalized by shoulder width.
+        # Negative => wrists are above the nose (MediaPipe y grows DOWNWARD).
+        # NaN when the nose is not visible or the shoulder-width normalizer degenerates;
+        # the nose is deliberately NOT added to `required` above, because that flag gates
+        # frame validity for every OHP rule and a briefly occluded face must not
+        # invalidate the elbow/asymmetry rules.
+        nose_y = _y(points, NOSE)
+        wrist_above_nose = (
+            (wrist_mean_y - nose_y) / shoulder_width
+            if np.isfinite(wrist_mean_y) and np.isfinite(nose_y) and normalizer_ok
+            else np.nan
+        )
+
+        # Sagittal-plane horizontal offsets, normalized by shoulder width. Positive =
+        # the point sits ANTERIOR to the shoulder line, per the single facing convention
+        # documented above (anterior = -x), hence shoulder_x - point_x.
+        shoulder_mean_x = mean_finite([_x(points, LEFT_SHOULDER), _x(points, RIGHT_SHOULDER)])
+        ear_mean_x = mean_finite([_x(points, LEFT_EAR), _x(points, RIGHT_EAR)])
+        wrist_mean_x = mean_finite([_x(points, LEFT_WRIST), _x(points, RIGHT_WRIST)])
+        ear_forward_offset = (
+            (shoulder_mean_x - ear_mean_x) / shoulder_width
+            if np.isfinite(shoulder_mean_x) and np.isfinite(ear_mean_x) and normalizer_ok
+            else np.nan
+        )
+        wrist_forward_offset = (
+            (shoulder_mean_x - wrist_mean_x) / shoulder_width
+            if np.isfinite(shoulder_mean_x) and np.isfinite(wrist_mean_x) and normalizer_ok
+            else np.nan
+        )
+
         raw.append(
             {
                 "frame_index": frame_index,
@@ -153,6 +202,9 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
                 "elbow_height_asymmetry": elbow_height_asymmetry,
                 "wrist_height_asymmetry": wrist_height_asymmetry,
                 "shoulder_ear_gap": shoulder_ear_gap,
+                "wrist_above_nose": wrist_above_nose,
+                "ear_forward_offset": ear_forward_offset,
+                "wrist_forward_offset": wrist_forward_offset,
             }
         )
     return raw
@@ -365,6 +417,13 @@ def rule_excessive_back_lean(core: list[CoreFrame], ctx: RuleContext) -> list[Po
     return detections
 
 
+def _lockout_phases(core: list[CoreFrame]) -> set[str]:
+    """Phase set for rules the spec assesses "at/near lockout": the `lockout` phase when the
+    rep has one, otherwise press+lockout so a rep with a weak/absent lockout window still
+    gets evaluated instead of silently never firing."""
+    return {"lockout"} if any(frame.phase == "lockout" for frame in core) else {"press", "lockout"}
+
+
 def rule_asymmetric_press(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Flag frames where one wrist presses meaningfully higher than the other (normalized by
     shoulder width), a proxy for the scapular/shoulder-girdle asymmetry (scapular dyskinesis)
@@ -373,9 +432,7 @@ def rule_asymmetric_press(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
     press+lockout when a rep has no lockout-phase frames at all (e.g. a weak/incomplete
     lockout window), so it still gets evaluated instead of silently never firing."""
     observable_asymmetry = ctx.view_type in {"front", "rear"}
-    asymmetry_phases = (
-        {"lockout"} if any(frame.phase == "lockout" for frame in core) else {"press", "lockout"}
-    )
+    asymmetry_phases = _lockout_phases(core)
     asymmetry_mask = [
         frame.valid
         and frame.phase in asymmetry_phases
@@ -421,12 +478,189 @@ def rule_asymmetric_press(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
     return detections
 
 
+def rule_insufficient_elevation(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag reps whose hands never travel to a true overhead position -- the press ends around
+    forehead/eye level instead of with the wrists clearly above the head. Assessed at/near
+    lockout (see `_lockout_phases`).
+
+    SUBSTITUTED CRITERION -- read before touching the threshold:
+    The spec (docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md,
+    `ohp_insufficient_elevation`) expresses this as the wrist failing to clear the nose "by at
+    least ~0.5 head-heights". That is NOT implementable here: MediaPipe's 33 landmarks contain
+    no head-height measure at all -- nose, eyes, ears and mouth ALL lie within the face, so no
+    pair of them spans the head. This rule therefore SUBSTITUTES a different criterion:
+    nose clearance normalized by SHOULDER WIDTH (the module's existing normalizer, cf.
+    `wrist_height_asymmetry`), firing when `wrist_above_nose > -0.15`. The -0.15 is a
+    SUBSTITUTION, NOT A UNIT CONVERSION of the spec's 0.5 head-heights -- no anthropometric
+    head-height-to-biacromial-width constant was assumed, invented, or applied. Like every
+    other threshold in this module it is unvalidated against labeled OHP data (spec §8.4).
+
+    Distinct from `ohp_incomplete_lockout`, which keys off elbow extension: a lifter can lock
+    the elbows out at forehead level (this rule fires, that one does not) or press the hands
+    well overhead with bent elbows (that one fires, this one does not)."""
+    observable_elevation = ctx.view_type in {"side", "front", "front_oblique"}
+    elevation_phases = _lockout_phases(core)
+    elevation_mask = [
+        frame.valid
+        and frame.phase in elevation_phases
+        and np.isfinite(frame.m("wrist_above_nose"))
+        and frame.m("wrist_above_nose") > -0.15
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(elevation_mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        values = [frame.m("wrist_above_nose") for frame in segment]
+        # Larger = wrists sit LOWER relative to the nose = worse.
+        worst = float(np.nanmax(values))
+        severity = severity_from_range(worst, -0.15, 0.35, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="ohp_insufficient_elevation",
+                fault_name="Insufficient Overhead Elevation / Short Press",
+                kg_query="Insufficient Overhead Elevation",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=values,
+                severity=severity,
+                confidence=severity * (1.0 if observable_elevation else 0.65),
+                observability="high" if observable_elevation else "medium",
+                evidence={
+                    "max_wrist_above_nose": round(worst, 4),
+                    "threshold": -0.15,
+                    "primary_label": "wrist height above nose (shoulder-widths)",
+                    "primary_value": round(worst, 4),
+                    "primary_threshold": -0.15,
+                },
+                citation="Coratella G, Tornatore G, Longo S, Esposito F, Cè E. (2022). Front vs Back "
+                         "and Barbell vs Machine Overhead Press: An Electromyographic Analysis and "
+                         "Implications For Resistance Training. Frontiers in Physiology. PMC9354811; "
+                         "end position corroborated by Evangelista P, Rum L, Picerno P, Biscarini A. "
+                         "(2025). Decoding the Contribution of Shoulder and Elbow Mechanics to Barbell "
+                         "Kinematics and the Sticking Region in Bench and Overhead Press Exercises. "
+                         "J Funct Morphol Kinesiol. PMC12372072.",
+                citation_support="PMC9354811 defines the full overhead end position as \"the simultaneous "
+                                 "scapular upward rotation …, together with the humerus abduction and "
+                                 "elbow extension\" being what \"makes the overhead press suitable to "
+                                 "stimulate upper trapezius, deltoids and triceps\"; PMC12372072 treats "
+                                 "the lift as complete only when \"the barbell reaches its final "
+                                 "position\". A press that stalls below overhead never reaches that end "
+                                 "position, so the target motion and its musculature are never fully "
+                                 "loaded. (Detection criterion is a shoulder-width-normalized "
+                                 "substitution for the spec's head-height wording -- see docstring.)",
+            )
+        )
+    return detections
+
+
+def rule_forward_head_barpath(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag a forward-head / bar-ahead-of-midline finish: (a) the ear sitting anterior to the
+    shoulder line by > 0.30 shoulder-widths, and/or (b) at lockout, the wrist not stacked over
+    the shoulder but anterior by > 0.30 shoulder-widths.
+
+    HARD VIEW GATE (deliberately not a confidence multiplier): both cues are PURE horizontal
+    offsets, and their direction is meaningless unless the subject's facing is known. Outside a
+    sagittal view the sign of `shoulder_x - point_x` is arbitrary, so firing there -- even at
+    reduced confidence -- would emit a confidently-wrong DIRECTION claim ("head juts forward")
+    on data that cannot support any direction at all. A wrong direction is worse than silence,
+    so off-sagittal views return no detections rather than low-confidence ones.
+
+    Sign convention: anterior = -x, the single module-wide convention documented in
+    `ohp_compute_raw` and encoded by `rule_excessive_back_lean`. Do not introduce a second one.
+
+    Known weakness: the shoulder-width normalizer is weakly conditioned in exactly the views
+    this rule is gated to -- in a true sagittal view the two shoulder landmarks project nearly
+    on top of each other, so shoulder_width shrinks and the normalized offsets inflate (the
+    > 1e-6 guard in `ohp_compute_raw` prevents a divide-by-zero, not this inflation). That is a
+    further reason the 0.30 threshold here is unvalidated, like the rest of this module."""
+    if ctx.view_type not in SAGITTAL_VIEWS:
+        return []
+
+    lockout_phases = _lockout_phases(core)
+
+    def worst_offset(frame: CoreFrame) -> float:
+        """Larger = further anterior = worse. The bar-path cue only counts at lockout."""
+        ear = frame.m("ear_forward_offset")
+        wrist = frame.m("wrist_forward_offset") if frame.phase in lockout_phases else np.nan
+        finite = [value for value in (ear, wrist) if np.isfinite(value)]
+        return max(finite) if finite else np.nan
+
+    forward_mask = [
+        frame.valid and np.isfinite(worst_offset(frame)) and worst_offset(frame) > 0.30
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(forward_mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        values = [worst_offset(frame) for frame in segment]
+        max_offset = float(np.nanmax(values))
+        ear_values = [frame.m("ear_forward_offset") for frame in segment]
+        wrist_values = [
+            frame.m("wrist_forward_offset") if frame.phase in lockout_phases else np.nan
+            for frame in segment
+        ]
+        max_ear = float(np.nanmax(ear_values)) if any(np.isfinite(v) for v in ear_values) else np.nan
+        max_wrist = (
+            float(np.nanmax(wrist_values)) if any(np.isfinite(v) for v in wrist_values) else np.nan
+        )
+        severity = severity_from_range(max_offset, 0.30, 0.60, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="ohp_forward_head_barpath",
+                fault_name="Forward Head / Bar Path Forward of Midline",
+                kg_query="Forward Head Posture",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=values,
+                severity=severity,
+                confidence=severity,
+                # Spec rates this medium-high from `side`; reported as "medium" because the
+                # rule only ever runs on sagittal views (so there is no unobservable branch to
+                # downgrade) and its normalizer is weakly conditioned there -- see docstring.
+                observability="medium",
+                evidence={
+                    "max_ear_forward_offset": round(max_ear, 4) if np.isfinite(max_ear) else 0.0,
+                    "max_wrist_forward_offset": round(max_wrist, 4) if np.isfinite(max_wrist) else 0.0,
+                    "threshold": 0.30,
+                    "primary_label": "anterior offset from shoulder line (shoulder-widths)",
+                    "primary_value": round(max_offset, 4),
+                    "primary_threshold": 0.30,
+                },
+                citation="Abdelraouf OR, Abdel-Aziem AA, Alkhamees NH, Ibrahim ZM, Aboelela EM, "
+                         "Dawood RS, Ashour AA. (2026). Acute Effects of High-Load Training to Failure "
+                         "vs. Non-Failure on Posture and Core Endurance in Collegiate Weightlifters: A "
+                         "Crossover Study. J Clin Med. PMC13116542; mechanism from Gregori P, La Bruna M, "
+                         "Papalia GF, et al. (2026). Spine alignment influences shoulder range of motion "
+                         "and scapular orientation: A systematic review. J Exp Orthop. PMC13086636, and "
+                         "Al Hammadi MI, Shah ZA, Rathod RK, Seddik MA. (2025). Shoulder Impingement Pain "
+                         "Syndrome: Pathophysiology, Diagnosis, and a Review of Current Treatment "
+                         "Strategies. Cureus. PMC12514857.",
+                citation_support="PMC13116542 found high-load overhead-press training to failure "
+                                 "significantly reduced the craniovertebral angle (defining \"a "
+                                 "craniovertebral angle … less than 48 degrees … as forward head "
+                                 "posture\"), i.e. pressing measurably drives the head forward. "
+                                 "PMC13086636 reports \"greater thoracic kyphosis is associated with … "
+                                 "reduced shoulder abduction … and flexion,\" and PMC12514857 notes "
+                                 "forward head / thoracic kyphosis \"reduce[s] the subacromial space\" -- "
+                                 "giving both the ROM (performance) and impingement (injury) rationale "
+                                 "for flagging a forward head and an un-stacked bar path.",
+            )
+        )
+    return detections
+
+
 OHP_DETECTOR = MovementDetector(
     "Overhead Press",
     OHP_METRIC_KEYS,
     ohp_compute_raw,
     ohp_assign_phases,
-    (rule_incomplete_lockout, rule_excessive_back_lean, rule_asymmetric_press),
+    (
+        rule_incomplete_lockout,
+        rule_excessive_back_lean,
+        rule_asymmetric_press,
+        rule_insufficient_elevation,
+        rule_forward_head_barpath,
+    ),
 )
 
 registry.register(OHP_DETECTOR)
