@@ -391,7 +391,7 @@ Measured with `retrieve_graph_context(candidate, hops=1, max_seeds=3, movement="
 | --- | --- | --- |
 | `rule_excessive_back_lean` (`overhead_press.py:417`) | `"Excessive Lower Back Arching"` | corrections: `Ribcage Down`, `Gluteus Active`, `Core Active` |
 | `rule_asymmetric_press` (`overhead_press.py:475`) | `"Muscle Imbalance"` | risks: `Shoulder Injury`; causes: `Overuse`, `Weak External Rotators`, `Weak Abductors` |
-| `rule_incomplete_lockout` (`overhead_press.py:362`) | `"Incomplete Lockout"` | **node does not exist — authored, see §10.2** |
+| `rule_incomplete_lockout` (`overhead_press.py:362`) | unchanged — `"Incomplete Elbow Lockout"` | **node does not exist — authored under that exact name, see §10.2** |
 
 `Excessive Lower Back Arching` is a strong match: the rule's own fault name is "Excessive
 back-lean / lumbar hyperextension (rib flare)", and the node's first correction is `Ribcage Down`.
@@ -412,10 +412,19 @@ Every in-graph candidate was checked and rejected on evidence:
 | `Sticking Region` | Rich (degree 11) but describes a normal feature of every press, not a fault. Adjacent mechanism, not the same one. |
 | `Failure In Jerk` | `related_actions: Jerk`. Same scope problem as above. |
 
-Add `Overhead Press:Incomplete Lockout` as a `Fault` node with cited `CAUSED_BY` /
-`CORRECTED_BY` / `INCREASES_RISK_OF` edges, following the established authoring path:
-a new `scripts/knowledge/` script in the shape of `reconcile_ohp_v3.py` — idempotent, `--dry-run`
-capable, and checked into git even though `data/kg/sports_kg_v3.graphml` is not.
+Add `Overhead Press:Incomplete Elbow Lockout` as a `Fault` node — named to match the rule's
+existing `kg_query` exactly, so that string needs no edit. Following the established authoring
+path: a new `scripts/knowledge/` script in the shape of `reconcile_ohp_v3.py` — idempotent,
+`--dry-run` capable, and checked into git even though `data/kg/sports_kg_v3.graphml` is not.
+
+Edges: `HAS_FAULT` from the `Overhead Press` Action anchor, `OCCURS_IN_PHASE` to the existing
+`Overhead Press:Near Lockout` phase, `INDICATED_BY` the existing
+`Overhead Press:Elbow Extensor Torque` signal, `CAUSED_BY` a new shared `Weak Triceps Brachii`
+cause, and `CORRECTED_BY` a new shared `Full Elbow Extension At Lockout` cue.
+
+**No `INCREASES_RISK_OF` edge.** The rule's citation establishes a mechanism, not an injury
+outcome; an injury edge would be the uncited claim this spec forbids everywhere else. A test pins
+the absence so it cannot be added later without a deliberate decision.
 
 That gitignore split is the operational catch: the script is the reproducible artifact, the graph
 is rebuilt from it. The plan must include re-running retrieval verification after the rebuild, and
