@@ -1,8 +1,12 @@
-# Push-up raw metrics and phase segmentation.
+# Push-up raw metrics, phase segmentation, and the cited fault rules built on them.
 #
-# THIS MODULE CONTAINS NO THRESHOLDS. It computes scale-free per-frame metrics and a phase
-# label only; the cited fault rules that consume them arrive in later tasks. Nothing here may
-# be read as a validated criterion.
+# THE METRIC LAYER CONTAINS NO THRESHOLDS -- `pushup_compute_raw` / `pushup_assign_phases`
+# compute scale-free per-frame metrics and a phase label only. Every threshold in this file
+# lives in a `rule_*` function and is copied from
+# docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md (Push-up section).
+# Like OHP's, NONE of them has been validated against labeled push-up video (spec §8.4):
+# they are spec-derived, not measured. `rule_hip_sag` and `rule_shallow_depth` are the only
+# rules present so far; head drop, elbow flare and scapular winging arrive with Task 7.
 #
 # ---------------------------------------------------------------------------------------
 # MODULE-WIDE SILENCE RISK -- one dropped landmark silences EVERY push-up rule, not one.
@@ -99,8 +103,8 @@
 #   anatomical ground reference rather than a gravity assumption, which is why it survives
 #   the facing ambiguity above.
 #
-# No tilt or agreement THRESHOLD is defined here -- thresholds are out of scope for this
-# module. The metric is emitted so Tasks 6-7 can gate on it; deciding where to cut is theirs.
+# `rule_hip_sag` is the consumer of that guard: see its docstring for where it cuts and why
+# the cut is the sign boundary itself rather than an invented magnitude.
 from __future__ import annotations
 
 from typing import Sequence
@@ -111,8 +115,10 @@ from src.pose.geometry import (
     LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility, mean_finite,
-    distance,
+    contiguous_true_segments, severity_from_range, distance,
 )
+from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.pose_rule_detector import PoseRuleDetection, build_detection
 
 # MediaPipe indices not already exported by src.pose.geometry.
 LEFT_ELBOW = 13
@@ -152,6 +158,26 @@ PUSHUP_METRIC_KEYS: tuple[str, ...] = (
 # Below this, a length/normalizer is treated as degenerate and the dependent metric is NaN.
 # Same guard value OHP uses for its shoulder-width normalizer; not a tunable threshold.
 _DEGENERATE_LENGTH = 1e-6
+
+# Phases in which the plank is supposed to be held rigid. `setup` is excluded: the lifter is
+# still getting into position there, so a hip off the line is not yet a fault. The spec does
+# NOT scope `pushup_hip_sag` to a phase, so this is a RULE-LEVEL call, made to match the
+# squat detector's ACTIVE_PHASES precedent (src/pose/movements/squat.py) rather than a
+# spec requirement.
+PUSHUP_ACTIVE_PHASES = {"descent", "bottom", "ascent"}
+
+# Views in which the spec rates the shallow-depth elbow angle `high`. Defined locally rather
+# than imported from overhead_press: the two modules happen to agree today, but they are
+# answering different spec lines and must be free to diverge.
+DEPTH_OBSERVABLE_VIEWS = {"side", "front_oblique"}
+
+# Views from which the spec rates hip sag near-`none`. See `rule_hip_sag` for why these are
+# hard-gated to silence rather than emitted at reduced confidence.
+HEAD_ON_VIEWS = {"front", "rear"}
+
+# Confidence multiplier applied when a rule fires from a view the spec does not rate `high`.
+# Same 0.65 already used across squat and OHP -- not a new number.
+_OFF_VIEW_CONFIDENCE = 0.65
 
 
 def _interior_angle(a: np.ndarray, b: np.ndarray, c: np.ndarray) -> float:
@@ -450,3 +476,206 @@ def pushup_assign_phases(raw: list[dict]) -> list[str]:
         else:
             phases.append("ascent")
     return phases
+
+
+def rule_hip_sag(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag a broken plank line: the hips drop toward the floor (SAG) or rise above the line
+    (PIKE) by more than 0.06 of the shoulder-to-ankle length.
+
+    THRESHOLD PROVENANCE. 0.06 and the 0.06 -> 0.15 severity ramp are copied from the spec
+    (`pushup_hip_sag`), which flags sag "by offset > ~0.06 of body length" and pike "by the
+    same margin". Unvalidated against labeled push-up video, like every threshold here.
+
+    DIRECTION IS PART OF THE VERDICT. Sag and pike share one `fault_id` per the spec, but the
+    coaching cue is the exact opposite ("brace, lift the hips" vs "drop the hips"), so
+    `evidence["direction"]` records which of the two fired. It is read off the SIGN of the
+    frame with the largest ABSOLUTE offset, and `score_values` is the absolute series, so
+    `build_detection`'s `peak_frame` is the worst frame in either direction -- passing the
+    signed series would make a pike segment nominate its LEAST-piked frame as the peak.
+
+    INVERSION GUARD -- WHY THIS RULE CAN REFUSE TO ANSWER. `hip_offset_ratio`'s sign is only
+    meaningful while the module's idea of "groundward" is really groundward; a rolled or
+    180-degree-rotated clip inverts it and turns every sag into a confident, full-severity
+    PIKE (see the SIGN CONVENTION note at the top of this module, and
+    `test_camera_inversion_flips_hip_sign_and_hand_offset_catches_it`). The hands are planted
+    on the floor, so `hand_offset_ratio` is POSITIVE in any genuine push-up; the mask therefore
+    requires `hand_offset_ratio > 0.0` and stays silent otherwise.
+
+      * The cut is at ZERO -- the sign boundary the guard is defined by -- and not at some
+        margin around it, because no margin has been measured and this project does not invent
+        one. The honest cost of that: a hand offset arbitrarily close to zero (hands nearly on
+        the body axis, e.g. a very steep decline push-up) passes the guard while carrying
+        almost no evidential weight. That gap is documented, not closed.
+      * A NaN guard value refuses for free (`nan > 0.0` is False). That is deliberate, and
+        pinned by `test_nan_hand_offset_guard_refuses_rather_than_assuming`.
+      * Refusing matches how this module already handles unmeasurable input: an unmeasurable
+        frame gets no metrics rather than a degraded number. A non-directional "your plank is
+        broken, direction unknown" detection was considered and rejected -- it would still
+        assert the MAGNITUDE, which is exactly as inflated/valid as the sign is, and downstream
+        feedback has no way to render a directionless plank fault.
+
+    THE PLANK-ANGLE FORM DOES NOT GATE FIRING. The spec offers "Equivalent: hip angle
+    (shoulder-hip-ankle) departs from 180 deg by > ~12 deg" as a RESTATEMENT of the offset
+    criterion, not a second way in. It is deliberately not OR-ed into the mask because
+    `plank_angle_deviation_deg` is `abs(180 - angle)` and therefore UNSIGNED -- Task 5's
+    `test_plank_angle_deviation_grows_with_the_offset_and_is_unsigned` pins sag and pike to
+    identical values -- so a frame firing on the angle alone would carry no recoverable
+    direction, reintroducing the inverted-feedback failure the guard above exists to prevent.
+    The angle is reported in the evidence dict as corroboration only.
+
+    VIEW HANDLING. `high` on `side`, per the spec. `front`/`rear` are HARD-GATED to silence
+    rather than emitted at reduced confidence: the spec rates them near-`none` because the
+    offset is in-plane, and in a head-on view down the body the shoulder-mid -> ankle-mid
+    projection SHORTENS, so `axis_length` shrinks and the normalized offset INFLATES. That is a
+    false-positive amplifier, not merely a weak signal, and `_DEGENERATE_LENGTH` guards against
+    division by zero, not against inflation. Following `rule_forward_head`'s hard gate in
+    src/pose/movements/overhead_press.py. Oblique views keep the module's standard reduced
+    confidence."""
+    if ctx.view_type in HEAD_ON_VIEWS:
+        return []
+    observable_sag = ctx.view_type == "side"
+
+    sag_mask = [
+        frame.valid
+        and frame.phase in PUSHUP_ACTIVE_PHASES
+        and frame.m("hand_offset_ratio") > 0.0
+        and np.isfinite(frame.m("hip_offset_ratio"))
+        and (frame.m("hip_offset_ratio") > 0.06 or frame.m("hip_offset_ratio") < -0.06)
+        for frame in core
+    ]
+
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(sag_mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        signed_values = [frame.m("hip_offset_ratio") for frame in segment]
+        abs_values = [abs(value) if np.isfinite(value) else np.nan for value in signed_values]
+        peak_offset = int(np.nanargmax(np.where(np.isfinite(abs_values), abs_values, -np.inf)))
+        peak_signed = float(signed_values[peak_offset])
+        max_abs = float(abs_values[peak_offset])
+        direction = "sag" if peak_signed > 0.0 else "pike"
+        severity = severity_from_range(max_abs, 0.06, 0.15, lower_is_worse=False)
+
+        plank_values = [frame.m("plank_angle_deviation_deg") for frame in segment]
+        max_plank = (
+            float(np.nanmax(plank_values)) if any(np.isfinite(v) for v in plank_values) else 0.0
+        )
+
+        detections.append(
+            build_detection(
+                fault_id="pushup_hip_sag",
+                fault_name="Hip sag / broken plank line",
+                # Verified to resolve: graph_retrieval.resolve_nodes(..., movement="Push-up")
+                # returns "Push-up:Trunk Sagging" for this string.
+                kg_query="Trunk Sagging",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=abs_values,
+                severity=severity,
+                confidence=severity * (1.0 if observable_sag else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable_sag else "medium",
+                evidence={
+                    "direction": direction,
+                    "peak_hip_offset_ratio": round(peak_signed, 4),
+                    "max_abs_hip_offset_ratio": round(max_abs, 4),
+                    "threshold": 0.06,
+                    # Corroboration only -- unsigned, and does not gate firing. See docstring.
+                    "max_plank_angle_deviation_deg": round(max_plank, 2),
+                    "plank_angle_deviation_threshold_deg": 12.0,
+                    "primary_label": f"hip offset from plank line ({direction})",
+                    "primary_value": round(peak_signed, 4),
+                    "primary_threshold": 0.06 if direction == "sag" else -0.06,
+                },
+                citation="Freeman S, Karpowicz A, Gray J, McGill S. Med Sci Sports Exerc (2006). "
+                         "DOI 10.1249/01.mss.0000189317.08635.1b.",
+                citation_support="The study \"quantify[ied] the normalized amplitudes of the "
+                                 "abdominal wall and back extensor musculature\" and \"their impact "
+                                 "on spinal loading by calculating spinal compression and torque "
+                                 "generation in the L4-5 area,\" finding push-up form drives large "
+                                 "differences in L4-5 spine compression (the one-arm push-up produced "
+                                 "\"the highest spine compression\"). This establishes that push-up "
+                                 "trunk posture governs lumbar load; a sagging (hyperextended) trunk "
+                                 "is the posture that raises passive lumbar loading. Note: the paper "
+                                 "measured spine load by variant, not sag angle directly, so the "
+                                 "sag->load link is inferred from the loading mechanism it quantifies.",
+            )
+        )
+    return detections
+
+
+def rule_shallow_depth(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag a partial rep: at the bottom of the descent the elbows never bend past 100 deg.
+
+    THRESHOLD PROVENANCE -- THE SPEC GIVES A BAND, THIS TAKES ITS CONSERVATIVE END. The spec
+    (`pushup_shallow_depth`) flags "min elbow flexion angle > ~100-110 deg (a full rep reaches
+    roughly <= 90 deg)". 100 is the LOW end of that band and is therefore the strictest
+    criterion for firing -- a rep must be shallower than 100 deg to be flagged at all, so
+    fewer borderline reps are called faults. Picking 110 instead would flag every rep between
+    100 and 110 as well. 100 is chosen for that fewer-false-positives reason; no number
+    outside the spec's band is used, and the severity ramp 100 -> 140 is the spec's own.
+    Unvalidated against labeled push-up video.
+
+    Scoped to the `bottom` phase, per the spec's "at the bottom frame", and following the
+    squat detector's `rule_shallow_depth`, which gates on `phase == "bottom"` the same way.
+
+    METRIC DEVIATION INHERITED FROM TASK 5 (stated, not corrected here): the spec says to take
+    the elbow "whichever is more visible"; `pushup_compute_raw` emits `min_elbow_angle`, the
+    more FLEXED of the two arms. On a symmetric rep they agree. On an asymmetric one the
+    more-flexed arm is the more generous reading, so this rule under-reports depth faults
+    rather than over-reporting them -- consistent with the conservative threshold choice above.
+
+    VIEW HANDLING follows the spec exactly: `high` on `side`/`front_oblique`, downgraded (and
+    confidence-discounted) elsewhere because a head-on view foreshortens the elbow angle.
+    Unlike `rule_hip_sag` there is no hard gate, because a foreshortened elbow angle reads
+    LARGER-or-equal, i.e. it degrades toward the un-faulted direction, and the rule makes no
+    directional claim that an unknown facing could invert."""
+    observable_depth = ctx.view_type in DEPTH_OBSERVABLE_VIEWS
+
+    depth_mask = [
+        frame.valid
+        and frame.phase == "bottom"
+        and np.isfinite(frame.m("min_elbow_angle"))
+        and frame.m("min_elbow_angle") > 100.0
+        for frame in core
+    ]
+
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(depth_mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        values = [frame.m("min_elbow_angle") for frame in segment]
+        # Larger = less flexed = shallower = worse.
+        shallowest = float(np.nanmax(values))
+        severity = severity_from_range(shallowest, 100.0, 140.0, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="pushup_shallow_depth",
+                fault_name="Shallow depth (partial rep)",
+                # Verified to resolve: graph_retrieval.resolve_nodes(..., movement="Push-up")
+                # returns "Push-up:Limited Range Of Motion" for this string. (The literal fault
+                # name "Shallow depth" resolves only to the generic node "Depth".)
+                kg_query="Limited Range Of Motion",
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=values,
+                severity=severity,
+                confidence=severity * (1.0 if observable_depth else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable_depth else "medium",
+                evidence={
+                    "max_min_elbow_angle": round(shallowest, 2),
+                    "threshold": 100.0,
+                    "primary_label": "elbow angle at the bottom",
+                    "primary_value": round(shallowest, 2),
+                    "primary_threshold": 100.0,
+                },
+                citation="San Juan JG, Suprak DN, Roach SM, Lyda M. BMC Musculoskelet Disord (2015) "
+                         "PMC4327800.",
+                citation_support="Measuring elbow kinematics in 5 deg increments across the push-up "
+                                 "range, vertical ground-reaction force \"displayed a significant "
+                                 "linear decrease across the ROM\" and was \"highest during the "
+                                 "traditional PUP at 90 deg ... of elbow flexion and lowest at 20 "
+                                 "deg,\" while serratus anterior and other muscle EMG rose across "
+                                 "elbow extension. Deeper elbow flexion = higher force/demand, so a "
+                                 "shallow rep that never reaches the deep-flexion positions forfeits "
+                                 "the largest portion of the stimulus.",
+            )
+        )
+    return detections

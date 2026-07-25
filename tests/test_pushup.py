@@ -3,10 +3,13 @@ import unittest
 
 import numpy as np
 
+from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext, run_detector
 from src.pose.movements.pushup import (
     PUSHUP_METRIC_KEYS,
     pushup_assign_phases,
     pushup_compute_raw,
+    rule_hip_sag,
+    rule_shallow_depth,
 )
 
 
@@ -680,6 +683,377 @@ class PushupPhaseTests(unittest.TestCase):
         phases = pushup_assign_phases(pushup_compute_raw(frames, 30.0))
         self.assertEqual(phases[0], "unknown")
         self.assertEqual(phases[1], "setup")
+
+
+# --- rule-layer fixtures ------------------------------------------------------------------
+# The rule tests below set metric values DIRECTLY on CoreFrames rather than routing them
+# through landmark geometry. That is deliberate and is the only way to place a boundary AT the
+# threshold to the last bit: `_elbow_xy` reproduces a requested angle to ~1e-13, which is fine
+# for "is this metric right" but useless for "does 100.0 exactly fire under a strict `>`".
+# The landmark path is exercised end-to-end by PushupRuleIntegrationTests, which runs the real
+# `pushup_compute_raw` -> `pushup_assign_phases` -> `run_detector` chain.
+
+# What the fixture's default hand_drop=0.10 over a 0.60 body actually produces. Positive, as
+# it must be in any genuine push-up -- see rule_hip_sag's inversion guard.
+_GOOD_HAND_OFFSET = 0.1 / 0.6
+
+
+def _rule_frames(count: int = 10, *, phase: str = "bottom", valid: bool = True, **metrics):
+    """`count` identical CoreFrames carrying exactly the metrics named (plus a healthy
+    `hand_offset_ratio` unless overridden). Identical frames also mean the centred-median
+    smoothing inside `run_detector` would be a no-op on them, so the severities asserted
+    against these are the same ones the real pipeline would compute."""
+    values = {"hand_offset_ratio": _GOOD_HAND_OFFSET}
+    values.update(metrics)
+    return [
+        CoreFrame(
+            frame_index=index,
+            time=index / 30.0,
+            phase=phase,
+            valid=valid,
+            lower_body_visibility=1.0,
+            metrics=dict(values),
+        )
+        for index in range(count)
+    ]
+
+
+def _ctx(view_type: str = "side", *, min_frames: int = 6, view_confidence: float = 0.9):
+    """min_frames=6 is what `run_detector` computes at 30 fps -- max(3, ceil(30 * 0.20)) --
+    so a segment-length mutant cannot hide behind an artificially permissive 1."""
+    return RuleContext(
+        fps=30.0,
+        view_type=view_type,
+        view_confidence=view_confidence,
+        min_frames=min_frames,
+    )
+
+
+class PushupHipSagRuleTests(unittest.TestCase):
+    def test_fires_when_the_hips_sag(self) -> None:
+        detections = rule_hip_sag(_rule_frames(hip_offset_ratio=0.12), _ctx())
+        self.assertEqual(len(detections), 1)
+        detection = detections[0]
+        self.assertEqual(detection.fault_id, "pushup_hip_sag")
+        self.assertEqual(detection.fault_name, "Hip sag / broken plank line")
+        self.assertEqual(detection.kg_query, "Trunk Sagging")
+        self.assertEqual(detection.evidence["direction"], "sag")
+        self.assertEqual(detection.evidence["threshold"], 0.06)
+        self.assertEqual(detection.evidence["primary_threshold"], 0.06)
+        self.assertAlmostEqual(detection.evidence["peak_hip_offset_ratio"], 0.12, places=4)
+        self.assertEqual(detection.observability, "high")
+
+    def test_does_not_fire_on_a_straight_plank(self) -> None:
+        for offset in (0.0, 0.03, -0.03, -0.0001):
+            self.assertEqual(
+                rule_hip_sag(_rule_frames(hip_offset_ratio=offset), _ctx()), [],
+                msg=f"offset {offset} must not be a fault",
+            )
+
+    def test_sag_boundary_just_inside_and_just_outside_and_exactly_on(self) -> None:
+        # Strictly greater than 0.06. All three of these must behave differently from each
+        # other, which is what kills a `>=` mutant and a shifted-threshold mutant alike.
+        self.assertEqual(len(rule_hip_sag(_rule_frames(hip_offset_ratio=0.0601), _ctx())), 1)
+        self.assertEqual(rule_hip_sag(_rule_frames(hip_offset_ratio=0.06), _ctx()), [])
+        self.assertEqual(rule_hip_sag(_rule_frames(hip_offset_ratio=0.0599), _ctx()), [])
+
+    def test_a_pike_is_reported_as_a_pike_not_a_sag(self) -> None:
+        # THE INVERTED-FEEDBACK GUARD. Both directions share one fault_id per the spec, so if
+        # the direction were not carried in the evidence the coach would tell a piking lifter
+        # to lift their hips.
+        detections = rule_hip_sag(_rule_frames(hip_offset_ratio=-0.12), _ctx())
+        self.assertEqual(len(detections), 1)
+        detection = detections[0]
+        self.assertEqual(detection.fault_id, "pushup_hip_sag")
+        self.assertEqual(detection.evidence["direction"], "pike")
+        self.assertEqual(detection.evidence["primary_threshold"], -0.06)
+        self.assertAlmostEqual(detection.evidence["peak_hip_offset_ratio"], -0.12, places=4)
+        self.assertIn("pike", str(detection.evidence["primary_label"]))
+
+    def test_pike_boundary_just_inside_and_just_outside_and_exactly_on(self) -> None:
+        self.assertEqual(len(rule_hip_sag(_rule_frames(hip_offset_ratio=-0.0601), _ctx())), 1)
+        self.assertEqual(rule_hip_sag(_rule_frames(hip_offset_ratio=-0.06), _ctx()), [])
+        self.assertEqual(rule_hip_sag(_rule_frames(hip_offset_ratio=-0.0599), _ctx()), [])
+
+    def test_exact_severity_midway_along_the_ramp(self) -> None:
+        # MID-RAMP ON PURPOSE. 0.105 sits exactly halfway along the spec's 0.06 -> 0.15 ramp,
+        # so this single number pins BOTH endpoints: moving 0.06 or 0.15 moves the answer off
+        # 0.5. A fixture parked at or past 0.15 would saturate to 1.0 and see neither.
+        sag = rule_hip_sag(_rule_frames(hip_offset_ratio=0.105), _ctx())[0]
+        self.assertAlmostEqual(sag.severity, 0.5, places=6)
+        self.assertAlmostEqual(sag.confidence, 0.5, places=6)
+        # The ramp is on the MAGNITUDE, so a pike of the same size scores identically.
+        pike = rule_hip_sag(_rule_frames(hip_offset_ratio=-0.105), _ctx())[0]
+        self.assertAlmostEqual(pike.severity, 0.5, places=6)
+        # A second mid-ramp point, to pin the ramp's slope as well as one of its values.
+        # (places=4 because build_detection rounds the emitted severity to 4 dp.)
+        third = rule_hip_sag(_rule_frames(hip_offset_ratio=0.09), _ctx())[0]
+        self.assertAlmostEqual(third.severity, 1.0 / 3.0, places=4)
+
+    def test_severity_saturates_at_the_severe_end_of_the_ramp(self) -> None:
+        for offset in (0.15, 0.30):
+            self.assertAlmostEqual(
+                rule_hip_sag(_rule_frames(hip_offset_ratio=offset), _ctx())[0].severity,
+                1.0, places=6,
+            )
+
+    def test_peak_frame_is_the_worst_frame_in_either_direction(self) -> None:
+        # Passing the SIGNED offset series to build_detection would nanargmax a pike segment to
+        # its LEAST-piked frame; the absolute series is what makes the peak the worst frame.
+        offsets = [-0.07, -0.09, -0.13, -0.11, -0.08, -0.07, -0.07]
+        core = [
+            CoreFrame(
+                frame_index=index, time=index / 30.0, phase="bottom", valid=True,
+                lower_body_visibility=1.0,
+                metrics={"hip_offset_ratio": offset, "hand_offset_ratio": _GOOD_HAND_OFFSET},
+            )
+            for index, offset in enumerate(offsets)
+        ]
+        detection = rule_hip_sag(core, _ctx())[0]
+        self.assertEqual(detection.peak_frame, 2)
+        self.assertEqual(detection.evidence["direction"], "pike")
+        self.assertAlmostEqual(detection.evidence["peak_hip_offset_ratio"], -0.13, places=4)
+        self.assertAlmostEqual(detection.evidence["max_abs_hip_offset_ratio"], 0.13, places=4)
+
+    def test_camera_inversion_guard_refuses_a_directional_verdict(self) -> None:
+        # A negative hand offset means the direction the metric layer believes is groundward
+        # is not, so a genuine SAG arrives here as a large negative number. Emitting would
+        # produce a confident, full-severity PIKE. The rule must stay silent instead.
+        core = _rule_frames(hip_offset_ratio=-0.12, hand_offset_ratio=-_GOOD_HAND_OFFSET)
+        self.assertEqual(rule_hip_sag(core, _ctx()), [])
+        # ... in the other direction too, so this is a guard and not an accident of sign.
+        core = _rule_frames(hip_offset_ratio=0.12, hand_offset_ratio=-_GOOD_HAND_OFFSET)
+        self.assertEqual(rule_hip_sag(core, _ctx()), [])
+
+    def test_zero_hand_offset_is_on_the_refusing_side_of_the_guard(self) -> None:
+        # The cut is the sign boundary itself (`> 0.0`), not an invented margin around it.
+        # Exactly zero -- hands on the body axis, nothing to arbitrate with -- refuses.
+        core = _rule_frames(hip_offset_ratio=0.12, hand_offset_ratio=0.0)
+        self.assertEqual(rule_hip_sag(core, _ctx()), [])
+
+    def test_nan_hand_offset_guard_refuses_rather_than_assuming(self) -> None:
+        # `nan > 0.0` is False, so an unmeasurable guard refuses for free. Pinned so it is
+        # documented behaviour rather than a lucky accident of comparison semantics.
+        core = _rule_frames(hip_offset_ratio=0.12, hand_offset_ratio=float("nan"))
+        self.assertEqual(rule_hip_sag(core, _ctx()), [])
+
+    def test_plank_angle_alone_does_not_fire_but_is_reported(self) -> None:
+        # The spec's "Equivalent: ... departs from 180 deg by > ~12 deg" is a restatement, not
+        # a second gate. It is UNSIGNED (Task 5 pins sag and pike to identical values), so
+        # firing on it would emit a plank fault with no recoverable direction.
+        quiet = _rule_frames(hip_offset_ratio=0.0, plank_angle_deviation_deg=30.0)
+        self.assertEqual(rule_hip_sag(quiet, _ctx()), [])
+        loud = _rule_frames(hip_offset_ratio=0.12, plank_angle_deviation_deg=30.0)
+        detection = rule_hip_sag(loud, _ctx())[0]
+        self.assertAlmostEqual(detection.evidence["max_plank_angle_deviation_deg"], 30.0, places=2)
+        self.assertEqual(detection.evidence["plank_angle_deviation_threshold_deg"], 12.0)
+
+    def test_a_segment_shorter_than_min_frames_does_not_fire(self) -> None:
+        sagging = _rule_frames(5, hip_offset_ratio=0.12)
+        clean = _rule_frames(5, hip_offset_ratio=0.0)
+        self.assertEqual(rule_hip_sag(sagging + clean, _ctx()), [])
+        self.assertEqual(len(rule_hip_sag(_rule_frames(6, hip_offset_ratio=0.12), _ctx())), 1)
+
+    def test_setup_phase_is_out_of_scope(self) -> None:
+        # Rule-level call, not a spec requirement: the lifter is still getting into position.
+        for phase in ("setup", "unknown"):
+            self.assertEqual(
+                rule_hip_sag(_rule_frames(phase=phase, hip_offset_ratio=0.12), _ctx()), [],
+                msg=f"phase {phase} must be out of scope",
+            )
+        for phase in ("descent", "bottom", "ascent"):
+            self.assertEqual(
+                len(rule_hip_sag(_rule_frames(phase=phase, hip_offset_ratio=0.12), _ctx())), 1,
+                msg=f"phase {phase} must be in scope",
+            )
+
+    def test_invalid_frames_do_not_fire(self) -> None:
+        core = _rule_frames(hip_offset_ratio=0.12, valid=False)
+        self.assertEqual(rule_hip_sag(core, _ctx()), [])
+
+    def test_head_on_views_are_hard_gated_to_silence(self) -> None:
+        # The spec rates hip sag near-`none` from front/rear, and a foreshortened body axis
+        # INFLATES the normalized offset -- a false-positive amplifier, so silence beats a
+        # low-confidence guess.
+        for view in ("front", "rear"):
+            self.assertEqual(
+                rule_hip_sag(_rule_frames(hip_offset_ratio=0.12), _ctx(view)), [],
+                msg=f"view {view} must be hard-gated",
+            )
+
+    def test_oblique_view_downgrades_observability_and_confidence(self) -> None:
+        detection = rule_hip_sag(_rule_frames(hip_offset_ratio=0.105), _ctx("front_oblique"))[0]
+        self.assertEqual(detection.observability, "medium")
+        self.assertAlmostEqual(detection.severity, 0.5, places=6)
+        self.assertAlmostEqual(detection.confidence, 0.5 * 0.65, places=6)
+
+    def test_citation_is_copied_from_the_spec(self) -> None:
+        detection = rule_hip_sag(_rule_frames(hip_offset_ratio=0.12), _ctx())[0]
+        self.assertEqual(
+            detection.citation,
+            "Freeman S, Karpowicz A, Gray J, McGill S. Med Sci Sports Exerc (2006). "
+            "DOI 10.1249/01.mss.0000189317.08635.1b.",
+        )
+        self.assertIn("spinal compression and torque generation in the L4-5 area",
+                      detection.citation_support)
+        self.assertIn("the highest spine compression", detection.citation_support)
+        self.assertIn("inferred from the loading mechanism", detection.citation_support)
+
+
+class PushupShallowDepthRuleTests(unittest.TestCase):
+    def test_fires_on_a_shallow_bottom(self) -> None:
+        detections = rule_shallow_depth(_rule_frames(min_elbow_angle=125.0), _ctx())
+        self.assertEqual(len(detections), 1)
+        detection = detections[0]
+        self.assertEqual(detection.fault_id, "pushup_shallow_depth")
+        self.assertEqual(detection.fault_name, "Shallow depth (partial rep)")
+        self.assertEqual(detection.kg_query, "Limited Range Of Motion")
+        self.assertEqual(detection.evidence["threshold"], 100.0)
+        self.assertAlmostEqual(detection.evidence["max_min_elbow_angle"], 125.0, places=2)
+        self.assertEqual(detection.observability, "high")
+
+    def test_does_not_fire_on_a_full_depth_rep(self) -> None:
+        for angle in (60.0, 85.0, 90.0):
+            self.assertEqual(
+                rule_shallow_depth(_rule_frames(min_elbow_angle=angle), _ctx()), [],
+                msg=f"{angle} deg is a full rep, not a fault",
+            )
+
+    def test_boundary_just_inside_and_just_outside_and_exactly_on(self) -> None:
+        # Strictly greater than 100. Exactly 100.0 must NOT fire -- that is the `>=` mutant.
+        self.assertEqual(len(rule_shallow_depth(_rule_frames(min_elbow_angle=100.1), _ctx())), 1)
+        self.assertEqual(rule_shallow_depth(_rule_frames(min_elbow_angle=100.0), _ctx()), [])
+        self.assertEqual(rule_shallow_depth(_rule_frames(min_elbow_angle=99.9), _ctx()), [])
+
+    def test_exact_severity_midway_along_the_ramp(self) -> None:
+        # 120 is exactly halfway along the spec's 100 -> 140 ramp, so this pins both endpoints.
+        detection = rule_shallow_depth(_rule_frames(min_elbow_angle=120.0), _ctx())[0]
+        self.assertAlmostEqual(detection.severity, 0.5, places=6)
+        self.assertAlmostEqual(detection.confidence, 0.5, places=6)
+        # A second mid-ramp point pins the slope too.
+        quarter = rule_shallow_depth(_rule_frames(min_elbow_angle=110.0), _ctx())[0]
+        self.assertAlmostEqual(quarter.severity, 0.25, places=6)
+
+    def test_severity_saturates_at_the_severe_end_of_the_ramp(self) -> None:
+        for angle in (140.0, 170.0):
+            self.assertAlmostEqual(
+                rule_shallow_depth(_rule_frames(min_elbow_angle=angle), _ctx())[0].severity,
+                1.0, places=6,
+            )
+
+    def test_only_the_bottom_phase_counts(self) -> None:
+        for phase in ("setup", "descent", "ascent", "unknown"):
+            self.assertEqual(
+                rule_shallow_depth(_rule_frames(phase=phase, min_elbow_angle=125.0), _ctx()), [],
+                msg=f"depth must only be judged at the bottom, not during {phase}",
+            )
+
+    def test_nan_elbow_angle_does_not_fire(self) -> None:
+        core = _rule_frames(min_elbow_angle=float("nan"))
+        self.assertEqual(rule_shallow_depth(core, _ctx()), [])
+
+    def test_invalid_frames_do_not_fire(self) -> None:
+        core = _rule_frames(min_elbow_angle=125.0, valid=False)
+        self.assertEqual(rule_shallow_depth(core, _ctx()), [])
+
+    def test_a_segment_shorter_than_min_frames_does_not_fire(self) -> None:
+        shallow = _rule_frames(5, min_elbow_angle=125.0)
+        deep = _rule_frames(5, min_elbow_angle=85.0)
+        self.assertEqual(rule_shallow_depth(shallow + deep, _ctx()), [])
+        self.assertEqual(len(rule_shallow_depth(_rule_frames(6, min_elbow_angle=125.0), _ctx())), 1)
+
+    def test_view_handling_follows_the_spec(self) -> None:
+        for view in ("side", "front_oblique"):
+            detection = rule_shallow_depth(_rule_frames(min_elbow_angle=120.0), _ctx(view))[0]
+            self.assertEqual(detection.observability, "high", msg=view)
+            self.assertAlmostEqual(detection.confidence, 0.5, places=6)
+        # Head-on foreshortens the elbow angle: downgraded, but NOT silenced -- unlike hip sag
+        # this rule makes no directional claim an unknown facing could invert.
+        for view in ("front", "rear"):
+            detection = rule_shallow_depth(_rule_frames(min_elbow_angle=120.0), _ctx(view))[0]
+            self.assertEqual(detection.observability, "medium", msg=view)
+            self.assertAlmostEqual(detection.confidence, 0.5 * 0.65, places=6)
+
+    def test_citation_is_copied_from_the_spec(self) -> None:
+        detection = rule_shallow_depth(_rule_frames(min_elbow_angle=125.0), _ctx())[0]
+        self.assertEqual(
+            detection.citation,
+            "San Juan JG, Suprak DN, Roach SM, Lyda M. BMC Musculoskelet Disord (2015) "
+            "PMC4327800.",
+        )
+        self.assertIn("displayed a significant linear decrease across the ROM",
+                      detection.citation_support)
+        self.assertIn("PMC4327800", detection.citation)
+
+
+# A test-only detector so the rules can be driven through the real
+# compute_raw -> assign_phases -> centred-median -> rules chain. Task 8 owns the production
+# MovementDetector and its registry.register call; this one is never registered.
+_TEST_DETECTOR = MovementDetector(
+    "Push-up (test harness)",
+    PUSHUP_METRIC_KEYS,
+    pushup_compute_raw,
+    pushup_assign_phases,
+    (rule_hip_sag, rule_shallow_depth),
+)
+
+
+class PushupRuleIntegrationTests(unittest.TestCase):
+    """The rules driven over real landmark geometry, not hand-set metric values."""
+
+    @staticmethod
+    def _clip(**knobs) -> list[dict]:
+        # Constant frames: the centred median (window 5) is a no-op on them, so the severity
+        # the pipeline computes is exactly the severity the arithmetic predicts.
+        return [pushup_frame(frame_index=i, **knobs) for i in range(20)]
+
+    def test_a_sagging_shallow_rep_fires_both_rules_with_exact_severities(self) -> None:
+        # hip_offset 0.063 over the fixture's 0.60 body axis => hip_offset_ratio 0.105, the
+        # ramp midpoint; elbow 120 deg is the depth ramp's midpoint. Both must score 0.5.
+        _, detections = run_detector(
+            _TEST_DETECTOR, self._clip(hip_offset=0.063, elbow_angle=120.0), 30.0, "side", 0.9
+        )
+        by_id = {detection.fault_id: detection for detection in detections}
+        self.assertEqual(set(by_id), {"pushup_hip_sag", "pushup_shallow_depth"})
+        self.assertAlmostEqual(by_id["pushup_hip_sag"].severity, 0.5, places=4)
+        self.assertEqual(by_id["pushup_hip_sag"].evidence["direction"], "sag")
+        self.assertAlmostEqual(by_id["pushup_shallow_depth"].severity, 0.5, places=4)
+
+    def test_a_clean_deep_rep_fires_nothing(self) -> None:
+        _, detections = run_detector(
+            _TEST_DETECTOR, self._clip(hip_offset=0.0, elbow_angle=85.0), 30.0, "side", 0.9
+        )
+        self.assertEqual(detections, [])
+
+    def test_a_piking_rep_is_reported_as_a_pike_end_to_end(self) -> None:
+        _, detections = run_detector(
+            _TEST_DETECTOR, self._clip(hip_offset=-0.063, elbow_angle=85.0), 30.0, "side", 0.9
+        )
+        self.assertEqual([d.fault_id for d in detections], ["pushup_hip_sag"])
+        self.assertEqual(detections[0].evidence["direction"], "pike")
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=4)
+
+    def test_camera_inversion_silences_hip_sag_but_not_shallow_depth(self) -> None:
+        # A 180-degree-rotated clip of a genuine sag. Without the hand-offset guard the sag
+        # would be emitted as a full-severity PIKE; the depth rule, which reads no sign, is
+        # unaffected and must keep working.
+        _, detections = run_detector(
+            _TEST_DETECTOR,
+            self._clip(hip_offset=0.063, elbow_angle=120.0, tilt_deg=180.0),
+            30.0, "side", 0.9,
+        )
+        self.assertEqual([d.fault_id for d in detections], ["pushup_shallow_depth"])
+
+    def test_a_clip_cropped_at_the_knees_fires_nothing_at_all(self) -> None:
+        # The module-wide silence risk, now visible at the rule layer: no ankles, no plank
+        # line, no valid frames -- so even the depth rule (which does not need ankles) goes
+        # quiet, because the validity gate precedes it.
+        frames = self._clip(hip_offset=0.063, elbow_angle=120.0)
+        for frame in frames:
+            frame["landmarks"][27]["visibility"] = 0.0
+            frame["landmarks"][28]["visibility"] = 0.0
+        _, detections = run_detector(_TEST_DETECTOR, frames, 30.0, "side", 0.9)
+        self.assertEqual(detections, [])
 
 
 if __name__ == "__main__":
