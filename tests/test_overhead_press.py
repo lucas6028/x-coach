@@ -456,8 +456,14 @@ class OverheadPressForwardHeadRuleTests(unittest.TestCase):
 
 class OverheadPressFrameValidityTests(unittest.TestCase):
     """The module-level silence risk: BOTH shoulders are in `ohp_compute_raw`'s `required`
-    tuple, so an occluded far shoulder invalidates the frame outright and silences ALL FIVE
-    OHP rules -- not just the forward-head rule whose normalizer it also degrades."""
+    tuple, so dropping either one invalidates the frame outright and silences ALL FIVE OHP
+    rules -- not just the forward-head rule whose normalizer it also degrades.
+
+    SCOPE OF THE PROOF: this exercises the VALIDITY-GATE mechanism on a synthetic frame. It
+    does NOT reproduce the real-world scenario (a hard sagittal view where the far shoulder
+    is hidden behind the near one), because the fixture's landmark layout is not sagittal
+    geometry. The mechanism is view-independent, which is why that is enough to pin it; the
+    real-world hit rate remains unmeasured."""
 
     _run = staticmethod(run_ohp)
 
