@@ -578,9 +578,17 @@ git commit -m "feat(pose): push-up raw metrics and phase segmentation"
 **Interfaces:**
 - Produces: `rule_hip_sag(core, ctx) -> list[PoseRuleDetection]`, `rule_shallow_depth(core, ctx) -> list[PoseRuleDetection]`
 
-**Thresholds — copied from the spec, NOT invented:**
-- `pushup_hip_sag`: `hip_offset_ratio > 0.06` (sag) or `< -0.06` (pike); equivalently `plank_angle_deviation_deg > 12`. Severity ramp 0.06 → 0.15. Observability `high` on `side`, near-`none` from `front`/`rear`.
-- `pushup_shallow_depth`: at the bottom phase, `min_elbow_angle > 100` is the spec's lower bound of its "~100–110°" band. **Use 100 and state in a comment that the spec gives a band and 100 is its conservative (fewer false positives) end.** Severity ramp 100 → 140. Observability `high` on `side`/`front_oblique`.
+**Numbers — TWO CATEGORIES, label them differently in the code. Do NOT call the ramps "spec-copied".**
+
+*(Corrected after the Task 6 review. This heading previously read "Thresholds — copied from the spec, NOT invented" and covered the severity ramps too, which is false: the spec's Push-up section, lines 292–433, contains no `Severity ramp` line and neither the string `0.15` nor `140`. `grep -n "pushup_hip_sag\|pushup_shallow_depth"` over the spec returns exactly two lines — the two `fault_id` lines. The Squat section DOES state ramps explicitly ("Severity ramp 0.82 → 0.70"), so the absence is meaningful, not a formatting quirk.)*
+
+**(a) Fire thresholds — copied from the spec, NOT invented:**
+- `pushup_hip_sag`: `hip_offset_ratio > 0.06` (sag) or `< -0.06` (pike); equivalently `plank_angle_deviation_deg > 12`. Observability `high` on `side`, near-`none` from `front`/`rear`.
+- `pushup_shallow_depth`: at the bottom phase, `min_elbow_angle > 100` is the spec's lower bound of its "~100–110°" band. **Use 100 and state in a comment that the spec gives a band and 100 is its conservative (fewer false positives) end.** Observability `high` on `side`/`front_oblique`.
+
+**(b) Severity ramps — RULE-LEVEL CHOICES, not in the spec. Keep the values, but document the reasoning rather than claiming provenance:**
+- `pushup_hip_sag`: ramp 0.06 → 0.15 (0.15 ≈ 2.5× the fire threshold; no source fixes that multiple).
+- `pushup_shallow_depth`: ramp 100 → 140 (140° is well past the spec's own "a full rep reaches roughly ≤90°").
 
 - [ ] **Step 1: Write failing firing AND non-firing tests for both rules**, plus **boundary tests just inside and just outside each threshold** and **one exact severity-value assertion per rule**. (The prior OHP review found 5 of 10 threshold mutants surviving because every fixture sat at an extreme — do not repeat that.) Build boundary fixtures as constant-value frames so the median smoothing in `run_detector` is a no-op and the asserted severity is exact.
 - [ ] **Step 2: Run → FAIL. Step 3: Implement both rules** following `rule_excessive_back_lean` (`overhead_press.py:319-365`) for structure: build a phase-scoped mask, walk `contiguous_true_segments(mask, ctx.min_frames)`, compute severity via `severity_from_range`, emit through `build_detection` with `citation` + `citation_support` **copied verbatim from the spec**.
@@ -601,9 +609,9 @@ git commit -m "feat(pose): push-up hip-sag and shallow-depth cited rules"
 **Interfaces:**
 - Produces: `rule_head_drop`, `rule_elbow_flare`, `rule_scapular_winging` (always returns `[]`)
 
-- [ ] **Step 1: `rule_head_drop`** — fires when `neck_line_angle_deg` deviates by `> 15` (spec's number) during descent/bottom. **Per-clip baseline:** measure the neck-line angle over the `setup` phase and flag deviation FROM that baseline, not from an absolute value — absolute neck angle varies with individual anatomy and camera height, and the spec gives no absolute reference. Document this as a spec deviation. Observability `medium` on `side`/`front_oblique`.
+- [ ] **Step 1: `rule_head_drop`** — fires when `neck_line_angle_deg` deviates by `> 15` (spec's number — verified present as "by > ~15°"; note the spec states NO severity ramp for this fault either, so whatever ramp is chosen must be labelled a rule-level choice, as in Task 6) during descent/bottom. **Per-clip baseline:** measure the neck-line angle over the `setup` phase and flag deviation FROM that baseline, not from an absolute value — absolute neck angle varies with individual anatomy and camera height, and the spec gives no absolute reference. Document this as a spec deviation. Observability `medium` on `side`/`front_oblique`.
 
-- [ ] **Step 2: `rule_elbow_flare` — self-gating on measurability, NOT on view label.** The spec asks for a `front`/`rear` view, but Task 4 established those labels have no validated meaning for a horizontal body, and `front` is unreachable in production anyway. So gate on whether the metric is *physically measurable*: fire only when the wrists are genuinely separated in image space (`distance(wrist15, wrist16) > 0.25 * shoulder_width` — i.e. the camera is looking down the body's long axis; from a true sagittal view the wrists overlap and this is near zero). Threshold `hand_width_ratio > 1.6` from the spec, severity ramp 1.6 → 2.2, observability `medium`.
+- [ ] **Step 2: `rule_elbow_flare` — self-gating on measurability, NOT on view label.** The spec asks for a `front`/`rear` view, but Task 4 established those labels have no validated meaning for a horizontal body, and `front` is unreachable in production anyway. So gate on whether the metric is *physically measurable*: fire only when the wrists are genuinely separated in image space (`distance(wrist15, wrist16) > 0.25 * shoulder_width` — i.e. the camera is looking down the body's long axis; from a true sagittal view the wrists overlap and this is near zero). Fire threshold `hand_width_ratio > 1.6` **is from the spec** ("flag when ratio > ~1.6"); the severity ramp 1.6 → 2.2 **is NOT — it is a rule-level choice**, verified: `2.2` appears nowhere in the spec's Push-up section (lines 292–433). Label the two differently in the docstring, exactly as Task 6 does. Observability `medium`.
   Write a comment explaining WHY this deviates from the spec's view gating, and a test proving a sagittal fixture (overlapping wrists) does NOT fire it.
 
 - [ ] **Step 3: `rule_scapular_winging` — registered, never emits.**
