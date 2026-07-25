@@ -1624,6 +1624,76 @@ class PushupHeadDropRuleTests(unittest.TestCase):
         self.assertIsNone(detections[0].evidence["max_neck_deviation_deg"])
         self.assertAlmostEqual(detections[0].severity, 0.5, places=6)   # the nose axis alone
 
+    def test_peak_frame_is_the_worst_frame_even_when_the_ramp_saturates(self) -> None:
+        # REGRESSION, IN THE ONLY REGIME THAT CATCHES IT. `score_values` feeds
+        # `build_detection`'s `nanargmax`. Built from per-frame SEVERITIES it is clipped to 1.0,
+        # so every frame past the ramp's severe end ties and `nanargmax` returns the FIRST of
+        # them -- the peak silently becomes "first severe frame" exactly when the frame matters
+        # most. A sub-saturation fixture passes either way and proves nothing, so both are
+        # asserted here and the saturated one is the point.
+        setup = _rule_frames(8, phase="setup", neck_line_signed_deg=0.0)
+
+        def _peak(deviations: list[float]) -> int:
+            active = [
+                _rule_frames(1, phase="descent", neck_line_signed_deg=deviation)[0]
+                for deviation in deviations
+            ]
+            core = _sequenced(setup + active)
+            return rule_head_drop(core, _ctx())[0].peak_frame
+
+        # Sub-saturation (all below the 35 deg severe end): correct under either formulation.
+        self.assertEqual(_peak([16.0, 18.0, 34.0, 20.0, 17.0, 16.0, 16.0]), 10)
+        # SATURATED: 40, 36 and 60 all clip to severity 1.0. The worst is the 60 at offset 3,
+        # i.e. frame 8 + 3 = 11. The clipped formulation reported 9 (the first saturated frame).
+        self.assertEqual(_peak([16.0, 40.0, 36.0, 60.0, 17.0, 16.0, 16.0]), 11)
+        self.assertEqual(_peak([16.0, 50.0, 36.0, 90.0, 17.0, 16.0, 16.0]), 11)
+        # ... and it still ranks ACROSS axes, which is why the series is normalised per ramp
+        # rather than left in raw units. Both directions are asserted, because a one-directional
+        # fixture leaves the neck ramp's role in the comparison unpinned (a mutant widening it to
+        # 15 -> 70 survives a nose-always-wins test: it is a monotonic rescale WITHIN an axis and
+        # only shows up in the cross-axis comparison).
+        two_axis_setup = _rule_frames(
+            8, phase="setup", neck_line_signed_deg=0.0, nose_ahead_ratio=0.0
+        )
+
+        def _two_axis_peak(pairs: list[tuple[float, float]]) -> int:
+            active = [
+                _rule_frames(
+                    1, phase="descent", neck_line_signed_deg=neck, nose_ahead_ratio=nose
+                )[0]
+                for neck, nose in pairs
+            ]
+            return rule_head_drop(_sequenced(two_axis_setup + active), _ctx())[0].peak_frame
+
+        # Nose wins: 0.24 is 2.00 on its ramp, neck 45 deg only 1.50 on its -- even though 45 is
+        # the numerically larger number.
+        self.assertEqual(_two_axis_peak([(45.0, 0.0), (16.0, 0.24)] * 3), 9)
+        # Neck wins: 55 deg is 2.00 on its ramp, nose 0.15 only 1.00 on its.
+        self.assertEqual(_two_axis_peak([(55.0, 0.0), (16.0, 0.15)] * 3), 8)
+
+        # An axis that is UNMEASURABLE on every frame must not poison the ranking. Here the neck
+        # metric is absent entirely (NaN) and only the nose varies, so the peak is the worst nose
+        # frame; a `max()` that propagated NaN instead of ignoring it would hand `nanargmax` an
+        # all-NaN series and silently fall back to the first frame of the segment.
+        nose_only = [
+            _rule_frames(1, phase="descent", nose_ahead_ratio=nose)[0]
+            for nose in (0.07, 0.09, 0.20, 0.10, 0.08, 0.07)
+        ]
+        core = _sequenced(_rule_frames(8, phase="setup", nose_ahead_ratio=0.0) + nose_only)
+        self.assertEqual(rule_head_drop(core, _ctx())[0].peak_frame, 10)
+
+    def test_the_display_tie_break_favours_the_neck_axis(self) -> None:
+        # An EXACT tie: neck 25 deg and nose 0.105 both score 0.5. Which axis names the
+        # detection is arbitrary, but it must not flip silently, so the `>=` is pinned.
+        detection = rule_head_drop(
+            _head_clip(setup_neck=0.0, active_neck=25.0, setup_nose=0.0, active_nose=0.105),
+            _ctx(),
+        )[0]
+        self.assertAlmostEqual(detection.severity, 0.5, places=6)
+        self.assertEqual(detection.evidence["criterion"], "both")
+        self.assertIn("neck", str(detection.evidence["primary_label"]))
+        self.assertEqual(detection.evidence["primary_threshold"], 15.0)
+
     def test_the_two_baselines_are_independent(self) -> None:
         # An unmeasurable nose through setup must not silence the neck axis, and vice versa.
         neck_only = rule_head_drop(
