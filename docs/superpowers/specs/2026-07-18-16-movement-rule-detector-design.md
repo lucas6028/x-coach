@@ -555,7 +555,7 @@ needed for left/right asymmetry.
   genuinely overhead; ending short of overhead means the target motion (and its shoulder
   musculature) was never fully loaded.
 - **citation**: Coratella G et al. Front Physiol (2022) PMC9354811; end-position
-  corroborated by Bini et al. (2025) PMC12372072.
+  corroborated by Evangelista P et al. J Funct Morphol Kinesiol (2025) PMC12372072.
 - **citation_support**: PMC9354811 states that "the simultaneous scapular upward rotation
   …, together with the humerus abduction and elbow extension … makes the overhead press
   suitable to stimulate upper trapezius, deltoids and triceps," defining the full overhead
@@ -576,8 +576,12 @@ needed for left/right asymmetry.
   paper quantifies (stated in citation_support). All other citation_support items are
   direct findings from sources read in full.
 - Author-name attributions for PMC6548056 (WOPD review) and PMC12372072 (sticking-region
-  model) are approximate first-author guesses from the RAG text (the docs did not expose a
-  clean author line); the PMCID is authoritative — verify author strings before final use.
+  model) were originally approximate first-author guesses from the RAG text (the docs did
+  not expose a clean author line). **Both have since been resolved against
+  `data/paper_metadata.json`** and the §6 reference index now carries the authoritative
+  strings: PMC6548056 = Soriano MA, Suchomel TJ, Comfort P; PMC12372072 = Evangelista P,
+  Rum L, Picerno P, Biscarini A. The §6 index is the source of truth for author strings —
+  where an inline rule entry abbreviates, it must abbreviate the *indexed* first author.
 - No web search was needed: RAG coverage for both movements was sufficient to back every
   emitted rule.
 
