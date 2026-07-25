@@ -385,11 +385,11 @@
   },
   "data/runtime/pose_json/upload_a9111a9e3cc2.json": {
     "front_score": 0.0,
-    "oblique_score": 0.605,
+    "oblique_score": 0.3125,
     "orientation_score_mean": 0.0,
     "rear_score": -0.0,
-    "side_score": 0.9,
-    "torso_width_ratio_mean": 0.0,
+    "side_score": 0.25,
+    "torso_width_ratio_mean": NaN,
     "total_frames": 0,
     "valid_frame_ratio": 0.0,
     "view_confidence": 0.0,
@@ -529,14 +529,14 @@
   },
   "data/runtime/pose_json/vid1.json": {
     "front_score": 0.0,
-    "oblique_score": 0.605,
+    "oblique_score": 0.3125,
     "orientation_score_mean": 0.0,
     "rear_score": -0.0,
-    "side_score": 0.9,
-    "torso_width_ratio_mean": 0.0,
+    "side_score": 0.25,
+    "torso_width_ratio_mean": NaN,
     "total_frames": 1,
     "valid_frame_ratio": 1.0,
-    "view_confidence": 0.9,
-    "view_type": "side"
+    "view_confidence": 0.21875,
+    "view_type": "rear_oblique"
   }
 }
