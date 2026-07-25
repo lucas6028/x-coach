@@ -280,25 +280,35 @@ Run: `.venv\Scripts\python.exe scripts/knowledge/author_ohp_lockout_v3.py --dry-
 
 Expected: 3 nodes ADDED, 5 edges ADDED, `[dry-run] graph NOT written.` If any `REQUIRED_EXISTING` node is reported missing, STOP — the graph is not the expected build.
 
-- [ ] **Step 5: Apply it**
+- [ ] **Step 5: Snapshot the graph before writing to it**
+
+`data/kg/sports_kg_v3.graphml` is gitignored — a bad write cannot be recovered with `git checkout`, and rebuilding it from scratch is expensive. The repo already keeps `sports_kg_v3.post-ohp-raw.graphml` and `sports_kg_v3.post-lunge-raw.graphml` snapshots, so this follows the established habit:
+
+```bash
+cp data/kg/sports_kg_v3.graphml data/kg/sports_kg_v3.pre-lockout.graphml
+```
+
+- [ ] **Step 6: Apply it**
 
 Run: `.venv\Scripts\python.exe scripts/knowledge/author_ohp_lockout_v3.py`
 
 Expected: `Wrote .../sports_kg_v3.graphml`, node count `+3`, edge count `+5`.
 
-- [ ] **Step 6: Run the test to verify it passes**
+If anything looks wrong, restore with `cp data/kg/sports_kg_v3.pre-lockout.graphml data/kg/sports_kg_v3.graphml`.
+
+- [ ] **Step 7: Run the test to verify it passes**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_kg_ohp_lockout.py -v`
 
 Expected: 3 passed.
 
-- [ ] **Step 7: Verify idempotency**
+- [ ] **Step 8: Verify idempotency**
 
 Run: `.venv\Scripts\python.exe scripts/knowledge/author_ohp_lockout_v3.py --dry-run`
 
 Expected: every line reads `node exists:` / `edge exists:`, `edges added this run: 0`.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add scripts/knowledge/author_ohp_lockout_v3.py tests/test_kg_ohp_lockout.py
@@ -921,6 +931,22 @@ from fastapi.testclient import TestClient
 from backend.app.main import app
 
 
+def _stub_result(movement: str) -> dict:
+    """A response-shaped stub. The route returns the analysis verbatim, so keep the real keys --
+    a thin dict would pass today but hide a shape regression if the route ever post-processes."""
+    return {
+        "video_id": "vid1",
+        "movement": movement,
+        "metadata": {"fps": 30.0},
+        "view": {"view_type": "side", "view_confidence": 0.8},
+        "quality": {"total_frames": 10, "valid_frames": 9, "valid_frame_ratio": 0.9},
+        "detections": [],
+        "retrievals": [],
+        "pose": {"fps": 30.0, "width": 640, "height": 480, "frames": []},
+        "source": "upload",
+    }
+
+
 class TestAnalyzeMovement(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
@@ -953,7 +979,7 @@ class TestAnalyzeMovement(unittest.TestCase):
             "backend.app.services.analysis.save_upload", return_value=("vid1", "/tmp/vid1.mp4")
         ), patch(
             "backend.app.services.analysis.analyze_video_file",
-            return_value={"movement": "Push-up", "detections": []},
+            return_value=_stub_result("Push-up"),
         ) as run:
             resp = self._post("Push-up")
         self.assertEqual(resp.status_code, 200)
@@ -965,7 +991,7 @@ class TestAnalyzeMovement(unittest.TestCase):
             "backend.app.services.analysis.save_upload", return_value=("vid1", "/tmp/vid1.mp4")
         ), patch(
             "backend.app.services.analysis.analyze_video_file",
-            return_value={"movement": "Squat", "detections": []},
+            return_value=_stub_result("Squat"),
         ) as run:
             resp = self._post(None)
         self.assertEqual(resp.status_code, 200)
@@ -979,7 +1005,7 @@ class TestAnalyzeMovement(unittest.TestCase):
                     return_value=("vid1", "/tmp/vid1.mp4"),
                 ), patch(
                     "backend.app.services.analysis.analyze_video_file",
-                    return_value={"movement": movement, "detections": []},
+                    return_value=_stub_result(movement),
                 ):
                     self.assertEqual(self._post(movement).status_code, 200)
 ```
@@ -1941,6 +1967,10 @@ Add the fetch and derived selection above `runUpload`:
   const [movements, setMovements] = useState<AnalyzableMovement[]>([
     { name: "Squat", validated: true },
   ]);
+  // Tracked separately from the list itself: the seed value is a FALLBACK, not an answer, and
+  // treating it as one would flash "Push-up cannot be analysed yet" on every slow load before
+  // the real list arrives.
+  const [movementsLoaded, setMovementsLoaded] = useState(false);
   useEffect(() => {
     let cancelled = false;
     api
@@ -1948,7 +1978,10 @@ Add the fetch and derived selection above `runUpload`:
       .then((ms) => {
         if (!cancelled && ms.length) setMovements(ms);
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setMovementsLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -1964,7 +1997,10 @@ Add the fetch and derived selection above `runUpload`:
   }, [requestedMovement]);
 
   const known = movements.some((m) => m.name === movement);
-  const movementError = known ? "" : t("studio.movementUnavailable", { movement });
+  // Only an ANSWERED "not analyzable" is an error. While the list is in flight we know nothing,
+  // and "we don't know yet" must not render as "no".
+  const movementError =
+    !movementsLoaded || known ? "" : t("studio.movementUnavailable", { movement });
 ```
 
 Add the imports at the top: `import { api, type Analysis } from "./api";` already exists — extend it, and add `import type { AnalyzableMovement } from "./lib/movements";`.
@@ -1990,7 +2026,27 @@ Pass the new props to `DemoIntro`:
           movement={movement}
           onMovementChange={setMovement}
           movementError={movementError}
+          movementsLoaded={movementsLoaded}
         />
+```
+
+Add a test pinning that the warning does not flash before the list resolves — this is the bug the `movementsLoaded` gate exists to prevent, and without the test the gate can be refactored away:
+
+```tsx
+  it("does not claim a movement is unavailable while the list is still loading", async () => {
+    let resolve!: (ms: { name: string; validated: boolean }[]) => void;
+    vi.spyOn(api, "getMovements").mockReturnValue(
+      new Promise((r) => {
+        resolve = r;
+      })
+    );
+    renderWithProviders(<App />, { route: "/app?movement=Push-up" });
+    // In flight: "we don't know yet" must not render as "no".
+    expect(screen.queryByText(/not.*analys|尚未/i)).toBeNull();
+    resolve(LIVE);
+    expect(await screen.findByLabelText(/movement/i)).toBeTruthy();
+    expect(screen.queryByText(/not.*analys|尚未/i)).toBeNull();
+  });
 ```
 
 - [ ] **Step 5: Render the selector in `DemoIntro.tsx`**
@@ -2001,8 +2057,12 @@ Extend `Props`:
   movements: AnalyzableMovement[];
   movement: string;
   onMovementChange: (movement: string) => void;
-  /** Non-empty when the requested movement is not analyzable; the dropzone stays hidden. */
+  /** Non-empty when the requested movement is KNOWN not to be analyzable; the dropzone stays
+   *  hidden. Empty while the catalog is still in flight. */
   movementError: string;
+  /** False until GET /api/movements settles. The dropzone waits, so a slow network cannot let
+   *  someone upload against a movement we have not confirmed. */
+  movementsLoaded: boolean;
 ```
 
 Add to the destructured parameters, and render above the dropzone. The dropzone is replaced (not merely disabled) when the movement is unusable, so there is nothing to upload into:
@@ -2043,7 +2103,7 @@ Add to the destructured parameters, and render above the dropzone. The dropzone 
           <p className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-content">
             {movementError}
           </p>
-        ) : loading ? (
+        ) : loading || !movementsLoaded ? (
           <LumenLoader variant="scan" caption={statusMsg} />
         ) : (
           <UploadDropzone onFile={onFile} />
@@ -2090,66 +2150,49 @@ The last part of the §9 mitigation: the clean-rep banner names the movement, so
 
 Create `frontend/src/test/components.CoachTray.movement.test.tsx`:
 
+Reuse the shared fixtures the existing `components.CoachTray.test.tsx` uses — `mockCleanAnalysis` and `mockUnmeasuredAnalysis` from `./fixtures`. That file needs **no** chat mocks (the coaching-feedback half of the tray renders without them) and `activeFaultId` is optional, so follow its call shape exactly rather than hand-rolling an `Analysis` factory:
+
 ```tsx
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders } from "./renderWithProviders";
 import CoachTray from "../components/CoachTray";
-import type { Analysis } from "../api";
+import { mockCleanAnalysis, mockUnmeasuredAnalysis } from "./fixtures";
 
-function analysis(over: Partial<Analysis>): Analysis {
-  return {
-    video_id: "v1",
-    metadata: {},
-    view: { view_type: "side", view_confidence: 0.8 },
-    quality: { valid_frame_ratio: 0.9 },
-    detections: [],
-    retrievals: [],
-    pose: { fps: 30, width: 0, height: 0, frames: [] },
-    source: "upload",
-    ...over,
-  } as Analysis;
-}
-
-describe("clean-rep verdict", () => {
+describe("CoachTray — the clean-rep verdict names the movement", () => {
   it("names the movement whose rules ran", () => {
     renderWithProviders(
       <CoachTray
-        analysis={analysis({ movement: "Push-up" })}
+        analysis={{ ...mockCleanAnalysis, movement: "Push-up" }}
         currentTime={0}
-        onSeek={() => {}}
-        activeFaultId={null}
+        onSeek={vi.fn()}
       />
     );
-    expect(screen.getByText(/No Push-up faults detected/i)).toBeTruthy();
+    expect(screen.getByText(/No Push-up faults detected/i)).toBeInTheDocument();
   });
 
   it("falls back to Squat for an analysis predating per-movement selection", () => {
     renderWithProviders(
-      <CoachTray
-        analysis={analysis({})}
-        currentTime={0}
-        onSeek={() => {}}
-        activeFaultId={null}
-      />
+      <CoachTray analysis={mockCleanAnalysis} currentTime={0} onSeek={vi.fn()} />
     );
-    expect(screen.getByText(/No Squat faults detected/i)).toBeTruthy();
+    expect(screen.getByText(/No Squat faults detected/i)).toBeInTheDocument();
   });
 
   it("still refuses to claim a clean rep on an unmeasured clip", () => {
     renderWithProviders(
       <CoachTray
-        analysis={analysis({ movement: "Overhead Press", quality: { valid_frame_ratio: 0 } })}
+        analysis={{ ...mockUnmeasuredAnalysis, movement: "Overhead Press" }}
         currentTime={0}
-        onSeek={() => {}}
-        activeFaultId={null}
+        onSeek={vi.fn()}
       />
     );
-    expect(screen.queryByText(/No Overhead Press faults detected/i)).toBeNull();
-    expect(screen.getByText(/could not be measured|無法測量/i)).toBeTruthy();
+    expect(screen.queryByText(/No Overhead Press faults detected/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/could not be measured|無法測量/i)).toBeInTheDocument();
   });
 });
 ```
+
+Note `components.CoachTray.test.tsx:52` already asserts `/No biomechanical faults/i` against `mockCleanAnalysis`. That assertion **will** fail once the string is movement-scoped — update it to `/No Squat faults detected/i`. Expected churn from `2a5d3e64`'s assertions, not a regression.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
