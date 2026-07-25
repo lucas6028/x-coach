@@ -61,7 +61,9 @@ export default function App() {
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
     try {
-      const data = await api.analyzeUpload(file);
+      // TODO(Task 11): send the user's chosen movement once the studio selector lands; until
+      // then every upload analyses as Squat, matching the backend's own default.
+      const data = await api.analyzeUpload(file, "Squat");
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;

@@ -35,7 +35,7 @@ describe("api auth header", () => {
 
   it("attaches the bearer token to uploads", async () => {
     const spy = mockFetch({ video_id: "u1" });
-    await api.analyzeUpload(new File(["v"], "squat.mp4", { type: "video/mp4" }));
+    await api.analyzeUpload(new File(["v"], "squat.mp4", { type: "video/mp4" }), "Squat");
     const init = spy.mock.calls[0][1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(init.headers).toEqual({ Authorization: "Bearer tok123" });
