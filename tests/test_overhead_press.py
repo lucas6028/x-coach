@@ -41,6 +41,8 @@ def ohp_frame(
     shoulder_y: float = 0.4,
     frame_index: int = 0,
     shoulder_dx: float = 0.0,
+    ear_dx: float = 0.0,
+    nose_y: float | None = None,
 ) -> dict:
     lm = [{"x": 0.5, "y": 0.5, "z": 0.0, "visibility": 1.0} for _ in range(33)]
     # shoulders 11/12, elbows 13/14, wrists 15/16, hips 23/24, ears 7/8
@@ -60,8 +62,13 @@ def ohp_frame(
     lm[16] = {"x": right_wrist[0], "y": right_wrist[1], "z": 0, "visibility": 1.0}
     lm[23] = {"x": 0.46, "y": 0.75, "z": 0, "visibility": 1.0}
     lm[24] = {"x": 0.54, "y": 0.75, "z": 0, "visibility": 1.0}
-    lm[7] = {"x": 0.46, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
-    lm[8] = {"x": 0.54, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
+    lm[7] = {"x": 0.46 + ear_dx, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
+    lm[8] = {"x": 0.54 + ear_dx, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
+    # Nose (landmark 0) must be placed explicitly: the all-33 default sits at y=0.5, i.e.
+    # BELOW the shoulders (y=0.4), which is anatomically impossible and would make any
+    # nose-relative metric meaningless. Placed just above the ear line by default.
+    lm[0] = {"x": 0.50 + ear_dx, "y": shoulder_y - 0.10 if nose_y is None else nose_y,
+             "z": 0, "visibility": 1.0}
     return {"frame_index": frame_index, "landmarks": lm}
 
 
