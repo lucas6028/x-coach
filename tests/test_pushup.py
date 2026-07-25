@@ -109,6 +109,7 @@ def pushup_frame(
     tilt_deg: float = 0.0,
     hand_drop: float = 0.10,
     head_follows: str = "axis",
+    head_jut: float = 0.0,
 ) -> dict:
     """Build one push-up frame in which EVERY asserted metric is controlled by construction.
 
@@ -139,6 +140,13 @@ def pushup_frame(
                             disturb those either. `hand_drop=0.0` reproduces the original
                             round-0 geometry exactly, for diffing behaviour against commits
                             ed40e087 / 20c1204a.
+      head_jut           -- FORWARD-HEAD JUT: translates BOTH ears AND the nose along the body
+                            axis toward the head end (fixture -x), leaving them on the line.
+                            This is the posture the neck ANGLE is blind to by construction --
+                            the ear->shoulder vector stays parallel to the axis, so
+                            `neck_line_signed_deg` stays 0.0 at any jut -- and it is what
+                            `nose_ahead_ratio` exists to see. Given in raw fixture displacement;
+                            divide by 0.60 for the body-length ratio the metric reports.
       head_follows       -- WHICH SEGMENT THE HEAD IS MODELLED AS RIDING ON, when the hips
                             sag. This is a modeling assumption, not a fault knob, and neither
                             setting is "the correct one" -- see `_neck_line_angle`'s docstring
@@ -163,8 +171,9 @@ def pushup_frame(
     right_hip = (_HIP_X, _MID_Y + _HALF_WIDTH + hip_offset)
     left_ankle = (_ANKLE_X, _MID_Y - _HALF_WIDTH)
     right_ankle = (_ANKLE_X, _MID_Y + _HALF_WIDTH)
-    left_ear = (_EAR_X, _MID_Y - _HALF_WIDTH + ear_offset)
-    right_ear = (_EAR_X, _MID_Y + _HALF_WIDTH + ear_offset)
+    # The head end is -x in this fixture, so a forward jut SUBTRACTS from x.
+    left_ear = (_EAR_X - head_jut, _MID_Y - _HALF_WIDTH + ear_offset)
+    right_ear = (_EAR_X - head_jut, _MID_Y + _HALF_WIDTH + ear_offset)
     if head_follows == "chord":
         # Swing each ear about its own shoulder by exactly the angle the shoulder->hip chord
         # rotated through when the hips dropped, so the head stays neutral to the TORSO
@@ -180,7 +189,7 @@ def pushup_frame(
     # them, they only feed the framework's lower_body_visibility field.
     left_knee = ((_HIP_X + _ANKLE_X) / 2.0, _MID_Y - _HALF_WIDTH + hip_offset / 2.0)
     right_knee = ((_HIP_X + _ANKLE_X) / 2.0, _MID_Y + _HALF_WIDTH + hip_offset / 2.0)
-    nose = (_EAR_X - 0.03, _MID_Y + ear_offset)
+    nose = (_EAR_X - 0.03 - head_jut, _MID_Y + ear_offset)
 
     placed = {
         0: nose,
@@ -558,9 +567,20 @@ class PushupSignedNeckLineTests(unittest.TestCase):
         than the body axis, a plank fault alone produces a neck reading -- and the sign says
         which plank fault contaminates which verdict. A SAG rotates the head SKYWARD relative to
         the axis, so it reads as a LIFT: `rule_head_drop` does not fire on it, but it MASKS a
-        simultaneous genuine drop. A PIKE is the false-positive direction, and must exceed about
-        0.09 of body length to forge the rule's 15 deg threshold unaided. Task 5's unsigned
-        metric could not separate these two cases at all."""
+        simultaneous genuine drop. A PIKE is the false-positive direction, and must reach
+        `hip_offset_ratio` -0.1340 -- 2.23x the spec's own -0.06 pike threshold -- to forge the
+        rule's 15 deg threshold unaided. Task 5's unsigned metric could not separate these two
+        cases at all.
+
+        UNITS -- THE COLLISION THAT PRODUCED A WRONG CLAIM ONCE. `pushup_frame`'s `hip_offset`
+        argument below is the fixture's RAW DISPLACEMENT; the metric, the spec and every prose
+        figure in this file are in `hip_offset_ratio`, i.e. BODY LENGTHS, which is 1/0.60 times
+        larger. So `hip_offset=0.06` here IS `hip_offset_ratio = 0.10`. The first version of this
+        docstring quoted the raw displacement as though it were the ratio and concluded
+        contamination began at 1.5x the pike threshold when it actually begins at 2.23x. The
+        assertion pairs below are annotated with both."""
+        # (raw fixture displacement, expected deg)  ->  ratio = displacement / 0.60
+        #   0.06 -> ratio 0.10      0.09 -> ratio 0.15      0.15 -> ratio 0.25
         for hip_offset, expected in ((0.06, -11.3099), (0.09, -16.6992), (0.15, -26.5650)):
             raw = pushup_compute_raw(
                 [pushup_frame(hip_offset=hip_offset, head_follows="chord")], 30.0
@@ -600,6 +620,108 @@ class PushupSignedNeckLineTests(unittest.TestCase):
         raw = pushup_compute_raw([occluded], 30.0)[0]
         self.assertTrue(raw["valid"])
         self.assertFalse(np.isfinite(raw["neck_line_signed_deg"]))
+
+
+class PushupNoseAheadTests(unittest.TestCase):
+    """`nose_ahead_ratio` -- the spec's SECOND, OR-ed firing cue for `pushup_head_drop`
+    ("when nose 0 sits clearly ahead of the shoulder along the body axis"), which round 1 of
+    this rule omitted. Positive = the nose sits ahead of the shoulder line, toward the head end,
+    in units of the shoulder-to-ankle length."""
+
+    def test_the_neck_angle_is_blind_to_a_forward_jut_and_this_metric_is_not(self) -> None:
+        # THE REASON THE SECOND CUE EXISTS. The neck angle measures departure PERPENDICULAR to
+        # the body axis, so a head jutted straight FORWARD along the axis keeps the ear->shoulder
+        # vector parallel to it and reads exactly 0.0 at any magnitude. Without this metric the
+        # canonical forward-head posture -- the first half of the fault's own name -- could
+        # never fire.
+        base = pushup_compute_raw([pushup_frame()], 30.0)[0]["nose_ahead_ratio"]
+        for jut, expected_ratio in ((0.0, 0.0), (0.06, 0.10), (0.15, 0.25)):
+            raw = pushup_compute_raw([pushup_frame(head_jut=jut)], 30.0)[0]
+            self.assertAlmostEqual(raw["neck_line_signed_deg"], 0.0, places=6, msg=f"jut {jut}")
+            self.assertAlmostEqual(raw["neck_line_angle_deg"], 0.0, places=6, msg=f"jut {jut}")
+            self.assertAlmostEqual(
+                raw["nose_ahead_ratio"] - base, expected_ratio, places=6, msg=f"jut {jut}"
+            )
+
+    def test_a_neutral_plank_already_reads_the_nose_well_ahead_of_the_shoulder(self) -> None:
+        # WHY THE RULE BASELINES THIS AXIS instead of reading it absolutely: on a horizontal
+        # body the nose is ALWAYS ahead of the shoulder line -- that is just where a head sits.
+        # 0.1833 is 3x the rule's 0.06 cut, so an absolute reading fires on every correct
+        # push-up ever filmed. Only the change from the lifter's own setup carries information.
+        raw = pushup_compute_raw([pushup_frame()], 30.0)[0]
+        self.assertAlmostEqual(raw["nose_ahead_ratio"], 0.11 / 0.60, places=5)
+        self.assertGreater(raw["nose_ahead_ratio"], 0.06)
+
+    def test_nose_ahead_ratio_is_roll_invariant_where_the_signed_neck_angle_is_not(self) -> None:
+        # It is a dot product of two vectors that both rotate with the camera, so it survives a
+        # rolled or inverted clip untouched. This is why `rule_head_drop` applies the
+        # hand-offset inversion guard to the NECK term only.
+        values = [
+            pushup_compute_raw([pushup_frame(head_jut=0.06, tilt_deg=t)], 30.0)[0]
+            for t in (0.0, 37.0, 180.0)
+        ]
+        for raw in values[1:]:
+            self.assertAlmostEqual(
+                raw["nose_ahead_ratio"], values[0]["nose_ahead_ratio"], places=6
+            )
+        # ... whereas the neck sign really does invert on the same clips.
+        upright = pushup_compute_raw([pushup_frame(ear_offset=0.03)], 30.0)[0]
+        inverted = pushup_compute_raw([pushup_frame(ear_offset=0.03, tilt_deg=180.0)], 30.0)[0]
+        self.assertGreater(upright["neck_line_signed_deg"], 0.0)
+        self.assertLess(inverted["neck_line_signed_deg"], 0.0)
+
+    def test_facing_the_other_way_does_not_flip_it(self) -> None:
+        mirrored = pushup_frame(head_jut=0.06)
+        for landmark in mirrored["landmarks"]:
+            landmark["x"] = 1.0 - landmark["x"]
+        forward = pushup_compute_raw([pushup_frame(head_jut=0.06)], 30.0)[0]
+        backward = pushup_compute_raw([mirrored], 30.0)[0]
+        self.assertAlmostEqual(
+            forward["nose_ahead_ratio"], backward["nose_ahead_ratio"], places=6
+        )
+
+    def test_an_occluded_nose_nans_only_this_metric(self) -> None:
+        # The nose is NOT in `required` (same call as the ears), so a dropped nose must not
+        # invalidate the frame or disturb the neck axis.
+        frame = pushup_frame(head_jut=0.06, ear_offset=0.03, hip_offset=0.06)
+        frame["landmarks"][0]["visibility"] = 0.0
+        raw = pushup_compute_raw([frame], 30.0)[0]
+        self.assertTrue(raw["valid"])
+        self.assertFalse(np.isfinite(raw["nose_ahead_ratio"]))
+        self.assertTrue(np.isfinite(raw["neck_line_signed_deg"]))
+        self.assertAlmostEqual(raw["hip_offset_ratio"], 0.1, places=5)
+
+    def test_nose_ahead_ratio_is_nan_without_a_body_axis(self) -> None:
+        frame = pushup_frame(head_jut=0.06)
+        for ankle, shoulder in ((27, 11), (28, 12)):
+            frame["landmarks"][ankle] = dict(frame["landmarks"][shoulder])
+        raw = pushup_compute_raw([frame], 30.0)[0]
+        self.assertTrue(raw["valid"])
+        self.assertFalse(np.isfinite(raw["nose_ahead_ratio"]))
+
+
+class PushupShoulderAxisRatioTests(unittest.TestCase):
+    """`shoulder_axis_ratio` = shoulder width / shoulder-to-ankle length -- the non-collapsing
+    normalizer `hand_width_ratio` lacks. `rule_elbow_flare` gates on it."""
+
+    def test_it_is_the_shoulder_width_in_body_lengths(self) -> None:
+        raw = pushup_compute_raw([pushup_frame()], 30.0)[0]
+        self.assertAlmostEqual(raw["shoulder_axis_ratio"], 0.10 / 0.60, places=5)
+
+    def test_it_is_scale_free_and_roll_invariant(self) -> None:
+        for tilt in (0.0, 37.0, 180.0):
+            raw = pushup_compute_raw([pushup_frame(tilt_deg=tilt)], 30.0)[0]
+            self.assertAlmostEqual(raw["shoulder_axis_ratio"], 0.10 / 0.60, places=5)
+
+    def test_it_collapses_when_the_shoulders_do_which_is_the_whole_point(self) -> None:
+        # The sagittal failure case: shoulders projected onto near-coincident points. This is
+        # exactly where `hand_width_ratio` becomes noise/noise, and this metric reports it.
+        frame = pushup_frame()
+        for index, y in ((11, 0.4990), (12, 0.5010)):
+            frame["landmarks"][index]["y"] = y
+        raw = pushup_compute_raw([frame], 30.0)[0]
+        self.assertAlmostEqual(raw["shoulder_axis_ratio"], 0.0033, places=4)
+        self.assertLess(raw["shoulder_axis_ratio"], 0.15)
 
 
 class PushupUnmeasurableInputTests(unittest.TestCase):
@@ -811,13 +933,24 @@ class PushupPhaseTests(unittest.TestCase):
 # it must be in any genuine push-up -- see rule_hip_sag's inversion guard.
 _GOOD_HAND_OFFSET = 0.1 / 0.6
 
+# A physically plausible plank seen from a camera that resolves the transverse axis: the
+# shoulders span roughly 0.3 of the shoulder-to-ankle length. Comfortably above
+# `rule_elbow_flare`'s 0.15 measurability cut, so hand-width fixtures are measurable unless a
+# test says otherwise. (The LANDMARK fixture's deliberately non-physical geometry reads 0.1667;
+# see `test_sagittal_collapse_is_refused_by_the_transverse_axis_guard` for the other extreme.)
+_MEASURABLE_SHOULDER_AXIS = 0.30
+
 
 def _rule_frames(count: int = 10, *, phase: str = "bottom", valid: bool = True, **metrics):
     """`count` identical CoreFrames carrying exactly the metrics named (plus a healthy
-    `hand_offset_ratio` unless overridden). Identical frames also mean the centred-median
-    smoothing inside `run_detector` would be a no-op on them, so the severities asserted
-    against these are the same ones the real pipeline would compute."""
-    values = {"hand_offset_ratio": _GOOD_HAND_OFFSET}
+    `hand_offset_ratio` and a measurable `shoulder_axis_ratio` unless overridden). Identical
+    frames also mean the centred-median smoothing inside `run_detector` would be a no-op on
+    them, so the severities asserted against these are the same ones the real pipeline would
+    compute."""
+    values = {
+        "hand_offset_ratio": _GOOD_HAND_OFFSET,
+        "shoulder_axis_ratio": _MEASURABLE_SHOULDER_AXIS,
+    }
     values.update(metrics)
     return [
         CoreFrame(
@@ -1167,8 +1300,10 @@ def _sequenced(frames: list[CoreFrame]) -> list[CoreFrame]:
 
 def _head_clip(
     *,
-    setup_neck: float = 0.0,
-    active_neck: float = 25.0,
+    setup_neck: float | None = 0.0,
+    active_neck: float | None = 25.0,
+    setup_nose: float | None = None,
+    active_nose: float | None = None,
     setup_count: int = 8,
     active_count: int = 8,
     active_phase: str = "descent",
@@ -1176,24 +1311,32 @@ def _head_clip(
     active_valid: bool = True,
     hand_offset_ratio: float = _GOOD_HAND_OFFSET,
 ) -> list[CoreFrame]:
-    """A two-block clip for `rule_head_drop`: `setup` frames that DEFINE the baseline, then
-    active frames judged against it. Both blocks are constant-valued, so `run_detector`'s
+    """A two-block clip for `rule_head_drop`: `setup` frames that DEFINE the baselines, then
+    active frames judged against them. Both blocks are constant-valued, so `run_detector`'s
     centred median would be a no-op on them and the severities asserted here are the ones the
-    real pipeline computes. 8 frames each clears `min_frames=6` with room to spare."""
+    real pipeline computes. 8 frames each clears `min_frames=6` with room to spare.
+
+    A `None` on either axis omits that metric entirely, so `CoreFrame.m` returns NaN for it and
+    the axis cannot fire. The two axes are independent, so most tests exercise exactly one:
+    the neck defaults are live, the nose ones are off unless a test asks for them."""
+
+    def _metrics(neck: float | None, nose: float | None) -> dict:
+        values: dict[str, float] = {"hand_offset_ratio": hand_offset_ratio}
+        if neck is not None:
+            values["neck_line_signed_deg"] = neck
+        if nose is not None:
+            values["nose_ahead_ratio"] = nose
+        return values
+
     return _sequenced(
         _rule_frames(
-            setup_count,
-            phase="setup",
-            valid=setup_valid,
-            neck_line_signed_deg=setup_neck,
-            hand_offset_ratio=hand_offset_ratio,
+            setup_count, phase="setup", valid=setup_valid, **_metrics(setup_neck, setup_nose)
         )
         + _rule_frames(
             active_count,
             phase=active_phase,
             valid=active_valid,
-            neck_line_signed_deg=active_neck,
-            hand_offset_ratio=hand_offset_ratio,
+            **_metrics(active_neck, active_nose),
         )
     )
 
@@ -1206,10 +1349,10 @@ class PushupHeadDropRuleTests(unittest.TestCase):
         self.assertEqual(detection.fault_id, "pushup_head_drop")
         self.assertEqual(detection.fault_name, "Forward head / neck drop")
         self.assertEqual(detection.kg_query, "Forward Head Posture")
-        self.assertEqual(detection.evidence["threshold"], 15.0)
+        self.assertEqual(detection.evidence["neck_threshold_deg"], 15.0)
         self.assertEqual(detection.evidence["primary_threshold"], 15.0)
         self.assertAlmostEqual(detection.evidence["max_neck_deviation_deg"], 25.0, places=2)
-        self.assertAlmostEqual(detection.evidence["setup_baseline_deg"], 0.0, places=2)
+        self.assertAlmostEqual(detection.evidence["neck_setup_baseline_deg"], 0.0, places=2)
         # The spec never rates this fault `high` from any view; `medium` is its ceiling.
         self.assertEqual(detection.observability, "medium")
         # The detected span is the ACTIVE block only, which is also what proves `_sequenced`
@@ -1242,7 +1385,7 @@ class PushupHeadDropRuleTests(unittest.TestCase):
         # It works below zero too: a lifter who sets up with the head LIFTED gets faulted for a
         # smaller absolute reading, because they moved further.
         detection = rule_head_drop(_head_clip(setup_neck=-10.0, active_neck=6.0), _ctx())[0]
-        self.assertAlmostEqual(detection.evidence["setup_baseline_deg"], -10.0, places=2)
+        self.assertAlmostEqual(detection.evidence["neck_setup_baseline_deg"], -10.0, places=2)
         self.assertAlmostEqual(detection.evidence["max_neck_deviation_deg"], 16.0, places=2)
 
     def test_the_baseline_is_the_MEAN_over_setup_frames_not_the_median(self) -> None:
@@ -1258,7 +1401,7 @@ class PushupHeadDropRuleTests(unittest.TestCase):
         # 17.6 - 2.5 = 15.1, just over.
         loud = _sequenced(setup + _rule_frames(8, phase="descent", neck_line_signed_deg=17.6))
         detection = rule_head_drop(loud, _ctx())[0]
-        self.assertAlmostEqual(detection.evidence["setup_baseline_deg"], 2.5, places=4)
+        self.assertAlmostEqual(detection.evidence["neck_setup_baseline_deg"], 2.5, places=4)
         self.assertAlmostEqual(detection.evidence["max_neck_deviation_deg"], 15.1, places=4)
 
     def test_exact_severity_midway_along_the_ramp(self) -> None:
@@ -1374,6 +1517,129 @@ class PushupHeadDropRuleTests(unittest.TestCase):
         self.assertEqual(weak.observability, "medium")
         self.assertAlmostEqual(weak.confidence, 0.5, places=6)
 
+    # --- the spec's SECOND, OR-ed firing cue: nose ahead along the body axis ----------------
+
+    def test_fires_on_the_nose_criterion_with_the_neck_perfectly_neutral(self) -> None:
+        # ROUND 1 COULD NOT DO THIS AT ALL. The neck angle is blind to an axial jut (pinned in
+        # PushupNoseAheadTests), so before the nose axis existed the canonical forward-head
+        # posture could never fire, and the omission was recorded nowhere.
+        detections = rule_head_drop(
+            _head_clip(setup_neck=0.0, active_neck=0.0, setup_nose=0.18, active_nose=0.285),
+            _ctx(),
+        )
+        self.assertEqual(len(detections), 1)
+        detection = detections[0]
+        self.assertEqual(detection.fault_id, "pushup_head_drop")
+        self.assertEqual(detection.evidence["criterion"], "nose_ahead")
+        self.assertEqual(detection.evidence["nose_ahead_threshold"], 0.06)
+        self.assertAlmostEqual(detection.evidence["max_nose_ahead_deviation"], 0.105, places=4)
+        self.assertAlmostEqual(detection.evidence["nose_setup_baseline"], 0.18, places=4)
+        # The display axis follows the driver, so it names the nose here.
+        self.assertIn("nose", str(detection.evidence["primary_label"]))
+        self.assertEqual(detection.evidence["primary_threshold"], 0.06)
+
+    def test_a_neutral_head_that_merely_sits_ahead_of_the_shoulder_does_not_fire(self) -> None:
+        # The measured reason this axis is baselined: on a real neutral plank the nose reads
+        # 0.1833 ahead, 3x the 0.06 cut. Read absolutely it would fire on every correct rep.
+        self.assertEqual(
+            rule_head_drop(
+                _head_clip(active_neck=0.0, setup_nose=0.1833, active_nose=0.1833), _ctx()
+            ),
+            [],
+        )
+
+    def test_nose_boundary_just_inside_and_just_outside_and_exactly_on(self) -> None:
+        for deviation, fires in ((0.0601, True), (0.06, False), (0.0599, False)):
+            detections = rule_head_drop(
+                _head_clip(
+                    active_neck=0.0, setup_nose=0.20, active_nose=0.20 + deviation
+                ),
+                _ctx(),
+            )
+            self.assertEqual(len(detections), 1 if fires else 0, msg=f"deviation {deviation}")
+
+    def test_exact_nose_severity_midway_along_the_ramp(self) -> None:
+        # 0.105 is exactly halfway along the rule-level 0.06 -> 0.15 ramp, pinning both ends.
+        half = rule_head_drop(
+            _head_clip(active_neck=0.0, setup_nose=0.0, active_nose=0.105), _ctx()
+        )[0]
+        self.assertAlmostEqual(half.severity, 0.5, places=6)
+        quarter = rule_head_drop(
+            _head_clip(active_neck=0.0, setup_nose=0.0, active_nose=0.0825), _ctx()
+        )[0]
+        self.assertAlmostEqual(quarter.severity, 0.25, places=6)
+        for saturated in (0.15, 0.40):
+            self.assertAlmostEqual(
+                rule_head_drop(
+                    _head_clip(active_neck=0.0, setup_nose=0.0, active_nose=saturated), _ctx()
+                )[0].severity,
+                1.0, places=6,
+            )
+
+    def test_a_nose_that_moves_BACK_is_not_a_forward_head(self) -> None:
+        self.assertEqual(
+            rule_head_drop(
+                _head_clip(active_neck=0.0, setup_nose=0.20, active_nose=0.05), _ctx()
+            ),
+            [],
+        )
+
+    def test_both_criteria_are_reported_and_the_worse_one_drives_severity(self) -> None:
+        # Spec's own two-axis idiom (squat shallow depth): OR the masks, take the max severity.
+        detection = rule_head_drop(
+            _head_clip(setup_neck=0.0, active_neck=20.0, setup_nose=0.0, active_nose=0.105),
+            _ctx(),
+        )[0]
+        self.assertEqual(detection.evidence["criterion"], "both")
+        # neck 20 deg -> 0.25; nose 0.105 -> 0.5. The max wins, and the display follows it.
+        self.assertAlmostEqual(detection.severity, 0.5, places=6)
+        self.assertIn("nose", str(detection.evidence["primary_label"]))
+        self.assertAlmostEqual(detection.evidence["max_neck_deviation_deg"], 20.0, places=2)
+        self.assertAlmostEqual(detection.evidence["max_nose_ahead_deviation"], 0.105, places=4)
+        # ... and the other way round, so `criterion` is not just tracking the severity.
+        neck_driven = rule_head_drop(
+            _head_clip(setup_neck=0.0, active_neck=35.0, setup_nose=0.0, active_nose=0.07),
+            _ctx(),
+        )[0]
+        self.assertEqual(neck_driven.evidence["criterion"], "both")
+        self.assertAlmostEqual(neck_driven.severity, 1.0, places=6)
+        self.assertIn("neck", str(neck_driven.evidence["primary_label"]))
+
+    def test_the_nose_axis_is_not_silenced_by_the_inversion_guard(self) -> None:
+        # DELIBERATE ASYMMETRY. `nose_ahead_ratio` is roll-invariant (a dot product of two
+        # vectors that both rotate with the camera), so it has no inversion exposure and is not
+        # guarded. An upside-down clip therefore loses the neck cue and KEEPS the forward-head
+        # cue -- the correct partial answer rather than a blanket refusal.
+        core = _head_clip(
+            active_neck=25.0, setup_nose=0.0, active_nose=0.105,
+            hand_offset_ratio=-_GOOD_HAND_OFFSET,
+        )
+        detections = rule_head_drop(core, _ctx())
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["criterion"], "nose_ahead")
+        # REGRESSION: the neck deviation is present in the data (+25 deg) and must not leak into
+        # the verdict anywhere -- not into `criterion`, not into the reported maximum, not into
+        # the severity. A first cut applied the guard only in the mask and reported
+        # `criterion="both"` here, claiming a neck verdict the rule had refused to make.
+        self.assertIsNone(detections[0].evidence["max_neck_deviation_deg"])
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=6)   # the nose axis alone
+
+    def test_the_two_baselines_are_independent(self) -> None:
+        # An unmeasurable nose through setup must not silence the neck axis, and vice versa.
+        neck_only = rule_head_drop(
+            _head_clip(active_neck=25.0, setup_nose=None, active_nose=0.9), _ctx()
+        )
+        self.assertEqual(len(neck_only), 1)
+        self.assertEqual(neck_only[0].evidence["criterion"], "neck_angle")
+        self.assertIsNone(neck_only[0].evidence["nose_setup_baseline"])
+        nose_only = rule_head_drop(
+            _head_clip(setup_neck=None, active_neck=99.0, setup_nose=0.0, active_nose=0.105),
+            _ctx(),
+        )
+        self.assertEqual(len(nose_only), 1)
+        self.assertEqual(nose_only[0].evidence["criterion"], "nose_ahead")
+        self.assertIsNone(nose_only[0].evidence["neck_setup_baseline_deg"])
+
     def test_citation_is_copied_from_the_spec(self) -> None:
         detection = rule_head_drop(_head_clip(active_neck=25.0), _ctx())[0]
         self.assertEqual(
@@ -1408,7 +1674,13 @@ class PushupElbowFlareRuleTests(unittest.TestCase):
         self.assertEqual(detection.evidence["threshold"], 1.6)
         self.assertEqual(detection.evidence["primary_threshold"], 1.6)
         self.assertAlmostEqual(detection.evidence["max_hand_width_ratio"], 1.9, places=4)
-        self.assertEqual(detection.observability, "medium")
+        self.assertEqual(detection.evidence["shoulder_axis_ratio_threshold"], 0.15)
+        self.assertAlmostEqual(
+            detection.evidence["min_shoulder_axis_ratio"], _MEASURABLE_SHOULDER_AXIS, places=4
+        )
+        # `low`, never `medium`: no label the pipeline can emit for a HORIZONTAL body carries
+        # validated meaning, so the spec's `medium` ceiling is not honestly reachable here.
+        self.assertEqual(detection.observability, "low")
 
     def test_does_not_fire_at_or_near_shoulder_width(self) -> None:
         for ratio in (0.8, 1.0, 1.3, 1.5):
@@ -1438,8 +1710,11 @@ class PushupElbowFlareRuleTests(unittest.TestCase):
             _rule_frames(hand_width_ratio=1.9, phase="descent"), _ctx("rear")
         )[0]
         self.assertAlmostEqual(detection.severity, 0.5, places=6)
-        # No view discount is applied at all (see the rule's docstring), so confidence == severity.
-        self.assertAlmostEqual(detection.confidence, 0.5, places=6)
+        # Confidence is ALWAYS discounted by 0.65: the rule can only ever fire from a label Task
+        # 4 leaves unvalidated for a horizontal body, so it must not shout. Severity (how bad the
+        # measured geometry is) and confidence (how much the view lets us trust it) part company
+        # here on purpose.
+        self.assertAlmostEqual(detection.confidence, 0.5 * 0.65, places=6)
         quarter = rule_elbow_flare(
             _rule_frames(hand_width_ratio=1.75, phase="descent"), _ctx("rear")
         )[0]
@@ -1493,17 +1768,65 @@ class PushupElbowFlareRuleTests(unittest.TestCase):
         )
         self.assertEqual(len(just_below), 1)
 
-    def test_observability_is_a_flat_medium_with_no_view_discount(self) -> None:
-        # `medium` is the spec's CEILING for this fault, and the only label that would tier
-        # below it is the front/rear one Task 4 discredited for a horizontal body -- so
-        # discounting on it would be theatre. The one informative label, `side`, is handled by
-        # silence above rather than by a discount.
+    def test_it_never_shouts_from_an_unvalidated_view(self) -> None:
+        # THE REVIEW FINDING THIS ANSWERS: the live firing envelope is exactly {rear,
+        # rear_oblique, unknown} (side is silenced, front is unreachable with allow_front=False),
+        # and Task 4 limit 1 says none of those carries validated meaning for a horizontal body
+        # -- while limit 4 says an EVIDENCE-FREE clip resolves to `rear_oblique`. Round 1 emitted
+        # severity 1.0 / confidence 1.0 / observability medium there. It must not.
         for view in ("front", "rear", "front_oblique", "rear_oblique", "unknown"):
             detection = rule_elbow_flare(
                 _rule_frames(hand_width_ratio=1.9, phase="descent"), _ctx(view)
             )[0]
-            self.assertEqual(detection.observability, "medium", msg=view)
-            self.assertAlmostEqual(detection.confidence, 0.5, places=6, msg=view)
+            self.assertEqual(detection.observability, "low", msg=view)
+            self.assertAlmostEqual(detection.confidence, 0.5 * 0.65, places=6, msg=view)
+        # Even a maximally wide reading -- severity saturated -- is capped in confidence.
+        loudest = rule_elbow_flare(
+            _rule_frames(hand_width_ratio=5.0, phase="descent"), _ctx("rear_oblique")
+        )[0]
+        self.assertAlmostEqual(loudest.severity, 1.0, places=6)
+        self.assertAlmostEqual(loudest.confidence, 0.65, places=6)
+        self.assertEqual(loudest.observability, "low")
+
+    def test_a_collapsed_transverse_axis_is_refused(self) -> None:
+        # The view-INDEPENDENT measurability guard. A sagittal clip that failed to earn the
+        # `side` label (Task 4 limit 3) reaches this rule with a noise/noise hand-width ratio;
+        # the collapsed shoulder/axis ratio is what refuses it.
+        for ratio in (0.0033, 0.05, 0.10):
+            self.assertEqual(
+                rule_elbow_flare(
+                    _rule_frames(
+                        hand_width_ratio=2.5, phase="descent", shoulder_axis_ratio=ratio
+                    ),
+                    _ctx("rear"),
+                ),
+                [],
+                msg=f"shoulder_axis_ratio {ratio} is not measurable",
+            )
+
+    def test_transverse_axis_guard_boundary(self) -> None:
+        # Strictly greater than 0.15.
+        wide = dict(hand_width_ratio=1.9, phase="descent")
+        self.assertEqual(
+            len(rule_elbow_flare(_rule_frames(**wide, shoulder_axis_ratio=0.1501), _ctx("rear"))), 1
+        )
+        self.assertEqual(
+            rule_elbow_flare(_rule_frames(**wide, shoulder_axis_ratio=0.15), _ctx("rear")), []
+        )
+        self.assertEqual(
+            rule_elbow_flare(_rule_frames(**wide, shoulder_axis_ratio=0.1499), _ctx("rear")), []
+        )
+
+    def test_a_nan_transverse_axis_ratio_refuses_for_free(self) -> None:
+        self.assertEqual(
+            rule_elbow_flare(
+                _rule_frames(
+                    hand_width_ratio=1.9, phase="descent", shoulder_axis_ratio=float("nan")
+                ),
+                _ctx("rear"),
+            ),
+            [],
+        )
 
     def test_setup_phase_is_out_of_scope(self) -> None:
         # Same rule-level call `rule_hip_sag` makes: during setup the hands are still being
@@ -1562,19 +1885,17 @@ class PushupElbowFlareRuleTests(unittest.TestCase):
 
 
 class PushupElbowFlareKnownGapTests(unittest.TestCase):
-    def test_sagittal_collapse_can_forge_a_wide_ratio(self) -> None:
-        """KNOWN GAP, pinned rather than claimed away -- the same idiom as
-        `test_visible_but_misplaced_landmark_is_trusted`.
+    def test_sagittal_collapse_is_refused_by_the_transverse_axis_guard(self) -> None:
+        """THE HAZARD, AND THE GUARD THAT NOW CLOSES IT -- built from real landmark arrays, in
+        the idiom of `test_visible_but_misplaced_landmark_is_trusted`.
 
-        The measurability gate assumes a sagittal view makes the WRIST separation vanish. It
-        does -- but the SHOULDER separation vanishes with it, so `hand_width_ratio` becomes
-        noise/noise and can land anywhere, including far above the spec's 1.6.
-        `_DEGENERATE_LENGTH` guards division by zero, not this. Closing it needs the wrist span
-        normalized by something that survives the sagittal view (shoulder-to-ankle length would),
-        which is not emitted today and is deliberately NOT invented here: a fabricated
-        anthropometric constant in a FIRE gate is worse than a documented gap. The `side` view
-        gate narrows this -- but only partly, because Task 4's limit 3 records that a genuine
-        sagittal clip often fails to EARN the `side` label."""
+        `hand_width_ratio` alone cannot see this: a sagittal view collapses the WRIST separation,
+        but it collapses the SHOULDER separation with it, so the ratio is noise/noise and lands
+        wherever the noise puts it -- here 2.500 out of two sub-pixel separations, i.e. a
+        full-severity flare verdict from nothing. Round 1 pinned this as an open gap. It is now
+        refused on the geometry by `shoulder_axis_ratio > 0.15`, which is VIEW-INDEPENDENT and so
+        also covers the residual the `side` label gate cannot reach (Task 4 limit 3: a genuine
+        sagittal clip often fails to earn the `side` label)."""
         frame = pushup_frame()
         # Both pairs collapsed onto near-coincident image points, as a camera looking down the
         # sagittal plane produces. Shoulder separation 0.0020, wrist separation 0.0050.
@@ -1583,16 +1904,36 @@ class PushupElbowFlareKnownGapTests(unittest.TestCase):
             frame["landmarks"][index]["x"] = _SHOULDER_X if index in (11, 12) else _WRIST_X
         raw = pushup_compute_raw([frame], 30.0)[0]
         self.assertTrue(raw["valid"])
-        # A forged 2.5 from two sub-pixel separations -- truth here is "unmeasurable".
+        # The forged ratio is still there -- the metric layer is not what changed.
         self.assertAlmostEqual(raw["hand_width_ratio"], 2.5, places=3)
+        # ... and the metric that exposes it as noise.
+        self.assertAlmostEqual(raw["shoulder_axis_ratio"], 0.0033, places=4)
 
-        # ... and the rule fires on it at FULL severity when the view label is not a confident
-        # `side`, which is exactly the residual the view gate cannot reach.
+        # The rule is now SILENT on it, from every label -- including the ones where round 1
+        # emitted severity 1.0 at confidence 1.0.
+        for view in ("rear", "rear_oblique", "unknown", "side", "front"):
+            self.assertEqual(
+                rule_elbow_flare(
+                    _rule_frames(
+                        hand_width_ratio=raw["hand_width_ratio"],
+                        shoulder_axis_ratio=raw["shoulder_axis_ratio"],
+                        phase="descent",
+                    ),
+                    _ctx(view),
+                ),
+                [],
+                msg=f"forged ratio must not fire from view {view}",
+            )
+
+    def test_the_guard_does_not_silence_a_genuinely_measurable_wide_grip(self) -> None:
+        # The other half of the claim: the guard refuses noise, not signal. Same forged wrist
+        # geometry is NOT used here -- the shoulders are intact, so the ratio means something.
         detections = rule_elbow_flare(
-            _rule_frames(hand_width_ratio=raw["hand_width_ratio"], phase="descent"), _ctx("rear")
+            _rule_frames(hand_width_ratio=1.9, phase="descent", shoulder_axis_ratio=0.30),
+            _ctx("rear"),
         )
         self.assertEqual(len(detections), 1)
-        self.assertAlmostEqual(detections[0].severity, 1.0, places=6)
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=6)
 
 
 class PushupScapularWingingRuleTests(unittest.TestCase):
@@ -1673,7 +2014,9 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         self.assertEqual([d.fault_id for d in detections], ["pushup_shallow_depth"])
 
     @staticmethod
-    def _rep_with_head(ear_offset: float, *, drop_from: int = 6, **knobs) -> list[dict]:
+    def _rep_with_head(
+        ear_offset: float, *, drop_from: int = 6, head_jut: float = 0.0, **knobs
+    ) -> list[dict]:
         """A real 24-frame rep whose head leaves the line partway through the descent. The
         opening frames stay neutral so the `setup` baseline is measured on an undropped head;
         the centred median (window 5) is a no-op on both constant stretches and only blends
@@ -1690,6 +2033,7 @@ class PushupRuleIntegrationTests(unittest.TestCase):
                 elbow_angle=angle,
                 frame_index=i,
                 ear_offset=(ear_offset if i >= drop_from else 0.0),
+                head_jut=(head_jut if i >= drop_from else 0.0),
                 **knobs,
             )
             for i, angle in enumerate(angles)
@@ -1707,7 +2051,7 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         self.assertIn("pushup_head_drop", by_id)
         detection = by_id["pushup_head_drop"]
         self.assertAlmostEqual(detection.severity, 0.5, places=3)
-        self.assertAlmostEqual(detection.evidence["setup_baseline_deg"], 0.0, places=3)
+        self.assertAlmostEqual(detection.evidence["neck_setup_baseline_deg"], 0.0, places=3)
         self.assertAlmostEqual(detection.evidence["max_neck_deviation_deg"], 25.0, places=2)
         self.assertEqual(detection.observability, "medium")
 
@@ -1731,6 +2075,42 @@ class PushupRuleIntegrationTests(unittest.TestCase):
                 30.0, "side", 0.9,
             )
             self.assertNotIn("pushup_head_drop", {d.fault_id for d in detections})
+
+    def test_a_forward_head_jut_fires_end_to_end_on_the_nose_criterion(self) -> None:
+        # The spec's second OR-ed cue, over REAL landmark geometry: the head translates 0.063
+        # forward along the body axis (0.105 of body length -- the nose ramp's midpoint), with
+        # the neck left exactly on the line. Round 1 of this rule was structurally incapable of
+        # detecting this clip.
+        _, detections = run_detector(
+            _TEST_DETECTOR, self._rep_with_head(0.0, head_jut=0.063), 30.0, "side", 0.9
+        )
+        by_id = {detection.fault_id: detection for detection in detections}
+        self.assertIn("pushup_head_drop", by_id)
+        detection = by_id["pushup_head_drop"]
+        self.assertEqual(detection.evidence["criterion"], "nose_ahead")
+        self.assertAlmostEqual(detection.severity, 0.5, places=3)
+        self.assertAlmostEqual(detection.evidence["max_nose_ahead_deviation"], 0.105, places=3)
+        # The neck axis is measurable here and reads exactly ZERO -- it is blind to an axial
+        # jut, which is precisely why the second cue had to exist.
+        self.assertAlmostEqual(detection.evidence["max_neck_deviation_deg"], 0.0, places=3)
+
+    def test_an_inverted_forward_head_jut_still_fires(self) -> None:
+        # `nose_ahead_ratio` is roll-invariant, so unlike the neck cue it survives a
+        # 180-degree-rotated clip. The inversion guard is deliberately not applied to it.
+        _, detections = run_detector(
+            _TEST_DETECTOR,
+            self._rep_with_head(0.0, head_jut=0.063, tilt_deg=180.0),
+            30.0, "side", 0.9,
+        )
+        by_id = {detection.fault_id: detection for detection in detections}
+        self.assertIn("pushup_head_drop", by_id)
+        self.assertEqual(by_id["pushup_head_drop"].evidence["criterion"], "nose_ahead")
+
+    def test_a_clean_rep_fires_neither_head_criterion(self) -> None:
+        _, detections = run_detector(
+            _TEST_DETECTOR, self._rep_with_head(0.0, head_jut=0.0), 30.0, "side", 0.9
+        )
+        self.assertNotIn("pushup_head_drop", {d.fault_id for d in detections})
 
     def test_wide_hands_fire_only_when_the_view_is_not_a_confident_side(self) -> None:
         frames = self._clip(hand_width_ratio=1.9, elbow_angle=85.0)
