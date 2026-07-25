@@ -98,6 +98,24 @@ describe("History", () => {
     expect(await screen.findByText("clean rep")).toBeInTheDocument();
   });
 
+  it("badges a row with the movement whose rules produced it", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ movement: "Push-up" })],
+    });
+    renderHistory();
+    expect(await screen.findByText("Push-up")).toBeInTheDocument();
+  });
+
+  it("badges a row predating the movement column as Squat", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item()], // no `movement` — the column didn't exist yet for this row
+    });
+    renderHistory();
+    expect(await screen.findByText("Squat")).toBeInTheDocument();
+  });
+
   it("shows the empty state with no analyses", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 0, items: [] });
     renderHistory();

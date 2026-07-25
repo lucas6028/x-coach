@@ -130,7 +130,10 @@ const en: Dict = {
   // Reasoning / coaching feedback
   "feedback.title": "Coaching Feedback",
   "feedback.badge": "rule + GraphRAG",
-  "feedback.noFaults": "No biomechanical faults detected. Clean rep.",
+  // Names the movement because it is USER-ASSERTED: the studio lets the user pick, so a clip can
+  // be measured by rules that do not describe it. Naming it makes the claim true relative to the
+  // user's own assertion and puts that assertion in front of them at the verdict.
+  "feedback.noFaults": "No {movement} faults detected. Clean rep.",
   // Shown instead of the clean-rep banner when no frame was measurable: an empty fault list then
   // means "never measured", not "nothing wrong". See lib/quality.ts.
   "feedback.notMeasured":
@@ -236,7 +239,7 @@ const en: Dict = {
   "landing.hero.titleAccent": "trace to the joint",
   "landing.hero.titlePost": ".",
   "landing.hero.sub":
-    "x-coach reads a squat video, locates the fault, traces its cause in a biomechanics knowledge graph spanning 16 movements, and explains the fix.",
+    "x-coach reads a squat, push-up or overhead-press video, locates the fault, traces its cause in a biomechanics knowledge graph spanning 16 movements, and explains the fix.",
   "landing.hero.readMethod": "Read the method",
 
   // Landing — problem
@@ -759,7 +762,7 @@ const zhHant: Dict = {
   // Reasoning / coaching feedback
   "feedback.title": "教練回饋",
   "feedback.badge": "規則 + GraphRAG",
-  "feedback.noFaults": "未偵測到生物力學錯誤，標準動作。",
+  "feedback.noFaults": "未偵測到{movement}的生物力學錯誤，這一下很標準。",
   "feedback.notMeasured":
     "這支影片沒有任何一個影格可供判讀，因此沒有產生動作評估結果。請確認全身都在畫面內後重新錄製。",
   "feedback.graphragContext": "GraphRAG 脈絡",
@@ -862,7 +865,7 @@ const zhHant: Dict = {
   "landing.hero.titleAccent": "追溯到關節",
   "landing.hero.titlePost": "。",
   "landing.hero.sub":
-    "x-coach 讀取深蹲影片，定位動作錯誤，在涵蓋 16 個動作的生物力學知識圖譜中追溯成因，並說明修正方式。",
+    "x-coach 讀取深蹲、伏地挺身或肩上推舉影片，定位動作錯誤，在涵蓋 16 個動作的生物力學知識圖譜中追溯成因，並說明修正方式。",
   "landing.hero.readMethod": "了解方法",
 
   // Landing — problem
