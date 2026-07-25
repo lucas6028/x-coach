@@ -103,6 +103,9 @@ describe("Movements page", () => {
     expect(betas).toHaveLength(2);
     const squatCard = screen.getByText("Squat").closest("button")!;
     expect(within(squatCard).queryByText("Beta")).toBeNull();
+    // Named, not just counted: Overhead Press specifically carries the tag Squat does not.
+    const ohpCard = screen.getByText("Overhead Press").closest("button")!;
+    expect(within(ohpCard).getByText("Beta")).toBeInTheDocument();
   });
 
   it("navigates to the studio with the chosen movement", async () => {
@@ -111,6 +114,17 @@ describe("Movements page", () => {
     const pushup = screen.getByRole("button", { name: /Push-up/ });
     await userEvent.click(pushup);
     expect(navigate).toHaveBeenCalledWith("/app?movement=Push-up");
+  });
+
+  it("navigates to the studio with a space-containing movement name, percent-encoded", async () => {
+    renderWithProviders(<Movements />);
+    await waitFor(() => expect(liveButtons()).toHaveLength(LIVE.length));
+    // Names Overhead Press explicitly (the count-only checks above would also pass if this card
+    // were actually some other movement, e.g. Row, misrouted by a typo'd name match) and pins the
+    // one interesting case for encodeURIComponent: a movement name containing a space.
+    const ohp = screen.getByRole("button", { name: /Overhead Press/ });
+    await userEvent.click(ohp);
+    expect(navigate).toHaveBeenCalledWith("/app?movement=Overhead%20Press");
   });
 
   it("falls back to Squat-only when the list cannot be fetched", async () => {
