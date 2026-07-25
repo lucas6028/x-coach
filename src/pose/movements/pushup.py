@@ -530,7 +530,15 @@ def rule_hip_sag(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetect
     false-positive amplifier, not merely a weak signal, and `_DEGENERATE_LENGTH` guards against
     division by zero, not against inflation. Following `rule_forward_head`'s hard gate in
     src/pose/movements/overhead_press.py. Oblique views keep the module's standard reduced
-    confidence."""
+    confidence.
+
+    THE VIEW GATE KEYS OFF THE CLASSIFIED VIEW LABEL, NOT THE TRUE CAMERA ANGLE. The inflation
+    it guards against is a continuous function of the real angle, so a clip MISCLASSIFIED as
+    `side` is not covered by it: it earns `observability="high"` and undiscounted confidence
+    however weak `ctx.view_confidence` is. No `SIDE_VIEW_CONF_THRESHOLD` floor is applied,
+    matching the structural model this rule follows (`rule_excessive_back_lean` does not gate
+    on confidence either); adding one would go beyond the spec's observability lines and change
+    behaviour, so it is recorded as a limit rather than silently patched."""
     if ctx.view_type in HEAD_ON_VIEWS:
         return []
     observable_sag = ctx.view_type == "side"
@@ -547,9 +555,11 @@ def rule_hip_sag(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetect
     detections: list[PoseRuleDetection] = []
     for start, end in contiguous_true_segments(sag_mask, ctx.min_frames):
         segment = core[start : end + 1]
+        # Every frame in the segment passed the mask, which already required a FINITE
+        # hip_offset_ratio -- so no NaN can reach here and no NaN-tolerant argmax is needed.
         signed_values = [frame.m("hip_offset_ratio") for frame in segment]
-        abs_values = [abs(value) if np.isfinite(value) else np.nan for value in signed_values]
-        peak_offset = int(np.nanargmax(np.where(np.isfinite(abs_values), abs_values, -np.inf)))
+        abs_values = [abs(value) for value in signed_values]
+        peak_offset = int(np.argmax(abs_values))
         peak_signed = float(signed_values[peak_offset])
         max_abs = float(abs_values[peak_offset])
         direction = "sag" if peak_signed > 0.0 else "pike"

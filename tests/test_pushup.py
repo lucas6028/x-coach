@@ -815,6 +815,29 @@ class PushupHipSagRuleTests(unittest.TestCase):
         self.assertAlmostEqual(detection.evidence["peak_hip_offset_ratio"], -0.13, places=4)
         self.assertAlmostEqual(detection.evidence["max_abs_hip_offset_ratio"], 0.13, places=4)
 
+    def test_a_clip_that_sags_then_pikes_yields_one_detection_of_each(self) -> None:
+        # WHY `direction` IS TRUSTWORTHY AT ALL: a segment cannot contain both directions,
+        # because getting from +0.061 to -0.061 must pass through |x| <= 0.06, which breaks the
+        # mask. That property is argued in the rule's docstring; this pins it, so widening the
+        # mask or adding hysteresis later cannot silently produce a mixed-direction segment
+        # whose single reported direction is wrong for half its frames.
+        mixed = (
+            _rule_frames(7, hip_offset_ratio=0.12)
+            + _rule_frames(7, hip_offset_ratio=0.0)
+            + _rule_frames(7, hip_offset_ratio=-0.12)
+        )
+        core = [
+            CoreFrame(
+                frame_index=index, time=index / 30.0, phase=frame.phase, valid=frame.valid,
+                lower_body_visibility=frame.lower_body_visibility, metrics=frame.metrics,
+            )
+            for index, frame in enumerate(mixed)
+        ]
+        detections = rule_hip_sag(core, _ctx())
+        self.assertEqual([d.evidence["direction"] for d in detections], ["sag", "pike"])
+        self.assertEqual((detections[0].start_frame, detections[0].end_frame), (0, 6))
+        self.assertEqual((detections[1].start_frame, detections[1].end_frame), (14, 20))
+
     def test_camera_inversion_guard_refuses_a_directional_verdict(self) -> None:
         # A negative hand offset means the direction the metric layer believes is groundward
         # is not, so a genuine SAG arrives here as a large negative number. Emitting would
