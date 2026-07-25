@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import math
 import unittest
 from dataclasses import replace
 
@@ -8,8 +10,10 @@ from src.pose.pose_rule_detector import (
     FrameMetrics,
     compute_frame_metrics,
     detect_rule_segments,
+    json_safe_view_payload,
     raw_frame_metrics,
 )
+from src.pose.view_estimation import ViewEstimate
 
 
 def landmark(x: float, y: float, visibility: float = 1.0) -> dict[str, float]:
@@ -122,6 +126,98 @@ class PoseRuleDetectorTests(unittest.TestCase):
         ]
         detections = detect_rule_segments(metrics, fps=30.0, view_type="rear", view_confidence=0.8)
         self.assertFalse(any(item.fault_id == "knees_inward" for item in detections))
+
+
+class JsonSafeViewPayloadTests(unittest.TestCase):
+    """torso_width_ratio_mean (and any other ViewEstimate float) can legitimately be
+    NaN -- that's honest "no width evidence" from estimate_view_for_pose, not a bug.
+    But dataclasses.asdict() leaves NaN untouched, and the Supabase/postgrest write
+    path serializes with allow_nan=False: it raises before any network call, gets
+    swallowed by the analyze route's broad except, and silently drops the analysis
+    from the user's history. json_safe_view_payload is the boundary fix: it must
+    always produce something strict `json.dumps(..., allow_nan=False)` accepts.
+    """
+
+    def _view(self, **overrides) -> ViewEstimate:
+        base = dict(
+            split_name="",
+            video_id="vid1",
+            view_type="rear_oblique",
+            view_confidence=0.21875,
+            front_score=0.0,
+            rear_score=0.0,
+            side_score=0.25,
+            oblique_score=0.3125,
+            face_visibility_mean=0.0,
+            torso_width_ratio_mean=float("nan"),
+            orientation_score_mean=0.0,
+            z_asymmetry_mean=0.0,
+            valid_frame_ratio=1.0,
+            valid_frame_count=1,
+            total_frames=1,
+        )
+        base.update(overrides)
+        return ViewEstimate(**base)
+
+    def test_non_finite_float_becomes_none(self) -> None:
+        payload = json_safe_view_payload(self._view())
+        self.assertIsNone(payload["torso_width_ratio_mean"])
+
+    def test_finite_fields_survive_unchanged(self) -> None:
+        payload = json_safe_view_payload(self._view())
+        self.assertEqual(payload["view_type"], "rear_oblique")
+        self.assertEqual(payload["view_confidence"], 0.21875)
+        self.assertEqual(payload["valid_frame_count"], 1)
+
+    def test_payload_survives_strict_json_dumps(self) -> None:
+        # This is the exact call postgrest/httpx makes when Supabase-persisting an
+        # analysis. Before the fix, asdict(view) fed straight to this call raised
+        # ValueError: Out of range float values are not JSON compliant: nan.
+        payload = json_safe_view_payload(self._view())
+        encoded = json.dumps(payload, allow_nan=False)
+        self.assertNotIn("NaN", encoded)
+        round_tripped = json.loads(encoded)
+        self.assertIsNone(round_tripped["torso_width_ratio_mean"])
+
+    def test_infinite_float_also_becomes_none(self) -> None:
+        # math.isfinite rejects +/-inf too, not just NaN -- belt and suspenders in
+        # case a future aggregation change introduces an infinite default.
+        payload = json_safe_view_payload(self._view(z_asymmetry_mean=math.inf))
+        self.assertIsNone(payload["z_asymmetry_mean"])
+        json.dumps(payload, allow_nan=False)
+
+    def test_all_finite_view_round_trips_with_no_nones(self) -> None:
+        payload = json_safe_view_payload(self._view(torso_width_ratio_mean=0.14828))
+        encoded = json.dumps(payload, allow_nan=False)
+        round_tripped = json.loads(encoded)
+        self.assertEqual(round_tripped["torso_width_ratio_mean"], 0.14828)
+
+    def test_end_to_end_degenerate_pose_json_view_survives_strict_json(self) -> None:
+        # Mirrors data/runtime/pose_json/vid1.json (all-coincident landmarks ->
+        # torso_width_ratio NaN in every frame) at the real call site,
+        # detect_pose_rules_from_payload, not just the helper in isolation.
+        import json as json_module
+        import tempfile
+        from pathlib import Path
+
+        from src.pose.pose_rule_detector import detect_pose_rules_from_payload
+
+        landmarks = [{"x": 0.1, "y": 0.2, "z": 0.0, "visibility": 0.9} for _ in range(33)]
+        pose_payload = {"metadata": {}, "frames": [{"frame_index": 0, "landmarks": landmarks}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "degenerate.json"
+            path.write_text(json_module.dumps(pose_payload), encoding="utf-8")
+            result = detect_pose_rules_from_payload(pose_payload, pose_json_path=path)
+
+        self.assertIsNone(result["view"]["torso_width_ratio_mean"])
+        # result["view"] is stored verbatim inside the JSONB blob that
+        # backend/app/services/store.py:persist_analysis hands to postgrest/httpx
+        # (allow_nan=False). Scoped to result["view"], matching the reviewer's
+        # traced call site (asdict(view) at the old pose_rule_detector.py:565) --
+        # NOT the full result dict, which separately carries NaN in frame_metrics
+        # for degenerate/invalid frames (a pre-existing, unrelated gap outside
+        # this fix's scope; see task-2-report.md).
+        json_module.dumps(result["view"], allow_nan=False)
 
 
 if __name__ == "__main__":
