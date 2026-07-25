@@ -145,7 +145,9 @@ class MovementRegistryTests(unittest.TestCase):
         metric_keys = set(result["frame_metrics"][0])
         self.assertIn("hip_offset_ratio", metric_keys)
         self.assertIn("hand_offset_ratio", metric_keys)
-        self.assertNotIn("knee_angle", metric_keys)
+        # `avg_knee_angle` is a real entry in squat's METRIC_KEYS -- asserting on a key that
+        # does not exist in EITHER movement would pass trivially and prove nothing.
+        self.assertNotIn("avg_knee_angle", metric_keys)
 
     def test_payload_routes_to_named_movement(self) -> None:
         from src.pose.pose_rule_detector import detect_pose_rules_from_payload
