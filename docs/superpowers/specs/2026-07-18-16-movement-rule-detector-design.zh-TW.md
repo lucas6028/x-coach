@@ -506,15 +506,33 @@ visibility)。關鍵點索引依 shared_context.md。
   final position" 才算完成,因此建議訓練策略要 "target … elbow strength near
   lockout"。完全的肘伸展就是「一下做完」的力學定義,停在半路是實質的 ROM 缺失。
 
-#### 頭部前引 / 槓路落在中線前方
+#### 鎖定時頭部前引
 
-- **fault_id**: `ohp_forward_head_barpath`
-- **fault_name**: 頭部前引 / 槓路落在中線前方(Forward head / bar path forward of midline)
-- **description**: 頭往前伸,以及/或槓在鎖定時停在肩膀前方,而不是疊在肩膀與足中線的正上方。
-- **detection_heuristic**: 側面視角。(a) 頭部前引:耳(7/8)或鼻(0)沿前向軸相對肩(11/12)
-  的水平偏移量,以肩寬正規化;耳往前超過約 0.3 個肩寬就觸發。(b) 槓在前方:鎖定時腕(15/16)
-  相對肩的水平前向偏移;腕沒有大致垂直疊在肩膀上方(偏移 > 約 0.3 個肩寬)就觸發。
-- **observability**: medium–high —— `side`(兩個線索都是矢狀面的偏移);從 `front` 為 low。
+- **fault_id**: `ohp_forward_head`
+- **fault_name**: 鎖定時頭部前引(Forward head posture at lockout)
+- **description**: 鎖定前後,頭往前伸出肩線之外。
+- **detection_heuristic**: 側面視角。耳(7/8)沿前向軸相對肩(11/12)的水平偏移量,以肩寬
+  正規化;耳往前超過約 0.3 個肩寬就觸發。
+- **observability**: medium–high —— `side`(此線索為矢狀面偏移);從 `front` 為 low。
+
+> **已撤回的子準則——槓路落在中線前方。** 本規則原本還帶第二個線索:*「(b) 槓在前方:鎖定時
+> 腕(15/16)相對肩的水平前向偏移;腕沒有大致垂直疊在肩膀上方(偏移 > 約 0.3 個肩寬)就觸發。」*
+> 該子準則已於 2026-07-25 **撤回**,實作中的 `wrist_forward_offset` 指標亦一併刪除,理由有三:
+>
+> 1. **它其實是在重述後仰。** 把槓路的參考點放在 *肩膀* 會和軀幹後仰混為一談:後仰時肩膀往後
+>    移動,而槓仍停在支撐基底上方,因此「槓在肩膀前方」**就是** 後仰的力學特徵。實測上,一個
+>    純粹後仰的動作會以 severity 1.0 / confidence 1.0 觸發本錯誤,把真正發生的
+>    `ohp_lumbar_hyperextension`(0.41)壓在下面。
+> 2. **正確的參考座標量不到。** 描述自己的用詞(疊在肩膀 **與足中線** 正上方)意味著槓路該以
+>    足中線為參考,而那需要一個自行發明的足中線代理量——本專案「每個門檻都要有文獻支撐」的
+>    前提不允許。
+> 3. **引用文獻並不支持它。** Abdelraouf 等人(PMC13116542)是以 **頭顱脊椎角** 定義頭部前引,
+>    那是一個「耳相對於肩」的量測,因此耳對肩的參考方式正是文獻在量的東西。該文獻,以及
+>    PMC13086636 / PMC12514857,都完全沒有談到槓的位置。
+>
+> **待決的規格問題:** 過頭推舉規則集到底要不要一條真正的槓路錯誤?若要,它需要 (a) 一個
+> MediaPipe 真的解得出來的支撐基底參考點,以及 (b) 它自己的引用文獻。在兩者到位之前,本規則
+> 只是一條頭部前引線索。這是「待決定前先撤回」,不是默默改寫語意。
 - **biomechanical_rationale**: 頭部前引/胸椎後凸的過頭姿勢會減少可用的肩胛上旋與肩屈曲,並壓縮
   肩峰下空間,一邊砍掉可達成的過頭 ROM,一邊拉高夾擠風險;而推舉本身的疲勞已被證實會把頭推向
   這種前引姿勢。
@@ -1362,18 +1380,37 @@ RAG 語料庫來源(作者/標題/期刊以 `data/paper_metadata.json` 為權威
 
 **狀態(2026-07-25):** 過頭推舉的 5 條規則已 **全數(5/5)** 實作於
 `src/pose/movements/overhead_press.py`(`ohp_incomplete_lockout`、`ohp_lumbar_hyperextension`、
-`ohp_asymmetric_press`、`ohp_insufficient_elevation`、`ohp_forward_head_barpath`)。實作與上文
-偵測啟發式有兩處刻意的偏離,程式碼內亦已註明:
+`ohp_asymmetric_press`、`ohp_insufficient_elevation`、`ohp_forward_head`)。實作與上文
+偵測啟發式有數處刻意的偏離,程式碼內亦已註明:
 
 - `ohp_insufficient_elevation`——上文「約 0.5 個頭高」的寫法 **無法實作**:MediaPipe 的 33 個
   關鍵點裡根本沒有可量測頭高的東西(鼻、眼、耳、嘴全部落在臉部範圍內,任兩點都跨不過整顆頭)。
   實作改為 **替代準則**:以肩寬正規化的鼻部淨空高度,當
   `(wrist_mean_y − nose_y) / shoulder_width > −0.15` 時觸發。這是 **替代,不是單位換算**——
   沒有假設或引入任何「頭高對肩寬」的人體測量常數。
-- `ohp_forward_head_barpath`——實作為 **硬性視角閘門**,而非上文「側面中高、正面低」所隱含的
-  可觀察度降級。兩項線索都是純水平位移,方向在不知道受試者面向時無法判定,因此在
-  `{side, front_oblique}` 以外的視角 **完全不輸出偵測**,而不是輸出低信心的偵測:給錯方向比
-  沉默更糟。另外,它所用的肩寬正規化在被閘門允許的側面視角下條件最差(遠側肩被遮蔽時整條
-  規則會直接靜默)。
+- `ohp_forward_head`(由 `ohp_forward_head_barpath` 更名)——實作為 **硬性視角閘門**,而非
+  上文「側面中高、正面低」所隱含的可觀察度降級。該線索是純水平位移,方向在不知道受試者面向時
+  無法判定,因此在 `{side, front_oblique}` 以外的視角 **完全不輸出偵測**,而不是輸出低信心的
+  偵測:給錯方向比沉默更糟。另外,它所用的肩寬正規化在被閘門允許的側面視角下條件最差。
+- `ohp_forward_head`——閘門另外要求 `view_confidence >= 0.20`
+  (`src/pose/pose_rule_detector.py` 中的 `SIDE_VIEW_CONF_THRESHOLD`),沿用深蹲
+  `rule_knees_forward` 的先例。**這是對該先例的擴充**:深蹲只對 `side` 設閘,這裡把同一道信心
+  下限也套用到 `front_oblique`,理由是「分類信心很低的斜側視角」和「分類信心很低的正側視角」
+  一樣沒有資格支撐一個帶方向的宣稱。沒有引入新數字——常數與深蹲共用。
+- `ohp_forward_head`——規格中的 **槓路子準則已撤回**;完整理由與它留下的待決規格問題,見上文
+  該規則條目中的引用方塊。
+- `ohp_incomplete_lockout`——遮罩的觸發條件是 `elbow_flag OR wrist_flag`,因此嚴重度改為同時
+  計算 **兩條** 規格內的斜坡(肘 160→140 度、腕 0.0→0.15)後取較差者。原本以「肘的讀數是否
+  有限」來選斜坡,會在區段只由腕準則觸發時算錯:一個槓根本沒離開肩膀高度、但手肘打直的動作,
+  會以 **severity 0.0 / confidence 0.0** 輸出,而且帶著與自己所指錯誤互相矛盾的證據
+  (「峰值肘角 178 度 vs 門檻 160 度」)。沒有引入新門檻。
 
-兩條新門檻與既有三條一樣,尚未以標註資料驗證(§8.4)。
+五條過頭推舉門檻全部尚未以標註資料驗證(§8.4)。
+
+**已知的未竟事項(不是偏離,是缺口):** 有三個過頭推舉的 `kg_query` 字串在
+`data/kg/sports_kg_v3.graphml` 上 **完全解析不到任何節點**——`"Incomplete Elbow Lockout"`、
+`"Lumbar Hyperextension"`、`"Asymmetric Press"`(以 `graph_retrieval.resolve_nodes` 驗證,
+限定動作與不限定動作都一樣)。`"Forward Head Posture"` 與 `"Limited Shoulder Elevation"` 則
+可正常解析。圖上也沒有可以改指過去的相近節點(最接近的過頭推舉節點是 `Near Lockout`、
+`Thoracolumbar Extension`、`Elbow Extensor Torque`),所以這需要補 KG 內容,不是改字串就能解決。
+目前那三條錯誤送到對話層時有引用文獻,但沒有檢索到的依據。

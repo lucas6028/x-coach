@@ -108,13 +108,25 @@ class OverheadPressMetricsTests(unittest.TestCase):
         self.assertGreater(raw_low[0]["wrist_above_nose"], 0.0)
 
     def test_anterior_offset_sign_matches_back_lean_convention(self) -> None:
-        # Anchors the single module-wide facing convention: the SAME fixture shift that the
+        # Anchors the single module-wide facing convention: in ONE frame, the shift the
         # back-lean rule reads as "shoulders behind the hips" (positive torso_lean_signed_deg)
-        # must also read as "wrists anterior of the shoulders" (positive wrist_forward_offset).
-        # If these two ever disagree in sign, the module has two conflicting conventions.
-        raw = ohp_compute_raw([ohp_frame(160, wrist_y=0.15, shoulder_dx=0.15)], 30.0)
+        # and the shift the forward-head rule reads as "ear anterior of the shoulder line"
+        # (positive ear_forward_offset) must agree in sign. If they ever disagree, the module
+        # has two conflicting facing conventions.
+        # (Re-anchored from `wrist_forward_offset` to `ear_forward_offset` when the bar-path
+        # sub-criterion was withdrawn; `ear_dx` is needed because the fixture's head rides
+        # WITH the shoulders, so shoulder_dx alone leaves ear_forward_offset at exactly 0.)
+        raw = ohp_compute_raw([ohp_frame(160, wrist_y=0.15, shoulder_dx=0.15, ear_dx=-0.05)], 30.0)
         self.assertGreater(raw[0]["torso_lean_signed_deg"], 15.0)
-        self.assertGreater(raw[0]["wrist_forward_offset"], 0.0)
+        self.assertGreater(raw[0]["ear_forward_offset"], 0.0)
+
+    def test_wrist_forward_offset_metric_is_gone(self) -> None:
+        # The bar-path sub-criterion was withdrawn (see `rule_forward_head`); its metric must
+        # not survive as dead pre-wiring that a future reader mistakes for a live signal.
+        from src.pose.movements.overhead_press import OHP_METRIC_KEYS
+        raw = ohp_compute_raw([ohp_frame(160, wrist_y=0.15, shoulder_dx=0.15)], 30.0)
+        self.assertNotIn("wrist_forward_offset", raw[0])
+        self.assertNotIn("wrist_forward_offset", OHP_METRIC_KEYS)
 
     def test_ear_forward_offset_metric(self) -> None:
         # shoulder width is 0.10; ear_dx=-0.05 puts the ears 0.5 shoulder-widths anterior.
@@ -154,6 +166,24 @@ class OverheadPressRulesTests(unittest.TestCase):
                   + [ohp_frame(90, 0.45, frame_index=i + 10) for i in range(4)])
         ids = {d.fault_id for d in self._run(frames)}
         self.assertNotIn("ohp_incomplete_lockout", ids)
+
+    def test_lockout_severity_follows_the_criterion_that_fired(self) -> None:
+        # A maximally failed press: elbows locked straight (178 deg, so the ELBOW criterion
+        # does NOT fire) but the bar never rises above the shoulders at all (wrist_y 0.45 vs
+        # shoulder_y 0.40 => wrist_above_shoulder = +0.05, so the WRIST criterion fires).
+        # Selecting the severity ramp by "is the elbow reading finite?" used to take the
+        # elbow ramp here and emit severity 0.0 / confidence 0.0 -- a phantom detection whose
+        # own evidence said the elbow was fine.
+        frames = [ohp_frame(178, wrist_y=0.45, frame_index=i) for i in range(12)]
+        det = next(
+            d for d in self._run(frames) if d.fault_id == "ohp_incomplete_lockout"
+        )
+        self.assertGreater(det.severity, 0.0)
+        self.assertGreater(det.confidence, 0.0)
+        # severity_from_range(0.05, mild=0.0, severe=0.15) = 0.05 / 0.15 = 0.3333
+        self.assertAlmostEqual(det.severity, 0.3333, places=4)
+        self.assertEqual(det.evidence["primary_label"], "wrist height above shoulder")
+        self.assertAlmostEqual(det.evidence["primary_value"], 0.05, places=4)
 
     def test_lockout_rule_carries_citation(self) -> None:
         frames = [ohp_frame(140, 0.15, frame_index=i) for i in range(12)]
@@ -242,6 +272,53 @@ class OverheadPressElevationRuleTests(unittest.TestCase):
         assert det is not None and det.citation and det.citation_support
         self.assertIn("PMC9354811", det.citation)
 
+    @staticmethod
+    def _flat_rep(wrist_y: float) -> list[dict]:
+        """12 IDENTICAL frames. The window-5 median smoothing in `run_detector` is then a
+        no-op, so `wrist_above_nose` equals its per-frame value exactly and the severity ramp
+        can be asserted as a number. (`_rep` above cannot: its 0.45 setup frames blend into
+        the top frames under smoothing, and the resulting worst value saturates the ramp.)
+        The default nose sits at y=0.30 and shoulder width is 0.10, so
+        wrist_above_nose == (wrist_y - 0.30) / 0.10."""
+        return [ohp_frame(178, wrist_y, frame_index=i) for i in range(12)]
+
+    def test_elevation_fires_just_inside_threshold(self) -> None:
+        # wrist_y=0.29 => wrist_above_nose = -0.10, just past the -0.15 fire threshold.
+        det = next(
+            (d for d in self._run(self._flat_rep(0.29))
+             if d.fault_id == "ohp_insufficient_elevation"),
+            None,
+        )
+        self.assertIsNotNone(det)
+        self.assertAlmostEqual(det.evidence["max_wrist_above_nose"], -0.10, places=4)
+        # Deterministic ramp: severity_from_range(v, mild=-0.15, severe=0.35)
+        # = (-0.10 + 0.15) / (0.35 + 0.15) = 0.1. Pins BOTH range endpoints, so moving
+        # `severe` (e.g. 0.35 -> 0.9) fails here.
+        self.assertAlmostEqual(det.severity, 0.1, places=4)
+
+    def test_elevation_silent_just_outside_threshold(self) -> None:
+        # wrist_y=0.28 => wrist_above_nose = -0.20, just short of -0.15: hands barely clear
+        # the head but they DO clear it. Any fire threshold below -0.20 (e.g. -1.0) would
+        # wrongly fire here.
+        ids = {d.fault_id for d in self._run(self._flat_rep(0.28))}
+        self.assertNotIn("ohp_insufficient_elevation", ids)
+
+    def test_elevation_confidence_is_downgraded_off_observable_views(self) -> None:
+        # `rear` is outside {side, front, front_oblique}, so confidence must be severity
+        # scaled by the 0.65 unobservable-view multiplier, not severity itself.
+        observable = next(
+            d for d in self._run(self._flat_rep(0.29), view="side")
+            if d.fault_id == "ohp_insufficient_elevation"
+        )
+        unobservable = next(
+            d for d in self._run(self._flat_rep(0.29), view="rear")
+            if d.fault_id == "ohp_insufficient_elevation"
+        )
+        self.assertEqual(observable.severity, unobservable.severity)
+        self.assertAlmostEqual(observable.confidence, 0.1, places=4)
+        self.assertAlmostEqual(unobservable.confidence, 0.065, places=4)
+        self.assertEqual(unobservable.observability, "medium")
+
     def test_elevation_not_flagged_when_nose_invisible(self) -> None:
         # No nose landmark => wrist_above_nose is NaN => the rule must stay silent rather
         # than guess, and must not invalidate the frame for the other OHP rules.
@@ -254,66 +331,152 @@ class OverheadPressElevationRuleTests(unittest.TestCase):
 
 
 class OverheadPressForwardHeadRuleTests(unittest.TestCase):
-    """`ohp_forward_head_barpath` -- ear-anterior and bar-anterior sub-criteria, plus the
-    hard sagittal-view gate."""
+    """`ohp_forward_head` -- the ear-anterior cue, its hard sagittal-view gate, and the
+    view-confidence floor. The bar-path sub-criterion is WITHDRAWN (see `rule_forward_head`);
+    `test_back_lean_rep_does_not_emit_forward_head` and
+    `test_wrists_unstacked_alone_emits_nothing` are its regressions."""
 
     _run = staticmethod(run_ohp)
 
     @staticmethod
     def _frames(**kwargs) -> list[dict]:
-        return [ohp_frame(160, wrist_y=0.15, frame_index=i, **kwargs) for i in range(12)]
+        # All 12 frames identical, so the window-5 median smoothing in `run_detector` is a
+        # no-op and every metric equals its per-frame value exactly. That is what lets the
+        # severity assertions below name an exact number.
+        # elbow_angle=175 (not 160): the fixture's trig construction lands 160 at
+        # 159.99998 deg, which is `< 160.0` and so tripped `ohp_incomplete_lockout` at
+        # severity ~5e-7 in every forward-head test. That knife-edge artifact is a FIXTURE
+        # bug, not a production one, and it must not pollute a rule-isolation fixture.
+        return [ohp_frame(175, wrist_y=0.15, frame_index=i, **kwargs) for i in range(12)]
 
     def test_forward_head_flagged_when_ear_anterior(self) -> None:
         # ear_dx=-0.05 => ears 0.5 shoulder-widths anterior of the shoulder line (> 0.30).
         dets = self._run(self._frames(ear_dx=-0.05), view="side")
-        det = next((d for d in dets if d.fault_id == "ohp_forward_head_barpath"), None)
+        det = next((d for d in dets if d.fault_id == "ohp_forward_head"), None)
         self.assertIsNotNone(det)
         self.assertGreater(det.evidence["max_ear_forward_offset"], 0.30)
 
-    def test_bar_forward_flagged_when_wrists_not_stacked(self) -> None:
-        # shoulder_dx=+0.05 moves the shoulders posterior while the hands stay put, so at
-        # lockout the wrists sit 0.5 shoulder-widths anterior of the shoulders. The head
-        # rides with the shoulders, so the ear cue stays clean and only the bar-path cue
-        # fires. (The 8.1 deg torso lean this implies is well under the 15 deg back-lean
-        # threshold, so the two rules do not collide.)
-        dets = self._run(self._frames(shoulder_dx=0.05), view="side")
-        det = next((d for d in dets if d.fault_id == "ohp_forward_head_barpath"), None)
+    def test_forward_head_severity_is_the_exact_ramp_value(self) -> None:
+        # Deterministic ramp: severity_from_range(offset, mild=0.30, severe=0.60).
+        # ear_dx=-0.05 => offset 0.50 => (0.50 - 0.30) / (0.60 - 0.30) = 0.6667.
+        # Pins BOTH range endpoints, so widening `severe` (e.g. 0.60 -> 5.0) fails here.
+        det = next(
+            d for d in self._run(self._frames(ear_dx=-0.05), view="side")
+            if d.fault_id == "ohp_forward_head"
+        )
+        self.assertAlmostEqual(det.evidence["max_ear_forward_offset"], 0.5, places=4)
+        self.assertAlmostEqual(det.severity, 0.6667, places=4)
+        self.assertAlmostEqual(det.confidence, 0.6667, places=4)
+
+    def test_forward_head_fires_just_inside_threshold(self) -> None:
+        # ear_dx=-0.032 => offset 0.32, just past the 0.30 fire threshold.
+        det = next(
+            (d for d in self._run(self._frames(ear_dx=-0.032), view="side")
+             if d.fault_id == "ohp_forward_head"),
+            None,
+        )
         self.assertIsNotNone(det)
-        self.assertGreater(det.evidence["max_wrist_forward_offset"], 0.30)
-        self.assertLessEqual(det.evidence["max_ear_forward_offset"], 0.30)
-        self.assertNotIn("ohp_lumbar_hyperextension", {d.fault_id for d in dets})
+        self.assertAlmostEqual(det.severity, 0.0667, places=4)
+
+    def test_forward_head_silent_just_outside_threshold(self) -> None:
+        # ear_dx=-0.025 => offset 0.25, just short of 0.30: a real forward-head lean that is
+        # not yet a fault. Any threshold LOWER than 0.30 (e.g. 0.05) would fire here.
+        ids = {d.fault_id for d in self._run(self._frames(ear_dx=-0.025), view="side")}
+        self.assertNotIn("ohp_forward_head", ids)
 
     def test_forward_head_not_flagged_when_stacked(self) -> None:
         ids = {d.fault_id for d in self._run(self._frames(), view="side")}
-        self.assertNotIn("ohp_forward_head_barpath", ids)
+        self.assertNotIn("ohp_forward_head", ids)
+
+    def test_back_lean_rep_does_not_emit_forward_head(self) -> None:
+        # REGRESSION for the withdrawn bar-path sub-criterion. A PURE back lean (the exact
+        # fixture `test_back_lean_flagged` uses) moves the shoulders posterior while the hands
+        # stay over the base of support. The old wrist-vs-shoulder cue read that as a
+        # saturated bar-path fault (severity 1.0) and outranked the fault that actually
+        # occurred. Only the back-lean rule may speak for this rep.
+        frames = ([ohp_frame(90, 0.45, frame_index=i, shoulder_dx=0.15) for i in range(4)]
+                  + [ohp_frame(178, 0.15, frame_index=i + 4, shoulder_dx=0.15) for i in range(6)]
+                  + [ohp_frame(90, 0.45, frame_index=i + 10, shoulder_dx=0.15) for i in range(4)])
+        dets = self._run(frames, view="side")
+        ids = [d.fault_id for d in dets]
+        self.assertNotIn("ohp_forward_head", ids)
+        self.assertIn("ohp_lumbar_hyperextension", ids)
+        # ... and it must be the top-ranked detection, not buried under a phantom.
+        self.assertEqual(dets[0].fault_id, "ohp_lumbar_hyperextension")
+
+    def test_wrists_unstacked_alone_emits_nothing(self) -> None:
+        # The old `test_bar_forward_flagged_when_wrists_not_stacked` fixture, inverted.
+        # shoulder_dx=+0.05 leaves the wrists 0.5 shoulder-widths anterior of the shoulders
+        # but implies only an 8.1 deg lean -- under the 15 deg back-lean threshold. With the
+        # bar-path cue withdrawn this rep is now (correctly) silent end to end.
+        dets = self._run(self._frames(shoulder_dx=0.05), view="side")
+        self.assertEqual([d.fault_id for d in dets], [])
 
     def test_forward_head_is_hard_gated_to_sagittal_views(self) -> None:
         # IDENTICAL faulty frames: they fire from a sagittal view and must produce NO
         # detection at all (not a low-confidence one) from a frontal view, where the sign of
         # a pure horizontal offset is arbitrary.
         frames = self._frames(ear_dx=-0.05)
+        self.assertIn("ohp_forward_head", {d.fault_id for d in self._run(frames, view="side")})
         self.assertIn(
-            "ohp_forward_head_barpath", {d.fault_id for d in self._run(frames, view="side")}
-        )
-        self.assertIn(
-            "ohp_forward_head_barpath",
+            "ohp_forward_head",
             {d.fault_id for d in self._run(frames, view="front_oblique")},
         )
         for blind_view in ("front", "rear", "rear_oblique"):
             ids = {d.fault_id for d in self._run(frames, view=blind_view)}
-            self.assertNotIn("ohp_forward_head_barpath", ids, f"fired from view={blind_view}")
+            self.assertNotIn("ohp_forward_head", ids, f"fired from view={blind_view}")
+
+    def test_forward_head_requires_confident_view_classification(self) -> None:
+        # A LOW-confidence `side`/`front_oblique` classification must not authorize a
+        # directional claim -- the same floor `rule_knees_forward` applies in squat.py
+        # (SIDE_VIEW_CONF_THRESHOLD = 0.20 in src.pose.pose_rule_detector).
+        from src.pose.pose_rule_detector import SIDE_VIEW_CONF_THRESHOLD
+        frames = self._frames(ear_dx=-0.05)
+        for view in ("side", "front_oblique"):
+            below = {d.fault_id for d in self._run(frames, view=view, vc=SIDE_VIEW_CONF_THRESHOLD - 0.01)}
+            self.assertNotIn("ohp_forward_head", below, f"fired at low confidence, view={view}")
+            at = {d.fault_id for d in self._run(frames, view=view, vc=SIDE_VIEW_CONF_THRESHOLD)}
+            self.assertIn("ohp_forward_head", at, f"did not fire at the floor, view={view}")
 
     def test_head_behind_shoulders_does_not_fire(self) -> None:
         # Positive ear_dx pushes the head POSTERIOR. Forward head is directional: the
         # opposite deviation must not trip it.
         ids = {d.fault_id for d in self._run(self._frames(ear_dx=0.05), view="side")}
-        self.assertNotIn("ohp_forward_head_barpath", ids)
+        self.assertNotIn("ohp_forward_head", ids)
 
     def test_forward_head_rule_carries_citation(self) -> None:
         det = next(
             (d for d in self._run(self._frames(ear_dx=-0.05), view="side")
-             if d.fault_id == "ohp_forward_head_barpath"),
+             if d.fault_id == "ohp_forward_head"),
             None,
         )
         assert det is not None and det.citation and det.citation_support
         self.assertIn("PMC13116542", det.citation)
+
+
+class OverheadPressFrameValidityTests(unittest.TestCase):
+    """The module-level silence risk: BOTH shoulders are in `ohp_compute_raw`'s `required`
+    tuple, so an occluded far shoulder invalidates the frame outright and silences ALL FIVE
+    OHP rules -- not just the forward-head rule whose normalizer it also degrades."""
+
+    _run = staticmethod(run_ohp)
+
+    def test_occluded_far_shoulder_silences_every_ohp_rule(self) -> None:
+        # A rep that is faulty on several axes at once: elbows stuck at 140 deg (incomplete
+        # lockout), hands stalled at nose level (insufficient elevation), head jutting
+        # anterior (forward head), shoulders behind the hips (back lean).
+        frames = [
+            ohp_frame(140, wrist_y=0.30, frame_index=i, shoulder_dx=0.15, ear_dx=-0.05)
+            for i in range(12)
+        ]
+        loud = {d.fault_id for d in self._run(frames, view="side")}
+        self.assertIn("ohp_incomplete_lockout", loud)
+        self.assertIn("ohp_insufficient_elevation", loud)
+        self.assertIn("ohp_forward_head", loud)
+        self.assertIn("ohp_lumbar_hyperextension", loud)
+
+        for frame in frames:
+            frame["landmarks"][12]["visibility"] = 0.0   # far (right) shoulder occluded
+        raw = ohp_compute_raw(frames, 30.0)
+        self.assertTrue(all(not item["valid"] for item in raw))
+        self.assertEqual([d.fault_id for d in self._run(frames, view="side")], [])
