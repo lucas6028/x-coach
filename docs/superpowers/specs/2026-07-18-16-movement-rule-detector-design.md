@@ -1466,6 +1466,101 @@ detection heuristics written above, all deliberate and documented in-code:
 
 All five OHP thresholds remain unvalidated against labeled data (§8.4).
 
+**Status (2026-07-25) — Push-up detector registered:** `src/pose/movements/pushup.py` is now
+assembled as `PUSHUP_DETECTOR` and registered under `"Push-up"`, reachable from
+`scripts/pose/run_pose_rule_detection.py --movement "Push-up"`. All **5 of 5** push-up rules are
+present: **4 can fire** (`pushup_hip_sag`, `pushup_shallow_depth`, `pushup_head_drop`,
+`pushup_elbow_flare`) and **1 is permanently silent by design** (`rule_scapular_winging`, which
+always returns `[]` — MediaPipe's 33 landmarks contain no scapular border points, and this spec
+rates the fault observability `low`/`none` and recommends not emitting a confident verdict. It is
+registered rather than omitted so the spec and the code stay 1:1 and an auditor finds it with its
+citation instead of finding a gap and closing it with an invented proxy).
+
+> **PUSH-UP THRESHOLDS ARE SPEC-DERIVED AND UNVALIDATED (§8.4).** There is **no labeled push-up
+> data in this repository at all** — REHAB24-6 Ex3 is a *standing table push-up*, not the floor
+> push-up this detector models, and the EgoExo push-up frames are an unextracted ~3 GB archive.
+> Nothing in this detector has been checked against a human-labeled push-up fault. The synthetic
+> fixtures in `tests/test_pushup.py` prove geometry and sign conventions, not real-world fault
+> detection. Push-up is therefore **CLI-only**: `backend/app/config.py`'s
+> `DEFAULT_ANALYSIS_MOVEMENT` remains `"Squat"` and `frontend/src/lib/movements.ts` still lists
+> `ANALYZABLE_MOVEMENTS = ["Squat"]`, so these numbers do not reach end users.
+
+Deviations from the detection heuristics written above, all deliberate and documented in-code:
+
+- `pushup_shallow_depth` — fires at **100°**, the conservative (strictest-to-fire) end of the
+  spec's "~100–110°" band. No number outside the band is used. It also reads `min_elbow_angle`
+  (the **more-flexed** arm) where the spec says "whichever is more visible"; on an asymmetric rep
+  that is the more generous reading, so the rule under-reports rather than over-reports.
+- `pushup_head_drop` — **per-clip `setup` baseline instead of an absolute reading, on both axes.**
+  The spec's wording is absolute but supplies no absolute reference for "neutral", and none
+  exists: resting ear-to-shoulder angle varies with neck length, ear position and camera height.
+  The nose axis needs it even more concretely — measured on the neutral fixture,
+  `nose_ahead_ratio = 0.1833` with no fault present (3× an absolute 0.06 cut), so read absolutely
+  the cue fires on every correct push-up. The rule therefore measures each axis's deviation from
+  its mean over the clip's own `setup` frames, mirroring this spec's own construction for the
+  squat's heel rise. **Honest cost:** it measures *change*, not *posture* — a lifter who sets up
+  with the head already dropped and holds it there is never flagged (pinned by
+  `test_a_head_drop_held_from_setup_is_invisible`).
+- `pushup_head_drop` — the nose cue's **0.06 of body length is a RULE-LEVEL CHOICE, not this
+  spec's number.** The spec ORs the cue in but quantifies it only as "clearly ahead". The
+  magnitude is borrowed **by analogy** from `pushup_hip_sag`'s spec'd "> ~0.06 of body length" —
+  a defensible reading of "clearly", but an analogy, and it must not later be cited as spec
+  provenance.
+- `pushup_head_drop` — a **signed** metric (`neck_line_signed_deg`) was added to the metric layer
+  to support it. A baseline on the unsigned angle is not merely non-directional but *actively
+  inverted*: with a +5° baseline, a head **lifted** to −15° reads deviation +10 and fires as a
+  head drop. The neck angle is also referenced to the **body axis** (shoulder-mid → ankle-mid)
+  rather than the spec's shoulder→hip chord, because the chord rotates when the hips drop and so
+  manufactures neck deviation out of hip sag (measured: `hip_offset_ratio` 0.100 → 11.31° of
+  spurious neck signal, 55% of a full head-drop reading). The swap trades one modeling assumption
+  for another and the residual is documented in-code, not corrected.
+- `pushup_head_drop` — scoped to `{descent, bottom}` (the spec scopes it to no phase), so a head
+  that drops only on the way back up is missed. Stated rather than hidden.
+- `pushup_elbow_flare` — **a measurability gate replaces the spec's view gate.** The spec asks for
+  a `front`/`rear` view down the body's long axis. Task 4 establishes that `signed_orientation`'s
+  front/rear meaning is validated only for *upright* subjects, so for a horizontal body those
+  labels carry no validated meaning, and the production path calls
+  `estimate_view_for_pose(allow_front=False)`, so `front` is never emitted at all — a positive
+  gate on those labels would be either meaningless or permanently false. The rule instead requires
+  `shoulder_axis_ratio > 0.15` (a **rule-level** measurability threshold, not in this spec: enough
+  transverse extent survived the projection for the hand-width question to be answerable) and
+  hard-gates to silence on a *confident* `side` label, which is the answerable negative claim.
+  Without that guard a sagittal collapse forges a verdict: a measured shoulder separation of
+  0.0020 against a wrist separation of 0.0050 — both sub-pixel, both meaningless — yields
+  `hand_width_ratio = 2.500`, a full-severity flare out of pure noise.
+- `pushup_elbow_flare` — emitted at a flat **observability `low` with the 0.65 confidence
+  discount**, below this spec's `medium` ceiling for the fault, because that ceiling is attached
+  to `front`/`rear` labels that are not validated for a horizontal body. `run_detector` sorts
+  `low` detections behind every other detection regardless of severity (key
+  `(observability == "low", −severity, start_frame)`; `False < True`), so a flare verdict can
+  never outrank a fault observed from a view the pipeline actually validated. The rule's second
+  gate, `hand_width_ratio > 0.25`, is **arithmetically inert** while the fire threshold sits at
+  1.6 and is kept explicit only so the measurability condition stays legible.
+- `pushup_elbow_flare` — the spec's optional corroborating signal (trunk-to-upper-arm angle
+  > ~65°) is **not implemented**; the metric layer emits no such angle.
+- `pushup_hip_sag` and `pushup_elbow_flare` — both scoped to `{descent, bottom, ascent}`, a
+  rule-level call following the squat detector's `ACTIVE_PHASES`; this spec scopes neither.
+- `pushup_hip_sag` — hard-gates `front`/`rear` to **silence** rather than a confidence discount,
+  because the offset normalizer *inflates* head-on (the shoulder→ankle projection shortens), which
+  is a false-positive amplifier rather than a weak signal. It also requires
+  `hand_offset_ratio > 0.0` as a **camera-inversion guard**: the hands are planted on the floor, so
+  a negative value means "groundward" resolved backwards and every sag would be reported as a
+  confident pike. The plank-angle form ("hip angle departs from 180° by > ~12°") is reported as
+  corroboration but does **not** gate firing, because it is unsigned and would reintroduce the
+  direction-free verdict the guard exists to prevent.
+- **Severity ramps for every push-up rule are rule-level choices, not spec quantities.** This
+  spec's Push-up section carries no `Severity ramp` line at all (the Squat/Lunge/Deadlift sections
+  do, so the absence is meaningful). The endpoints chosen — 0.15 hip offset, 140° elbow, 35° neck,
+  0.15 nose, 2.2 hand-width — are ranking curves with in-code reasoning, not cited numbers.
+
+**Module-wide behavior worth recording, not a deviation:** `pushup_compute_raw` requires both
+shoulders, elbows, wrists, hips **and both ankles**, because the plank line is shoulder-mid →
+ankle-mid. One dropped landmark marks the frame invalid and silences *every* push-up rule for it,
+so a clip framed from the knees up produces no push-up verdict at all. That refusal is deliberate
+— `view_estimation`'s degrading alternative was measured to read a body-axis extent of 0.070
+instead of ~0.60 (8.6× low) with no NaN and no other signal, and a silently-wrong verdict is worse
+than none. The sagittal view the spec calls primary is also the view most likely to trip it.
+
 **Known open item (not a deviation, a gap):** three OHP `kg_query` strings resolve to **no KG
 node at all** against `data/kg/sports_kg_v3.graphml` — `"Incomplete Elbow Lockout"`,
 `"Lumbar Hyperextension"` and `"Asymmetric Press"` (verified via

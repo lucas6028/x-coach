@@ -67,3 +67,20 @@ export const mockCleanAnalysis: Analysis = {
   detections: [],
   retrievals: [],
 };
+
+// A clip pose extraction could not measure at all: every frame failed the detector's landmark
+// validity gate, so `detections` is empty for the SAME reason `mockCleanAnalysis` is — which is
+// exactly the ambiguity MetricsCards must not render as a clean bill of health. Kept as its own
+// fixture rather than mutating `mockCleanAnalysis`, which pins the genuinely-clean branch.
+export const mockUnmeasuredAnalysis: Analysis = {
+  ...mockAnalysis,
+  video_id: "vid_unmeasured",
+  quality: {
+    lower_body_visibility_mean: 0.12,
+    valid_frame_ratio: 0,
+    valid_frames: 0,
+    total_frames: 300,
+  },
+  detections: [],
+  retrievals: [],
+};

@@ -151,7 +151,8 @@ from src.pose.geometry import (
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility, mean_finite,
     contiguous_true_segments, severity_from_range, distance,
 )
-from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
+from src.pose.movements import registry
 from src.pose.pose_rule_detector import (
     SIDE_VIEW_CONF_THRESHOLD,
     PoseRuleDetection,
@@ -1568,3 +1569,38 @@ def rule_scapular_winging(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
     rotation and decreased posterior tilt of the scapula." The fault is biomechanically real and
     important, but honestly not monocular-observable, hence observability `none`."""
     return []
+
+
+# All FIVE of the spec's push-up rules are listed, deliberately: four can fire, and
+# `rule_scapular_winging` is registered while being permanently silent so the spec and the code
+# stay in 1:1 correspondence (see its docstring). Registering it costs one no-op call per clip
+# and buys an auditor the answer "yes, it is accounted for, and here is why it says nothing".
+#
+# `rule_elbow_flare` IS registered, per the explicit decision recorded in its docstring: it is
+# measurable when the geometry says so, cited, hard-gated to silence on a confident `side` label,
+# and emitted at `low` observability with the 0.65 confidence discount. `run_detector` sorts
+# `low` detections behind every other detection regardless of severity -- its key is
+# `(observability == "low", -severity, start_frame)` and `False < True` -- so a flare verdict can
+# never outrank a fault observed from a view the pipeline actually validated.
+#
+# PUSHUP_METRIC_KEYS must stay a two-way match with what `pushup_compute_raw` emits: keys the
+# tuple omits are dropped by `run_detector` (which builds each CoreFrame's metrics dict FROM this
+# tuple) and read back as NaN. That failure is silent and, for `hand_offset_ratio`, total -- it is
+# the camera-inversion guard in both `rule_hip_sag` and `rule_head_drop`, and `nan > 0.0` is
+# False, so dropping it would permanently silence both rules with no error anywhere.
+# `test_pushup_metric_keys_match_the_emitted_metrics` pins the correspondence in both directions.
+PUSHUP_DETECTOR = MovementDetector(
+    "Push-up",
+    PUSHUP_METRIC_KEYS,
+    pushup_compute_raw,
+    pushup_assign_phases,
+    (
+        rule_hip_sag,
+        rule_shallow_depth,
+        rule_elbow_flare,
+        rule_head_drop,
+        rule_scapular_winging,
+    ),
+)
+
+registry.register(PUSHUP_DETECTOR)

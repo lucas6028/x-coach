@@ -794,7 +794,8 @@ def main() -> None:
     parser.add_argument(
         "--movement",
         default="Squat",
-        help="Canonical movement name to detect (e.g. 'Squat', 'Overhead Press').",
+        help="Canonical movement name to detect (registered: 'Squat', 'Overhead Press', "
+             "'Push-up'). Only Squat is validated against labeled data.",
     )
     args = parser.parse_args()
 

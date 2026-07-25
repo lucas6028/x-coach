@@ -85,6 +85,9 @@ const en: Dict = {
   "metric.conf": "conf {v}",
   "metric.peakSeverity": "peak severity {v}",
   "metric.cleanRep": "clean rep",
+  // Shown instead of "clean rep" when zero frames were measurable: an empty detection list then
+  // means "never measured", not "nothing wrong". See MetricsCards.
+  "metric.notMeasured": "not measured",
   "metric.landmarkConf": "landmark confidence",
   "metric.framesRatio": "{valid}/{total} frames",
 
@@ -701,6 +704,7 @@ const zhHant: Dict = {
   "metric.conf": "信心 {v}",
   "metric.peakSeverity": "最高嚴重度 {v}",
   "metric.cleanRep": "標準動作",
+  "metric.notMeasured": "無法判讀",
   "metric.landmarkConf": "關鍵點信心度",
   "metric.framesRatio": "{valid}/{total} 影格",
 
