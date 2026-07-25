@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "motion/react";
 import type { Analysis } from "../api";
 import { useI18n, viewLabel } from "../lib/i18n";
+import { wasMeasured } from "../lib/quality";
 
 interface Props {
   analysis: Analysis;
@@ -56,19 +57,11 @@ export default function MetricsCards({ analysis, portrait = false }: Props) {
   const validRatio = (q.valid_frame_ratio ?? 0) * 100;
   const hasFaults = faults.length > 0;
   // The detector returns an empty `detections` list for BOTH "no faults found" and "the clip was
-  // never measurable" — a clip whose pose extraction produced no valid frames yields exactly the
-  // same empty list as a flawless rep. Reading `faults.length` alone therefore printed a green
-  // "Faults 0 / clean rep" card directly beside "Valid Frames 0%", i.e. a clean bill of health
-  // for a clip nothing was ever measured on. `quality.valid_frame_ratio` already carries the
-  // distinction, so it is consulted here.
-  //
-  // The gate is CATEGORICAL — exactly zero valid frames — and deliberately not a low-but-nonzero
-  // band: no threshold for "enough frames to trust a verdict" has been measured anywhere in this
-  // repo, and inventing one here would be a fabricated number on a user-facing verdict. A clip
-  // with one valid frame still reads "clean rep"; that is a known, narrower gap, not a claim.
-  // Missing quality fields fall to 0 via `?? 0` above and are treated as unmeasured, which is the
-  // honest default when the payload does not say.
-  const measured = validRatio > 0;
+  // never measurable", so `faults.length` alone printed a green "Faults 0 / clean rep" card
+  // directly beside "Valid Frames 0%". `wasMeasured` is the SHARED criterion — CoachTray's
+  // clean-rep banner reads the same helper, and the two co-render on one screen, so they must not
+  // be able to disagree. See src/lib/quality.ts for the full rationale and the stated gap.
+  const measured = wasMeasured(q);
 
   return (
     <motion.div

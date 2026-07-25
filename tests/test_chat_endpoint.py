@@ -51,7 +51,23 @@ _FAULT_CTX = {
         }
     ],
 }
-_CLEAN_CTX = {"view_type": "side", "fault_count": 0, "quality": {}, "faults": []}
+# A GENUINELY clean rep: no faults AND the clip was measurable. `valid_frame_ratio` is load-bearing
+# here, not decoration -- an empty fault list alone no longer earns the CLEAN REP instruction.
+_CLEAN_CTX = {
+    "view_type": "side",
+    "fault_count": 0,
+    "quality": {"valid_frame_ratio": 0.94, "valid_frames": 282, "total_frames": 300},
+    "faults": [],
+}
+
+# The SAME empty fault list, produced instead by a clip no frame of which could be measured (e.g.
+# framed above the ankles, which fails the push-up detector's validity gate on every frame).
+_UNMEASURED_CTX = {
+    "view_type": "side",
+    "fault_count": 0,
+    "quality": {"valid_frame_ratio": 0.0, "valid_frames": 0, "total_frames": 300},
+    "faults": [],
+}
 
 
 def _body(messages, context) -> chat_router.ChatRequest:
@@ -98,6 +114,45 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("CLEAN REP", prompt)
         self.assertNotIn("DETECTED FAULTS", prompt)
         self.assertIn("Faults detected: 0", prompt)
+
+    def test_unmeasured_clip_gets_no_clean_rep_instruction(self) -> None:
+        """An empty fault list means BOTH "no faults" and "nothing was measurable". Telling the
+        model to congratulate the user in the second case fabricates a verdict about form that was
+        never analysed -- the same claim the prompt's honesty constraint forbids everywhere else."""
+        prompt = chat_service._build_system_prompt(_UNMEASURED_CTX)
+        self.assertNotIn("CLEAN REP", prompt)
+        self.assertIn("NOT MEASURED", prompt)
+        self.assertIn("Do NOT congratulate", prompt)
+        self.assertIn("Faults detected: 0", prompt)
+        self.assertNotIn("DETECTED FAULTS", prompt)
+
+    def test_measurable_frame_ratio_is_surfaced_to_the_model(self) -> None:
+        """Shipped by `buildChatContext` and accepted by `ChatContext.quality` all along, but never
+        rendered -- so the model could not tell a clean rep from an unmeasured clip even in
+        principle."""
+        self.assertIn("Measurable frames: 94%", chat_service._build_system_prompt(_CLEAN_CTX))
+        self.assertIn("Measurable frames: 0%", chat_service._build_system_prompt(_UNMEASURED_CTX))
+        # Absent from the payload => no line at all (and see the next test for the verdict).
+        self.assertNotIn("Measurable frames", chat_service._build_system_prompt(_FAULT_CTX))
+
+    def test_absent_valid_frame_ratio_is_treated_as_unmeasured(self) -> None:
+        """"The payload did not say" must not resolve to "everything is fine". The analyze pipeline
+        always emits `valid_frame_ratio`, so its absence is missing information, not evidence of a
+        clean rep. Matches `wasMeasured`'s `?? 0` in frontend/src/lib/quality.ts."""
+        prompt = chat_service._build_system_prompt(
+            {"view_type": "side", "fault_count": 0, "quality": {}, "faults": []}
+        )
+        self.assertNotIn("CLEAN REP", prompt)
+        self.assertIn("NOT MEASURED", prompt)
+
+    def test_faults_win_over_the_measurability_branch(self) -> None:
+        """A clip with detected faults was measurable by construction, so neither no-fault branch
+        may fire even if the quality dict is missing or degenerate."""
+        ctx = dict(_FAULT_CTX, quality={"valid_frame_ratio": 0.0})
+        prompt = chat_service._build_system_prompt(ctx)
+        self.assertNotIn("CLEAN REP", prompt)
+        self.assertNotIn("NOT MEASURED", prompt)
+        self.assertIn("DETECTED FAULTS", prompt)
 
     def test_fmt_list_handles_empty_and_values(self) -> None:
         self.assertEqual(chat_service._fmt_list([]), "—")

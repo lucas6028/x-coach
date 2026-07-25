@@ -1391,8 +1391,15 @@ RAG 語料庫來源(作者/標題/期刊以 `data/paper_metadata.json` 為權威
    observability "high"** 而不是被排除在外,相對於這次改動之前的 **confidence 0.650 /
    "medium"**。**此次刻意不修正**:在該閘門加上信心下限會改變深蹲規則的輸出,而
    `tests/test_movement_registry.py` 釘住了「動作註冊表路徑」與 `pose_rule_detector.py` 內
-   legacy oracle 逐位元組相同的比對測試,若不同步套用相同修改,該閘門測試就會失敗。這是已知、
+   legacy oracle 逐欄位比對的測試,若不同步套用相同修改,該閘門測試就會失敗。這是已知、
    有實測數字佐證的缺陷,等待後續獨立處理,不是被忽略。
+
+   *(用詞校正,2026-07-25:這道閘門常被稱為「逐位元組相同」,那是誇大了。其 `comparable()`
+   只比對八個欄位——`fault_id`、取到小數第 4 位的 `severity` 與 `confidence`、
+   `observability`、`start_frame`、`end_frame`、`peak_frame`、`phase`——並 **沒有** 比對
+   `evidence`、`fault_name`、`kg_query`、`retrieval_mode`、`start_time`、`end_time`。
+   若 legacy 與註冊表路徑的差異只落在 evidence dict 上,這道閘門是攔不住的。上述關於信心下限
+   的論證不受影響,因為 `confidence` 正是那八個欄位之一。)*
 
 ## 8. 後續步驟
 

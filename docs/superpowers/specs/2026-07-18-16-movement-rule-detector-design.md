@@ -1411,10 +1411,17 @@ authoritative version of these four):**
    confidence floor — so an evidence-free clip can score `knees_inward` at **confidence 1.000 /
    observability "high"** instead of being excluded, versus **confidence 0.650 / "medium"**
    before this change. **Deliberately NOT fixed here**: a confidence floor on that gate would
-   change squat rule output, and `tests/test_movement_registry.py` pins a byte-for-byte
+   change squat rule output, and `tests/test_movement_registry.py` pins a field-by-field
    comparison of the registry path against the legacy oracle in `pose_rule_detector.py`, which
    would need the identical change in lockstep or the gate test fails. This is a known, measured
    defect awaiting a scoped follow-up, not an oversight.
+
+   *(Precision note, 2026-07-25: that gate is often called "byte-for-byte", which overstates it.
+   Its `comparable()` helper compares exactly eight fields — `fault_id`, `severity` and
+   `confidence` to 4 dp, `observability`, `start_frame`, `end_frame`, `peak_frame`, `phase` — and
+   does NOT compare `evidence`, `fault_name`, `kg_query`, `retrieval_mode`, `start_time` or
+   `end_time`. A legacy-vs-registry divergence confined to the evidence dict would pass it. The
+   confidence-floor argument above is unaffected, since `confidence` is one of the eight.)*
 
 ## 8. Next steps
 
