@@ -211,6 +211,43 @@ def _neck_line_angle(
     must be measured against the intact reference rather than the broken one. No correction
     factor is applied and no constant is invented -- the reference vector is simply swapped.
 
+    ---- THE MODELING ASSUMPTION THIS RESTS ON. READ BEFORE TRUSTING THE DECOUPLING. ----
+
+    Swapping the reference does not make the metric assumption-free; it TRADES one assumption
+    for another, and the trade is only a win if this one holds:
+
+        ASSUMED: as the hips sag, the head stays neutral relative to the BODY AXIS
+                 (shoulder-mid -> ankle-mid) -- i.e. the head does not rotate with the
+                 dropping torso segment.
+
+    If the truth is the opposite -- the head staying neutral relative to the THORACIC
+    (shoulder->hip) chord, rotating with the torso as the hips drop -- then this metric reads,
+    with no head fault present at all:
+
+        sag 0.06 -> 11.310 deg     sag 0.09 -> 16.699 deg     sag 0.15 -> 26.565 deg
+
+    which is bit-identical in magnitude to the chord-reference contamination this change
+    removed, merely inverted in which posture it penalises. And because the metric is
+    UNSIGNED (see below), that reading is indistinguishable from a genuine head drop.
+    Symmetrically, a bent body whose ANKLES move (axis rotates, chord does not) reads ~5.7 deg
+    at an ankle displacement of 0.06 with the head on the chord.
+
+    Why the axis assumption is nonetheless the better model, stated as reasoning and not as
+    fact: in a real sag the hands and feet are planted and the LUMBAR spine hyperextends, so
+    the pelvis drops while the thorax -- braced by the arms -- stays put. The head rides on
+    the cervical spine atop that thorax, so it moves with the thorax, which has NOT rotated;
+    the shoulder->hip chord meanwhile spans both thorax and lumbar and therefore rotates by
+    more than any segment the head is attached to. That is an argument from segment
+    kinematics, not a measurement: NEITHER reference has been validated against labeled
+    push-up video, and a real head presumably lands somewhere between the two.
+
+    This is deliberately NOT corrected for, blended, or interpolated -- doing any of those
+    would require a constant nobody has measured. It is stated so Task 7 can decide with the
+    trade in view. `test_neck_reference_assumption_is_visible` makes the alternative concrete:
+    the fixture's `head_follows="chord"` knob rotates the head with the chord instead of
+    translating it, and pins the three numbers above, so the assumption is exercised by the
+    suite rather than only described here.
+
     Computed per side (same-side ear and shoulder) so a sagittal clip showing only ONE ear
     still yields a reading -- an ear midpoint would go NaN there, which is exactly the
     primary view for this cue.
