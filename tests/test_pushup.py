@@ -91,6 +91,7 @@ def pushup_frame(
     frame_index: int = 0,
     right_elbow_angle: float | None = None,
     tilt_deg: float = 0.0,
+    hand_drop: float = 0.10,
 ) -> dict:
     """Build one push-up frame in which EVERY asserted metric is controlled by construction.
 
@@ -110,6 +111,15 @@ def pushup_frame(
                             floor out of the torso line. 0 => ears collinear with
                             shoulder+hip => neck_line_angle_deg exactly 0.
       tilt_deg           -- rigid rotation of the whole body about the image centre.
+      hand_drop          -- displacement of BOTH wrists along +y, i.e. how far the planted
+                            hands sit on the groundward side of the plank line. Defaults to
+                            a non-zero value because that is anatomically true (the hands are
+                            on the floor, the body is above it) AND because it is what makes
+                            `hand_offset_ratio` -- the camera-inversion diagnostic -- live
+                            rather than degenerate. It moves both wrists equally, so it does
+                            not disturb `hand_width_ratio`, and the elbow angles are
+                            constructed from whatever wrist position results, so it does not
+                            disturb those either.
     """
     right_angle = elbow_angle if right_elbow_angle is None else right_elbow_angle
     half_hand = hand_width_ratio * _SHOULDER_WIDTH / 2.0
@@ -122,8 +132,8 @@ def pushup_frame(
     right_ankle = (_ANKLE_X, _MID_Y + _HALF_WIDTH)
     left_ear = (_EAR_X, _MID_Y - _HALF_WIDTH + ear_offset)
     right_ear = (_EAR_X, _MID_Y + _HALF_WIDTH + ear_offset)
-    left_wrist = (_WRIST_X, _MID_Y - half_hand)
-    right_wrist = (_WRIST_X, _MID_Y + half_hand)
+    left_wrist = (_WRIST_X, _MID_Y + hand_drop - half_hand)
+    right_wrist = (_WRIST_X, _MID_Y + hand_drop + half_hand)
     left_elbow = _elbow_xy(left_shoulder, left_wrist, elbow_angle, "left")
     right_elbow = _elbow_xy(right_shoulder, right_wrist, right_angle, "right")
     # Knees ride midway down the leg so lower-body landmarks are plausible; no metric reads
@@ -226,6 +236,46 @@ class PushupPlankMetricTests(unittest.TestCase):
         )
         self.assertGreater(tilted["hip_offset_ratio"], 0.0)
 
+    def test_hand_offset_ratio_is_positive_in_a_genuine_pushup(self) -> None:
+        # The hands are planted on the floor, so they always sit on the groundward side of
+        # the plank line. hand_drop=0.10 over a 0.60 body => +1/6.
+        raw = pushup_compute_raw([pushup_frame(hand_drop=0.10)], 30.0)[0]
+        self.assertAlmostEqual(raw["hand_offset_ratio"], 0.1 / 0.6, places=5)
+        self.assertGreater(raw["hand_offset_ratio"], 0.0)
+
+    def test_camera_inversion_flips_hip_sign_and_hand_offset_catches_it(self) -> None:
+        # THE FAILURE `body_axis_tilt_deg` CANNOT SEE. A 180-degree-rotated clip (unapplied
+        # rotation metadata, inverted mount) makes every sag read as a pike, while the folded
+        # tilt diagnostic reports 0.0 -- the IDEAL plank value. `hand_offset_ratio` is what
+        # detects it: the hands cannot be on the sky side of the body in a real push-up.
+        upright = pushup_compute_raw([pushup_frame(hip_offset=0.06)], 30.0)[0]
+        inverted = pushup_compute_raw(
+            [pushup_frame(hip_offset=0.06, tilt_deg=180.0)], 30.0
+        )[0]
+
+        # The sign really does invert, and the tilt diagnostic really is blind to it.
+        self.assertGreater(upright["hip_offset_ratio"], 0.0)
+        self.assertLess(inverted["hip_offset_ratio"], 0.0)
+        self.assertAlmostEqual(upright["body_axis_tilt_deg"], 0.0, places=4)
+        self.assertAlmostEqual(inverted["body_axis_tilt_deg"], 0.0, places=4)
+
+        # The emitted guard is not blind.
+        self.assertGreater(upright["hand_offset_ratio"], 0.0)
+        self.assertLess(inverted["hand_offset_ratio"], 0.0)
+
+    def test_hand_offset_stays_positive_when_the_subject_merely_faces_the_other_way(
+        self,
+    ) -> None:
+        # The case a SIGNED body-axis angle confuses with inversion: mirroring the subject
+        # left-to-right gives the same +180 deg axis angle as a rotated camera, but the sign
+        # of hip_offset_ratio is CORRECT here. The hand guard must not cry wolf.
+        mirrored = pushup_frame(hip_offset=0.06)
+        for landmark in mirrored["landmarks"]:
+            landmark["x"] = 1.0 - landmark["x"]
+        raw = pushup_compute_raw([mirrored], 30.0)[0]
+        self.assertGreater(raw["hip_offset_ratio"], 0.0)
+        self.assertGreater(raw["hand_offset_ratio"], 0.0)
+
     def test_body_axis_tilt_is_zero_for_a_horizontal_body(self) -> None:
         raw = pushup_compute_raw([pushup_frame()], 30.0)[0]
         self.assertAlmostEqual(raw["body_axis_tilt_deg"], 0.0, places=6)
@@ -272,6 +322,34 @@ class PushupNeckLineTests(unittest.TestCase):
         # 0.03 groundward of it, against a torso vector that runs straight down the axis.
         expected = math.degrees(math.atan2(0.03, _SHOULDER_X - _EAR_X))
         self.assertAlmostEqual(dropped["neck_line_angle_deg"], expected, places=4)
+
+    def test_hip_sag_does_not_manufacture_neck_deviation(self) -> None:
+        # REGRESSION for the shoulder->hip chord reference. With the head perfectly on the
+        # body line (ear_offset=0), referencing the neck angle to the shoulder->hip chord
+        # made a sagging hip rotate the reference and invent neck deviation:
+        #     hip_offset_ratio 0.067 -> 7.595 deg,  0.100 -> 11.310 deg,  0.150 -> 16.699 deg
+        # against 20.556 deg for a genuine head drop -- so a 0.10 sag forged 55% of a full
+        # head-drop signal, growing through the descent exactly as the sag does. Referencing
+        # to the BODY AXIS (which a hip sag does not move) decouples them.
+        for hip_offset in (0.0, 0.04, 0.06, 0.09, 0.15):
+            raw = pushup_compute_raw([pushup_frame(hip_offset=hip_offset)], 30.0)[0]
+            self.assertAlmostEqual(
+                raw["neck_line_angle_deg"], 0.0, places=4,
+                msg=f"sag of {hip_offset} manufactured neck deviation",
+            )
+
+    def test_neck_line_angle_is_unchanged_by_a_simultaneous_sag(self) -> None:
+        # The head-drop reading must be the SAME whether or not the hips also sag, so Task 7
+        # never sees hip_sag and head_drop as mutually corroborating.
+        alone = pushup_compute_raw([pushup_frame(ear_offset=0.03)], 30.0)[0]
+        with_sag = pushup_compute_raw(
+            [pushup_frame(ear_offset=0.03, hip_offset=0.06)], 30.0
+        )[0]
+        self.assertAlmostEqual(
+            alone["neck_line_angle_deg"], with_sag["neck_line_angle_deg"], places=4
+        )
+        # ... and the sag is still detected, by the metric that owns it.
+        self.assertGreater(with_sag["hip_offset_ratio"], 0.0)
 
     def test_neck_line_angle_is_unsigned(self) -> None:
         # Documented limitation: a head LIFTED off the torso line reads the same as a head
@@ -380,6 +458,33 @@ class PushupUnmeasurableInputTests(unittest.TestCase):
         self.assertAlmostEqual(raw["time"], 7 / 30.0, places=6)
         self.assertIn("lower_body_visibility", raw)
 
+    def test_visible_but_misplaced_landmark_is_trusted(self) -> None:
+        """KNOWN GAP, pinned rather than claimed away. The "NaN, never a degraded number"
+        guarantee covers landmark DROP-OUT only. `geometry.visible_point` trusts any landmark
+        at visibility >= 0.50 completely, so one that MediaPipe reports confidently but places
+        wrongly yields a finite, wrong metric with no signal at all. This matters because
+        MediaPipe routinely gives mid-range visibility to HALLUCINATED far-side landmarks in
+        exactly the sagittal view this module calls primary.
+
+        Inherited from the shared gate, not introduced by this module, and not fixable here
+        without inventing a plausibility threshold (out of scope). Asserted so the limit is
+        documented behaviour: if someone later narrows it, this test tells them what changed."""
+        # Just BELOW the gate: refused, as advertised.
+        below = pushup_frame(hip_offset=0.06)
+        below["landmarks"][12]["visibility"] = 0.49
+        below["landmarks"][12]["x"] += 0.20
+        self.assertFalse(pushup_compute_raw([below], 30.0)[0]["valid"])
+
+        # Just ABOVE it: trusted, and wrong, with no NaN anywhere.
+        above = pushup_frame(hip_offset=0.06)
+        above["landmarks"][12]["visibility"] = 0.55
+        above["landmarks"][12]["x"] += 0.20
+        raw = pushup_compute_raw([above], 30.0)[0]
+        self.assertTrue(raw["valid"])
+        self.assertTrue(np.isfinite(raw["hand_width_ratio"]))
+        self.assertAlmostEqual(raw["hand_width_ratio"], 0.44721, places=4)   # truth is 1.0
+        self.assertAlmostEqual(raw["hip_offset_ratio"], 0.12, places=4)      # truth is 0.10
+
     def test_non_dict_frame_is_invalid(self) -> None:
         raw = pushup_compute_raw([None, "not a frame"], 30.0)
         self.assertEqual([item["valid"] for item in raw], [False, False])
@@ -413,6 +518,26 @@ class PushupPhaseTests(unittest.TestCase):
         ascent_indices = [i for i, p in enumerate(phases) if p == "ascent"]
         self.assertTrue(all(i < min(bottom_indices) for i in descent_indices))
         self.assertTrue(all(i > min(bottom_indices) for i in ascent_indices))
+
+    def test_setup_window_is_the_first_fifteen_percent(self) -> None:
+        # Pins the FRACTION, not just "the clip opens with some setup frames". The earlier
+        # `phases[:3] == [setup]*3` assertion left 0.25 free (it also makes frames 0-2 setup),
+        # so the constant was unpinned in the direction it was most likely to drift.
+        # `setup` is only ever assigned in the index < cutoff branch, so for an all-valid clip
+        # the count IS the cutoff.
+        for frame_count, expected in ((24, 3), (40, 6), (13, 1)):
+            angles = [170.0 - 80.0 * math.sin(math.pi * i / (frame_count - 1))
+                      for i in range(frame_count)]
+            frames = [pushup_frame(elbow_angle=a, frame_index=i)
+                      for i, a in enumerate(angles)]
+            phases = pushup_assign_phases(pushup_compute_raw(frames, 30.0))
+            self.assertEqual(
+                phases.count("setup"), expected,
+                msg=f"n={frame_count}: expected int(n*0.15)={expected} setup frames",
+            )
+            # ... and they are the LEADING frames, contiguously.
+            self.assertEqual(phases[:expected], ["setup"] * expected)
+            self.assertNotEqual(phases[expected], "setup")
 
     def test_bottom_is_the_deepest_thirty_percent(self) -> None:
         raw = pushup_compute_raw(self._rep(), 30.0)
