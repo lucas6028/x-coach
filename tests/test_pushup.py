@@ -189,14 +189,6 @@ class PushupElbowMetricTests(unittest.TestCase):
         # The mean would be 115; the more-flexed arm is 80.
         self.assertAlmostEqual(raw["min_elbow_angle"], 80.0, delta=3)
 
-    def test_min_elbow_angle_survives_one_unmeasurable_arm(self) -> None:
-        # A wrist dropped below the visibility gate makes THAT arm's angle NaN, but the frame
-        # is invalidated outright (wrists are in `required`), so nothing is silently averaged.
-        frame = pushup_frame(elbow_angle=90.0)
-        frame["landmarks"][16]["visibility"] = 0.0
-        raw = pushup_compute_raw([frame], 30.0)[0]
-        self.assertFalse(raw["valid"])
-
 
 class PushupPlankMetricTests(unittest.TestCase):
     def test_hip_offset_ratio_is_positive_for_sag_and_negative_for_pike(self) -> None:
@@ -326,6 +318,33 @@ class PushupUnmeasurableInputTests(unittest.TestCase):
         self.assertAlmostEqual(raw["hip_offset_ratio"], 0.1, places=5)
         self.assertAlmostEqual(raw["hand_width_ratio"], 1.0, places=5)
         self.assertAlmostEqual(raw["body_axis_tilt_deg"], 0.0, places=6)
+
+    def test_occluded_wrist_invalidates_the_frame(self) -> None:
+        # Wrists are in `required`, so a wrist dropped below the visibility gate does not
+        # leave one arm's angle NaN inside an otherwise-valid frame -- it invalidates the
+        # frame outright, and nothing is silently computed from the surviving arm.
+        frame = pushup_frame(elbow_angle=90.0)
+        frame["landmarks"][16]["visibility"] = 0.0
+        raw = pushup_compute_raw([frame], 30.0)[0]
+        self.assertFalse(raw["valid"])
+        self.assertNotIn("min_elbow_angle", raw)
+
+    def test_degenerate_elbow_geometry_nans_only_the_elbow_metrics(self) -> None:
+        # The one route to a NaN elbow angle inside a VALID frame: the elbow landmark
+        # coinciding with the wrist, which makes geometry.angle_degrees' denominator
+        # degenerate. All three landmarks stay visible, so the frame is still valid -- and
+        # `min_elbow_angle` must come back NaN rather than fall back to some other number,
+        # while the plank metrics (which do not depend on the elbows) stay finite.
+        frame = pushup_frame(elbow_angle=90.0, hip_offset=0.06)
+        for elbow, wrist in ((13, 15), (14, 16)):
+            frame["landmarks"][elbow] = dict(frame["landmarks"][wrist])
+        raw = pushup_compute_raw([frame], 30.0)[0]
+        self.assertTrue(raw["valid"])
+        self.assertFalse(np.isfinite(raw["left_elbow_angle"]))
+        self.assertFalse(np.isfinite(raw["right_elbow_angle"]))
+        self.assertFalse(np.isfinite(raw["min_elbow_angle"]))
+        self.assertAlmostEqual(raw["hip_offset_ratio"], 0.1, places=5)
+        self.assertAlmostEqual(raw["hand_width_ratio"], 1.0, places=5)
 
     def test_occluded_far_shoulder_yields_no_metrics_not_a_wrong_plank_line(self) -> None:
         loud = pushup_compute_raw([pushup_frame(hip_offset=0.06)], 30.0)[0]
