@@ -51,7 +51,7 @@ const en: Dict = {
 
   // Header
   "header.session": "Session: {id}",
-  "header.title": "Squat Analysis",
+  "header.title": "{movement} Analysis",
   "header.processing": "PROCESSING",
   "header.complete": "ANALYSIS COMPLETE",
   "header.awaiting": "AWAITING INPUT",
@@ -194,11 +194,11 @@ const en: Dict = {
 
   // Upload dropzone
   "upload.analysing": "Analysing…",
-  "upload.prompt": "Drop a squat video or tap to upload",
+  "upload.prompt": "Drop a {movement} video or tap to upload",
   "upload.hint": "MP4 / MOV · single athlete · side or rear view",
 
   // Demo onboarding (empty state)
-  "demo.heading": "Analyze a squat in about 20 seconds.",
+  "demo.heading": "Analyze your {movement} in about 20 seconds.",
   "demo.sub": "Upload a clip or open a labeled sample. You get a skeleton overlay, a fault timeline, and coaching feedback x-coach can trace to the cause.",
   "demo.sampleBtn": "Open a sample clip",
   "demo.or": "or",
@@ -685,7 +685,7 @@ const zhHant: Dict = {
 
   // Header
   "header.session": "工作階段：{id}",
-  "header.title": "深蹲分析",
+  "header.title": "{movement}分析",
   "header.processing": "處理中",
   "header.complete": "分析完成",
   "header.awaiting": "等待輸入",
@@ -821,11 +821,11 @@ const zhHant: Dict = {
 
   // Upload dropzone
   "upload.analysing": "分析中…",
-  "upload.prompt": "拖放深蹲影片或點擊上傳",
+  "upload.prompt": "拖放{movement}影片或點擊上傳",
   "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
 
   // Demo onboarding (empty state)
-  "demo.heading": "約 20 秒，分析一段深蹲。",
+  "demo.heading": "約 20 秒，分析一段{movement}。",
   "demo.sub": "上傳影片或開啟已標註的範例。你會得到骨架疊圖、錯誤時間軸，以及能追溯成因的教練回饋。",
   "demo.sampleBtn": "開啟範例片段",
   "demo.or": "或",

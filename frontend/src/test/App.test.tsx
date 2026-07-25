@@ -58,7 +58,7 @@ describe("App — initial state", () => {
   it("renders the demo intro (no analysis)", () => {
     renderApp();
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Analyze a squat in about 20 seconds."
+      "Analyze your Squat in about 20 seconds."
     );
   });
 
@@ -217,7 +217,7 @@ describe("App — new analysis reset", () => {
 
     // Back to the empty studio, and the shareable id is dropped from the URL.
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Analyze a squat in about 20 seconds."
+      "Analyze your Squat in about 20 seconds."
     );
     await waitFor(() => expect(screen.getByTestId("loc-search").textContent).toBe(""));
   });

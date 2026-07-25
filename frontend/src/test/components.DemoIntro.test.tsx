@@ -22,8 +22,30 @@ describe("DemoIntro", () => {
       <DemoIntro onFile={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Analyze a squat in about 20 seconds."
+      "Analyze your Squat in about 20 seconds."
     );
+  });
+
+  // Finding 2 of the 2026-07-25 review: this heading sits directly above the movement selector and
+  // stayed hardcoded to "squat" regardless of what was selected. Pin that it now names the actual
+  // selection, and that the dropzone below it (see UploadDropzone.test.tsx) agrees.
+  it("names the selected movement in the heading, not a hardcoded squat", () => {
+    renderWithProviders(
+      <DemoIntro
+        onFile={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        loading={false}
+        statusMsg=""
+        error=""
+        {...movementProps}
+        movement="Push-up"
+        movements={[{ name: "Push-up", validated: true }]}
+      />
+    );
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Analyze your Push-up in about 20 seconds."
+    );
+    expect(screen.getByText(/Drop a Push-up video/i)).toBeInTheDocument();
   });
 
   it("shows the sub-heading description", () => {

@@ -57,7 +57,7 @@ export default function DemoIntro({
         {/* Left: message + actions */}
         <div className="lg:flex-1">
           <h2 className="font-display text-3xl font-bold leading-tight tracking-tight text-content md:text-4xl">
-            {t("demo.heading")}
+            {t("demo.heading", { movement: movementLabel(t, movement) })}
           </h2>
           <p className="mt-4 max-w-md leading-relaxed text-muted">{t("demo.sub")}</p>
 
@@ -105,7 +105,7 @@ export default function DemoIntro({
               // never appears against an unconfirmed movement.
               <LumenLoader variant="scan" caption={statusMsg} />
             ) : (
-              <UploadDropzone onFile={onFile} />
+              <UploadDropzone onFile={onFile} movement={movement} />
             )}
 
             <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-faint">

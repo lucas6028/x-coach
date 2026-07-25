@@ -58,6 +58,21 @@ describe("studio movement selection", () => {
     expect(await screen.findByText("Beta")).toBeTruthy();
   });
 
+  // Finding 1 + 2 of the 2026-07-25 review: the header title, the demo heading, and the upload
+  // prompt all stayed pinned to "squat" no matter which movement was selected — three surfaces
+  // upstream of the verdict telling a Push-up user they were uploading a squat. This is the
+  // end-to-end pin that all three now track the URL-driven selection together.
+  it("names the URL-selected movement in the header, heading, and upload prompt", async () => {
+    renderWithProviders(<App />, { route: "/app?movement=Push-up" });
+    await screen.findByLabelText(/movement/i);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Push-up Analysis");
+    expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+      "Analyze your Push-up in about 20 seconds."
+    );
+    expect(screen.getByText("Drop a Push-up video or tap to upload")).toBeInTheDocument();
+    expect(screen.queryByText(/Squat Analysis/i)).not.toBeInTheDocument();
+  });
+
   it("does not claim a movement is unavailable while the list is still loading", async () => {
     let resolve!: (ms: { name: string; validated: boolean }[]) => void;
     vi.spyOn(api, "getMovements").mockReturnValue(
