@@ -3,9 +3,11 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.app.main import app
+from backend.app.routers.analyze import _validated_movement
 
 
 def _stub_result(movement: str) -> dict:
@@ -51,14 +53,41 @@ class TestAnalyzeMovement(unittest.TestCase):
         save.assert_not_called()
         run.assert_not_called()
 
+    def test_validated_movement_rejects_an_empty_or_whitespace_string(self) -> None:
+        """Unit-level guard check, called directly rather than through HTTP -- an HTTP client
+        cannot deliver a literal "" here at all (see the fix report for why); the reachable
+        whitespace-only case is covered end-to-end below via ``self._post``."""
+        for blank in ("", "   "):
+            with self.subTest(movement=repr(blank)):
+                with self.assertRaises(HTTPException) as ctx:
+                    _validated_movement(blank)
+                self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_rejects_a_whitespace_only_movement_over_http(self) -> None:
+        """The one "blank-ish" value an HTTP client can actually deliver as itself (see the unit
+        test above for why a literal "" cannot): a whitespace-only movement must 400 and must not
+        reach save_upload or the pipeline, same as any other invalid movement."""
+        resp = self._post("   ")
+        self.assertEqual(resp.status_code, 400)
+
+        with patch("backend.app.services.analysis.save_upload") as save, patch(
+            "backend.app.services.analysis.analyze_video_file"
+        ) as run:
+            self._post("   ")
+        save.assert_not_called()
+        run.assert_not_called()
+
     def test_forwards_a_valid_movement_to_the_pipeline(self) -> None:
+        """Pins the canonicalization contract: a non-canonical spelling ("push-up") must
+        resolve to the registry's canonical name ("Push-up") before reaching the pipeline, not
+        pass the caller's raw string through untouched."""
         with patch(
             "backend.app.services.analysis.save_upload", return_value=("vid1", "/tmp/vid1.mp4")
         ), patch(
             "backend.app.services.analysis.analyze_video_file",
             return_value=_stub_result("Push-up"),
         ) as run:
-            resp = self._post("Push-up")
+            resp = self._post("push-up")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(run.call_args.kwargs["movement"], "Push-up")
 

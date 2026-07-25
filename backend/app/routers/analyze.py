@@ -29,8 +29,21 @@ def _validated_movement(movement: str) -> str:
     Rejecting HERE -- before save_upload and before pose extraction -- means a bad request
     costs no compute. The registry lookup is case-insensitive (get_detector lowercases its
     key), so the canonical spelling is what comes back.
+
+    An explicit empty/whitespace-only ``movement`` is rejected here rather than left to
+    ``registry.get_detector``: that function's ``(movement or "Squat")`` fallback exists for
+    callers that legitimately pass ``None`` (the library path), not for a client that sent
+    ``movement=""`` on purpose. Silently mapping an explicit empty string to Squat would mask
+    exactly the kind of bad request this endpoint is meant to catch.
     """
     from src.pose.movements import registry
+
+    if not movement or not movement.strip():
+        known = ", ".join(d.name for d in registry.list_detectors())
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported movement '{movement}'. Analyzable movements: {known}.",
+        )
 
     try:
         return registry.get_detector(movement).name
