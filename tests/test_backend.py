@@ -1233,6 +1233,35 @@ class StorePersistTests(unittest.TestCase):
             )
         self.assertEqual(aid, "")
 
+    def test_persist_inserts_the_movement(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"id": "analysis-1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.persist_analysis(
+                token="t",
+                user_id="u1",
+                video_id="vid",
+                source="upload",
+                result={"view": {"view_type": "rear"}, "detections": [1], "movement": "Push-up"},
+            )
+        self.assertEqual(query.inserted["movement"], "Push-up")
+
+    def test_persist_inserts_movement_key_as_none_when_absent(self) -> None:
+        """The key must land unconditionally, not only when present: an unmigrated `analyses`
+        table rejects an unknown insert key outright (PGRST204), so a conditional insert would
+        hide that failure for movement-less results while still breaking on movement-bearing
+        ones -- pin the unconditional shape so a later refactor can't quietly narrow it."""
+        client, query = _fake_client(_Resp(data=[{"id": "analysis-1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.persist_analysis(
+                token="t",
+                user_id="u1",
+                video_id="vid",
+                source="upload",
+                result={"view": {"view_type": "rear"}, "detections": [1]},
+            )
+        self.assertIn("movement", query.inserted)
+        self.assertIsNone(query.inserted["movement"])
+
 
 class StoreListTests(unittest.TestCase):
     def test_list_returns_total_and_items(self) -> None:
