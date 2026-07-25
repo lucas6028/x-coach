@@ -665,9 +665,11 @@ Push-up · Lunge · Deadlift · Row · Band Pull Apart · Bicep Curl · Arm Abdu
 Analysis (`backend`) stays squat-only in the product until a movement's thresholds are validated against labeled data, regardless of detector availability.
 
 > **Update (2026-07-25, after this plan closed):** the two OHP rules this plan deferred
-> (`ohp_insufficient_elevation`, `ohp_forward_head_barpath`) have since been implemented, so OHP is
-> now 5/5 and 63 spec rules remain. See the 2026-07-25 status block in the spec (§8) for the two
-> documented deviations from the spec's detection heuristics.
+> (`ohp_insufficient_elevation`, `ohp_forward_head` — renamed from `ohp_forward_head_barpath`
+> when its bar-path sub-criterion was withdrawn) have since been implemented, so OHP is now 5/5
+> and 63 spec rules remain. See the 2026-07-25 status block in the spec (§8) for the documented
+> deviations from the spec's detection heuristics, the withdrawn sub-criterion, and the three
+> OHP `kg_query` strings that still resolve to no KG node.
 
 ## Self-Review
 

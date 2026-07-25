@@ -1,4 +1,14 @@
 # Thresholds in this module are spec-derived (docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md), NOT validated against labeled OHP data (spec §8.4).
+#
+# MODULE-WIDE SILENCE RISK -- far-shoulder occlusion silences ALL FIVE OHP rules, not one:
+# `ohp_compute_raw` puts BOTH shoulders (plus both elbows, wrists and hips) in its `required`
+# tuple, so if the far shoulder is occluded in a hard sagittal view `visible_point` returns
+# None, the frame is marked `valid=False`, and every rule below masks on `frame.valid`. The
+# whole OHP detector therefore goes silent on that frame -- incomplete lockout, back lean,
+# asymmetry, elevation and forward head alike. This is the failure mode most likely to bite
+# on real side-view video, and it has not been exercised against any (the unit fixtures keep
+# both shoulders fully visible). It is a validity-gate effect, NOT a NaN-normalizer effect:
+# the frame is discarded before any metric is read.
 from __future__ import annotations
 
 from typing import Sequence
@@ -13,7 +23,11 @@ from src.pose.geometry import (
 )
 from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
 from src.pose.movements import registry
-from src.pose.pose_rule_detector import PoseRuleDetection, build_detection
+from src.pose.pose_rule_detector import (
+    SIDE_VIEW_CONF_THRESHOLD,
+    PoseRuleDetection,
+    build_detection,
+)
 
 # MediaPipe indices not already exported by src.pose.geometry.
 LEFT_ELBOW = 13
@@ -51,7 +65,6 @@ OHP_METRIC_KEYS: tuple[str, ...] = (
     "shoulder_ear_gap",
     "wrist_above_nose",
     "ear_forward_offset",
-    "wrist_forward_offset",
 )
 
 # Views in which a sagittal-plane (anterior/posterior) offset is actually resolvable.
@@ -116,7 +129,7 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
         # already encodes -- shoulders drifting toward +x relative to the hips yields a
         # positive torso_lean_signed_deg, which rule_excessive_back_lean reads as a
         # BACKWARD lean (shoulders behind the hips). Every other sagittal offset in this
-        # module (see rule_forward_head_barpath) therefore measures "anterior" as
+        # module (see rule_forward_head) therefore measures "anterior" as
         # shoulder_x - point_x. A subject facing the opposite way inverts the sign of
         # every such reading. This is a known monocular limitation -- neither the sign
         # nor any of the sagittal thresholds has been validated on real data.
@@ -171,20 +184,17 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
             else np.nan
         )
 
-        # Sagittal-plane horizontal offsets, normalized by shoulder width. Positive =
-        # the point sits ANTERIOR to the shoulder line, per the single facing convention
-        # documented above (anterior = -x), hence shoulder_x - point_x.
+        # Sagittal-plane horizontal offset of the EAR, normalized by shoulder width. Positive
+        # = the ear sits ANTERIOR to the shoulder line, per the single facing convention
+        # documented above (anterior = -x), hence shoulder_x - ear_x. This ear-vs-shoulder
+        # referencing is exactly what the forward-head literature measures (craniovertebral
+        # angle). NOTE: there is deliberately NO wrist/bar-path counterpart here -- see the
+        # WITHDRAWN sub-criterion note in `rule_forward_head`.
         shoulder_mean_x = mean_finite([_x(points, LEFT_SHOULDER), _x(points, RIGHT_SHOULDER)])
         ear_mean_x = mean_finite([_x(points, LEFT_EAR), _x(points, RIGHT_EAR)])
-        wrist_mean_x = mean_finite([_x(points, LEFT_WRIST), _x(points, RIGHT_WRIST)])
         ear_forward_offset = (
             (shoulder_mean_x - ear_mean_x) / shoulder_width
             if np.isfinite(shoulder_mean_x) and np.isfinite(ear_mean_x) and normalizer_ok
-            else np.nan
-        )
-        wrist_forward_offset = (
-            (shoulder_mean_x - wrist_mean_x) / shoulder_width
-            if np.isfinite(shoulder_mean_x) and np.isfinite(wrist_mean_x) and normalizer_ok
             else np.nan
         )
 
@@ -204,7 +214,6 @@ def ohp_compute_raw(frames: Sequence[object], fps: float) -> list[dict]:
                 "shoulder_ear_gap": shoulder_ear_gap,
                 "wrist_above_nose": wrist_above_nose,
                 "ear_forward_offset": ear_forward_offset,
-                "wrist_forward_offset": wrist_forward_offset,
             }
         )
     return raw
@@ -314,23 +323,32 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
             float(np.nanmax(wrist_values)) if any(np.isfinite(v) for v in wrist_values) else np.nan
         )
 
-        if np.isfinite(peak_worse_elbow):
-            severity = severity_from_range(peak_worse_elbow, 160.0, 140.0, lower_is_worse=True)
-            primary_label = "peak worse-arm elbow angle"
-            primary_value = round(peak_worse_elbow, 2)
-            primary_threshold = 160.0
-        elif np.isfinite(max_wrist):
-            # Flagged only by the wrist-never-clears-shoulder condition (no finite elbow
-            # reading in the segment) -- drive severity off how far below the shoulder line
-            # the wrist stayed instead.
-            severity = severity_from_range(max_wrist, 0.0, 0.15, lower_is_worse=False)
+        # Severity must come from the criterion that ACTUALLY fired. The mask above is
+        # `elbow_flag OR wrist_flag`, so selecting the ramp on "is the elbow reading finite?"
+        # picks the WRONG one whenever a segment fires on the wrist criterion alone -- the bar
+        # never clears the shoulders while the elbows happen to be locked straight. The elbow
+        # ramp then returns exactly 0.0, and a maximally failed press is emitted at severity 0
+        # / confidence 0 carrying evidence ("peak elbow 178 deg vs 160 deg threshold") that
+        # contradicts the fault it names. Score BOTH spec'd ramps and take the worse; this
+        # introduces no new threshold -- 160/140 deg and 0.0/0.15 are both already spec'd.
+        elbow_severity = (
+            severity_from_range(peak_worse_elbow, 160.0, 140.0, lower_is_worse=True)
+            if np.isfinite(peak_worse_elbow)
+            else 0.0
+        )
+        wrist_severity = (
+            severity_from_range(max_wrist, 0.0, 0.15, lower_is_worse=False)
+            if np.isfinite(max_wrist)
+            else 0.0
+        )
+        severity = max(elbow_severity, wrist_severity)
+        if wrist_severity > elbow_severity:
             primary_label = "wrist height above shoulder"
             primary_value = round(max_wrist, 4)
             primary_threshold = 0.0
         else:
-            severity = 0.0
             primary_label = "peak worse-arm elbow angle"
-            primary_value = 0.0
+            primary_value = round(peak_worse_elbow, 2) if np.isfinite(peak_worse_elbow) else 0.0
             primary_threshold = 160.0
 
         detections.append(
@@ -556,65 +574,75 @@ def rule_insufficient_elevation(core: list[CoreFrame], ctx: RuleContext) -> list
     return detections
 
 
-def rule_forward_head_barpath(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
-    """Flag a forward-head / bar-ahead-of-midline finish: (a) the ear sitting anterior to the
-    shoulder line by > 0.30 shoulder-widths, and/or (b) at lockout, the wrist not stacked over
-    the shoulder but anterior by > 0.30 shoulder-widths.
+def rule_forward_head(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag a forward-head finish: the ear sitting anterior to the shoulder line by
+    > 0.30 shoulder-widths.
 
-    HARD VIEW GATE (deliberately not a confidence multiplier): both cues are PURE horizontal
-    offsets, and their direction is meaningless unless the subject's facing is known. Outside a
-    sagittal view the sign of `shoulder_x - point_x` is arbitrary, so firing there -- even at
+    WITHDRAWN SUB-CRITERION -- bar path forward of midline. The spec pairs this rule with a
+    second cue: "at lockout the wrist is not stacked over the shoulder (anterior offset
+    > ~0.3 shoulder-widths)". That sub-criterion is WITHDRAWN, and its `wrist_forward_offset`
+    metric deleted rather than left pre-wired, for three reasons:
+      1. Referencing bar path to the SHOULDER conflates it with trunk lean. A back lean moves
+         the shoulders posterior while the bar stays over the base of support, so "bar anterior
+         of the shoulders" IS the mechanical signature of a back lean -- this rule and
+         `rule_excessive_back_lean` were describing the same event, and the bar-path cue
+         saturated at severity 1.0 on a pure back-lean rep, outranking the fault that actually
+         occurred.
+      2. Referencing bar path to MID-FOOT (what the spec's "stacked over the shoulder and
+         mid-foot" wording really means) would need an invented mid-foot proxy, which this
+         project forbids.
+      3. The rule's citation does not independently support a bar-path threshold. Abdelraouf
+         et al. (PMC13116542) supports the FORWARD-HEAD cue specifically: it defines forward
+         head posture by CRANIOVERTEBRAL ANGLE -- an ear-relative-to-shoulder measure -- so
+         ear-vs-shoulder referencing is exactly what the literature measures. Nothing in it
+         speaks to bar position.
+    The sub-criterion is withdrawn PENDING A SPEC DECISION, not silently reinterpreted; it is
+    recorded as an open question in the spec's §8 status notes.
+
+    HARD VIEW GATE (deliberately not a confidence multiplier): the cue is a PURE horizontal
+    offset, and its direction is meaningless unless the subject's facing is known. Outside a
+    sagittal view the sign of `shoulder_x - ear_x` is arbitrary, so firing there -- even at
     reduced confidence -- would emit a confidently-wrong DIRECTION claim ("head juts forward")
     on data that cannot support any direction at all. A wrong direction is worse than silence,
     so off-sagittal views return no detections rather than low-confidence ones.
+
+    The gate also requires `view_confidence >= SIDE_VIEW_CONF_THRESHOLD`, following the squat
+    precedent (`rule_knees_forward` in src/pose/movements/squat.py). Same constant (0.20,
+    defined in src.pose.pose_rule_detector) -- no new number invented. NOTE this EXTENDS the
+    squat precedent, which gates only `side`: here the same confidence floor is applied to
+    `front_oblique` too, because a weakly-classified oblique view authorizes the directional
+    claim just as little as a weakly-classified side view does.
 
     Sign convention: anterior = -x, the single module-wide convention documented in
     `ohp_compute_raw` and encoded by `rule_excessive_back_lean`. Do not introduce a second one.
 
     Known weakness -- the shoulder-width normalizer is worst exactly where this rule is gated:
-    - In a true sagittal view the two shoulder landmarks project nearly on top of each other, so
-      shoulder_width shrinks and the normalized offsets INFLATE. The > 1e-6 guard in
-      `ohp_compute_raw` prevents a divide-by-zero, not this inflation.
-    - Worse, if the far shoulder is fully occluded, `visible_point` drops it, `shoulder_width`
-      becomes NaN, and every metric this rule reads goes NaN -- i.e. from a hard side view this
-      rule can go SILENT rather than merely noisy. It has not been exercised on real sagittal
-      video (the unit fixture keeps both shoulders fully visible), so its real-world hit rate
-      is unknown on top of its threshold being unvalidated like the rest of this module."""
-    if ctx.view_type not in SAGITTAL_VIEWS:
+    in a true sagittal view the two shoulder landmarks project nearly on top of each other, so
+    shoulder_width shrinks and the normalized offset INFLATES. The > 1e-6 guard in
+    `ohp_compute_raw` prevents a divide-by-zero, not this inflation. (For the harder
+    far-shoulder-OCCLUSION case, which silences every OHP rule and not just this one, see the
+    module-level note at the top of this file.) The rule has not been exercised on real
+    sagittal video, so its real-world hit rate is unknown on top of its threshold being
+    unvalidated like the rest of this module."""
+    if ctx.view_type not in SAGITTAL_VIEWS or ctx.view_confidence < SIDE_VIEW_CONF_THRESHOLD:
         return []
 
-    lockout_phases = _lockout_phases(core)
-
-    def worst_offset(frame: CoreFrame) -> float:
-        """Larger = further anterior = worse. The bar-path cue only counts at lockout."""
-        ear = frame.m("ear_forward_offset")
-        wrist = frame.m("wrist_forward_offset") if frame.phase in lockout_phases else np.nan
-        finite = [value for value in (ear, wrist) if np.isfinite(value)]
-        return max(finite) if finite else np.nan
-
     forward_mask = [
-        frame.valid and np.isfinite(worst_offset(frame)) and worst_offset(frame) > 0.30
+        frame.valid
+        and np.isfinite(frame.m("ear_forward_offset"))
+        and frame.m("ear_forward_offset") > 0.30
         for frame in core
     ]
     detections: list[PoseRuleDetection] = []
     for start, end in contiguous_true_segments(forward_mask, ctx.min_frames):
         segment = core[start : end + 1]
-        values = [worst_offset(frame) for frame in segment]
-        max_offset = float(np.nanmax(values))
-        ear_values = [frame.m("ear_forward_offset") for frame in segment]
-        wrist_values = [
-            frame.m("wrist_forward_offset") if frame.phase in lockout_phases else np.nan
-            for frame in segment
-        ]
-        max_ear = float(np.nanmax(ear_values)) if any(np.isfinite(v) for v in ear_values) else np.nan
-        max_wrist = (
-            float(np.nanmax(wrist_values)) if any(np.isfinite(v) for v in wrist_values) else np.nan
-        )
-        severity = severity_from_range(max_offset, 0.30, 0.60, lower_is_worse=False)
+        values = [frame.m("ear_forward_offset") for frame in segment]
+        max_ear = float(np.nanmax(values))
+        severity = severity_from_range(max_ear, 0.30, 0.60, lower_is_worse=False)
         detections.append(
             build_detection(
-                fault_id="ohp_forward_head_barpath",
-                fault_name="Forward Head / Bar Path Forward of Midline",
+                fault_id="ohp_forward_head",
+                fault_name="Forward Head Posture at Lockout",
                 # Verified to resolve to "Forward Head Posture" / "Overhead Press:Forward Head
                 # Posture" via graph_retrieval.resolve_nodes.
                 kg_query="Forward Head Posture",
@@ -628,11 +656,10 @@ def rule_forward_head_barpath(core: list[CoreFrame], ctx: RuleContext) -> list[P
                 # downgrade) and its normalizer is weakly conditioned there -- see docstring.
                 observability="medium",
                 evidence={
-                    "max_ear_forward_offset": round(max_ear, 4) if np.isfinite(max_ear) else 0.0,
-                    "max_wrist_forward_offset": round(max_wrist, 4) if np.isfinite(max_wrist) else 0.0,
+                    "max_ear_forward_offset": round(max_ear, 4),
                     "threshold": 0.30,
-                    "primary_label": "anterior offset from shoulder line (shoulder-widths)",
-                    "primary_value": round(max_offset, 4),
+                    "primary_label": "ear anterior offset from shoulder line (shoulder-widths)",
+                    "primary_value": round(max_ear, 4),
                     "primary_threshold": 0.30,
                 },
                 citation="Abdelraouf OR, Abdel-Aziem AA, Alkhamees NH, Ibrahim ZM, Aboelela EM, "
@@ -652,7 +679,10 @@ def rule_forward_head_barpath(core: list[CoreFrame], ctx: RuleContext) -> list[P
                                  "reduced shoulder abduction … and flexion,\" and PMC12514857 notes "
                                  "forward head / thoracic kyphosis \"reduce[s] the subacromial space\" -- "
                                  "giving both the ROM (performance) and impingement (injury) rationale "
-                                 "for flagging a forward head and an un-stacked bar path.",
+                                 "for flagging a forward head. (The craniovertebral angle is an "
+                                 "ear-relative-to-shoulder measure, which is exactly the referencing "
+                                 "this rule uses; the spec's companion bar-path sub-criterion is not "
+                                 "supported by these sources and has been withdrawn -- see docstring.)",
             )
         )
     return detections
@@ -668,7 +698,7 @@ OHP_DETECTOR = MovementDetector(
         rule_excessive_back_lean,
         rule_asymmetric_press,
         rule_insufficient_elevation,
-        rule_forward_head_barpath,
+        rule_forward_head,
     ),
 )
 

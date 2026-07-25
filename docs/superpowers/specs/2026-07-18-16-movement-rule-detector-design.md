@@ -484,19 +484,41 @@ needed for left/right asymmetry.
   lockout." Full elbow extension is therefore the mechanical definition of a finished rep,
   and stopping short is a genuine ROM failure.
 
-#### Forward head / bar path ahead of midline
+#### Forward head at lockout
 
-- **fault_id**: `ohp_forward_head_barpath`
-- **fault_name**: Forward head / bar path forward of midline
-- **description**: The head juts forward and/or the bar finishes in front of the shoulders
-  rather than stacked over the shoulder and mid-foot at lockout.
-- **detection_heuristic**: Side view. (a) Forward head: horizontal offset of ear (7/8) or
-  nose (0) ahead of the shoulder (11/12) along the anterior axis, normalized by shoulder
-  width; flag when ear is anterior by > ~0.3 shoulder-widths. (b) Bar-forward: at lockout,
-  wrist (15/16) horizontal offset anterior to shoulder; flag when wrist is not stacked
-  roughly vertically over the shoulder (offset > ~0.3 shoulder-widths).
-- **observability**: medium–high — `side` (both cues are sagittal-plane offsets); low from
+- **fault_id**: `ohp_forward_head`
+- **fault_name**: Forward head posture at lockout
+- **description**: The head juts forward of the shoulder line at/near lockout.
+- **detection_heuristic**: Side view. Horizontal offset of ear (7/8) ahead of the shoulder
+  (11/12) along the anterior axis, normalized by shoulder width; flag when the ear is
+  anterior by > ~0.3 shoulder-widths.
+- **observability**: medium–high — `side` (the cue is a sagittal-plane offset); low from
   `front`.
+
+> **WITHDRAWN sub-criterion — bar path ahead of midline.** This rule was originally written
+> with a second cue: *"(b) Bar-forward: at lockout, wrist (15/16) horizontal offset anterior
+> to shoulder; flag when the wrist is not stacked roughly vertically over the shoulder
+> (offset > ~0.3 shoulder-widths)."* That sub-criterion is **withdrawn** (2026-07-25) and its
+> `wrist_forward_offset` metric deleted from the implementation, for three reasons:
+>
+> 1. **It re-describes back lean.** Referencing bar path to the *shoulder* conflates it with
+>    trunk lean: a back lean moves the shoulders posterior while the bar stays over the base
+>    of support, so "bar anterior of the shoulders" **is** the mechanical signature of a back
+>    lean. Empirically, a pure back-lean rep emitted this fault at severity 1.0 / confidence
+>    1.0, outranking `ohp_lumbar_hyperextension` (0.41) — the fault that actually occurred.
+> 2. **The correct reference frame is not measurable.** The description's own wording
+>    ("stacked over the shoulder **and mid-foot**") means the bar should be referenced to
+>    mid-foot, which would require an invented mid-foot proxy — forbidden by this project's
+>    every-threshold-literature-backed premise.
+> 3. **The citation does not support it.** Abdelraouf et al. (PMC13116542) defines forward
+>    head posture by **craniovertebral angle**, an ear-relative-to-shoulder measure — so
+>    ear-vs-shoulder referencing is exactly what the literature measures. Nothing in that
+>    source, or in PMC13086636 / PMC12514857, speaks to bar position at all.
+>
+> **Open spec question:** does the OHP rule set want a genuine bar-path fault? If so it needs
+> (a) a base-of-support reference that MediaPipe can actually resolve and (b) its own
+> citation. Until both exist, the rule is a forward-head cue only. This is a withdrawal
+> pending a decision, not a silent reinterpretation.
 - **biomechanical_rationale**: A forward-head / kyphotic overhead posture reduces the
   scapular upward rotation and shoulder flexion available and narrows the subacromial
   space, both cutting achievable overhead ROM and raising impingement risk; fatigue in
@@ -1377,8 +1399,8 @@ as per-movement plans reusing this framework.
 
 **Status (2026-07-25):** All **5 of 5** OHP rules are now implemented in
 `src/pose/movements/overhead_press.py` (`ohp_incomplete_lockout`, `ohp_lumbar_hyperextension`,
-`ohp_asymmetric_press`, `ohp_insufficient_elevation`, `ohp_forward_head_barpath`). Two deviations
-from the detection heuristics written above, both deliberate and documented in-code:
+`ohp_asymmetric_press`, `ohp_insufficient_elevation`, `ohp_forward_head`). Deviations from the
+detection heuristics written above, all deliberate and documented in-code:
 
 - `ohp_insufficient_elevation` — the "~0.5 head-heights" wording above is **not implementable**:
   MediaPipe's 33 landmarks contain no head-height measure (nose, eyes, ears and mouth all lie
@@ -1386,11 +1408,35 @@ from the detection heuristics written above, both deliberate and documented in-c
   shoulder-width-normalized nose-clearance criterion (fires when
   `(wrist_mean_y − nose_y) / shoulder_width > −0.15`). This is a **substitution, not a unit
   conversion** — no head-height-to-biacromial-width anthropometric constant was assumed.
-- `ohp_forward_head_barpath` — implemented as a **hard view gate** rather than the observability
-  downgrade implied by "medium–high `side`; low from `front`". Both cues are pure horizontal
-  offsets whose direction is unresolvable without knowing the subject's facing, so the rule
-  returns **no detections at all** outside `{side, front_oblique}` instead of low-confidence ones;
-  a wrong direction claim is worse than silence. Its shoulder-width normalizer is also weakly
-  conditioned in exactly the sagittal views it is gated to.
+- `ohp_forward_head` (renamed from `ohp_forward_head_barpath`) — implemented as a **hard view
+  gate** rather than the observability downgrade implied by "medium–high `side`; low from
+  `front`". The cue is a pure horizontal offset whose direction is unresolvable without knowing
+  the subject's facing, so the rule returns **no detections at all** outside
+  `{side, front_oblique}` instead of low-confidence ones; a wrong direction claim is worse than
+  silence. Its shoulder-width normalizer is also weakly conditioned in exactly the sagittal views
+  it is gated to.
+- `ohp_forward_head` — the gate additionally requires `view_confidence >= 0.20`
+  (`SIDE_VIEW_CONF_THRESHOLD` in `src/pose/pose_rule_detector.py`), following the squat precedent
+  in `rule_knees_forward`. **This extends that precedent**: squat gates only `side`, whereas here
+  the same floor is applied to `front_oblique` too, on the grounds that a weakly-classified
+  oblique view authorizes a directional claim just as little as a weakly-classified side view
+  does. No new number was introduced — the constant is shared with squat.
+- `ohp_forward_head` — the spec's **bar-path sub-criterion is WITHDRAWN**; see the boxed note in
+  the rule entry above for the full rationale and the open spec question it leaves.
+- `ohp_incomplete_lockout` — the mask fires on `elbow_flag OR wrist_flag`, so severity is scored
+  from **both** spec'd ramps (160→140° elbow, 0.0→0.15 wrist) and the worse taken. Selecting the
+  ramp by "is the elbow reading finite?" mis-attributed severity when a segment fired on the
+  wrist criterion alone: a rep whose bar never left shoulder height with the elbows locked
+  straight was emitted at **severity 0.0 / confidence 0.0**, carrying evidence ("peak elbow 178°
+  vs 160° threshold") that contradicted the fault it named. No new threshold was introduced.
 
-Both new thresholds remain unvalidated, like the other three (§8.4).
+All five OHP thresholds remain unvalidated against labeled data (§8.4).
+
+**Known open item (not a deviation, a gap):** three OHP `kg_query` strings resolve to **no KG
+node at all** against `data/kg/sports_kg_v3.graphml` — `"Incomplete Elbow Lockout"`,
+`"Lumbar Hyperextension"` and `"Asymmetric Press"` (verified via
+`graph_retrieval.resolve_nodes`, both movement-scoped and unscoped). `"Forward Head Posture"`
+and `"Limited Shoulder Elevation"` do resolve. There is no near-miss node to re-point them at
+(the closest OHP-scoped nodes are `Near Lockout`, `Thoracolumbar Extension`,
+`Elbow Extensor Torque`), so this needs KG content work, not a string tweak. Those three faults
+currently reach the chat layer with citations but no retrieved grounding.
