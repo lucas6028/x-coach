@@ -398,13 +398,16 @@ const en: Dict = {
   // Movements menu
   "movements.title": "Movement library",
   "movements.subtitle":
-    "Every movement the coach knows. Squat analysis is live today; the rest are on the way.",
+    "Every movement the coach knows. Squat, Push-up and Overhead Press analysis are live today; the rest are on the way.",
   "movements.groupLower": "Lower body",
   "movements.groupUpper": "Upper body",
   "movements.groupCore": "Core",
   "movements.groupFullBody": "Full body",
   "movements.analyze": "Analyze a video",
   "movements.soon": "Soon",
+  "movements.beta": "Beta",
+  "movements.betaNote":
+    "Rules for this movement are literature-derived and have not yet been validated against labeled data.",
 
   // Movement display names. Only the ones titleCase() would mangle need an entry here; the rest
   // fall back to their canonical spelling.
@@ -1013,13 +1016,15 @@ const zhHant: Dict = {
 
   // Movements menu
   "movements.title": "動作庫",
-  "movements.subtitle": "教練目前認識的所有動作。深蹲分析已經上線，其餘動作陸續開放。",
+  "movements.subtitle": "教練目前認識的所有動作。深蹲、伏地挺身與肩上推舉分析已經上線，其餘動作陸續開放。",
   "movements.groupLower": "下肢",
   "movements.groupUpper": "上肢",
   "movements.groupCore": "核心",
   "movements.groupFullBody": "全身",
   "movements.analyze": "分析影片",
   "movements.soon": "即將開放",
+  "movements.beta": "Beta",
+  "movements.betaNote": "此動作的規則來自文獻推導，尚未以標註資料驗證。",
 
   // Movement display names.
   "movement.Squat": "深蹲",
