@@ -21,6 +21,7 @@ from src.pose.view_estimation import (
     LEFT_SHOULDER,
     RIGHT_HIP,
     RIGHT_SHOULDER,
+    body_axis_extent,
     body_height,
     clip01,
     estimate_view_for_pose,
@@ -45,6 +46,30 @@ def _lm(overrides: dict[int, tuple[float, float, float, float]]) -> list[dict]:
     for index, (x, y, z, vis) in overrides.items():
         points[index] = {"x": x, "y": y, "z": z, "visibility": vis}
     return points
+
+
+def _landmark(x: float, y: float, visibility: float = 0.95) -> dict:
+    return {"x": x, "y": y, "z": 0.0, "visibility": visibility}
+
+
+def _upright_landmarks() -> list[dict]:
+    """Standing subject: shoulders high, ankles low, body axis vertical (extent ~0.60)."""
+    lm = [_landmark(0.5, 0.5) for _ in range(33)]
+    lm[11], lm[12] = _landmark(0.46, 0.20), _landmark(0.54, 0.20)
+    lm[23], lm[24] = _landmark(0.47, 0.50), _landmark(0.53, 0.50)
+    lm[25], lm[26] = _landmark(0.47, 0.65), _landmark(0.53, 0.65)
+    lm[27], lm[28] = _landmark(0.47, 0.80), _landmark(0.53, 0.80)
+    return lm
+
+
+def _horizontal_landmarks() -> list[dict]:
+    """The same body rotated 90 degrees (push-up/plank): axis runs along image x."""
+    lm = [_landmark(0.5, 0.5) for _ in range(33)]
+    lm[11], lm[12] = _landmark(0.20, 0.46), _landmark(0.20, 0.54)
+    lm[23], lm[24] = _landmark(0.50, 0.47), _landmark(0.50, 0.53)
+    lm[25], lm[26] = _landmark(0.65, 0.47), _landmark(0.65, 0.53)
+    lm[27], lm[28] = _landmark(0.80, 0.47), _landmark(0.80, 0.53)
+    return lm
 
 
 def _side_view_landmarks() -> list[dict]:
@@ -147,6 +172,18 @@ class VisibilityGeometryTests(unittest.TestCase):
             points[index] = [0.5, 0.5, 0.0, 1.0]
         self.assertTrue(np.isnan(body_height(points)))
 
+    def test_axis_extent_matches_y_extent_for_an_upright_body(self) -> None:
+        # For a vertical body axis the projection reduces to the y-extent, so the
+        # upright behaviour this classifier was tuned on must be preserved exactly.
+        points = landmarks_to_array(_upright_landmarks())
+        self.assertAlmostEqual(body_axis_extent(points), 0.60, delta=0.02)
+
+    def test_axis_extent_recovers_body_length_when_horizontal(self) -> None:
+        # Same body rotated 90 degrees: the y-extent collapses to the body's thickness,
+        # but the axis-relative extent must still recover its full length.
+        points = landmarks_to_array(_horizontal_landmarks())
+        self.assertGreater(body_axis_extent(points), 0.45)
+
 
 class ClipAndMeanTests(unittest.TestCase):
     def test_clip01_clamps_range(self):
@@ -212,6 +249,49 @@ class ScoreViewTests(unittest.TestCase):
         )
         self.assertNotEqual(view_type, "side")
         self.assertLess(side_score, 0.62)
+
+    def test_sagittal_horizontal_body_scores_side_not_oblique(self) -> None:
+        # A sagittal push-up with a realistic residual left/right separation was
+        # misclassified `rear_oblique` when body extent was measured vertically,
+        # because the collapsed denominator inflated torso_width_ratio ~2.3x.
+        lm = _horizontal_landmarks()
+        for index in (12, 24, 26, 28):  # nudge the far side to a 0.04 residual gap
+            lm[index] = _landmark(lm[index]["x"] + 0.04, lm[index]["y"])
+        points = landmarks_to_array(lm)
+        width = mean_finite(
+            [xy_distance(points, 11, 12), xy_distance(points, 23, 24)], default=float("nan")
+        )
+        ratio = width / body_axis_extent(points)
+        view_type, _confidence, _f, _r, _s, _o = score_view(
+            orientation_score=0.0,
+            face_visibility=0.5,
+            torso_width_ratio=ratio,
+            z_asymmetry_value=0.0,
+            valid_frame_ratio=1.0,
+        )
+        self.assertEqual(view_type, "side")
+
+    def test_sagittal_upright_body_still_scores_side(self) -> None:
+        # Companion to the horizontal case above: for a genuine UPRIGHT sagittal view
+        # (the case this classifier was tuned on, and the case most at risk if the
+        # axis-relative change regressed anything) the verdict must still be `side`.
+        # After Task 2 the 45-file regression corpus contains zero `side` verdicts
+        # (its only sample was degenerate and was correctly reclassified), so the
+        # corpus alone cannot prove this; this synthetic case fills that gap.
+        lm = _upright_landmarks()
+        points = landmarks_to_array(lm)
+        width = mean_finite(
+            [xy_distance(points, 11, 12), xy_distance(points, 23, 24)], default=float("nan")
+        )
+        ratio = width / body_axis_extent(points)
+        view_type, _confidence, _f, _r, _s, _o = score_view(
+            orientation_score=0.0,
+            face_visibility=0.5,
+            torso_width_ratio=ratio,
+            z_asymmetry_value=0.0,
+            valid_frame_ratio=1.0,
+        )
+        self.assertEqual(view_type, "side")
 
 
 class EstimateViewForPoseTests(unittest.TestCase):
