@@ -62,12 +62,17 @@ def ohp_frame(
     lm[16] = {"x": right_wrist[0], "y": right_wrist[1], "z": 0, "visibility": 1.0}
     lm[23] = {"x": 0.46, "y": 0.75, "z": 0, "visibility": 1.0}
     lm[24] = {"x": 0.54, "y": 0.75, "z": 0, "visibility": 1.0}
-    lm[7] = {"x": 0.46 + ear_dx, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
-    lm[8] = {"x": 0.54 + ear_dx, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
+    # Head landmarks ride WITH the shoulders (a torso lean carries the head with it), so
+    # `ear_dx` is a pure head-jut knob measured relative to the shoulder line. Sign follows
+    # the module's single facing convention (anterior = -x, see ohp_compute_raw): a NEGATIVE
+    # ear_dx means the head juts ANTERIOR of the shoulders, i.e. forward head.
+    lm[7] = {"x": 0.46 + shoulder_dx + ear_dx, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
+    lm[8] = {"x": 0.54 + shoulder_dx + ear_dx, "y": shoulder_y - 0.08, "z": 0, "visibility": 1.0}
     # Nose (landmark 0) must be placed explicitly: the all-33 default sits at y=0.5, i.e.
     # BELOW the shoulders (y=0.4), which is anatomically impossible and would make any
     # nose-relative metric meaningless. Placed just above the ear line by default.
-    lm[0] = {"x": 0.50 + ear_dx, "y": shoulder_y - 0.10 if nose_y is None else nose_y,
+    lm[0] = {"x": 0.50 + shoulder_dx + ear_dx,
+             "y": shoulder_y - 0.10 if nose_y is None else nose_y,
              "z": 0, "visibility": 1.0}
     return {"frame_index": frame_index, "landmarks": lm}
 
@@ -93,6 +98,32 @@ class OverheadPressMetricsTests(unittest.TestCase):
         raw_bent = ohp_compute_raw([ohp_frame(elbow_angle=140, wrist_y=0.15)], 30.0)
         self.assertAlmostEqual(raw_bent[0]["avg_elbow_angle"], 140, delta=3)
 
+    def test_wrist_above_nose_sign(self) -> None:
+        # Nose sits at shoulder_y - 0.10 = 0.30 by default; wrists at 0.20 are ABOVE it, and
+        # MediaPipe y grows downward, so the normalized clearance must be negative.
+        raw = ohp_compute_raw([ohp_frame(160, wrist_y=0.20)], 30.0)
+        self.assertLess(raw[0]["wrist_above_nose"], 0.0)
+        # Wrists stalled below the nose flips the sign.
+        raw_low = ohp_compute_raw([ohp_frame(160, wrist_y=0.40)], 30.0)
+        self.assertGreater(raw_low[0]["wrist_above_nose"], 0.0)
+
+    def test_anterior_offset_sign_matches_back_lean_convention(self) -> None:
+        # Anchors the single module-wide facing convention: the SAME fixture shift that the
+        # back-lean rule reads as "shoulders behind the hips" (positive torso_lean_signed_deg)
+        # must also read as "wrists anterior of the shoulders" (positive wrist_forward_offset).
+        # If these two ever disagree in sign, the module has two conflicting conventions.
+        raw = ohp_compute_raw([ohp_frame(160, wrist_y=0.15, shoulder_dx=0.15)], 30.0)
+        self.assertGreater(raw[0]["torso_lean_signed_deg"], 15.0)
+        self.assertGreater(raw[0]["wrist_forward_offset"], 0.0)
+
+    def test_ear_forward_offset_metric(self) -> None:
+        # shoulder width is 0.10; ear_dx=-0.05 puts the ears 0.5 shoulder-widths anterior.
+        raw = ohp_compute_raw([ohp_frame(160, wrist_y=0.15, ear_dx=-0.05)], 30.0)
+        self.assertAlmostEqual(raw[0]["ear_forward_offset"], 0.5, places=6)
+        # Head stacked over the shoulders => no anterior offset, even during a back lean.
+        raw_stacked = ohp_compute_raw([ohp_frame(160, wrist_y=0.15, shoulder_dx=0.15)], 30.0)
+        self.assertAlmostEqual(raw_stacked[0]["ear_forward_offset"], 0.0, places=6)
+
     def test_wrist_height_asymmetry_metric(self) -> None:
         frame = ohp_frame(160, wrist_y=0.15)
         # Push the right wrist down relative to the left to create asymmetry.
@@ -101,11 +132,14 @@ class OverheadPressMetricsTests(unittest.TestCase):
         self.assertGreater(raw[0]["wrist_height_asymmetry"], 0.15)
 
 
+def run_ohp(frames, view="side", vc=0.8):
+    from src.pose.movements import registry
+    from src.pose.movements.base import run_detector
+    return run_detector(registry.get_detector("Overhead Press"), frames, 30.0, view, vc)[1]
+
+
 class OverheadPressRulesTests(unittest.TestCase):
-    def _run(self, frames, view="side", vc=0.8):
-        from src.pose.movements import registry
-        from src.pose.movements.base import run_detector
-        return run_detector(registry.get_detector("Overhead Press"), frames, 30.0, view, vc)[1]
+    _run = staticmethod(run_ohp)
 
     def test_incomplete_lockout_flagged(self) -> None:
         frames = ([ohp_frame(90, 0.45, frame_index=i) for i in range(4)]
@@ -160,3 +194,126 @@ class OverheadPressRulesTests(unittest.TestCase):
                   + [ohp_frame(90, 0.45, frame_index=i + 10) for i in range(4)])
         ids = {d.fault_id for d in self._run(frames)}
         self.assertNotIn("ohp_lumbar_hyperextension", ids)
+
+
+class OverheadPressElevationRuleTests(unittest.TestCase):
+    """`ohp_insufficient_elevation` -- and, crucially, its separation from
+    `ohp_incomplete_lockout`, which the spec explicitly demands be distinguishable."""
+
+    _run = staticmethod(run_ohp)
+
+    @staticmethod
+    def _rep(elbow_angle: float, top_wrist_y: float) -> list[dict]:
+        """setup -> press -> lockout -> lower, with the top of the rep held for 8 frames
+        (min_frames is 6 at 30 fps)."""
+        return ([ohp_frame(90, 0.45, frame_index=i) for i in range(4)]
+                + [ohp_frame(elbow_angle, top_wrist_y, frame_index=i + 4) for i in range(8)]
+                + [ohp_frame(90, 0.45, frame_index=i + 12) for i in range(4)])
+
+    def test_insufficient_elevation_flagged_when_hands_stall_at_nose(self) -> None:
+        # Nose sits at 0.30 by default, so wrists held at 0.30 never clear the head.
+        ids = {d.fault_id for d in self._run(self._rep(178, 0.30))}
+        self.assertIn("ohp_insufficient_elevation", ids)
+
+    def test_elevation_not_flagged_when_hands_finish_overhead(self) -> None:
+        # Same rep with the hands 1.5 shoulder-widths above the nose.
+        ids = {d.fault_id for d in self._run(self._rep(178, 0.15))}
+        self.assertNotIn("ohp_insufficient_elevation", ids)
+
+    def test_elevation_fires_without_incomplete_lockout(self) -> None:
+        # Elbows essentially locked (178 deg) but the hands stall at nose level: this is a
+        # short press, NOT an incomplete lockout. Only the elevation rule may fire.
+        ids = {d.fault_id for d in self._run(self._rep(178, 0.30))}
+        self.assertIn("ohp_insufficient_elevation", ids)
+        self.assertNotIn("ohp_incomplete_lockout", ids)
+
+    def test_incomplete_lockout_fires_without_elevation(self) -> None:
+        # The inverse: hands well clear of the nose but elbows stuck at 140 deg.
+        ids = {d.fault_id for d in self._run(self._rep(140, 0.15))}
+        self.assertIn("ohp_incomplete_lockout", ids)
+        self.assertNotIn("ohp_insufficient_elevation", ids)
+
+    def test_elevation_rule_carries_citation(self) -> None:
+        det = next(
+            (d for d in self._run(self._rep(178, 0.30))
+             if d.fault_id == "ohp_insufficient_elevation"),
+            None,
+        )
+        assert det is not None and det.citation and det.citation_support
+        self.assertIn("PMC9354811", det.citation)
+
+    def test_elevation_not_flagged_when_nose_invisible(self) -> None:
+        # No nose landmark => wrist_above_nose is NaN => the rule must stay silent rather
+        # than guess, and must not invalidate the frame for the other OHP rules.
+        frames = self._rep(140, 0.30)
+        for frame in frames:
+            frame["landmarks"][0]["visibility"] = 0.0
+        ids = {d.fault_id for d in self._run(frames)}
+        self.assertNotIn("ohp_insufficient_elevation", ids)
+        self.assertIn("ohp_incomplete_lockout", ids)
+
+
+class OverheadPressForwardHeadRuleTests(unittest.TestCase):
+    """`ohp_forward_head_barpath` -- ear-anterior and bar-anterior sub-criteria, plus the
+    hard sagittal-view gate."""
+
+    _run = staticmethod(run_ohp)
+
+    @staticmethod
+    def _frames(**kwargs) -> list[dict]:
+        return [ohp_frame(160, wrist_y=0.15, frame_index=i, **kwargs) for i in range(12)]
+
+    def test_forward_head_flagged_when_ear_anterior(self) -> None:
+        # ear_dx=-0.05 => ears 0.5 shoulder-widths anterior of the shoulder line (> 0.30).
+        dets = self._run(self._frames(ear_dx=-0.05), view="side")
+        det = next((d for d in dets if d.fault_id == "ohp_forward_head_barpath"), None)
+        self.assertIsNotNone(det)
+        self.assertGreater(det.evidence["max_ear_forward_offset"], 0.30)
+
+    def test_bar_forward_flagged_when_wrists_not_stacked(self) -> None:
+        # shoulder_dx=+0.05 moves the shoulders posterior while the hands stay put, so at
+        # lockout the wrists sit 0.5 shoulder-widths anterior of the shoulders. The head
+        # rides with the shoulders, so the ear cue stays clean and only the bar-path cue
+        # fires. (The 8.1 deg torso lean this implies is well under the 15 deg back-lean
+        # threshold, so the two rules do not collide.)
+        dets = self._run(self._frames(shoulder_dx=0.05), view="side")
+        det = next((d for d in dets if d.fault_id == "ohp_forward_head_barpath"), None)
+        self.assertIsNotNone(det)
+        self.assertGreater(det.evidence["max_wrist_forward_offset"], 0.30)
+        self.assertLessEqual(det.evidence["max_ear_forward_offset"], 0.30)
+        self.assertNotIn("ohp_lumbar_hyperextension", {d.fault_id for d in dets})
+
+    def test_forward_head_not_flagged_when_stacked(self) -> None:
+        ids = {d.fault_id for d in self._run(self._frames(), view="side")}
+        self.assertNotIn("ohp_forward_head_barpath", ids)
+
+    def test_forward_head_is_hard_gated_to_sagittal_views(self) -> None:
+        # IDENTICAL faulty frames: they fire from a sagittal view and must produce NO
+        # detection at all (not a low-confidence one) from a frontal view, where the sign of
+        # a pure horizontal offset is arbitrary.
+        frames = self._frames(ear_dx=-0.05)
+        self.assertIn(
+            "ohp_forward_head_barpath", {d.fault_id for d in self._run(frames, view="side")}
+        )
+        self.assertIn(
+            "ohp_forward_head_barpath",
+            {d.fault_id for d in self._run(frames, view="front_oblique")},
+        )
+        for blind_view in ("front", "rear", "rear_oblique"):
+            ids = {d.fault_id for d in self._run(frames, view=blind_view)}
+            self.assertNotIn("ohp_forward_head_barpath", ids, f"fired from view={blind_view}")
+
+    def test_head_behind_shoulders_does_not_fire(self) -> None:
+        # Positive ear_dx pushes the head POSTERIOR. Forward head is directional: the
+        # opposite deviation must not trip it.
+        ids = {d.fault_id for d in self._run(self._frames(ear_dx=0.05), view="side")}
+        self.assertNotIn("ohp_forward_head_barpath", ids)
+
+    def test_forward_head_rule_carries_citation(self) -> None:
+        det = next(
+            (d for d in self._run(self._frames(ear_dx=-0.05), view="side")
+             if d.fault_id == "ohp_forward_head_barpath"),
+            None,
+        )
+        assert det is not None and det.citation and det.citation_support
+        self.assertIn("PMC13116542", det.citation)

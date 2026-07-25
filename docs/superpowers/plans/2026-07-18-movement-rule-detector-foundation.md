@@ -664,6 +664,11 @@ Push-up · Lunge · Deadlift · Row · Band Pull Apart · Bicep Curl · Arm Abdu
 
 Analysis (`backend`) stays squat-only in the product until a movement's thresholds are validated against labeled data, regardless of detector availability.
 
+> **Update (2026-07-25, after this plan closed):** the two OHP rules this plan deferred
+> (`ohp_insufficient_elevation`, `ohp_forward_head_barpath`) have since been implemented, so OHP is
+> now 5/5 and 63 spec rules remain. See the 2026-07-25 status block in the spec (§8) for the two
+> documented deviations from the spec's detection heuristics.
+
 ## Self-Review
 
 - **Spec coverage:** this plan implements the *engine* + squat (spec Group A squat) + OHP (spec Group B OHP, 3 of 5 rules). The remaining 65 rules are explicitly deferred to per-movement follow-on plans (roadmap above). No spec rule is silently dropped.
