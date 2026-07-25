@@ -518,7 +518,10 @@ def rule_insufficient_elevation(core: list[CoreFrame], ctx: RuleContext) -> list
             build_detection(
                 fault_id="ohp_insufficient_elevation",
                 fault_name="Insufficient Overhead Elevation / Short Press",
-                kg_query="Insufficient Overhead Elevation",
+                # Verified to resolve: graph_retrieval.resolve_nodes(..., movement="Overhead
+                # Press") returns "Overhead Press:Limited Shoulder Elevation" for this string.
+                # (The literal fault name "Insufficient Overhead Elevation" resolves to nothing.)
+                kg_query="Limited Shoulder Elevation",
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=values,
@@ -568,11 +571,15 @@ def rule_forward_head_barpath(core: list[CoreFrame], ctx: RuleContext) -> list[P
     Sign convention: anterior = -x, the single module-wide convention documented in
     `ohp_compute_raw` and encoded by `rule_excessive_back_lean`. Do not introduce a second one.
 
-    Known weakness: the shoulder-width normalizer is weakly conditioned in exactly the views
-    this rule is gated to -- in a true sagittal view the two shoulder landmarks project nearly
-    on top of each other, so shoulder_width shrinks and the normalized offsets inflate (the
-    > 1e-6 guard in `ohp_compute_raw` prevents a divide-by-zero, not this inflation). That is a
-    further reason the 0.30 threshold here is unvalidated, like the rest of this module."""
+    Known weakness -- the shoulder-width normalizer is worst exactly where this rule is gated:
+    - In a true sagittal view the two shoulder landmarks project nearly on top of each other, so
+      shoulder_width shrinks and the normalized offsets INFLATE. The > 1e-6 guard in
+      `ohp_compute_raw` prevents a divide-by-zero, not this inflation.
+    - Worse, if the far shoulder is fully occluded, `visible_point` drops it, `shoulder_width`
+      becomes NaN, and every metric this rule reads goes NaN -- i.e. from a hard side view this
+      rule can go SILENT rather than merely noisy. It has not been exercised on real sagittal
+      video (the unit fixture keeps both shoulders fully visible), so its real-world hit rate
+      is unknown on top of its threshold being unvalidated like the rest of this module."""
     if ctx.view_type not in SAGITTAL_VIEWS:
         return []
 
@@ -608,6 +615,8 @@ def rule_forward_head_barpath(core: list[CoreFrame], ctx: RuleContext) -> list[P
             build_detection(
                 fault_id="ohp_forward_head_barpath",
                 fault_name="Forward Head / Bar Path Forward of Midline",
+                # Verified to resolve to "Forward Head Posture" / "Overhead Press:Forward Head
+                # Posture" via graph_retrieval.resolve_nodes.
                 kg_query="Forward Head Posture",
                 retrieval_mode="kg",
                 segment_metrics=segment,
