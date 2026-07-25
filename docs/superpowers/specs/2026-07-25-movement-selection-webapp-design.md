@@ -34,6 +34,10 @@ through `src/pose/movements/registry.py`, and runs the matching detector
 Let a user choose Squat, Push-up, or Overhead Press in the UI and have that choice drive which
 detector runs, then survive into history, the chat coach, and the rendered verdict.
 
+All three ship live together. That makes one piece of knowledge-graph work a prerequisite rather
+than a follow-up: three of the five Overhead Press retrieval queries currently resolve to nothing,
+and are fixed before the wiring lands (§10).
+
 ## 3. Non-goals
 
 - **Automatic movement classification from video.** The movement is user-asserted input.
@@ -54,6 +58,7 @@ detector runs, then survive into history, the chat coach, and the rendered verdi
 | D4 | `MovementDetector.validated` defaults to **`False`**; Squat opts in. | A future detector then fails toward Beta rather than silently presenting as validated. |
 | D5 | No plausibility check on movement-vs-video. Instead, **every verdict names the movement whose rules ran**. | §9. |
 | D6 | Scope covers chat grounding and a history `movement` column + badge. Demo library excluded. | Chat is a correctness issue (a push-up analysis must not get squat advice); history is needed to tell past analyses apart. |
+| D7 | The three unresolved Overhead Press `kg_query` strings are fixed **first**; all three movements then ship live together. OHP is not gated off the list. | §10. Shipping OHP with 3 of 5 faults unexplained undercuts the point of the product. |
 
 ## 5. Architecture
 
@@ -334,7 +339,7 @@ perform. Two closures were considered and deferred:
 Either would close it at the cost of new detection logic and thresholds. Both are recorded here
 as follow-up work rather than silently omitted.
 
-## 10. Prerequisite: three Overhead Press `kg_query` strings do not resolve
+## 10. Prerequisite work: three Overhead Press `kg_query` strings do not resolve
 
 The data-flow diagram shows `retrieve_contexts_for_detections(movement=)` as a working step. It is
 working for two of the three movements. Measured on this branch against
@@ -373,20 +378,60 @@ retrieval context, and `_fmt_list` (`chat.py:102-107`) renders each as `—`:
 The coach names the fault and can say nothing about it — in a project whose stated purpose is
 *explainable* coaching feedback. Squat never exposed this because all four of its strings resolve.
 
-**Decision: re-pointing these three strings is knowledge work, not wiring, and is a prerequisite
-to marking Overhead Press live — not part of this change.** `Lumbar Hyperextension` →
-`Excessive Lower Back Arching` looks mechanically obvious, but `Incomplete Elbow Lockout` →
-`Elbows Locked` does not: the graph node plausibly describes locking out *too hard*, the opposite
-fault. Guessing a mapping to make retrieval non-empty would produce confidently-worded advice
-about the wrong mechanism, which is worse than the `—` it replaces. Each re-point needs the same
-verification the push-up strings received (`pushup.py:1502` carries a comment recording exactly
-that check).
+**Ordering decision: resolve all three first, then ship all three movements live.** Overhead Press
+is not gated off the list; the retrieval fix lands ahead of the wiring. Re-pointing is knowledge
+work, so each target was verified against the graph rather than chosen by name similarity — the
+same discipline `pushup.py:1502` records for the push-up strings.
 
-Two acceptable orderings, to be settled in the implementation plan:
+### 10.1 Verified targets
 
-1. Resolve the three strings first, then ship all three movements live.
-2. Ship this change with Overhead Press still gated off the `/api/movements` list, and open it once
-   the strings resolve. Push-up goes live either way.
+Measured with `retrieve_graph_context(candidate, hops=1, max_seeds=3, movement="Overhead Press")`:
+
+| Rule | New `kg_query` | 1-hop content that justifies it |
+| --- | --- | --- |
+| `rule_excessive_back_lean` (`overhead_press.py:417`) | `"Excessive Lower Back Arching"` | corrections: `Ribcage Down`, `Gluteus Active`, `Core Active` |
+| `rule_asymmetric_press` (`overhead_press.py:475`) | `"Muscle Imbalance"` | risks: `Shoulder Injury`; causes: `Overuse`, `Weak External Rotators`, `Weak Abductors` |
+| `rule_incomplete_lockout` (`overhead_press.py:362`) | `"Incomplete Lockout"` | **node does not exist — authored, see §10.2** |
+
+`Excessive Lower Back Arching` is a strong match: the rule's own fault name is "Excessive
+back-lean / lumbar hyperextension (rib flare)", and the node's first correction is `Ribcage Down`.
+
+`Muscle Imbalance` resolves to **two** seeds — a movement-generic `Cause` node (1 edge, no summary
+buckets) and `Overhead Press:Muscle Imbalance` (`Fault`, 5 edges), which carries all the content.
+Retrieval returns both; the scoped one supplies the coaching material. Worth knowing when reading
+the payload, but not a defect.
+
+### 10.2 `Incomplete Elbow Lockout`: no existing node fits, so author one
+
+Every in-graph candidate was checked and rejected on evidence:
+
+| Candidate | Why not |
+| --- | --- |
+| `Elbows Locked` | Its only correction is **`Avoid Elbow Locking`** — the *opposite* fault. Pointing here would tell a user who failed to finish the press to lock out less. |
+| `Failure To Fix Barbell` | `related_actions: Jerk From Chest` — Olympic jerk-specific, not the strict press the detector measures. |
+| `Sticking Region` | Rich (degree 11) but describes a normal feature of every press, not a fault. Adjacent mechanism, not the same one. |
+| `Failure In Jerk` | `related_actions: Jerk`. Same scope problem as above. |
+
+Add `Overhead Press:Incomplete Lockout` as a `Fault` node with cited `CAUSED_BY` /
+`CORRECTED_BY` / `INCREASES_RISK_OF` edges, following the established authoring path:
+a new `scripts/knowledge/` script in the shape of `reconcile_ohp_v3.py` — idempotent, `--dry-run`
+capable, and checked into git even though `data/kg/sports_kg_v3.graphml` is not.
+
+That gitignore split is the operational catch: the script is the reproducible artifact, the graph
+is rebuilt from it. The plan must include re-running retrieval verification after the rebuild, and
+the same "does it resolve" check has to be repeated on any deploy target, since the target's graph
+is built separately.
+
+Citations for the authored edges are held to the same bar as the rule citations already in
+`overhead_press.py` — a real source with a quantified finding, not a plausible-sounding assertion.
+The rule's existing citation is the starting point.
+
+### 10.3 Sequencing
+
+1. Author the `Incomplete Lockout` node; rebuild the graph; verify it resolves.
+2. Re-point the two verified strings.
+3. Confirm all 5 OHP strings resolve, alongside Push-up's 4/4 and Squat's 4/4.
+4. Then the web-app wiring in §5, with all three movements live from the start.
 
 **Related, lower severity:** `"Forward Head Posture"` is shared by `pushup.py:1274` and
 `overhead_press.py:652` and matches a movement-generic `Cause` node whose only 1-hop edge runs to
