@@ -20,7 +20,7 @@ from src.pose.geometry import (
     knee_forward_ratio, heel_height_delta, clip01, contiguous_true_segments,
     severity_from_range,
 )
-from src.pose.view_estimation import estimate_view_for_pose
+from src.pose.view_estimation import ViewEstimate, estimate_view_for_pose
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -542,6 +542,28 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
     return detections
 
 
+def json_safe_view_payload(view: ViewEstimate) -> dict[str, Any]:
+    """Serialize a ViewEstimate for the API/DB boundary, replacing non-finite
+    floats with None.
+
+    torso_width_ratio_mean is NaN whenever a clip carries no measurable-width
+    evidence (e.g. degenerate/empty pose JSON) -- that is deliberate, honest
+    "no evidence" signaling from estimate_view_for_pose, not a bug. But NaN
+    survives dataclasses.asdict() untouched, and postgrest's httpx JSON
+    encoder serializes with allow_nan=False: it raises ValueError before any
+    network call, which the broad except in the analyze route swallows,
+    silently dropping the analysis from the user's history with no error
+    surfaced. None/null is the honest JSON representation of "no evidence";
+    0.0 is not. (The HTTP response path is unaffected -- FastAPI/pydantic
+    already maps NaN to null there.)
+    """
+    payload = asdict(view)
+    for key, value in payload.items():
+        if isinstance(value, float) and not math.isfinite(value):
+            payload[key] = None
+    return payload
+
+
 def detect_pose_rules_from_payload(
     payload: dict[str, Any],
     *,
@@ -562,7 +584,7 @@ def detect_pose_rules_from_payload(
     fps = float(metadata.get("fps", 0.0) or 0.0)
     if pose_json_path is not None:
         view = estimate_view_for_pose(pose_json_path)
-        view_payload = asdict(view)
+        view_payload = json_safe_view_payload(view)
         view_type = view.view_type
         view_confidence = view.view_confidence
     else:
