@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import unittest
 from src.pose.movements.base import CoreFrame, RuleContext, MovementDetector, run_detector
 from src.pose.movements import registry
@@ -167,3 +169,36 @@ class MovementRegistryTests(unittest.TestCase):
         payload = {"metadata": {"fps": 30.0}, "frames": frames}
         with self.assertRaises(KeyError):
             detect_pose_rules_from_payload(payload, movement="No Such Movement")
+
+
+class TestMovementRegistry(unittest.TestCase):
+    def test_lists_all_three_detectors_in_registration_order(self) -> None:
+        from src.pose.movements import registry
+
+        names = [d.name for d in registry.list_detectors()]
+        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up"])
+
+    def test_only_squat_is_validated(self) -> None:
+        """Push-up and Overhead Press rules are literature-derived and never checked against
+        ground-truth labels. The UI marks them Beta off this flag."""
+        from src.pose.movements import registry
+
+        validated = {d.name: d.validated for d in registry.list_detectors()}
+        self.assertEqual(validated, {"Squat": True, "Overhead Press": False, "Push-up": False})
+
+    def test_validated_defaults_to_false(self) -> None:
+        """A new detector must fail toward Beta, never silently present as validated."""
+        from src.pose.movements.base import MovementDetector
+
+        detector = MovementDetector("Test", (), lambda frames, fps: [], lambda raw: [], ())
+        self.assertFalse(detector.validated)
+
+    def test_names_are_the_canonical_spellings(self) -> None:
+        """These strings are simultaneously the KG `movement` scope and the frontend's
+        movement.<Name> i18n key. A drift breaks both silently."""
+        from src.pose.movements import registry
+
+        self.assertEqual(
+            {d.name for d in registry.list_detectors()},
+            {"Squat", "Push-up", "Overhead Press"},
+        )

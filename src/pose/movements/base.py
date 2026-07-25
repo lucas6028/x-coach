@@ -41,6 +41,10 @@ class MovementDetector:
     compute_raw: Callable[[Sequence[object], float], list[dict]]
     assign_phases: Callable[[list[dict]], list[str]]
     rules: tuple[RuleFn, ...]
+    # Whether this detector's rules have been checked against labeled ground truth. Defaults to
+    # False so a newly registered detector surfaces as Beta in the UI rather than silently
+    # presenting as validated; Squat opts in explicitly.
+    validated: bool = False
 
 
 def run_detector(
