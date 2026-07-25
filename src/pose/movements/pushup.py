@@ -359,6 +359,40 @@ def _neck_line_angle(
     return float(np.degrees(np.arccos(cosine)))
 
 
+def _unclipped(value: float, mild: float, severe: float) -> float:
+    """`severity_from_range`'s ramp WITHOUT the clip to [0, 1]: 0.0 at the fire threshold, 1.0 at
+    the ramp's severe end, and free to exceed 1.0 beyond it. NaN in, NaN out.
+
+    Exists so a per-frame RANKING series can stay monotonic past saturation. Severities cannot
+    do that job: `clip01` makes every frame past the severe end read exactly 1.0, and
+    `build_detection` picks the peak with `nanargmax`, which returns the FIRST maximum -- so a
+    ranking built on severities nominates the first severe frame rather than the worst one. Used
+    only for `score_values` (which feeds `peak_frame` / `evidence["peak_time"]`); the reported
+    SEVERITY still goes through `severity_from_range` and is still clipped.
+
+    The NaN-in/NaN-out guard is DEFENSIVE rather than load-bearing at today's only call site, and
+    saying which is which matters: `contiguous_true_segments` only yields frames where the mask
+    was True, so every frame in a segment has at least one axis above its fire threshold, i.e. an
+    unclipped value > 0 -- a spurious 0.0 from an unmeasurable axis could never win that max.
+    (Verified: a mutant returning 0.0 here is EQUIVALENT and survives the suite by construction.
+    The two forms diverge only on all-negative input, which the mask excludes.) The guard is kept
+    so the function stays correct if it is ever called outside that invariant."""
+    if not np.isfinite(value):
+        return np.nan
+    span = severe - mild
+    if not np.isfinite(span) or span == 0.0:
+        return np.nan
+    return (value - mild) / span
+
+
+def _worst_axis(*values: float) -> float:
+    """Largest of the given per-axis scores, ignoring NaN; NaN only if every axis is NaN. Plain
+    `max` would propagate a NaN from an axis that merely happens to be unmeasurable on this
+    frame, which would hand `nanargmax` a hole exactly where one cue is occluded."""
+    finite = [value for value in values if np.isfinite(value)]
+    return max(finite) if finite else np.nan
+
+
 def _signed_neck_line_angle(
     points: np.ndarray | None,
     ear: int,
@@ -969,9 +1003,21 @@ def rule_head_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDete
     `rule_shallow_depth` (src/pose/movements/squat.py). `evidence["criterion"]` records which
     cue fired -- `neck_angle`, `nose_ahead` or `both` -- because the coaching cue differs ("stop
     reaching your chin at the floor" vs "pull your head back over your shoulders"), and the
-    `primary_*` display fields follow whichever axis drove the severity. One improvement on the
-    squat precedent: `score_values` is the PER-FRAME max rather than a constant, so
-    `build_detection`'s `peak_frame` is the genuinely worst frame instead of always frame 0.
+    `primary_*` display fields follow whichever axis drove the severity. On an exact tie the neck
+    axis wins the display (`>=`), pinned by `test_the_display_tie_break_favours_the_neck_axis` --
+    an arbitrary but fixed choice, so the label cannot silently flip.
+
+      ONE IMPROVEMENT ON THE SQUAT PRECEDENT, AND THE TRAP IN IT. `score_values` is a PER-FRAME
+      series rather than the constant squat's `rule_shallow_depth` passes, so
+      `build_detection`'s `peak_frame` is the genuinely worst frame instead of always frame 0.
+      But the series must be UNCLIPPED to deliver that, and a first cut of this rule used
+      per-frame SEVERITIES, which are clipped: every frame past the ramp's severe end reads
+      exactly 1.0, and `nanargmax` returns the FIRST maximum, so the peak silently regressed to
+      "first severe frame" precisely in the severe regime where the field matters. Measured on
+      deviations [16, 40, 36, 60, 17, 16, 16], it nominated the 40-degree frame over the
+      60-degree one. `_unclipped` is what fixes it, and
+      `test_peak_frame_is_the_worst_frame_even_when_the_ramp_saturates` pins the saturated
+      regime specifically -- a sub-saturation fixture passes either way and proves nothing.
 
     SPEC DEVIATION 1 -- PER-CLIP BASELINE INSTEAD OF AN ABSOLUTE READING, ON BOTH AXES. The
     spec's heuristic reads as absolute on both cues ("deviates below the torso line ... by
@@ -1039,6 +1085,26 @@ def rule_head_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDete
       does not have. The practical effect is that an inverted clip loses the neck cue and keeps
       the forward-head cue, which is the correct partial answer rather than a blanket refusal.
       See the SIGN CONVENTION note at the top of this module.
+
+      WHAT THE ROLL TESTS DO *NOT* PROVE, because they look stronger than they are: an in-plane
+      rotation is a similarity transform, and this metric is a ratio of two lengths measured
+      along the same rotating axis, so invariance under it is close to arithmetically trivial.
+      The interesting question is a NON-similarity transform -- an oblique camera, which
+      foreshortens along one direction only. Probed during review:
+
+        * A CONSTANT oblique view cannot forge a deviation at all -- exactly 0.000000 at
+          x-compressions 0.70 / 0.40 / 0.20 and tilts 0 / 30 / 55 deg. The per-clip baseline
+          cancels any FIXED linear map, whatever it is, because both the baseline and the
+          reading pass through the same map.
+        * A spurious fire therefore needs BOTH an intra-rep CHANGE in foreshortening AND the
+          nose sitting off the body axis on the sky side. At a 20% intra-rep change the worst
+          drift measured is +0.034, still under the 0.06 cut even with the head 0.12 off-axis;
+          crossing the cut needs roughly a 40% foreshortening change plus a nose ~0.12 above the
+          axis. For a rigid body under a fixed camera that combination is not plausible.
+
+      So the invariance this rule actually relies on is the baseline's cancellation of a fixed
+      projection, not the roll tests -- stated here so nobody cites the easy result for the hard
+      claim.
 
     THE MODELING ASSUMPTION THIS RULE INHERITS, AND WHICH FAULT IT CONTAMINATES. The neck angle
     is referenced to the BODY AXIS, which assumes the head stays neutral to that axis rather
@@ -1183,12 +1249,14 @@ def rule_head_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDete
             primary_label = "nose jut ahead of the setup baseline"
             primary_value, primary_threshold = round(float(max_nose), 4), 0.06
 
-        # Per-frame max, so `peak_frame` is the worst frame rather than always frame 0.
+        # Per-frame ranking series for `build_detection`'s `peak_frame`. UNCLIPPED on purpose:
+        # `severity_from_range` clips to 1.0, so in any severe segment several frames tie at
+        # 1.0 and `nanargmax` returns the FIRST of them rather than the worst -- measured, a
+        # segment with deviations [16, 40, 36, 60, 17, ...] nominated the 40-degree frame over
+        # the 60-degree one. The two axes are in different units (degrees vs body lengths), so
+        # they are put on a common scale by their own ramps and only then compared.
         values = [
-            max(
-                severity_from_range(neck, 15.0, 35.0, lower_is_worse=False),
-                severity_from_range(nose, 0.06, 0.15, lower_is_worse=False),
-            )
+            _worst_axis(_unclipped(neck, 15.0, 35.0), _unclipped(nose, 0.06, 0.15))
             for neck, nose in zip(neck_values, nose_values)
         ]
         detections.append(
