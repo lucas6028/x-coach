@@ -20,12 +20,14 @@ import io
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from fastapi import HTTPException
 from starlette.datastructures import UploadFile
 
 from backend.app.routers import analyze as analyze_router
 from backend.app.services import analysis as analysis_service
+from backend.app.services import runtime_config
 
 
 def _upload(filename: str = "clip.mp4", data: bytes = b"fake-video-bytes") -> UploadFile:
@@ -48,6 +50,16 @@ class AnalyzeEndpointTests(unittest.TestCase):
             "upload_test",
             Path(f"upload_test{suffix}"),
         )
+        # KEEP THESE TESTS OFFLINE, as the module docstring promises. ``analyze`` calls
+        # ``settings.allowed_upload_suffixes()``, which reads the admin overrides via
+        # ``runtime_config.get_overrides()`` -- and that does a REAL Supabase round-trip whenever
+        # auth is configured. On any machine with a populated ``.env`` that call measured ~10s,
+        # which is long enough to break the concurrency test below on its own (see its docstring).
+        # ``{}`` is exactly what ``get_overrides`` returns when auth is unconfigured, so this runs
+        # the same code path CI does rather than a bespoke stub, and pins no suffix values.
+        overrides = mock.patch.object(runtime_config, "get_overrides", return_value={})
+        overrides.start()
+        self.addCleanup(overrides.stop)
 
     def tearDown(self) -> None:
         analysis_service.save_upload = self._orig_save
@@ -108,50 +120,69 @@ class AnalyzeEndpointTests(unittest.TestCase):
         self.assertIsNot(seen["thread"], threading.main_thread())
 
     def test_concurrent_analyses_are_bounded(self) -> None:
-        """At most MAX_CONCURRENT_ANALYSES run at once; the rest wait on the semaphore."""
+        """At most MAX_CONCURRENT_ANALYSES run at once, and the cap is genuinely reached.
+
+        THE BARRIER IS THE PROOF, NOT A WALL CLOCK. Each call parks in ``blocking`` until
+        ``limit`` calls are inside SIMULTANEOUSLY. If the semaphore admits fewer, the barrier
+        times out and breaks, which the ``broken`` assertion reports; if it admits more, ``peak``
+        exceeds ``limit``. Both directions fail, and neither depends on how fast the machine is.
+
+        The previous version polled a 5s deadline for ``peak`` to reach the cap and then let
+        everything drain regardless -- so anything slow upstream could exhaust the deadline
+        before the first analysis even started, leaving ``peak`` at 0 and the cap never observed.
+        That is what made this test look like a "load-dependent flake": the symptom was right,
+        but the cause was a real Supabase round-trip in ``allowed_upload_suffixes`` (now stubbed
+        in ``setUp``), not machine load. A deadline race would still be fragile on a loaded CI
+        box even with the network gone, so the timing design is replaced rather than patched.
+        """
         limit = 2
+        # A MULTIPLE of `limit`, so every barrier cycle fills exactly and none is left with a
+        # partial batch that could never satisfy it. `limit` slots are held while the first batch
+        # parks, so the remainder genuinely queue on the semaphore rather than sailing through.
+        total = limit * 2
         lock = threading.Lock()
-        release = threading.Event()
-        state = {"active": 0, "peak": 0}
+        state = {"active": 0, "peak": 0, "broken": False}
+        # Generous enough not to trip on a loaded machine, small enough that a genuine failure
+        # reports in seconds instead of adding a multiple of it to every suite run.
+        barrier = threading.Barrier(limit, timeout=10)
 
         def blocking(path, *, video_id=None, movement=None):
             with lock:
                 state["active"] += 1
                 state["peak"] = max(state["peak"], state["active"])
-            # Hold the slot until released so concurrent calls genuinely overlap in time.
-            release.wait(timeout=5)
+            try:
+                # Returns only once `limit` calls are here together. Swallowed rather than raised
+                # so the failure surfaces as a readable assertion, not a BrokenBarrierError
+                # escaping through the threadpool.
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                state["broken"] = True
             with lock:
                 state["active"] -= 1
             return {"video_id": video_id, "source": "upload"}
 
         analysis_service.analyze_video_file = blocking
 
-        async def drive() -> int:
+        async def drive() -> None:
             # Bind a fresh semaphore (sized to `limit`) to this event loop.
             analyze_router._ANALYSIS_SEMAPHORE = asyncio.Semaphore(limit)
-            tasks = [
-                asyncio.create_task(
-                    analyze_router.analyze(
-                        _upload(f"c{i}.mp4"), movement="Squat", user=None
-                    )
+            await asyncio.gather(
+                *(
+                    analyze_router.analyze(_upload(f"c{i}.mp4"), movement="Squat", user=None)
+                    for i in range(total)
                 )
-                for i in range(limit + 3)
-            ]
-            loop = asyncio.get_running_loop()
-            deadline = loop.time() + 5
-            # Wait until the cap is saturated, then let everything drain.
-            while state["peak"] < limit and loop.time() < deadline:
-                await asyncio.sleep(0.01)
-            release.set()
-            await asyncio.gather(*tasks)
-            return state["peak"]
+            )
 
-        try:
-            peak = asyncio.run(drive())
-        finally:
-            release.set()
-        # Never more than `limit` ran simultaneously, and the cap was actually reached.
-        self.assertEqual(peak, limit)
+        asyncio.run(drive())
+        self.assertFalse(
+            state["broken"],
+            # ASCII only: this string is read off a console on failure, and a Windows terminal
+            # mangles non-ASCII punctuation into noise exactly when someone needs to read it.
+            f"fewer than {limit} analyses were ever in flight together - the semaphore admitted "
+            f"too few, so the concurrency cap this test exists to pin was never exercised",
+        )
+        # Never more than `limit` ran simultaneously (the barrier already proved not fewer).
+        self.assertEqual(state["peak"], limit)
 
 
 if __name__ == "__main__":
