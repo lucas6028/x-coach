@@ -714,6 +714,8 @@ OHP_DETECTOR = MovementDetector(
         rule_insufficient_elevation,
         rule_forward_head,
     ),
+    rep_signal="avg_elbow_angle",
+    rep_polarity="max",
 )
 
 registry.register(OHP_DETECTOR)
