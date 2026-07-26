@@ -29,6 +29,9 @@ RAG_DB_DIR = DATA_DIR / "rag" / "vector_db"
 # request from the detector registry -- see GET /api/movements.
 DEFAULT_ANALYSIS_MOVEMENT = "Squat"
 
+# How many repetitions the web path analyzes. Sampled first/middle/last, not the first N.
+DEFAULT_MAX_REPS = 3
+
 # Runtime scratch space for uploaded videos and their derived pose JSON (gitignored).
 RUNTIME_DIR = DATA_DIR / "runtime"
 UPLOAD_DIR = RUNTIME_DIR / "uploads"

@@ -780,6 +780,19 @@ def parse_split_names(value: str) -> list[str]:
     return split_names
 
 
+def parse_max_reps(value: str) -> int | None:
+    """Parse ``--max-reps``. ``all`` and ``0`` both mean every repetition."""
+    text = (value or "").strip().lower()
+    if text == "all":
+        return None
+    if not text.isdigit():
+        raise argparse.ArgumentTypeError(
+            f"--max-reps must be a non-negative integer or 'all', got {value!r}"
+        )
+    count = int(text)
+    return None if count == 0 else count
+
+
 def build_requests(
     pose_json_dir: Path,
     split_dir: Path,
@@ -869,12 +882,22 @@ def main() -> None:
         help="Canonical movement name to detect (registered: 'Squat', 'Overhead Press', "
              "'Push-up'). Only Squat is validated against labeled data.",
     )
+    parser.add_argument(
+        "--max-reps",
+        type=parse_max_reps,
+        default=3,
+        help="How many repetitions to analyze (first/middle/last are sampled). "
+             "Use 0 or 'all' to analyze every repetition.",
+    )
     args = parser.parse_args()
 
     summary_rows: list[dict[str, Any]] = []
     if args.pose_json is not None:
         result = detect_pose_rules_from_json(
-            args.pose_json, include_retrieval=not args.no_retrieval, movement=args.movement
+            args.pose_json,
+            include_retrieval=not args.no_retrieval,
+            movement=args.movement,
+            max_reps=args.max_reps,
         )
         output_path = args.output_json or args.output_dir / f"{args.pose_json.stem}.json"
         write_detection_json(output_path, result, include_frames=args.include_frames)
@@ -892,6 +915,7 @@ def main() -> None:
                 video_id=request.video_id,
                 include_retrieval=not args.no_retrieval,
                 movement=args.movement,
+                max_reps=args.max_reps,
             )
             write_detection_json(request.output_path, result, include_frames=args.include_frames)
             for detection in result["detections"]:
