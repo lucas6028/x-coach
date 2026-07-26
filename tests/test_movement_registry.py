@@ -191,6 +191,29 @@ class MovementRegistryTests(unittest.TestCase):
                 self.assertFalse(detector.rep_rectify)
                 self.assertEqual(detector.rep_start, "extended")
 
+    def test_multi_rep_clip_is_mis_phased_by_the_legacy_path_and_fixed_by_the_new_one(self) -> None:
+        """Pins BOTH sides of the fix.
+
+        The legacy whole-clip path takes one global argmin for the bottom frame, so on a
+        three-rep clip everything after the first bottom is labelled `ascent` -- reps 2 and 3
+        get no descent at all. The per-rep path must give every rep its own descent.
+        """
+        from src.pose.pose_rule_detector import compute_frame_metrics
+        from tests.test_run_detector_per_rep import squat_reps
+
+        frames = squat_reps(3)
+
+        legacy_phases = [m.phase for m in compute_frame_metrics(frames, fps=30.0)]
+        # Rep 3 lives in the final third; under one global argmin it never descends.
+        self.assertNotIn("descent", legacy_phases[60:], "fixture is not multi-rep enough")
+
+        result = run_detector(registry.get_detector("Squat"), frames, 30.0, "rear", 0.8)
+        self.assertEqual(len(result.reps), 3)
+        for rep in result.reps:
+            phases = {c.phase for c in result.core[rep.start : rep.end + 1]}
+            with self.subTest(rep=rep.index):
+                self.assertIn("descent", phases)
+
 
 class TestMovementRegistry(unittest.TestCase):
     def test_lists_all_three_detectors_in_registration_order(self) -> None:
