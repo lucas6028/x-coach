@@ -597,6 +597,9 @@ def detect_pose_rules_from_payload(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     movement: str | None = None,
+    # -1 (not None) is the "caller said nothing" sentinel: None is a meaningful value here,
+    # meaning "analyze every rep".
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     metadata = payload.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -617,12 +620,22 @@ def detect_pose_rules_from_payload(
         view_confidence = 0.0
 
     from src.pose.movements import registry
-    from src.pose.movements.base import run_detector
+    from src.pose.movements.base import DEFAULT_MAX_REPS, run_detector
 
     detector = registry.get_detector(movement)
-    run = run_detector(detector, frames, fps if fps > 0 else 30.0, view_type, view_confidence)
+    effective_max_reps = DEFAULT_MAX_REPS if max_reps == -1 else max_reps
+    run = run_detector(
+        detector,
+        frames,
+        fps if fps > 0 else 30.0,
+        view_type,
+        view_confidence,
+        max_reps=effective_max_reps,
+    )
     core, detections = run.core, run.detections
 
+    analyzed_indices = [rep.index for rep in run.analyzed]
+    analyzed_frames = sum(rep.end - rep.start + 1 for rep in run.analyzed) or len(core)
     valid_frames = [c for c in core if c.valid]
     result = {
         "video_id": video_id or (pose_json_path.stem if pose_json_path else ""),
@@ -642,6 +655,11 @@ def detect_pose_rules_from_payload(
             "lower_body_visibility_mean": round(float(np.mean([c.lower_body_visibility for c in core])), 4)
             if core
             else 0.0,
+            # ADDITIVE. The existing denominators above stay whole-clip on purpose -- they are a
+            # compatibility surface for backend/app/services/analysis.py, the frontend, and
+            # src/knowledge/perception_to_graph.py.
+            "analyzed_frames": analyzed_frames if core else 0,
+            "analyzed_frame_ratio": round(analyzed_frames / len(frames), 4) if frames else 0.0,
         },
         "detections": [asdict(detection) for detection in detections],
         "retrievals": [],
@@ -656,6 +674,27 @@ def detect_pose_rules_from_payload(
             }
             for c in core
         ],
+        # Which repetitions were found and which were actually scored. `segments` exists so a UI
+        # can show which spans were examined: when whole stretches of a clip are never looked
+        # at, the interface must not imply they were clean.
+        "reps": {
+            "detected": len(run.reps),
+            "analyzed": analyzed_indices,
+            "max_reps": effective_max_reps,
+            "fallback": run.fallback,
+            "segments": [
+                {
+                    "index": rep.index,
+                    "start_frame": core[rep.start].frame_index,
+                    "end_frame": core[rep.end].frame_index,
+                    "start_time": round(core[rep.start].time, 3),
+                    "end_time": round(core[rep.end].time, 3),
+                    "analyzed": rep.index in set(analyzed_indices),
+                    "partial": rep.partial,
+                }
+                for rep in run.reps
+            ],
+        },
     }
     if include_retrieval:
         result["retrievals"] = retrieve_contexts_for_detections(
@@ -675,6 +714,7 @@ def detect_pose_rules_from_json(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     movement: str | None = None,
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     path = Path(pose_json_path)
     return detect_pose_rules_from_payload(
@@ -685,6 +725,7 @@ def detect_pose_rules_from_json(
         graph_file=graph_file,
         rag_db_dir=rag_db_dir,
         movement=movement,
+        max_reps=max_reps,
     )
 
 
