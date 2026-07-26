@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import uuid
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from backend.app import config
 
@@ -98,7 +98,9 @@ def analyze_video_file(
     return result
 
 
-def _squat_strategy(payload: dict[str, Any], video_id: str, pose_json_path: Path) -> dict[str, Any]:
+def _run_detector(
+    payload: dict[str, Any], video_id: str, pose_json_path: Path, movement: str
+) -> dict[str, Any]:
     # Deferred import: the detector drags in numpy/networkx; keep module import light.
     from src.pose.pose_rule_detector import detect_pose_rules_from_payload
 
@@ -110,14 +112,30 @@ def _squat_strategy(payload: dict[str, Any], video_id: str, pose_json_path: Path
         include_retrieval=True,
         graph_file=config.KG_GRAPH_FILE,
         rag_db_dir=config.RAG_DB_DIR,
-        movement="Squat",
+        movement=movement,
     )
 
 
-# The seam SP2 extends: register a per-movement detector strategy under its canonical name.
-_ANALYSIS_STRATEGIES: dict[str, Callable[[dict[str, Any], str, Path], dict[str, Any]]] = {
-    "Squat": _squat_strategy,
-}
+def _has_detector(movement: str) -> bool:
+    """Whether a rule detector is registered for ``movement``.
+
+    Asked of the movement registry itself — the SAME source ``GET /api/movements`` advertises from
+    — so what the studio offers and what this path can actually analyze are one set BY
+    CONSTRUCTION. They used to be two: a hand-maintained ``{"Squat": ...}`` dict here versus the
+    registry there. Registering Push-up and Overhead Press as detectors therefore advertised them
+    to the studio while this path silently fell through to the ``analysis_pending`` skeleton —
+    which carries no ``quality`` key, so the frontend's ``wasMeasured()`` reported a perfectly
+    measurable clip as "no frame could be measured".
+    """
+    # Deferred like the detector import above: pulls in every movement module for its registration
+    # side effects.
+    from src.pose.movements import registry
+
+    try:
+        registry.get_detector(movement)
+    except KeyError:
+        return False
+    return True
 
 
 def analyze_pose_payload(
@@ -125,13 +143,12 @@ def analyze_pose_payload(
 ) -> dict[str, Any]:
     """Analyze a client-supplied pose JSON payload — no server-side MediaPipe.
 
-    Routes by movement to a detector strategy. Movements without a strategy yet return a
+    Routes by movement to its registered rule detector. Movements with no detector return a
     skeleton-only 'analysis pending' result (the video is still stored by the caller).
     """
     vid = video_id or f"upload_{uuid.uuid4().hex[:12]}"
     pose_block = build_pose_block_from_payload(payload)
-    strategy = _ANALYSIS_STRATEGIES.get(movement)
-    if strategy is None:
+    if not _has_detector(movement):
         return {
             "video_id": vid,
             "source": "upload",
@@ -147,7 +164,7 @@ def analyze_pose_payload(
     config.ensure_runtime_dirs()
     pose_json_path = config.UPLOAD_POSE_DIR / f"{vid}.json"
     pose_json_path.write_text(json.dumps(payload), encoding="utf-8")
-    result = strategy(payload, vid, pose_json_path)
+    result = _run_detector(payload, vid, pose_json_path, movement)
     result = _strip_frame_metrics(result)
     result["pose"] = pose_block
     result["source"] = "upload"
