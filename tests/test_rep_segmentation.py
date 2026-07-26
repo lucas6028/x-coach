@@ -396,6 +396,26 @@ class SegmentRepsTests(unittest.TestCase):
         )
         # And a paused rep is a rep here too, for the same reason as on the extended path.
         self.assertEqual(len(segment_reps(paused_rep(20) + paused_rep(20), fps=30.0, rep_start="flexed")), 3)
+        # THE BOUNDARY BAND (see `_windows_from_valleys`'s docstring). `frames_per_rep=30` above
+        # gives a 15-frame half-period against `min_frames=12` -- a 3-frame margin that never
+        # exercises the boundary discard. Here `frames_per_rep=16` puts the half-period at 8
+        # frames, so `rep_period (16) < 2 * min_frames (24)` and the accepted trade fires: the
+        # clip ends exactly on a true bottom (a genuine, fully-captured final descent -- not a
+        # glitch), but the trailing deep run is a boundary run, `_excursion_bounds` can only
+        # measure its unreturned half (well under `min_frames`), so it is discarded from
+        # `real_runs` and that valley never becomes a boundary. The would-be third complete rep
+        # (40-55) therefore never forms; instead the second valley (40) opens a trailing partial
+        # that runs to the clip's actual end (56), one frame past where the discarded valley sat.
+        # Pinned as-is per the accepted trade, not as a target to fix.
+        boundary = segment_reps(sine_reps(3, 16) + sine_reps(1, 16)[:9], fps=30.0, rep_start="flexed")
+        self.assertEqual(
+            boundary,
+            [
+                RepWindow(index=1, start=8, end=23, partial=False),
+                RepWindow(index=2, start=24, end=39, partial=False),
+                RepWindow(index=3, start=40, end=56, partial=True),
+            ],
+        )
 
     def test_reps_separated_by_rests_are_all_found(self) -> None:
         # The full shape of a real recording: idle, then reps with a 2-second stand between
