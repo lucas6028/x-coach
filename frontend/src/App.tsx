@@ -90,9 +90,24 @@ export default function App() {
     if (requestedMovement) setMovement(requestedMovement);
   }, [requestedMovement]);
 
-  const known = movements.some((m) => m.name === movement);
+  // Resolve to the catalog's OWN spelling, matched the way the BACKEND matches it: the movement
+  // registry lowercases its lookup key (registry.get_detector) and `_validated_movement` returns
+  // the registry's canonical name, so `?movement=push-up` is a request the API accepts and
+  // canonicalizes to "Push-up". Comparing exactly here locked the user out of a movement the
+  // server would have analyzed fine.
+  //
+  // Canonicalizing rather than just loosening the comparison, because the canonical spelling is
+  // load-bearing in three more places: it is the <select> option value, the `movement.<Name>`
+  // i18n key, and the key the Beta badge looks up. A case-insensitive `known` alone would clear
+  // the error but still show a phantom duplicate option and drop the Beta tag.
+  const resolved = movements.find(
+    (m) => m.name.toLowerCase() === movement.trim().toLowerCase()
+  );
+  const known = resolved !== undefined;
+  const canonicalMovement = resolved?.name ?? movement;
   // Only an ANSWERED "not analyzable" is an error. While the list is in flight we know nothing,
-  // and "we don't know yet" must not render as "no".
+  // and "we don't know yet" must not render as "no". The message quotes what the USER asked for,
+  // not a canonical name we could not resolve.
   const movementError =
     !movementsLoaded || known ? "" : t("studio.movementUnavailable", { movement });
 
@@ -107,7 +122,7 @@ export default function App() {
       const pose = await extractPoseFromBlob(blob, tier);
       // The user's selected movement, not a hardcoded "Squat". `analyzePose` has taken a movement
       // since the client-capture path landed; this is the caller that finally supplies a real one.
-      const data = await api.analyzePose(movement, pose, blob);
+      const data = await api.analyzePose(canonicalMovement, pose, blob);
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;
@@ -123,7 +138,7 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t, setSearchParams, movement]);
+  }, [t, setSearchParams, canonicalMovement]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -179,7 +194,7 @@ export default function App() {
     <AppLayout
       analysis={analysis}
       loading={loading}
-      movement={movement}
+      movement={canonicalMovement}
       onOpenLibrary={() => setPickerOpen(true)}
       onNewAnalysis={newAnalysis}
     >
@@ -192,7 +207,7 @@ export default function App() {
           statusMsg={statusMsg}
           error={error}
           movements={movements}
-          movement={movement}
+          movement={canonicalMovement}
           onMovementChange={setMovement}
           movementError={movementError}
           movementsLoaded={movementsLoaded}

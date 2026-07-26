@@ -88,6 +88,44 @@ describe("studio movement selection", () => {
     expect(screen.queryByText(/Squat Analysis/i)).not.toBeInTheDocument();
   });
 
+  // The backend matches movements case-insensitively — `registry.get_detector` lowercases its
+  // lookup key and `_validated_movement` returns the registry's own spelling — so `?movement=push-up`
+  // is a request the API accepts and canonicalizes to "Push-up". The studio compared exactly, so a
+  // differently-cased link (hand-typed, shared, or lowercased by another tool) locked the user out
+  // of a movement the server would have analyzed fine.
+  it.each(["push-up", "PUSH-UP", "Push-Up", " Push-up "])(
+    "accepts %j as the URL movement, the way the backend does",
+    async (param) => {
+      const analyze = vi
+        .spyOn(api, "analyzePose")
+        .mockResolvedValue({ ...mockAnalysis, video_id: "v1", movement: "Push-up" });
+      renderWithProviders(<App />, { route: `/app?movement=${encodeURIComponent(param)}` });
+
+      const select = (await screen.findByLabelText(/movement/i)) as HTMLSelectElement;
+      // Canonicalized, not merely accepted: the <select> value, the i18n label and the Beta badge
+      // all key off the registry's spelling, so a case-insensitive gate alone would leave the
+      // dropdown showing a phantom duplicate option and the Beta tag missing.
+      expect(select.value).toBe("Push-up");
+      expect(screen.queryByText(/not.*analys|尚未/i)).toBeNull();
+      expect(screen.getByText("Beta")).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Push-up Analysis");
+
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+      expect(input).not.toBeNull();
+      await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
+      await vi.waitFor(() =>
+        expect(analyze).toHaveBeenCalledWith("Push-up", expect.anything(), expect.anything())
+      );
+    }
+  );
+
+  it("still refuses a movement that differs by more than case", async () => {
+    // Guards the fix from overreaching into fuzzy matching: only spelling/case may vary.
+    renderWithProviders(<App />, { route: "/app?movement=pushup" });
+    expect(await screen.findByText(/not.*analys|尚未/i)).toBeTruthy();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
   it("does not claim a movement is unavailable while the list is still loading", async () => {
     let resolve!: (ms: { name: string; validated: boolean }[]) => void;
     vi.spyOn(api, "getMovements").mockReturnValue(
