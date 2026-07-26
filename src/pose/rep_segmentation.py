@@ -335,3 +335,22 @@ def _finalize(spans: list[tuple[int, int, bool]], min_frames: int) -> list[RepWi
             continue
         windows.append(RepWindow(index=len(windows) + 1, start=start, end=end, partial=partial))
     return windows
+
+
+def select_reps(reps: Sequence[RepWindow], max_reps: int | None) -> list[RepWindow]:
+    """Choose which repetitions to actually analyze.
+
+    First / middle / last rather than "the first N" or "the middle N": the first rep carries
+    warm-up errors, the middle one represents steady state, and the last one carries fatigue
+    breakdown. Sampling only the middle systematically hides the fault a lifter most needs
+    told. Partial reps (a clip that starts or ends mid-repetition) are skipped when complete
+    ones exist, but kept when they are all there is — analyzing a truncated rep beats
+    analyzing nothing.
+    """
+    candidates = [rep for rep in reps if not rep.partial] or list(reps)
+    if not candidates:
+        return []
+    if not max_reps or max_reps <= 0 or len(candidates) <= max_reps:
+        return candidates
+    positions = sorted({int(round(value)) for value in np.linspace(0, len(candidates) - 1, max_reps)})
+    return [candidates[position] for position in positions]

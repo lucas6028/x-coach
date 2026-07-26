@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
 import unittest
+from pathlib import Path
 
-from src.pose.rep_segmentation import RepWindow, segment_reps
+from src.pose.rep_segmentation import RepWindow, segment_reps, select_reps
 
 
 def sine_reps(n_reps: int, frames_per_rep: int = 30, low: float = 60.0, high: float = 170.0) -> list[float]:
@@ -430,6 +432,68 @@ class SegmentRepsTests(unittest.TestCase):
             + [170.0] * 45
         )
         self.assertEqual(len(segment_reps(signal, fps=30.0)), 3)
+
+
+FIXTURE_PATH = Path(__file__).resolve().parent / "fixtures" / "rep_segmentation_cases.json"
+
+
+def window(index: int, start: int, end: int, partial: bool = False) -> RepWindow:
+    return RepWindow(index=index, start=start, end=end, partial=partial)
+
+
+class SelectRepsTests(unittest.TestCase):
+    def test_five_reps_capped_at_three_takes_first_middle_last(self) -> None:
+        reps = [window(i + 1, i * 10, i * 10 + 9) for i in range(5)]
+        self.assertEqual([r.index for r in select_reps(reps, 3)], [1, 3, 5])
+
+    def test_fewer_reps_than_the_cap_are_all_kept(self) -> None:
+        reps = [window(1, 0, 9), window(2, 10, 19)]
+        self.assertEqual([r.index for r in select_reps(reps, 3)], [1, 2])
+
+    def test_zero_and_none_mean_every_rep(self) -> None:
+        reps = [window(i + 1, i * 10, i * 10 + 9) for i in range(7)]
+        self.assertEqual(len(select_reps(reps, 0)), 7)
+        self.assertEqual(len(select_reps(reps, None)), 7)
+
+    def test_partial_reps_are_excluded_when_complete_ones_exist(self) -> None:
+        reps = [window(1, 0, 9, partial=True), window(2, 10, 19), window(3, 20, 29)]
+        self.assertEqual([r.index for r in select_reps(reps, 3)], [2, 3])
+
+    def test_partial_reps_are_kept_when_they_are_all_there_is(self) -> None:
+        reps = [window(1, 0, 9, partial=True), window(2, 10, 19, partial=True)]
+        self.assertEqual([r.index for r in select_reps(reps, 3)], [1, 2])
+
+    def test_empty_input_selects_nothing(self) -> None:
+        self.assertEqual(select_reps([], 3), [])
+
+    def test_seven_reps_capped_at_three_spans_the_whole_set(self) -> None:
+        reps = [window(i + 1, i * 10, i * 10 + 9) for i in range(7)]
+        self.assertEqual([r.index for r in select_reps(reps, 3)], [1, 4, 7])
+
+
+class SharedFixtureTests(unittest.TestCase):
+    """The SAME file RS-SP2's vitest will read. Any threshold change reddens both suites."""
+
+    def test_every_fixture_case_matches(self) -> None:
+        cases = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))["cases"]
+        self.assertTrue(cases, "fixture file must not be empty")
+        for case in cases:
+            with self.subTest(case=case["name"]):
+                actual = segment_reps(
+                    case["signal"],
+                    fps=case["fps"],
+                    polarity=case["polarity"],
+                    rectify=case["rectify"],
+                    rep_start=case["rep_start"],
+                    min_rep_seconds=case["min_rep_seconds"],
+                )
+                self.assertEqual(
+                    [
+                        {"index": r.index, "start": r.start, "end": r.end, "partial": r.partial}
+                        for r in actual
+                    ],
+                    case["expected"],
+                )
 
 
 if __name__ == "__main__":
