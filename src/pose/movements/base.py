@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Sequence
 
 import numpy as np
 
 from src.pose.geometry import centered_median
 from src.pose.pose_rule_detector import PoseRuleDetection
-from src.pose.rep_segmentation import DEFAULT_MIN_REP_SECONDS
+from src.pose.rep_segmentation import DEFAULT_MIN_REP_SECONDS, RepWindow, segment_reps, select_reps
 
 
 @dataclass(frozen=True)
@@ -61,19 +61,87 @@ class MovementDetector:
     min_rep_seconds: float = DEFAULT_MIN_REP_SECONDS
 
 
+# Phase for frames belonging to no repetition: walking in, racking, resting between reps.
+# Every rule gates on its movement's active phases, so "rest" frames are never scored -- that
+# suppression is the point, not a side effect.
+REST_PHASE = "rest"
+
+DEFAULT_MAX_REPS = 3
+
+
+@dataclass(frozen=True)
+class RunResult:
+    core: list[CoreFrame]
+    detections: list[PoseRuleDetection]
+    reps: list[RepWindow]
+    analyzed: list[RepWindow]
+    # None when reps were segmented normally; otherwise why the whole clip was analyzed
+    # instead: "no_reps_detected", "only_partial_reps", or "segmentation_disabled".
+    fallback: str | None
+
+
+# `merge_by_fault` does not exist yet -- Task 5 collapses a fault that recurs across reps into
+# one PoseRuleDetection with `occurred_reps`/`rep_count` populated. This is a temporary
+# pass-through so the module imports; it must be replaced, not extended, when that task lands.
+def merge_by_fault(detections: list[PoseRuleDetection]) -> list[PoseRuleDetection]:
+    return detections
+
+
 def run_detector(
     detector: MovementDetector,
     frames: Sequence[object],
     fps: float,
     view_type: str,
     view_confidence: float,
-) -> tuple[list[CoreFrame], list[PoseRuleDetection]]:
+    *,
+    max_reps: int | None = DEFAULT_MAX_REPS,
+) -> RunResult:
+    """Compute metrics over the whole clip, then phase and score one repetition at a time.
+
+    Smoothing stays GLOBAL (all frames exist here), and only phase assignment and rule
+    execution are per-rep. RS-SP2 extracts only the selected windows, at which point smoothing
+    necessarily becomes per-padded-window -- that is an SP2 change, not a constraint on this
+    one.
+    """
     raw = detector.compute_raw(frames, fps)
-    phases = detector.assign_phases(raw)
     smoothed = {
         key: centered_median([float(item.get(key, np.nan)) for item in raw], window=5)
         for key in detector.metric_keys
     }
+
+    reps: list[RepWindow] = []
+    fallback: str | None = None
+    if detector.rep_signal is None:
+        fallback = "segmentation_disabled"
+    else:
+        reps = segment_reps(
+            smoothed[detector.rep_signal],
+            fps=fps,
+            polarity=detector.rep_polarity,
+            rectify=detector.rep_rectify,
+            rep_start=detector.rep_start,
+            min_rep_seconds=detector.min_rep_seconds,
+        )
+        if not reps:
+            fallback = "no_reps_detected"
+        elif all(rep.partial for rep in reps):
+            # A tightly-trimmed single-rep clip (the labeled research dataset) looks like this.
+            # Analyzing it whole is exactly the pre-existing behavior, which is correct for it.
+            fallback = "only_partial_reps"
+
+    # `reps` is what was FOUND and gets reported; `segmented` is what is actually used to phase
+    # and score. They differ on the only_partial_reps path, where the payload should still say
+    # what was there rather than claiming the clip held nothing.
+    segmented = reps if fallback is None else []
+
+    # Phases: per-rep when segmented, whole-clip on any fallback (today's behavior).
+    if segmented:
+        phases = [REST_PHASE] * len(raw)
+        for rep in segmented:
+            phases[rep.start : rep.end + 1] = detector.assign_phases(raw[rep.start : rep.end + 1])
+    else:
+        phases = detector.assign_phases(raw)
+
     core: list[CoreFrame] = []
     for i, item in enumerate(raw):
         core.append(
@@ -86,10 +154,28 @@ def run_detector(
                 metrics={key: float(smoothed[key][i]) for key in detector.metric_keys},
             )
         )
+
     min_frames = max(3, int(math.ceil(max(fps, 1.0) * 0.20)))
     ctx = RuleContext(fps=fps, view_type=view_type, view_confidence=view_confidence, min_frames=min_frames)
+    analyzed = select_reps(segmented, max_reps)
+
     detections: list[PoseRuleDetection] = []
-    for rule in detector.rules:
-        detections.extend(rule(core, ctx))
+    if analyzed:
+        for rep in analyzed:
+            # A SLICE, not a mask: `contiguous_true_segments` over a rep-gated global mask would
+            # weld a fault at the end of rep 2 to one at the start of rep 3 into a single
+            # detection spanning the gap between them. CoreFrame carries absolute frame_index
+            # and time, so slicing does not disturb the reported timestamps.
+            window = core[rep.start : rep.end + 1]
+            for rule in detector.rules:
+                for detection in rule(window, ctx):
+                    detections.append(
+                        replace(detection, rep_index=rep.index, occurred_reps=(rep.index,), rep_count=1)
+                    )
+    else:
+        for rule in detector.rules:
+            detections.extend(rule(core, ctx))
+
+    detections = merge_by_fault(detections)
     detections.sort(key=lambda d: (d.observability == "low", -d.severity, d.start_frame))
-    return core, detections
+    return RunResult(core=core, detections=detections, reps=reps, analyzed=analyzed, fallback=fallback)

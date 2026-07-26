@@ -49,7 +49,7 @@ class MovementRegistryTests(unittest.TestCase):
             legacy = detect_rule_segments(
                 compute_frame_metrics(frames, 30.0), fps=30.0, view_type=view_type, view_confidence=0.8
             )
-            _, new = run_detector(registry.get_detector("Squat"), frames, 30.0, view_type, 0.8)
+            new = run_detector(registry.get_detector("Squat"), frames, 30.0, view_type, 0.8).detections
             self.assertEqual(comparable(legacy), comparable(new), f"mismatch for view_type={view_type}")
 
     def test_pushup_resolves_case_insensitively(self) -> None:
@@ -132,7 +132,7 @@ class MovementRegistryTests(unittest.TestCase):
                 lambda core, ctx: [detection("high_but_mild", 0.05, "high")],
             ),
         )
-        _, detections = run_detector(detector, [{}], 30.0, "side", 0.9)
+        detections = run_detector(detector, [{}], 30.0, "side", 0.9).detections
         self.assertEqual([d.fault_id for d in detections], ["high_but_mild", "low_but_severe"])
 
     def test_payload_routes_to_pushup(self) -> None:

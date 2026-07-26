@@ -98,6 +98,13 @@ class PoseRuleDetection:
     evidence: dict[str, float | int | str]
     citation: str = ""
     citation_support: str = ""
+    # Per-rep attribution, populated by `run_detector` when rules ran on a single rep's slice.
+    # All three stay at their zero/empty default on the whole-clip fallback path, where there
+    # are no repetitions to attribute a detection to. `rep_count`/`occurred_reps` are owned by
+    # `merge_by_fault` (a later task); `run_detector` itself only ever sets `rep_count=1`.
+    rep_index: int = 0
+    occurred_reps: tuple[int, ...] = ()
+    rep_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -613,7 +620,8 @@ def detect_pose_rules_from_payload(
     from src.pose.movements.base import run_detector
 
     detector = registry.get_detector(movement)
-    core, detections = run_detector(detector, frames, fps if fps > 0 else 30.0, view_type, view_confidence)
+    run = run_detector(detector, frames, fps if fps > 0 else 30.0, view_type, view_confidence)
+    core, detections = run.core, run.detections
 
     valid_frames = [c for c in core if c.valid]
     result = {
