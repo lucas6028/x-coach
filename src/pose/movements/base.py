@@ -8,6 +8,7 @@ import numpy as np
 
 from src.pose.geometry import centered_median
 from src.pose.pose_rule_detector import PoseRuleDetection
+from src.pose.rep_segmentation import DEFAULT_MIN_REP_SECONDS
 
 
 @dataclass(frozen=True)
@@ -45,6 +46,19 @@ class MovementDetector:
     # False so a newly registered detector surfaces as Beta in the UI rather than silently
     # presenting as validated; Squat opts in explicitly.
     validated: bool = False
+    # How this movement's repetitions are found. `rep_signal` names the metric (it MUST be one
+    # of `metric_keys`) whose excursion defines a rep; None disables segmentation for this
+    # movement and takes the whole-clip fallback. The remaining knobs exist because the 16
+    # movements in the rule spec do not all share one shape -- see the spec's §3.4 audit:
+    # `rep_rectify` for bipolar signals (torso twist swings to both sides), `rep_start="flexed"`
+    # for movements whose rep starts at the bottom (deadlift, from the floor), and
+    # `min_rep_seconds` for fast cyclic movements (high knees run ~3Hz, about 10 frames per rep
+    # at 30fps, which the default would discard as noise).
+    rep_signal: str | None = None
+    rep_polarity: str = "min"
+    rep_rectify: bool = False
+    rep_start: str = "extended"
+    min_rep_seconds: float = DEFAULT_MIN_REP_SECONDS
 
 
 def run_detector(

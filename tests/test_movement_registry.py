@@ -172,6 +172,25 @@ class MovementRegistryTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             detect_pose_rules_from_payload(payload, movement="No Such Movement")
 
+    def test_registered_detectors_declare_their_rep_signal(self) -> None:
+        """A detector's rep signal must be one of the metrics it actually emits, or the
+        segmenter would read NaN for every frame and silently find zero reps."""
+        expected = {
+            "Squat": ("avg_knee_angle", "min"),
+            "Push-up": ("min_elbow_angle", "min"),
+            "Overhead Press": ("avg_elbow_angle", "max"),
+        }
+        for name, (signal, polarity) in expected.items():
+            with self.subTest(movement=name):
+                detector = registry.get_detector(name)
+                self.assertEqual(detector.rep_signal, signal)
+                self.assertEqual(detector.rep_polarity, polarity)
+                self.assertIn(detector.rep_signal, detector.metric_keys)
+                # The other knobs exist for movements RS-SP1 does not implement (spec §3.4);
+                # these three use the defaults.
+                self.assertFalse(detector.rep_rectify)
+                self.assertEqual(detector.rep_start, "extended")
+
 
 class TestMovementRegistry(unittest.TestCase):
     def test_lists_all_three_detectors_in_registration_order(self) -> None:
