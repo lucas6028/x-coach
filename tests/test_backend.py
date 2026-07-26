@@ -196,6 +196,16 @@ class MaxRepsPlumbingTests(unittest.TestCase):
 
         self.assertEqual(config.DEFAULT_MAX_REPS, 3)
 
+    def test_backend_and_pose_default_max_reps_stay_in_sync(self) -> None:
+        """`config.DEFAULT_MAX_REPS` and `base.DEFAULT_MAX_REPS` are two separate definitions
+        on purpose (config.py must not import numpy-heavy `src.pose` at server startup), but
+        they must never diverge: an operator raising one without the other would make the web
+        path and the CLI/library callers silently analyze a different number of reps."""
+        from backend.app import config
+        from src.pose.movements import base
+
+        self.assertEqual(config.DEFAULT_MAX_REPS, base.DEFAULT_MAX_REPS)
+
 
 # --------------------------------------------------------------- services.analysis
 

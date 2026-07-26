@@ -127,6 +127,57 @@ class RunDetectorPerRepTests(unittest.TestCase):
         result = run_detector(detector, squat_reps(3), 30.0, "rear", 0.8)
         self.assertEqual(result.reps, [])
         self.assertEqual(result.fallback, "segmentation_disabled")
+        self.assertTrue(result.detections, "a segmentation failure must still be analyzed, not read as clean")
+
+    def test_assign_phases_returning_too_many_phases_raises(self) -> None:
+        """A detector whose `assign_phases` returns one phase too many for a rep's slice must
+        raise, not silently resize `phases` and misalign every later frame -- see base.py's
+        slice-assignment guard. The message must name the detector AND both lengths, not just
+        signal that something went wrong."""
+        from dataclasses import replace
+
+        good_detector = registry.get_detector("Squat")
+        observed_input_lengths: list[int] = []
+
+        def too_long(rep_frames: list[dict]) -> list[str]:
+            observed_input_lengths.append(len(rep_frames))
+            return good_detector.assign_phases(rep_frames) + ["ascent"]
+
+        detector = replace(good_detector, assign_phases=too_long)
+        with self.assertRaises(ValueError) as ctx:
+            run_detector(detector, squat_reps(3), 30.0, "rear", 0.8)
+        message = str(ctx.exception)
+        self.assertIn(detector.name, message)
+        # `too_long` always returns exactly one MORE phase than it was given: the guard's
+        # message must report that expected (input) length and the actual (returned) length,
+        # not just gesture at "a mismatch happened".
+        self.assertEqual(len(observed_input_lengths), 1, "the guard must raise on the FIRST mismatch")
+        expected_len = observed_input_lengths[0]
+        self.assertIn(str(expected_len), message, "message must name the expected (slice) length")
+        self.assertIn(str(expected_len + 1), message, "message must name the actual (returned) length")
+
+    def test_assign_phases_returning_too_few_phases_raises(self) -> None:
+        """The mirror-image direction: too SHORT must also raise explicitly here, not merely
+        happen to raise IndexError later via the tail of the frame loop. Same message-content
+        requirement as the too-long direction."""
+        from dataclasses import replace
+
+        good_detector = registry.get_detector("Squat")
+        observed_input_lengths: list[int] = []
+
+        def too_short(rep_frames: list[dict]) -> list[str]:
+            observed_input_lengths.append(len(rep_frames))
+            return good_detector.assign_phases(rep_frames)[:-1]
+
+        detector = replace(good_detector, assign_phases=too_short)
+        with self.assertRaises(ValueError) as ctx:
+            run_detector(detector, squat_reps(3), 30.0, "rear", 0.8)
+        message = str(ctx.exception)
+        self.assertIn(detector.name, message)
+        self.assertEqual(len(observed_input_lengths), 1, "the guard must raise on the FIRST mismatch")
+        expected_len = observed_input_lengths[0]
+        self.assertIn(str(expected_len), message, "message must name the expected (slice) length")
+        self.assertIn(str(expected_len - 1), message, "message must name the actual (returned) length")
 
     def test_detections_carry_absolute_frame_indices(self) -> None:
         """Rules run on a SLICE, so a bug here would report REP-RELATIVE indices.

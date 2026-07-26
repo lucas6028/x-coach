@@ -679,6 +679,10 @@ def detect_pose_rules_from_payload(
         # at, the interface must not imply they were clean.
         "reps": {
             "detected": len(run.reps),
+            # Repetition indices scored PER-REPETITION. Empty on any fallback (`run.fallback is
+            # not None`) -- not because nothing was examined, but because on fallback the whole
+            # clip was scored as one unit instead of rep-by-rep. See `segments[].analyzed` below
+            # for whether a given span was actually looked at.
             "analyzed": analyzed_indices,
             "max_reps": effective_max_reps,
             "fallback": run.fallback,
@@ -689,7 +693,13 @@ def detect_pose_rules_from_payload(
                     "end_frame": core[rep.end].frame_index,
                     "start_time": round(core[rep.start].time, 3),
                     "end_time": round(core[rep.end].time, 3),
-                    "analyzed": rep.index in set(analyzed_indices),
+                    # On a normal (non-fallback) run this mirrors `analyzed_indices`: only the
+                    # sampled reps were scored. On any fallback the whole clip -- including every
+                    # span listed here -- WAS examined, just as one unit rather than rep-by-rep,
+                    # so every segment is genuinely analyzed=true. `reps.analyzed` staying `[]` on
+                    # fallback must not be read as "these spans are unexamined" -- see the comment
+                    # on `reps.analyzed` above.
+                    "analyzed": True if run.fallback is not None else rep.index in set(analyzed_indices),
                     "partial": rep.partial,
                 }
                 for rep in run.reps
@@ -882,10 +892,16 @@ def main() -> None:
         help="Canonical movement name to detect (registered: 'Squat', 'Overhead Press', "
              "'Push-up'). Only Squat is validated against labeled data.",
     )
+    # Local import, not module-level: `src.pose.movements.base` imports THIS module
+    # (`PoseRuleDetection`) at module scope, so importing it back at module scope here would be
+    # circular. `detect_pose_rules_from_payload` already defers the same import for the same
+    # reason (see above). This is the one place `DEFAULT_MAX_REPS` is actually *defined*; the
+    # argparse default below references it rather than repeating the literal `3`.
+    from src.pose.movements.base import DEFAULT_MAX_REPS
     parser.add_argument(
         "--max-reps",
         type=parse_max_reps,
-        default=3,
+        default=DEFAULT_MAX_REPS,
         help="How many repetitions to analyze (first/middle/last are sampled). "
              "Use 0 or 'all' to analyze every repetition.",
     )
