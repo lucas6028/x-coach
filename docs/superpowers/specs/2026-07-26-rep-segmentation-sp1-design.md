@@ -146,8 +146,9 @@ detections = merge_by_fault(detections)           # 新
 四個關鍵決定：
 
 1. **平滑仍在全域做**。切片後才平滑會弄壞每個 rep 的邊界。
-   （RS-SP2 底下這條會變成「逐 padding 過的區間平滑」，因為區間外的資料根本不存在——
-   那是 padding 存在的理由之一。）
+   **這是 RS-SP1 專屬的選擇，不是要 RS-SP2 保留的約束**：SP1 全域平滑是因為所有 frame 都
+   存在；SP2 只抽取選中區間，區間外的資料根本不存在，因此必然改成「對 padding 過的區間
+   逐段平滑」——padding 正是讓那件事安全的原因。SP2 的實作者不該把全域平滑當成前提。
 2. **phases 逐 rep 指派，不是餵較少的 frame 給全域函式**。三個 movement 檔一行都不用改。
 3. **規則對切片執行，不是把 rep 條件 AND 進現有 mask**。後者會讓 `contiguous_true_segments`
    把 rep 2 尾端與 rep 3 開頭的錯誤黏成一段跨 rep 的 detection。
@@ -224,6 +225,13 @@ rep_count: int = 0                      # len(occurred_reps)
 `quality` 增加 `analyzed_frames` 與 `analyzed_frame_ratio`；**既有欄位的分母不動**。
 `frame_metrics` 仍然每個 frame 一列（rep 外的 `phase` 是 `"rest"`）。
 
+`"rest"` 是新的 phase 值，已確認不會打破既有消費者：`frontend/src/api.ts:33` 把 phase 型別
+定成開放的 `string`（不是 union）；`i18n.tsx:1370-1375` 的 `dataLabel` 對沒有對應 key 的值
+退回 `titleCase(raw)`，所以最壞情況是顯示英文 "Rest" 而非崩潰（`lockout` 今天就已經是這個
+狀態）；`src/knowledge/perception_to_graph.py` 完全不讀 phase。
+另外 detection 的 `phase` 是該區段的 dominant phase，而規則只在 active phase 上觸發，
+所以 detection 永遠不會帶 `"rest"`——UI 上看得到的那個欄位不受影響。
+
 理由：`quality` 與 `frame_metrics` 是相容性介面，消費者有
 `backend/app/services/analysis.py`、frontend、`src/knowledge/perception_to_graph.py`。
 附加安全，改分母或減列數不安全。
@@ -262,6 +270,18 @@ API 往返）。為了讓兩份不會漂移，RS-SP1 必須：
 2. 所有門檻（0.35 / 0.65 / 0.4 秒 / 百分位 5 與 95）是**具名模組常數**，不是行內字面值
 3. 產出 `tests/fixtures/rep_segmentation_cases.json`：一組合成訊號 + 期望區間。
    Python 測試讀它、RS-SP2 的 vitest 也讀同一個檔案。任一邊改門檻，兩邊測試同時紅。
+
+### 7.1 未解決：誰算那條訊號（留給 RS-SP2 的 spec）
+
+fixture 只釘住「**給定一條 1-D 訊號 → 得到哪些區間**」，這是切割器本身。但 RS-SP2 的 TS
+那一側手上是 **live landmarks**，不是 `avg_knee_angle`——後者是 `compute_raw` 算出來的，
+而 `compute_raw` 在 Python。所以 SP2 還得決定：
+
+- (a) 在 TS 重寫該動作的 rep 訊號計算（深蹲只需要膝角，很小；但每加一個動作就多一份），或
+- (b) 把 `segment_reps` 的輸入定義成瀏覽器能直接算的東西（例如髖-膝 y 差，不需要三點夾角）
+
+**這是 RS-SP2 要回答的開放問題，RS-SP1 不預先決定**。RS-SP1 只保證切割器本身是可移植的
+純函式，且 `rep_signal` 是 `MovementDetector` 上一個可替換的欄位——換訊號不需要改切割器。
 
 ---
 
