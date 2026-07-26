@@ -365,9 +365,26 @@ fixture 只釘住「**給定一條 1-D 訊號 → 得到哪些區間**」，這�
   代表值來自 severity 較高那次
 - fixture 檔案的每個 case（同時被 RS-SP2 的 TS 測試消費）
 
-現有測試：**預期 `tests/test_pose_rule_detector.py` 會有 case 因 phase 語意改變而失敗**。
-那是預期內的，不是切割器的 bug；逐一檢視、更新成 per-rep 的期望值，不要為了讓測試綠而
-放寬切割器。
+現有測試：**預期全部通過，不需修改**。查證後的實情（此處更正本 spec 早期草稿的相反預測）：
+
+- `tests/test_pose_rule_detector.py` 走的是 `compute_frame_metrics` + `detect_rule_segments`
+  這條**legacy squat 參考路徑**，本次不動它。
+- 所有既有 fixture 都是**靜止**的（同一個 frame 重複 12–14 次），動態範圍為 0 →
+  `segment_reps` 回傳 `[]` → 走 §4.2 fallback → 與今天逐位元相同。
+  `tests/test_movement_registry.py::test_squat_via_registry_matches_legacy`
+  因此仍然成立。
+
+真正的風險因此**反過來**：不是既有測試會爆，而是**既有測試完全不會走到新路徑**。
+所以必須新增一個真正動態的多 rep fixture（見下），否則這次改動等於沒有測試覆蓋。
+
+**多 rep 迴歸測試（證明 bug 真的修好）**：以 `tests/test_pose_rule_detector.py` 的 `frame()`
+產生 3 個 rep（`hip_y` 依餘弦在 0.45 ↔ 0.92 之間擺動），然後斷言：
+
+- `segment_reps` 切出 3 個 rep
+- legacy 路徑把第 2、3 個 rep 的下降段標成 `ascent`（釘住 bug 的存在）
+- 新路徑三個 rep 各自都有 `descent` / `bottom` / `ascent`（釘住 bug 已修）
+
+若這個測試在改動前就通過，表示 fixture 不夠動態，要先修 fixture 而不是接受它。
 
 跑法（見 CLAUDE.md）：
 `.venv\Scripts\python.exe -m pytest tests/`、
