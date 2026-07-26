@@ -57,7 +57,9 @@ RS-SP1 唯一實際的省時來自合併重複 fault 後減少的 `retrieve_cont
 **做**
 
 - 共用 rep 切割器（`src/pose/rep_segmentation.py`），純函式、無 I/O、對 1-D 訊號操作
-- `MovementDetector` 增加 `rep_signal` / `rep_polarity` 兩個欄位
+- `MovementDetector` 增加 5 個 rep 相關欄位（`rep_signal` / `rep_polarity` / `rectify` /
+  `rep_start` / `min_rep_seconds`）——欄位一次開齊，即使目前只有 3 個 detector 用得到，
+  理由見 §3.4
 - `run_detector` 改為：全域算 raw → 切 rep → **逐 rep** assign phases → **逐 rep 切片**跑規則
 - rep 選取（預設 N=3，首/中/尾）
 - 同 `fault_id` 合併成一筆，帶發生的 rep
@@ -94,25 +96,34 @@ def segment_reps(
     fps: float,
     polarity: str = "min",      # "min" = 用力點是最小值（蹲、伏地挺身）
                                 # "max" = 用力點是最大值（推舉鎖定）
+    rectify: bool = False,      # True = 先取絕對值，把雙極訊號變成單極（軀幹旋轉）
+    rep_start: str = "extended",# rep 邊界放在哪一端："extended"（站姿起算，多數動作）
+                                # 或 "flexed"（從地板起算，硬舉）
     min_rep_seconds: float = 0.4,
 ) -> list[RepWindow]:
 ```
 
+`rectify` / `rep_start` / `min_rep_seconds` 都是為了 §3.4 才存在的；RS-SP1 的三個動作全部
+走預設值。它們現在就進介面，是為了讓 SP2 逐動作實作時**填參數而不是改切割器**。
+
 ### 3.2 演算法（遲滯門檻）
 
 1. 取有限值樣本；不足 `2 * min_rep_frames` → 回傳 `[]`
-2. `polarity == "max"` 時把訊號取負，之後一律以「用力點 = 低值」處理
+2. `rectify` 為真時先取絕對值；`polarity == "max"` 時把訊號取負。
+   之後一律以「用力點 = 低值」處理
 3. `lo = percentile(5)`、`hi = percentile(95)`；`hi - lo` 小於動態範圍下限 → 回傳 `[]`（靜止片段）
 4. `enter = lo + 0.35 * (hi - lo)`（進入底部）、`exit = lo + 0.65 * (hi - lo)`（回到伸展）
 5. 一個 rep = 訊號跌破 `enter` 之後、再回到 `exit` 之上的整個區間；
-   起點是跌破 `enter` 前最後一次在 `exit` 之上的位置，終點是之後第一次回到 `exit` 之上的位置
+   起點是跌破 `enter` 前最後一次在 `exit` 之上的位置，終點是之後第一次回到 `exit` 之上的位置。
+   `rep_start == "flexed"` 時邊界改放在**谷底**：一個 rep = 從一次跌破 `enter` 的最低點，
+   到下一次跌破 `enter` 的最低點（硬舉：地板 → 鎖定 → 地板）
 6. 長度 `< max(min_frames, min_rep_seconds * fps)` 的區間視為雜訊丟棄
 7. 開頭第一個樣本就在 `enter` 以下 → 該 rep `partial=True`；
    結尾跌破 `enter` 後直到片尾都沒回到 `exit` → 該 rep `partial=True`
 
 門檻 0.35 / 0.65 是動態範圍的比例，不是絕對角度，所以對動作、體型、鏡頭距離都不敏感。
 
-### 3.3 各動作的訊號
+### 3.3 RS-SP1 實作的三個動作
 
 | 動作 | `rep_signal` | `rep_polarity` |
 |---|---|---|
@@ -120,7 +131,55 @@ def segment_reps(
 | Push-up | `min_elbow_angle` | `min` |
 | Overhead Press | `avg_elbow_angle` | `max` |
 
-三個 key 都已經在各自的 `METRIC_KEYS` 裡，不需要新增指標。
+三個 key 都已經在各自的 `METRIC_KEYS` 裡，不需要新增指標，其餘參數全走預設值。
+
+### 3.4 對 16 個動作的適用性盤點
+
+依 `docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.zh-TW.md` 逐一檢視。
+**演算法的形狀（1-D excursion + 遲滯 + 相對動態範圍的門檻）對 16 個動作都成立**，
+差別在需要哪些旋鈕。
+
+**乾淨的單向 excursion（11 個，全走預設值）**
+
+| 動作 | 訊號 | polarity |
+|---|---|---|
+| 深蹲 Squat | 平均膝角 | min |
+| 弓步 Lunge | 前腳膝角（= 兩腳膝角取 min） | min |
+| 伏地挺身 Push-up | 較屈曲側肘角 | min |
+| 過頭推舉 Overhead Press | 平均肘角 | max |
+| 划船 Row | 肘角 | min |
+| 二頭彎舉 Bicep Curl | 肘角 | min |
+| 仰臥起坐 Sit-up | 軀幹相對水平角 | max |
+| 臀橋 Shoulder Bridge | 髖高 / 髖角 | max |
+| 手臂外展 Arm Abduction | 上臂仰角 | max |
+| 彈力帶擴胸 Band Pull Apart | 雙手間距 / 肩寬 | max |
+| 腿部外展 Leg Abduction | 踝離中線距離 | max |
+
+**手臂 VW** 也屬於這類：V（手臂高舉）→ 下拉成 W → 等長維持 → 回 V，就是標準 excursion
+（`arm_elevation_angle`，polarity `min`）。W 位置的等長停頓不影響遲滯判定。
+
+**需要旋鈕的（4 個）**
+
+| 動作 | 問題 | 旋鈕 |
+|---|---|---|
+| 軀幹旋轉 Torso Twist | spec 明訂「每次單側擺動 = 一下」，訊號**雙極**（中心 → A 側 → 中心 → B 側）。單一 `enter` 門檻只抓得到一個方向 | `rectify=True` + `polarity="max"`，對有號旋轉角取絕對值，A/B 兩側各成一次 excursion |
+| 硬舉 Deadlift | rep 從**地板**起算（setup → lift-off → knee-passing → lockout），不是從站姿。邊界放在伸展端會切成「鎖定→地板→鎖定」，`assign_phases` 的前 15% setup 於是落在上一下的鎖定上 | `rep_start="flexed"` |
+| 開合跳 Jumping Jacks | 節奏 ~1–2 Hz；且規則釘在「落地那一幀」的單幀事件而非 phase 區間 | `min_rep_seconds` 調小；SP2 的 padding 對它特別關鍵（落地就在區間邊界上） |
+| 高抬腿 High Knee | 交替單腳、每步一下，節奏可到 ~3 Hz → 30fps 下一下僅約 10 幀，預設 `min_rep_seconds=0.4`（12 幀）會把**真的 rep 當雜訊丟掉** | 見下方：暫不開啟 |
+
+**雙側 / 交替動作**（高抬腿、交替弓步、交替彎舉）的訊號必須取**兩側的 min/max**，否則只會
+抓到一隻腳/手。這是訊號定義問題，不是演算法問題。
+
+**高抬腿：暫不開啟切割，走整段 fallback。**
+~10 幀一下的訊號在 MediaPipe 的抖動下能否穩定切割，沒有證據；而**切錯比不切更糟**——切錯
+會讓規則在錯的 phase 上跑，產生看起來正常但實際錯誤的判定。它同時是本專案最弱的動作
+（general-tier RAG 唯一找不到乾淨來源的一個）。作法：`rep_signal=None` 表示「此動作未啟用
+切割」，直接走 §4.2 的 fallback。等有標註資料驗證過再開。
+
+**這一節的性質必須講清楚**：除了深蹲 / 伏地挺身 / 推舉，其餘 13 個動作的 detector
+**目前並不存在**。上表是從規則 spec 的動作描述推導出來的**介面設計推論，不是驗證過的事實**。
+每個動作實作時仍必須拿真實影片確認切割結果，並且可以推翻上表。RS-SP1 的責任只到
+「介面容納得下這些情況」為止。
 
 ---
 
@@ -185,6 +244,7 @@ def select_reps(reps: list[RepWindow], max_reps: int | None) -> list[RepWindow]
 |---|---|
 | 切不出任何 rep | `"no_reps_detected"` |
 | 只切出 partial rep | `"only_partial_reps"` |
+| 該動作未啟用切割（`rep_signal=None`，見 §3.4 高抬腿） | `"segmentation_disabled"` |
 | 正常 | `null` |
 
 ### 4.3 合併
@@ -295,7 +355,11 @@ fixture 只釘住「**給定一條 1-D 訊號 → 得到哪些區間**」，這�
 - 尾端截斷 → 最後一個 `partial=True`
 - 開頭截斷 → 第一個 `partial=True`
 - `polarity="max"`（OHP 形狀）→ 與 `"min"` 鏡像後結果相同
+- `rectify=True`（軀幹旋轉形狀：中心→A→中心→B→中心）→ 切出 2 個 rep，不是 1 個
+- `rep_start="flexed"`（硬舉形狀）→ 邊界落在谷底，切出的區間數與 `"extended"` 相同但相位差半下
+- `rep_signal=None` → 回傳 `[]` 且 fallback 記 `"segmentation_disabled"`
 - 過短的抖動不被算成 rep
+- `min_rep_seconds` 調小後，快節奏訊號（開合跳形狀）能切出全部 rep
 - `select_reps`：n=5/max=3 → `[1, 3, 5]`；n=2/max=3 → 全取；max=0 → 全取；partial 被排除
 - 合併語意：同 fault 兩個 rep → 一筆、`rep_count=2`、`occurred_reps=(1,3)`、
   代表值來自 severity 較高那次
@@ -319,3 +383,4 @@ fixture 只釘住「**給定一條 1-D 訊號 → 得到哪些區間**」，這�
 | 既有 Labeled 資料集的短片被切太緊，頭尾都是 partial | `"only_partial_reps"` fallback → 整段當一個 rep，行為與今天一致 |
 | `rule_heel_rise` 之類依賴 setup 基線的規則，per-rep 的 setup 是站姿而非真正的起始 | 對第 2 個 rep 之後其實更合理（腳跟本來就該在地上）；在該規則的測試裡明確釘住 |
 | N=3 一定會漏掉沒被選中的 rep 上的錯誤 | 使用者已知並接受；`reps.segments` 記錄哪些被分析過，供 UI 之後標示 |
+| §3.4 的 13 個動作是**推論**，實作時可能發現訊號選錯或旋鈕不夠 | 旋鈕是 `MovementDetector` 上的資料而非切割器的分支；推翻某一列只需改該動作的欄位。若出現連旋鈕都表達不了的形狀，該動作先走 `rep_signal=None` fallback，不要為它在切割器裡開特例 |
