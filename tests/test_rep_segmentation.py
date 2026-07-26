@@ -105,6 +105,70 @@ class SegmentRepsTests(unittest.TestCase):
         # The phase differs from the extended convention.
         self.assertNotEqual([r.start for r in extended], [r.start for r in flexed])
 
+    def test_flexed_leading_and_trailing_windows_are_partial(self) -> None:
+        """`_windows_from_valleys` has a leading- and a trailing-partial branch (the clip can
+        start or end away from a valley); nothing previously asserted on `.partial` or on rep
+        count for `rep_start="flexed"`, so a flipped or off-by-one flag there would pass
+        silently. This mirrors `test_leading_truncated_rep_is_partial` /
+        `test_trailing_truncated_rep_is_partial`, which make the equivalent check for the
+        "extended" convention.
+        """
+        # Starts and ends at the extended peak (not a valley), so both the leading and the
+        # trailing window are incomplete reps.
+        signal = sine_reps(3)
+        reps = segment_reps(signal, fps=30.0, rep_start="flexed")
+        self.assertEqual(len(reps), 4)
+        self.assertTrue(reps[0].partial)
+        self.assertFalse(reps[1].partial)
+        self.assertFalse(reps[2].partial)
+        self.assertTrue(reps[3].partial)
+        # The leading window runs from the very start of the clip...
+        self.assertEqual(reps[0].start, 0)
+        # ...and the trailing window runs to the very end of it.
+        self.assertEqual(reps[-1].end, len(signal) - 1)
+        # The two full (non-partial) reps between them still start at a local minimum.
+        for rep in reps[1:-1]:
+            window = signal[rep.start : rep.end + 1]
+            self.assertEqual(min(window), window[0])
+
+    def test_wobble_that_stays_inside_the_hysteresis_band_does_not_split_a_rep(self) -> None:
+        """The module's own leading comment gives the reason two thresholds (`enter`/`exit_`)
+        exist: "a single threshold would split one rep into several whenever the signal
+        wobbles across it near the bottom." No prior test constructed a signal that actually
+        wobbles across `enter` without recovering past `exit_` -- the two-deep-runs-collapse
+        path in `_finalize`'s `seen`-based de-dup was only exercised indirectly.
+        """
+        signal = sine_reps(2)
+        # A noisy frame at the very bottom of the first rep: it rises back above `enter`
+        # (splitting what would otherwise be one continuous deep run into two) but stays well
+        # below `exit_`, so it must never read as a full recovery to standing.
+        signal[15] = 110.0
+        reps = segment_reps(signal, fps=30.0)
+        # Still 2 reps, not 3 -- the wobble must not manufacture an extra one.
+        self.assertEqual(len(reps), 2)
+        self.assertFalse(reps[0].partial)
+        self.assertFalse(reps[1].partial)
+        self.assertEqual(reps[0].start, 0)
+        self.assertEqual(reps[0].end, 29)
+        self.assertEqual(reps[1].start, 30)
+        self.assertEqual(reps[1].end, 59)
+
+    def test_duplicate_frames_do_not_zero_out_the_noise_floor(self) -> None:
+        """A real pose estimator can repeat a frame verbatim on a dropped capture, driving many
+        frame-to-frame steps to exactly zero. `NOISE_PERCENTILE=5.0` only needs the calmest 5%
+        of steps to be zero for the naive percentile-based noise estimate to read 0.0 -- far
+        easier to trigger than the brief's original median-based estimate, which needed a
+        majority of steps to be zero. Reading noise as exactly 0.0 would waive the
+        range-vs-noise gate entirely (`noise > 0.0` guards it), so a static clip with one brief
+        detection glitch would otherwise report a rep spanning nearly the whole clip.
+        """
+        # Ninety static frames (many exact repeats, i.e. zero-diff steps) plus one isolated
+        # 6-frame glitch -- not a repeated movement, just a single bad detection.
+        signal = [170.0] * 90
+        for index in range(40, 46):
+            signal[index] = 60.0
+        self.assertEqual(segment_reps(signal, fps=30.0), [])
+
     def test_short_blips_are_not_reps(self) -> None:
         signal = [170.0] * 60
         signal[30] = 60.0  # one-frame spike
