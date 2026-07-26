@@ -98,6 +98,13 @@ class PoseRuleDetection:
     evidence: dict[str, float | int | str]
     citation: str = ""
     citation_support: str = ""
+    # Per-rep attribution, populated by `run_detector` when rules ran on a single rep's slice.
+    # All three stay at their zero/empty default on the whole-clip fallback path, where there
+    # are no repetitions to attribute a detection to. `rep_count`/`occurred_reps` are owned by
+    # `merge_by_fault` (a later task); `run_detector` itself only ever sets `rep_count=1`.
+    rep_index: int = 0
+    occurred_reps: tuple[int, ...] = ()
+    rep_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -590,6 +597,9 @@ def detect_pose_rules_from_payload(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     movement: str | None = None,
+    # -1 (not None) is the "caller said nothing" sentinel: None is a meaningful value here,
+    # meaning "analyze every rep".
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     metadata = payload.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -610,11 +620,22 @@ def detect_pose_rules_from_payload(
         view_confidence = 0.0
 
     from src.pose.movements import registry
-    from src.pose.movements.base import run_detector
+    from src.pose.movements.base import DEFAULT_MAX_REPS, run_detector
 
     detector = registry.get_detector(movement)
-    core, detections = run_detector(detector, frames, fps if fps > 0 else 30.0, view_type, view_confidence)
+    effective_max_reps = DEFAULT_MAX_REPS if max_reps == -1 else max_reps
+    run = run_detector(
+        detector,
+        frames,
+        fps if fps > 0 else 30.0,
+        view_type,
+        view_confidence,
+        max_reps=effective_max_reps,
+    )
+    core, detections = run.core, run.detections
 
+    analyzed_indices = [rep.index for rep in run.analyzed]
+    analyzed_frames = sum(rep.end - rep.start + 1 for rep in run.analyzed) or len(core)
     valid_frames = [c for c in core if c.valid]
     result = {
         "video_id": video_id or (pose_json_path.stem if pose_json_path else ""),
@@ -634,6 +655,11 @@ def detect_pose_rules_from_payload(
             "lower_body_visibility_mean": round(float(np.mean([c.lower_body_visibility for c in core])), 4)
             if core
             else 0.0,
+            # ADDITIVE. The existing denominators above stay whole-clip on purpose -- they are a
+            # compatibility surface for backend/app/services/analysis.py, the frontend, and
+            # src/knowledge/perception_to_graph.py.
+            "analyzed_frames": analyzed_frames if core else 0,
+            "analyzed_frame_ratio": round(analyzed_frames / len(frames), 4) if frames else 0.0,
         },
         "detections": [asdict(detection) for detection in detections],
         "retrievals": [],
@@ -648,6 +674,37 @@ def detect_pose_rules_from_payload(
             }
             for c in core
         ],
+        # Which repetitions were found and which were actually scored. `segments` exists so a UI
+        # can show which spans were examined: when whole stretches of a clip are never looked
+        # at, the interface must not imply they were clean.
+        "reps": {
+            "detected": len(run.reps),
+            # Repetition indices scored PER-REPETITION. Empty on any fallback (`run.fallback is
+            # not None`) -- not because nothing was examined, but because on fallback the whole
+            # clip was scored as one unit instead of rep-by-rep. See `segments[].analyzed` below
+            # for whether a given span was actually looked at.
+            "analyzed": analyzed_indices,
+            "max_reps": effective_max_reps,
+            "fallback": run.fallback,
+            "segments": [
+                {
+                    "index": rep.index,
+                    "start_frame": core[rep.start].frame_index,
+                    "end_frame": core[rep.end].frame_index,
+                    "start_time": round(core[rep.start].time, 3),
+                    "end_time": round(core[rep.end].time, 3),
+                    # On a normal (non-fallback) run this mirrors `analyzed_indices`: only the
+                    # sampled reps were scored. On any fallback the whole clip -- including every
+                    # span listed here -- WAS examined, just as one unit rather than rep-by-rep,
+                    # so every segment is genuinely analyzed=true. `reps.analyzed` staying `[]` on
+                    # fallback must not be read as "these spans are unexamined" -- see the comment
+                    # on `reps.analyzed` above.
+                    "analyzed": True if run.fallback is not None else rep.index in set(analyzed_indices),
+                    "partial": rep.partial,
+                }
+                for rep in run.reps
+            ],
+        },
     }
     if include_retrieval:
         result["retrievals"] = retrieve_contexts_for_detections(
@@ -667,6 +724,7 @@ def detect_pose_rules_from_json(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     movement: str | None = None,
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     path = Path(pose_json_path)
     return detect_pose_rules_from_payload(
@@ -677,6 +735,7 @@ def detect_pose_rules_from_json(
         graph_file=graph_file,
         rag_db_dir=rag_db_dir,
         movement=movement,
+        max_reps=max_reps,
     )
 
 
@@ -729,6 +788,19 @@ def parse_split_names(value: str) -> list[str]:
     if invalid:
         raise argparse.ArgumentTypeError(f"Unsupported splits: {', '.join(invalid)}")
     return split_names
+
+
+def parse_max_reps(value: str) -> int | None:
+    """Parse ``--max-reps``. ``all`` and ``0`` both mean every repetition."""
+    text = (value or "").strip().lower()
+    if text == "all":
+        return None
+    if not text.isdigit():
+        raise argparse.ArgumentTypeError(
+            f"--max-reps must be a non-negative integer or 'all', got {value!r}"
+        )
+    count = int(text)
+    return None if count == 0 else count
 
 
 def build_requests(
@@ -820,12 +892,28 @@ def main() -> None:
         help="Canonical movement name to detect (registered: 'Squat', 'Overhead Press', "
              "'Push-up'). Only Squat is validated against labeled data.",
     )
+    # Local import, not module-level: `src.pose.movements.base` imports THIS module
+    # (`PoseRuleDetection`) at module scope, so importing it back at module scope here would be
+    # circular. `detect_pose_rules_from_payload` already defers the same import for the same
+    # reason (see above). This is the one place `DEFAULT_MAX_REPS` is actually *defined*; the
+    # argparse default below references it rather than repeating the literal `3`.
+    from src.pose.movements.base import DEFAULT_MAX_REPS
+    parser.add_argument(
+        "--max-reps",
+        type=parse_max_reps,
+        default=DEFAULT_MAX_REPS,
+        help="How many repetitions to analyze (first/middle/last are sampled). "
+             "Use 0 or 'all' to analyze every repetition.",
+    )
     args = parser.parse_args()
 
     summary_rows: list[dict[str, Any]] = []
     if args.pose_json is not None:
         result = detect_pose_rules_from_json(
-            args.pose_json, include_retrieval=not args.no_retrieval, movement=args.movement
+            args.pose_json,
+            include_retrieval=not args.no_retrieval,
+            movement=args.movement,
+            max_reps=args.max_reps,
         )
         output_path = args.output_json or args.output_dir / f"{args.pose_json.stem}.json"
         write_detection_json(output_path, result, include_frames=args.include_frames)
@@ -843,6 +931,7 @@ def main() -> None:
                 video_id=request.video_id,
                 include_retrieval=not args.no_retrieval,
                 movement=args.movement,
+                max_reps=args.max_reps,
             )
             write_detection_json(request.output_path, result, include_frames=args.include_frames)
             for detection in result["detections"]:

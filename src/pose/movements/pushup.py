@@ -1601,6 +1601,8 @@ PUSHUP_DETECTOR = MovementDetector(
         rule_head_drop,
         rule_scapular_winging,
     ),
+    rep_signal="min_elbow_angle",
+    rep_polarity="min",
 )
 
 registry.register(PUSHUP_DETECTOR)

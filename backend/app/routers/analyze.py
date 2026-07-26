@@ -56,6 +56,19 @@ def _validated_movement(movement: str) -> str:
         ) from None
 
 
+def _validated_max_reps(max_reps: int | None) -> int | None:
+    """Resolve an optional client-supplied rep cap. 0 means 'every rep'.
+
+    Bounded so a client cannot ask for an unbounded amount of per-rep work on the shared
+    analysis semaphore.
+    """
+    if max_reps is None:
+        return config.DEFAULT_MAX_REPS
+    if max_reps < 0 or max_reps > 20:
+        raise HTTPException(status_code=400, detail="max_reps must be between 0 and 20.")
+    return None if max_reps == 0 else max_reps
+
+
 def _validate_pose_landmarks(payload: dict) -> None:
     """Reject structurally malformed landmark entries before they reach the pose pipeline.
 
@@ -84,6 +97,7 @@ def _validate_pose_landmarks(payload: dict) -> None:
 async def analyze(
     file: UploadFile = File(...),
     movement: str = Form(config.DEFAULT_ANALYSIS_MOVEMENT),
+    max_reps: int | None = Form(None),
     user: CurrentUser | None = Depends(get_optional_user),
 ) -> dict:
     """Accept a video of a supported movement, extract pose, detect faults, and return the analysis.
@@ -110,6 +124,7 @@ async def analyze(
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'.")
 
     canonical_movement = await run_in_threadpool(_validated_movement, movement)
+    resolved_max_reps = _validated_max_reps(max_reps)
 
     data = await file.read()
     if not data:
@@ -124,6 +139,7 @@ async def analyze(
                 saved_path,
                 video_id=video_id,
                 movement=canonical_movement,
+                max_reps=resolved_max_reps,
             )
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -150,6 +166,7 @@ async def analyze_pose(
     movement: str = Form(...),
     pose: str = Form(...),
     file: UploadFile = File(...),
+    max_reps: int | None = Form(None),
     user: CurrentUser | None = Depends(get_optional_user),
 ) -> dict:
     """Analyze a client-extracted pose JSON (no server-side MediaPipe).
@@ -162,6 +179,8 @@ async def analyze_pose(
     allowed = await run_in_threadpool(settings.allowed_upload_suffixes)
     if suffix not in allowed:
         raise HTTPException(status_code=400, detail=f"Unsupported file type '{suffix}'.")
+
+    resolved_max_reps = _validated_max_reps(max_reps)
 
     try:
         payload = json.loads(pose)
@@ -180,7 +199,11 @@ async def analyze_pose(
     try:
         async with _ANALYSIS_SEMAPHORE:
             result = await run_in_threadpool(
-                analysis.analyze_pose_payload, payload, movement=movement, video_id=video_id
+                analysis.analyze_pose_payload,
+                payload,
+                movement=movement,
+                video_id=video_id,
+                max_reps=resolved_max_reps,
             )
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

@@ -54,7 +54,7 @@ def shallow_clip(frame_count: int = 14) -> list[dict]:
 
 
 def detect(frames: list[dict], view_type: str, view_confidence: float = 0.8):
-    _, detections = run_detector(registry.get_detector("Squat"), frames, 30.0, view_type, view_confidence)
+    detections = run_detector(registry.get_detector("Squat"), frames, 30.0, view_type, view_confidence).detections
     return detections
 
 

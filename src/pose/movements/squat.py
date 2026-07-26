@@ -324,6 +324,8 @@ SQUAT_DETECTOR = MovementDetector(
     assign_phases,
     (rule_knees_inward, rule_knees_forward, rule_shallow_depth, rule_forward_lean, rule_heel_rise),
     validated=True,
+    rep_signal="avg_knee_angle",
+    rep_polarity="min",
 )
 
 registry.register(SQUAT_DETECTOR)

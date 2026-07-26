@@ -2015,7 +2015,7 @@ class PushupScapularWingingRuleTests(unittest.TestCase):
         # nuisance failure to update. The rule is registered rather than omitted so the spec and
         # the code stay in 1:1 correspondence.
         frames = [pushup_frame(elbow_angle=90.0, frame_index=i) for i in range(12)]
-        core, _ = run_detector(_TEST_DETECTOR, frames, 30.0, "side", 0.8)
+        core = run_detector(_TEST_DETECTOR, frames, 30.0, "side", 0.8).core
         for view in ("side", "front", "rear", "front_oblique", "rear_oblique", "unknown"):
             self.assertEqual(rule_scapular_winging(core, _ctx(view)), [], msg=view)
         # Also silent on the postures a proxy would be tempted by (rounded upper back would
@@ -2049,9 +2049,9 @@ class PushupRuleIntegrationTests(unittest.TestCase):
     def test_a_sagging_shallow_rep_fires_both_rules_with_exact_severities(self) -> None:
         # hip_offset 0.063 over the fixture's 0.60 body axis => hip_offset_ratio 0.105, the
         # ramp midpoint; elbow 120 deg is the depth ramp's midpoint. Both must score 0.5.
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR, self._clip(hip_offset=0.063, elbow_angle=120.0), 30.0, "side", 0.9
-        )
+        ).detections
         by_id = {detection.fault_id: detection for detection in detections}
         self.assertEqual(set(by_id), {"pushup_hip_sag", "pushup_shallow_depth"})
         self.assertAlmostEqual(by_id["pushup_hip_sag"].severity, 0.5, places=4)
@@ -2059,15 +2059,15 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         self.assertAlmostEqual(by_id["pushup_shallow_depth"].severity, 0.5, places=4)
 
     def test_a_clean_deep_rep_fires_nothing(self) -> None:
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR, self._clip(hip_offset=0.0, elbow_angle=85.0), 30.0, "side", 0.9
-        )
+        ).detections
         self.assertEqual(detections, [])
 
     def test_a_piking_rep_is_reported_as_a_pike_end_to_end(self) -> None:
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR, self._clip(hip_offset=-0.063, elbow_angle=85.0), 30.0, "side", 0.9
-        )
+        ).detections
         self.assertEqual([d.fault_id for d in detections], ["pushup_hip_sag"])
         self.assertEqual(detections[0].evidence["direction"], "pike")
         self.assertAlmostEqual(detections[0].severity, 0.5, places=4)
@@ -2076,11 +2076,11 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         # A 180-degree-rotated clip of a genuine sag. Without the hand-offset guard the sag
         # would be emitted as a full-severity PIKE; the depth rule, which reads no sign, is
         # unaffected and must keep working.
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR,
             self._clip(hip_offset=0.063, elbow_angle=120.0, tilt_deg=180.0),
             30.0, "side", 0.9,
-        )
+        ).detections
         self.assertEqual([d.fault_id for d in detections], ["pushup_shallow_depth"])
 
     @staticmethod
@@ -2114,9 +2114,9 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         # 0.08 * tan(25 deg) puts the neck exactly 25 deg off the line -- the ramp midpoint --
         # against a setup baseline of 0.
         offset = 0.08 * math.tan(math.radians(25.0))
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR, self._rep_with_head(offset), 30.0, "side", 0.9
-        )
+        ).detections
         by_id = {detection.fault_id: detection for detection in detections}
         self.assertIn("pushup_head_drop", by_id)
         detection = by_id["pushup_head_drop"]
@@ -2128,9 +2128,9 @@ class PushupRuleIntegrationTests(unittest.TestCase):
     def test_a_head_lift_of_the_same_size_fires_nothing_end_to_end(self) -> None:
         # Directional over real landmark geometry, not just over hand-set metric values.
         offset = 0.08 * math.tan(math.radians(25.0))
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR, self._rep_with_head(-offset), 30.0, "side", 0.9
-        )
+        ).detections
         self.assertNotIn("pushup_head_drop", {d.fault_id for d in detections})
 
     def test_an_inverted_clip_silences_the_head_drop_end_to_end(self) -> None:
@@ -2139,11 +2139,11 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         # become a confident drop. The guard refuses either way.
         offset = 0.08 * math.tan(math.radians(25.0))
         for signed_offset in (offset, -offset):
-            _, detections = run_detector(
+            detections = run_detector(
                 _TEST_DETECTOR,
                 self._rep_with_head(signed_offset, tilt_deg=180.0),
                 30.0, "side", 0.9,
-            )
+            ).detections
             self.assertNotIn("pushup_head_drop", {d.fault_id for d in detections})
 
     def test_a_forward_head_jut_fires_end_to_end_on_the_nose_criterion(self) -> None:
@@ -2151,9 +2151,9 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         # forward along the body axis (0.105 of body length -- the nose ramp's midpoint), with
         # the neck left exactly on the line. Round 1 of this rule was structurally incapable of
         # detecting this clip.
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR, self._rep_with_head(0.0, head_jut=0.063), 30.0, "side", 0.9
-        )
+        ).detections
         by_id = {detection.fault_id: detection for detection in detections}
         self.assertIn("pushup_head_drop", by_id)
         detection = by_id["pushup_head_drop"]
@@ -2167,26 +2167,26 @@ class PushupRuleIntegrationTests(unittest.TestCase):
     def test_an_inverted_forward_head_jut_still_fires(self) -> None:
         # `nose_ahead_ratio` is roll-invariant, so unlike the neck cue it survives a
         # 180-degree-rotated clip. The inversion guard is deliberately not applied to it.
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR,
             self._rep_with_head(0.0, head_jut=0.063, tilt_deg=180.0),
             30.0, "side", 0.9,
-        )
+        ).detections
         by_id = {detection.fault_id: detection for detection in detections}
         self.assertIn("pushup_head_drop", by_id)
         self.assertEqual(by_id["pushup_head_drop"].evidence["criterion"], "nose_ahead")
 
     def test_a_clean_rep_fires_neither_head_criterion(self) -> None:
-        _, detections = run_detector(
+        detections = run_detector(
             _TEST_DETECTOR, self._rep_with_head(0.0, head_jut=0.0), 30.0, "side", 0.9
-        )
+        ).detections
         self.assertNotIn("pushup_head_drop", {d.fault_id for d in detections})
 
     def test_wide_hands_fire_only_when_the_view_is_not_a_confident_side(self) -> None:
         frames = self._clip(hand_width_ratio=1.9, elbow_angle=85.0)
-        _, silenced = run_detector(_TEST_DETECTOR, frames, 30.0, "side", 0.9)
+        silenced = run_detector(_TEST_DETECTOR, frames, 30.0, "side", 0.9).detections
         self.assertEqual(silenced, [])
-        _, detections = run_detector(_TEST_DETECTOR, frames, 30.0, "rear", 0.9)
+        detections = run_detector(_TEST_DETECTOR, frames, 30.0, "rear", 0.9).detections
         self.assertEqual([d.fault_id for d in detections], ["pushup_elbow_flare"])
         self.assertAlmostEqual(detections[0].severity, 0.5, places=4)
 
@@ -2198,7 +2198,7 @@ class PushupRuleIntegrationTests(unittest.TestCase):
         for frame in frames:
             frame["landmarks"][27]["visibility"] = 0.0
             frame["landmarks"][28]["visibility"] = 0.0
-        _, detections = run_detector(_TEST_DETECTOR, frames, 30.0, "side", 0.9)
+        detections = run_detector(_TEST_DETECTOR, frames, 30.0, "side", 0.9).detections
         self.assertEqual(detections, [])
 
 

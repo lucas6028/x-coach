@@ -147,7 +147,7 @@ class OverheadPressMetricsTests(unittest.TestCase):
 def run_ohp(frames, view="side", vc=0.8):
     from src.pose.movements import registry
     from src.pose.movements.base import run_detector
-    return run_detector(registry.get_detector("Overhead Press"), frames, 30.0, view, vc)[1]
+    return run_detector(registry.get_detector("Overhead Press"), frames, 30.0, view, vc).detections
 
 
 class OverheadPressRulesTests(unittest.TestCase):

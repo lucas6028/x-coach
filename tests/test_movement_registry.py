@@ -49,7 +49,7 @@ class MovementRegistryTests(unittest.TestCase):
             legacy = detect_rule_segments(
                 compute_frame_metrics(frames, 30.0), fps=30.0, view_type=view_type, view_confidence=0.8
             )
-            _, new = run_detector(registry.get_detector("Squat"), frames, 30.0, view_type, 0.8)
+            new = run_detector(registry.get_detector("Squat"), frames, 30.0, view_type, 0.8).detections
             self.assertEqual(comparable(legacy), comparable(new), f"mismatch for view_type={view_type}")
 
     def test_pushup_resolves_case_insensitively(self) -> None:
@@ -132,7 +132,7 @@ class MovementRegistryTests(unittest.TestCase):
                 lambda core, ctx: [detection("high_but_mild", 0.05, "high")],
             ),
         )
-        _, detections = run_detector(detector, [{}], 30.0, "side", 0.9)
+        detections = run_detector(detector, [{}], 30.0, "side", 0.9).detections
         self.assertEqual([d.fault_id for d in detections], ["high_but_mild", "low_but_severe"])
 
     def test_payload_routes_to_pushup(self) -> None:
@@ -171,6 +171,48 @@ class MovementRegistryTests(unittest.TestCase):
         payload = {"metadata": {"fps": 30.0}, "frames": frames}
         with self.assertRaises(KeyError):
             detect_pose_rules_from_payload(payload, movement="No Such Movement")
+
+    def test_registered_detectors_declare_their_rep_signal(self) -> None:
+        """A detector's rep signal must be one of the metrics it actually emits, or the
+        segmenter would read NaN for every frame and silently find zero reps."""
+        expected = {
+            "Squat": ("avg_knee_angle", "min"),
+            "Push-up": ("min_elbow_angle", "min"),
+            "Overhead Press": ("avg_elbow_angle", "max"),
+        }
+        for name, (signal, polarity) in expected.items():
+            with self.subTest(movement=name):
+                detector = registry.get_detector(name)
+                self.assertEqual(detector.rep_signal, signal)
+                self.assertEqual(detector.rep_polarity, polarity)
+                self.assertIn(detector.rep_signal, detector.metric_keys)
+                # The other knobs exist for movements RS-SP1 does not implement (spec §3.4);
+                # these three use the defaults.
+                self.assertFalse(detector.rep_rectify)
+                self.assertEqual(detector.rep_start, "extended")
+
+    def test_multi_rep_clip_is_mis_phased_by_the_legacy_path_and_fixed_by_the_new_one(self) -> None:
+        """Pins BOTH sides of the fix.
+
+        The legacy whole-clip path takes one global argmin for the bottom frame, so on a
+        three-rep clip everything after the first bottom is labelled `ascent` -- reps 2 and 3
+        get no descent at all. The per-rep path must give every rep its own descent.
+        """
+        from src.pose.pose_rule_detector import compute_frame_metrics
+        from tests.test_run_detector_per_rep import squat_reps
+
+        frames = squat_reps(3)
+
+        legacy_phases = [m.phase for m in compute_frame_metrics(frames, fps=30.0)]
+        # Rep 3 lives in the final third; under one global argmin it never descends.
+        self.assertNotIn("descent", legacy_phases[60:], "fixture is not multi-rep enough")
+
+        result = run_detector(registry.get_detector("Squat"), frames, 30.0, "rear", 0.8)
+        self.assertEqual(len(result.reps), 3)
+        for rep in result.reps:
+            phases = {c.phase for c in result.core[rep.start : rep.end + 1]}
+            with self.subTest(rep=rep.index):
+                self.assertIn("descent", phases)
 
 
 class TestMovementRegistry(unittest.TestCase):

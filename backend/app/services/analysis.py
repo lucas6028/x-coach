@@ -64,12 +64,20 @@ def _strip_frame_metrics(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def analyze_video_file(
-    source_path: Path, *, video_id: str | None = None, movement: str | None = None
+    source_path: Path,
+    *,
+    video_id: str | None = None,
+    movement: str | None = None,
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     """Run the full pipeline on an arbitrary video file (the live-upload flow).
 
     Extracts pose to a runtime JSON path, runs rule detection with retrieval enrichment, and
     returns the detector result with a slimmed ``pose`` block attached.
+
+    ``max_reps`` follows the ``-1`` sentinel convention: ``-1`` means "caller said nothing" and
+    resolves to ``config.DEFAULT_MAX_REPS``; ``None`` means "analyze every repetition" and is
+    passed through unchanged.
     """
     # Deferred imports: pull in MediaPipe/OpenCV (process_videos) and the detector only when an
     # upload is actually analyzed, keeping module import (and server startup) lightweight.
@@ -91,6 +99,7 @@ def analyze_video_file(
         graph_file=config.KG_GRAPH_FILE,
         rag_db_dir=config.RAG_DB_DIR,
         movement=movement or config.DEFAULT_ANALYSIS_MOVEMENT,
+        max_reps=config.DEFAULT_MAX_REPS if max_reps == -1 else max_reps,
     )
     result = _strip_frame_metrics(result)
     result["pose"] = build_pose_block(pose_json_path)
@@ -99,7 +108,11 @@ def analyze_video_file(
 
 
 def _run_detector(
-    payload: dict[str, Any], video_id: str, pose_json_path: Path, movement: str
+    payload: dict[str, Any],
+    video_id: str,
+    pose_json_path: Path,
+    movement: str,
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     # Deferred import: the detector drags in numpy/networkx; keep module import light.
     from src.pose.pose_rule_detector import detect_pose_rules_from_payload
@@ -113,6 +126,7 @@ def _run_detector(
         graph_file=config.KG_GRAPH_FILE,
         rag_db_dir=config.RAG_DB_DIR,
         movement=movement,
+        max_reps=config.DEFAULT_MAX_REPS if max_reps == -1 else max_reps,
     )
 
 
@@ -139,12 +153,18 @@ def _has_detector(movement: str) -> bool:
 
 
 def analyze_pose_payload(
-    payload: dict[str, Any], *, movement: str, video_id: str | None = None
+    payload: dict[str, Any],
+    *,
+    movement: str,
+    video_id: str | None = None,
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     """Analyze a client-supplied pose JSON payload — no server-side MediaPipe.
 
     Routes by movement to its registered rule detector. Movements with no detector return a
     skeleton-only 'analysis pending' result (the video is still stored by the caller).
+
+    ``max_reps`` follows the same ``-1`` sentinel convention as ``analyze_video_file``.
     """
     vid = video_id or f"upload_{uuid.uuid4().hex[:12]}"
     pose_block = build_pose_block_from_payload(payload)
@@ -164,7 +184,7 @@ def analyze_pose_payload(
     config.ensure_runtime_dirs()
     pose_json_path = config.UPLOAD_POSE_DIR / f"{vid}.json"
     pose_json_path.write_text(json.dumps(payload), encoding="utf-8")
-    result = _run_detector(payload, vid, pose_json_path, movement)
+    result = _run_detector(payload, vid, pose_json_path, movement, max_reps=max_reps)
     result = _strip_frame_metrics(result)
     result["pose"] = pose_block
     result["source"] = "upload"
