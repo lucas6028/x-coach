@@ -159,7 +159,18 @@ def segment_reps(
     span = high - low
     if span <= 0.0:
         return []
-    noise = float(np.percentile(np.abs(np.diff(finite)), NOISE_PERCENTILE))
+    diffs = np.abs(np.diff(finite))
+    noise = float(np.percentile(diffs, NOISE_PERCENTILE))
+    if noise <= 0.0:
+        # A real pose estimator can repeat a frame verbatim (a dropped capture, a quantised
+        # joint angle) often enough that the calmest NOISE_PERCENTILE of steps are exactly
+        # zero, even while the signal is genuinely noisy elsewhere. Trusting that zero at face
+        # value would waive the entire gate below -- any span, however implausible, would read
+        # as "not noise". Fall back to the smallest STRICTLY POSITIVE step instead, so a
+        # signal that is static but for occasional jitter or a detection glitch still has its
+        # noise floor measured from that jitter, not from the unrelated duplicate frames.
+        nonzero = diffs[diffs > 0.0]
+        noise = float(nonzero.min()) if nonzero.size else 0.0
     if noise > 0.0 and span < MIN_RANGE_TO_NOISE * noise:
         return []
 
