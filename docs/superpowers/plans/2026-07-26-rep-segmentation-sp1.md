@@ -87,9 +87,28 @@ class SegmentRepsTests(unittest.TestCase):
         self.assertEqual(len(reps), 3)
         self.assertEqual([r.index for r in reps], [1, 2, 3])
         self.assertTrue(all(not r.partial for r in reps))
-        # Windows are ordered and non-overlapping.
+        # Ordered and strictly non-overlapping — a shared boundary frame would be phased and
+        # scored twice.
         for earlier, later in zip(reps, reps[1:]):
-            self.assertLess(earlier.end, later.start + 1)
+            self.assertLess(earlier.end, later.start)
+
+    def test_windows_reach_the_top_of_each_excursion(self) -> None:
+        """The boundary must sit at the actual top of the rep, not at the `exit` crossing.
+
+        `EXIT_FRACTION` is a hysteresis crossing detector — its job is to stop a wobble near
+        the bottom from splitting one rep in two. If it also defined the boundary, the window
+        would open 35% of the dynamic range BELOW the top, so the whole opening third of every
+        rep would fall outside every window, be labelled `rest`, and never be scored — taking
+        the standing frames `rule_heel_rise` reads for its setup baseline with it.
+        """
+        signal = sine_reps(3)
+        reps = segment_reps(signal, fps=30.0)
+        covered = sum(rep.end - rep.start + 1 for rep in reps)
+        self.assertGreaterEqual(covered, int(0.9 * len(signal)))
+        # Each window opens near that rep's own maximum.
+        for rep in reps:
+            window = signal[rep.start : rep.end + 1]
+            self.assertAlmostEqual(window[0], max(window), delta=0.1 * (max(window) - min(window)))
 
     def test_single_rep_is_one_window(self) -> None:
         reps = segment_reps(sine_reps(1), fps=30.0)
@@ -291,6 +310,26 @@ def _first_at_or_above(values: np.ndarray, threshold: float, after: int) -> int 
     return None
 
 
+def _climb_backward(values: np.ndarray, index: int) -> int:
+    """Walk back from an `exit_` crossing to the top of the excursion.
+
+    The crossing is only where the hysteresis band was pierced; the rep actually begins at the
+    standing/extended peak above it. Using the crossing as the boundary would drop the opening
+    third of every rep outside the window.
+    """
+    while index > 0 and np.isfinite(values[index - 1]) and values[index - 1] >= values[index]:
+        index -= 1
+    return index
+
+
+def _climb_forward(values: np.ndarray, index: int) -> int:
+    """The mirror of `_climb_backward` for the end of a rep."""
+    last = len(values) - 1
+    while index < last and np.isfinite(values[index + 1]) and values[index + 1] >= values[index]:
+        index += 1
+    return index
+
+
 def segment_reps(
     signal: Sequence[float],
     *,
@@ -349,8 +388,10 @@ def _windows_from_plateaus(
     for deep_start, deep_end in deep_runs:
         before = _last_at_or_above(values, exit_, deep_start)
         after = _first_at_or_above(values, exit_, deep_end)
-        start = 0 if before is None else before
-        end = len(values) - 1 if after is None else after
+        # Cross the band to identify the rep, then climb to the peak to bound it. Two jobs,
+        # two mechanisms -- see `_climb_backward`.
+        start = 0 if before is None else _climb_backward(values, before)
+        end = len(values) - 1 if after is None else _climb_forward(values, after)
         spans.append((start, end, before is None or after is None))
     return _finalize(spans, min_frames)
 
@@ -371,22 +412,33 @@ def _windows_from_valleys(
 
     spans: list[tuple[int, int, bool]] = []
     if valleys[0] > 0:
-        spans.append((0, valleys[0], True))
+        spans.append((0, valleys[0] - 1, True))
     for earlier, later in zip(valleys, valleys[1:]):
-        spans.append((earlier, later, False))
+        spans.append((earlier, later - 1, False))
     if valleys[-1] < len(values) - 1:
         spans.append((valleys[-1], len(values) - 1, True))
     return _finalize(spans, min_frames)
 
 
 def _finalize(spans: list[tuple[int, int, bool]], min_frames: int) -> list[RepWindow]:
-    """De-duplicate, drop noise-length spans, and number what survives."""
-    windows: list[RepWindow] = []
+    """De-duplicate, resolve shared boundaries, drop noise-length spans, and number the rest.
+
+    Adjacent reps meet at a single frame -- the peak between them belongs to the rep that
+    STARTS there -- so the earlier window gives it up. Without this, one frame would be
+    phase-assigned twice and scored twice.
+    """
+    unique: list[tuple[int, int, bool]] = []
     seen: set[tuple[int, int]] = set()
-    for start, end, partial in spans:
-        if (start, end) in seen:
+    for span in sorted(spans):
+        if span[:2] in seen:
             continue
-        seen.add((start, end))
+        seen.add(span[:2])
+        unique.append(span)
+
+    windows: list[RepWindow] = []
+    for position, (start, end, partial) in enumerate(unique):
+        if position + 1 < len(unique):
+            end = min(end, unique[position + 1][0] - 1)
         if end - start + 1 < min_frames:
             continue
         windows.append(RepWindow(index=len(windows) + 1, start=start, end=end, partial=partial))
@@ -796,19 +848,52 @@ class RunDetectorPerRepTests(unittest.TestCase):
         self.assertEqual(len(result.analyzed), 5)
 
     def test_frames_outside_every_rep_are_rest_and_are_never_scored(self) -> None:
-        """Walk-in / rack / rest frames must not be scored -- that is the noise this fixes."""
-        idle = [frame(hip_y=0.45, knee_y=0.70, frame_index=i) for i in range(20)]
+        """Walk-in / rack / rest frames must not be scored -- that is the noise this fixes.
+
+        The idle frames are built with a KNEES-FORWARD posture so they WOULD fire a rule if
+        they were scored; a neutral idle stretch would make this test pass for the wrong
+        reason.
+        """
+        idle = [frame(left_knee_x=0.48, right_knee_x=0.88, frame_index=i) for i in range(20)]
         working = squat_reps(2)
         for offset, item in enumerate(working):
             item["frame_index"] = 20 + offset
         result = run_detector(
-            registry.get_detector("Squat"), idle + working, 30.0, "rear", 0.8
+            registry.get_detector("Squat"), idle + working, 30.0, "side", 0.8, max_reps=0
         )
-        self.assertTrue(any(c.phase == REST_PHASE for c in result.core[:20]))
-        rep_positions = {i for rep in result.reps for i in range(rep.start, rep.end + 1)}
+
+        self.assertTrue(result.reps, "the working stretch must still segment")
+        self.assertTrue(all(c.phase == REST_PHASE for c in result.core[:20]))
+
+        # Detections are reported in frame_index units; rep windows are sequence positions.
+        # Convert once, then require every detection to lie inside some ANALYZED rep.
+        analyzed_ranges = [
+            (result.core[rep.start].frame_index, result.core[rep.end].frame_index)
+            for rep in result.analyzed
+        ]
+        self.assertTrue(analyzed_ranges)
         for detection in result.detections:
             with self.subTest(fault=detection.fault_id):
-                self.assertIn(detection.start_frame - 0, rep_positions | {detection.start_frame})
+                self.assertTrue(
+                    any(
+                        start <= detection.start_frame and detection.end_frame <= end
+                        for start, end in analyzed_ranges
+                    ),
+                    f"{detection.fault_id} spans {detection.start_frame}-{detection.end_frame}, "
+                    f"outside every analyzed rep {analyzed_ranges}",
+                )
+                # Nothing may reach back into the idle stretch (frame_index 0-19).
+                self.assertGreaterEqual(detection.start_frame, 20)
+
+    def test_only_partial_reps_are_still_reported_even_though_the_clip_is_analyzed_whole(self) -> None:
+        """A clip trimmed to one mid-rep excerpt -- the labeled research dataset's shape."""
+        result = run_detector(
+            registry.get_detector("Squat"), squat_reps(1)[8:22], 30.0, "rear", 0.8
+        )
+        if result.fallback == "only_partial_reps":
+            self.assertTrue(result.reps, "partial reps must still be reported")
+            self.assertEqual(result.analyzed, [])
+            self.assertTrue(result.detections, "the clip must still be analyzed whole")
 
     def test_static_clip_falls_back_to_whole_clip_analysis(self) -> None:
         """A segmentation failure must never present as 'no faults found'."""
@@ -828,15 +913,30 @@ class RunDetectorPerRepTests(unittest.TestCase):
         self.assertEqual(result.fallback, "segmentation_disabled")
 
     def test_detections_carry_absolute_frame_indices(self) -> None:
-        """Rules run on a SLICE, so a bug here would report rep-relative indices."""
+        """Rules run on a SLICE, so a bug here would report REP-RELATIVE indices.
+
+        Bounds-checking alone would not catch that -- rep-relative indices are also in range.
+        The discriminating assertion is that each detection's frames fall inside the window of
+        the rep it says it came from: a rep-relative index would land in rep 1's range while
+        `rep_index` claimed rep 3.
+        """
         result = run_detector(
             registry.get_detector("Squat"), squat_reps(3), 30.0, "rear", 0.8, max_reps=0
         )
+        self.assertEqual(len(result.reps), 3)
+        ranges = {
+            rep.index: (result.core[rep.start].frame_index, result.core[rep.end].frame_index)
+            for rep in result.reps
+        }
+        self.assertTrue(any(index > 1 for index in ranges), "need more than one rep to discriminate")
+
         for detection in result.detections:
             with self.subTest(fault=detection.fault_id):
                 self.assertLessEqual(detection.start_frame, detection.peak_frame)
                 self.assertLessEqual(detection.peak_frame, detection.end_frame)
-                self.assertLess(detection.end_frame, 90)
+                start, end = ranges[detection.rep_index]
+                self.assertGreaterEqual(detection.start_frame, start)
+                self.assertLessEqual(detection.end_frame, end)
 
 
 if __name__ == "__main__":
@@ -912,13 +1012,17 @@ def run_detector(
         elif all(rep.partial for rep in reps):
             # A tightly-trimmed single-rep clip (the labeled research dataset) looks like this.
             # Analyzing it whole is exactly the pre-existing behavior, which is correct for it.
-            reps = []
             fallback = "only_partial_reps"
 
+    # `reps` is what was FOUND and gets reported; `segmented` is what is actually used to phase
+    # and score. They differ on the only_partial_reps path, where the payload should still say
+    # what was there rather than claiming the clip held nothing.
+    segmented = reps if fallback is None else []
+
     # Phases: per-rep when segmented, whole-clip on any fallback (today's behavior).
-    if reps:
+    if segmented:
         phases = [REST_PHASE] * len(raw)
-        for rep in reps:
+        for rep in segmented:
             phases[rep.start : rep.end + 1] = detector.assign_phases(raw[rep.start : rep.end + 1])
     else:
         phases = detector.assign_phases(raw)
@@ -938,7 +1042,7 @@ def run_detector(
 
     min_frames = max(3, int(math.ceil(max(fps, 1.0) * 0.20)))
     ctx = RuleContext(fps=fps, view_type=view_type, view_confidence=view_confidence, min_frames=min_frames)
-    analyzed = select_reps(reps, max_reps)
+    analyzed = select_reps(segmented, max_reps)
 
     detections: list[PoseRuleDetection] = []
     if analyzed:
@@ -1311,6 +1415,20 @@ class RepsPayloadTests(unittest.TestCase):
         """postgrest serialises with allow_nan=False; a NaN here would drop the analysis."""
         result = detect_pose_rules_from_payload(payload(squat_reps(3)), movement="Squat")
         json.dumps(result, allow_nan=False)
+
+    def test_partial_only_clip_still_lists_what_was_found(self) -> None:
+        """`fallback` explains why the clip was analyzed whole; it must not also erase the
+        evidence that repetitions were there."""
+        result = detect_pose_rules_from_payload(payload(squat_reps(1)[8:22]), movement="Squat")
+        if result["reps"]["fallback"] == "only_partial_reps":
+            self.assertGreater(result["reps"]["detected"], 0)
+            self.assertTrue(result["reps"]["segments"])
+            self.assertTrue(all(s["partial"] for s in result["reps"]["segments"]))
+            self.assertFalse(any(s["analyzed"] for s in result["reps"]["segments"]))
+            self.assertEqual(result["reps"]["analyzed"], [])
+            self.assertEqual(
+                result["quality"]["analyzed_frames"], result["quality"]["total_frames"]
+            )
 
     def test_empty_frame_list_does_not_raise(self) -> None:
         result = detect_pose_rules_from_payload(payload([]), movement="Squat")
@@ -1749,6 +1867,14 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - `max_reps` sentinel `-1` — used identically in Task 6 (`detect_pose_rules_from_*`) and Task 7 (`analysis.*`). The routers resolve to a real value before calling, so the sentinel never crosses the HTTP boundary.
 
 **Ordering note:** Task 4 introduces a temporary pass-through `merge_by_fault` so `base.py` imports before Task 5 replaces it. Task 4's assertions do not depend on merging; Task 5 adds the end-to-end merge assertion once the real implementation lands.
+
+**4. Review pass (defects found and fixed in this document, recorded so execution does not reintroduce them):**
+
+- **The hysteresis threshold was doing two jobs.** `EXIT_FRACTION = 0.65` is a *crossing detector* — it exists so a wobble near the bottom does not split one rep in two. Using the crossing as the *window boundary* would have opened each window 35% of the dynamic range below the top of the excursion, putting the opening third of every rep outside every window, labelling it `rest`, and never scoring it — including the standing frames `rule_heel_rise` reads for its setup baseline. Split into two mechanisms: cross the band to identify the rep (`_last_at_or_above`), then climb to the peak to bound it (`_climb_backward` / `_climb_forward`). `test_windows_reach_the_top_of_each_excursion` pins it; none of the phase-based tests would have caught it.
+- **Shared boundary frames.** Climbing to peaks (and the valley convention) make adjacent windows meet at one frame, which would be phase-assigned and scored twice. `_finalize` now trims each window to end one frame before the next begins, and the non-overlap assertion is `assertLess(earlier.end, later.start)` rather than the tautological `< later.start + 1`.
+- **A vacuous noise-suppression assertion.** The original `assertIn(detection.start_frame - 0, rep_positions | {detection.start_frame})` cannot fail — the right-hand set contains the left-hand value by construction — and it compared sequence positions against `frame_index` values. It was also the *only* check on this change's headline claim. Rewritten to convert units once and require every detection to lie inside an analyzed rep, with idle frames built in a fault-triggering posture so the test cannot pass for the wrong reason.
+- **A vacuous absolute-index assertion.** `end_frame < 90` is satisfied by rep-relative indices too. Now each detection's frames must lie inside the window of the rep its `rep_index` names.
+- **`only_partial_reps` erased its own evidence.** Setting `reps = []` made the payload report `detected: 0` with empty `segments` even though partial reps were found. `reps` (reported) and `segmented` (used for phasing/scoring) are now separate.
 
 ---
 
