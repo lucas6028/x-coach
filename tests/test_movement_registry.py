@@ -43,7 +43,9 @@ class MovementRegistryTests(unittest.TestCase):
                 for d in detections
             ]
 
-        for view_type in ["rear", "side", "rear_oblique", "front", "front_oblique"]:
+        # "unknown" is in the list because `rule_shallow_depth` and `rule_heel_rise` now branch
+        # on it; a duplicated rule set drifts silently on exactly the branch nobody compares.
+        for view_type in ["rear", "side", "rear_oblique", "front", "front_oblique", "unknown"]:
             legacy = detect_rule_segments(
                 compute_frame_metrics(frames, 30.0), fps=30.0, view_type=view_type, view_confidence=0.8
             )

@@ -8,9 +8,12 @@ from src.pose.geometry import contiguous_true_segments, severity_from_range
 from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
 from src.pose.movements import registry
 from src.pose.pose_rule_detector import (
+    HEEL_OBSERVABLE_VIEWS,
     KNEE_FORWARD_MILD,
     KNEE_FORWARD_SEVERE,
     SIDE_VIEW_CONF_THRESHOLD,
+    UNKNOWN_VIEW,
+    VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
     PoseRuleDetection,
     assign_phases,
     build_detection,
@@ -155,6 +158,12 @@ def rule_knees_forward(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRule
 
 
 def rule_shallow_depth(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    # Spec rates depth high on side/front/front_oblique and medium on rear/rear_oblique (the hip
+    # crease is occluded), and says nothing about `unknown` -- which is the view estimator's
+    # "no usable evidence" verdict, not a view. Folding it in with rear would still hand a
+    # geometry-less clip full confidence, so it takes the same medium/x0.65 treatment
+    # `rule_knees_inward` and `rule_forward_lean` already give it.
+    view_unavailable = ctx.view_type == UNKNOWN_VIEW
     depth_mask = [
         frame.valid
         and frame.phase == "bottom"
@@ -188,8 +197,10 @@ def rule_shallow_depth(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRule
                 segment_metrics=segment,
                 score_values=[max(hip_severity, knee_severity) for _ in segment],
                 severity=severity,
-                confidence=severity,
-                observability="medium" if ctx.view_type in {"rear", "rear_oblique"} else "high",
+                confidence=severity * (VIEW_UNAVAILABLE_CONFIDENCE_SCALE if view_unavailable else 1.0),
+                observability="medium"
+                if view_unavailable or ctx.view_type in {"rear", "rear_oblique"}
+                else "high",
                 evidence={
                     "min_hip_minus_knee_y": round(min_hip_depth, 4),
                     "max_avg_knee_angle": round(max_knee_angle, 2),
@@ -249,6 +260,12 @@ def rule_forward_lean(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleD
 
 
 def rule_heel_rise(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    # Heel-vs-toe height only survives the projection from a lateral or oblique camera; head-on
+    # (and on an `unknown` view, where no camera geometry was established at all) the fault is
+    # "nearly invisible" per spec, so the verdict is downgraded to `low` and discounted rather
+    # than emitted as confidently as a sagittal one. `low` also sorts it behind every observed
+    # fault in `run_detector`, so a barely-seen heel cue cannot outrank one the camera did show.
+    observable_heel = ctx.view_type in HEEL_OBSERVABLE_VIEWS
     setup_heel = [
         frame.m("heel_height_delta")
         for frame in core
@@ -278,12 +295,13 @@ def rule_heel_rise(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDete
                 segment_metrics=segment,
                 score_values=values,
                 severity=severity,
-                confidence=severity,
-                observability="medium",
+                confidence=severity * (1.0 if observable_heel else VIEW_UNAVAILABLE_CONFIDENCE_SCALE),
+                observability="medium" if observable_heel else "low",
                 evidence={
                     "max_heel_lift_delta": round(max_lift, 4),
                     "setup_baseline": round(baseline, 4),
                     "threshold": 0.015,
+                    "view_type": ctx.view_type,
                     "primary_label": "heel lift",
                     "primary_value": round(max_lift, 4),
                     "primary_threshold": 0.015,

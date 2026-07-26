@@ -1568,6 +1568,45 @@ so a clip framed from the knees up produces no push-up verdict at all. That refu
 instead of ~0.60 (8.6× low) with no NaN and no other signal, and a silently-wrong verdict is worse
 than none. The sagittal view the spec calls primary is also the view most likely to trip it.
 
+**Status (2026-07-26) — Squat view gating brought in line with §3.** A compliance audit of
+`src/pose/movements/squat.py` against the Squat rules above found every threshold, severity ramp,
+phase scope and citation matching, and all four `retrieval_mode="kg"` queries resolving against
+`data/kg/sports_kg_v3.graphml` (`Knee Valgus`, `Anterior Knee Translation`, `Shallow Depth`,
+`Excessive Forward Lean` → their `Squat:`-scoped nodes — no squat analogue of the dangling OHP
+queries below). Two rules ignored §3's "confidence is scaled down when the required view is
+unavailable" convention and now honour it (mirrored in `pose_rule_detector.detect_rule_segments`,
+the legacy oracle, and pinned across all six view labels by `tests/test_movement_registry.py`):
+
+- `heel_rise` — was `observability="medium"` at undiscounted confidence for **every** view,
+  including head-on, where this spec calls the cue "nearly invisible". Now gated to
+  `{side, front_oblique, rear_oblique}`; outside that set (and on `unknown`) it emits
+  observability `low` with the ×0.65 discount. **The `low` rating is a rule-level downgrade, not
+  this spec's number** — the entry above rates the fault `medium` and names no rating for the
+  views where it is unavailable. `low` additionally demotes the verdict behind every observed
+  fault via `run_detector`'s sort key, which is the intended consequence.
+- `shallow_depth` — `unknown` (the view estimator's *evidence-floor failure* verdict, not a view)
+  fell through to the rule's `else` branch and so earned its **best** rating, observability `high`
+  at full confidence, on precisely the clips whose camera geometry could not be established. It
+  now takes medium/×0.65, matching how `knees_inward` and `excessive_forward_lean` already
+  resolve `unknown`. Behaviour on the views this spec does enumerate is unchanged: side → high,
+  rear/rear_oblique → medium, both undiscounted.
+
+> **DEFECT IN THIS SPEC'S `heel_rise` HEURISTIC (2026-07-26, found by that audit, NOT fixed).**
+> The heuristic above — `heel_height_delta = heel_y(29/30) − toe_y(31/32)`, flag when
+> `heel_height_delta − baseline > 0.015` — is **inverted against §3's own coordinate convention**
+> ("y increasing downward"). A heel lifting off the floor travels UP the image, so `heel_y`
+> *decreases* and the delta goes *negative*; the stated condition can only be met when the heel
+> drops **below** the toe line, i.e. on a toe rise. `src/pose/geometry.py:heel_height_delta`
+> implements this text faithfully, so code and spec agree and are both wrong: measured on a
+> fixture with the heels raised 0.05 above the toe line, `rule_heel_rise` emits nothing.
+> Consistent with that, `heel_rise` appears in **zero** stored detections — no file under
+> `data/` contains the string at all (5 detection JSONs are present locally; the rest of the
+> labeled set is gitignored, so this is corroboration, not proof).
+> Pinned as `tests/test_squat_view_gating.py::test_a_real_heel_rise_never_fires`
+> (`@unittest.expectedFailure`), so whoever flips the sign is told by an unexpected-success
+> failure to amend this spec entry and drop the marker. Fixing it changes the meaning of a
+> metric already written into stored analyses, so it is left as an explicit decision.
+
 **Known open item (not a deviation, a gap):** three OHP `kg_query` strings resolve to **no KG
 node at all** against `data/kg/sports_kg_v3.graphml` — `"Incomplete Elbow Lockout"`,
 `"Lumbar Hyperextension"` and `"Asymmetric Press"` (verified via

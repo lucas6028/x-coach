@@ -44,6 +44,18 @@ LOWER_BODY_LANDMARKS = (
 KNEE_FORWARD_MILD = 0.10  # ratio above which knee-forward is considered present
 KNEE_FORWARD_SEVERE = 0.30  # ratio at or above which knee-forward is severe
 SIDE_VIEW_CONF_THRESHOLD = 0.20  # min view confidence to treat a 'side' view as reliable
+# Spec convention (design doc §3): "Confidence is scaled down when the required view is
+# unavailable (the coded squat detector multiplies by ~0.65)". Named here so every rule that
+# applies it shares one number instead of re-typing the literal.
+VIEW_UNAVAILABLE_CONFIDENCE_SCALE = 0.65
+# `estimate_view_for_pose` returns "unknown" only when a clip FAILS its evidence floor
+# (valid_frame_ratio < 0.15, or every view score < 0.20) -- i.e. the camera geometry could not
+# be established at all. Rules must treat it as an unavailable view, never as a default-good
+# one: resolving it to a rule's best branch hands the worst clips the most confident verdicts.
+UNKNOWN_VIEW = "unknown"
+# Heel-vs-toe height is a sagittal cue -- "medium on side / oblique ... nearly invisible
+# head-on" (spec, Squat / Heel Rise).
+HEEL_OBSERVABLE_VIEWS = frozenset({"side", "front_oblique", "rear_oblique"})
 
 
 
@@ -299,6 +311,8 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
     observable_alignment = view_type in {"rear", "rear_oblique", "front", "front_oblique"}
     observable_side = view_type == "side" and view_confidence >= SIDE_VIEW_CONF_THRESHOLD
     observable_lean = view_type in {"side", "rear_oblique", "front_oblique"}
+    observable_heel = view_type in HEEL_OBSERVABLE_VIEWS
+    view_unavailable = view_type == UNKNOWN_VIEW
 
     active_phases = {"descent", "bottom", "ascent"}
     inward_mask = [
@@ -438,8 +452,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                 segment_metrics=segment,
                 score_values=[max(hip_severity, knee_severity) for _ in segment],
                 severity=severity,
-                confidence=severity,
-                observability="medium" if view_type in {"rear", "rear_oblique"} else "high",
+                confidence=severity * (VIEW_UNAVAILABLE_CONFIDENCE_SCALE if view_unavailable else 1.0),
+                observability="medium"
+                if view_unavailable or view_type in {"rear", "rear_oblique"}
+                else "high",
                 evidence={
                     "min_hip_minus_knee_y": round(min_hip_depth, 4),
                     "max_avg_knee_angle": round(max_knee_angle, 2),
@@ -519,12 +535,13 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                 segment_metrics=segment,
                 score_values=values,
                 severity=severity,
-                confidence=severity,
-                observability="medium",
+                confidence=severity * (1.0 if observable_heel else VIEW_UNAVAILABLE_CONFIDENCE_SCALE),
+                observability="medium" if observable_heel else "low",
                 evidence={
                     "max_heel_lift_delta": round(max_lift, 4),
                     "setup_baseline": round(baseline, 4),
                     "threshold": 0.015,
+                    "view_type": view_type,
                     "primary_label": "heel lift",
                     "primary_value": round(max_lift, 4),
                     "primary_threshold": 0.015,
