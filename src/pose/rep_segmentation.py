@@ -32,10 +32,14 @@ ENTER_FRACTION = 0.35
 EXIT_FRACTION = 0.65
 
 # Movement-agnostic floor on repetition duration, and the ONLY thing that separates a real
-# excursion from an anomalous one. It works because a window measures the excursion and nothing
-# else -- see `_climb_backward` for the plateau rule that makes that true. Fast cyclic movements
-# (jumping jacks, high knees) legitimately run below this and must lower it — see the spec's
-# §3.4 audit.
+# excursion from an anomalous one. Both boundary conventions test an excursion's duration
+# against it, but they reach it differently, and the difference matters: on the extended path a
+# window IS an excursion (see `_climb_backward` for the plateau rule that makes that true), so
+# `_finalize` applies the test as a side effect of dropping short windows; on the flexed path a
+# window is the valley-to-valley PERIOD, so `_windows_from_valleys` has to apply the same test
+# explicitly to each deep run, or that path has no anomaly rejection at all. Fast cyclic
+# movements (jumping jacks, high knees) legitimately run below this and must lower it — see the
+# spec's §3.4 audit.
 #
 # There is deliberately NO separate noise-vs-range gate. Four attempts at one (median step, low
 # percentile of steps, then a moving-step fraction over the clip and over the active span) each
@@ -185,8 +189,28 @@ def segment_reps(
         return []
 
     if rep_start == "flexed":
-        return _windows_from_valleys(values, deep_runs, min_frames)
+        return _windows_from_valleys(values, deep_runs, exit_, min_frames)
     return _windows_from_plateaus(values, deep_runs, exit_, min_frames)
+
+
+def _excursion_bounds(
+    values: np.ndarray, deep_start: int, deep_end: int, exit_: float
+) -> tuple[int, int, bool]:
+    """The full extent of the excursion a deep run belongs to: top, through the bottom, to top.
+
+    Returns `(start, end, partial)`. Cross the band to identify the rep, then climb to the peak
+    to bound it -- two jobs, two mechanisms, see `_climb_backward`. `partial` is True when the
+    clip cut the excursion off at one end, so there was no crossing to climb from.
+
+    This is the module's measure of "how long did this movement actually take", and it is the
+    only thing that tells a repetition from an anomalous blip. Both boundary conventions need
+    it, though only one of them can use it to bound a window -- see `_windows_from_valleys`.
+    """
+    before = _last_at_or_above(values, exit_, deep_start)
+    after = _first_at_or_above(values, exit_, deep_end)
+    start = 0 if before is None else _climb_backward(values, before)
+    end = len(values) - 1 if after is None else _climb_forward(values, after)
+    return start, end, before is None or after is None
 
 
 def _windows_from_plateaus(
@@ -197,29 +221,56 @@ def _windows_from_plateaus(
     Two deep runs with no return above `exit_` between them are one rep, not two — they
     produce the same (start, end) pair here and collapse in the de-duplication below. That
     collapse is the whole point of the hysteresis band.
+
+    Here a window IS the excursion, so `_finalize`'s `min_frames` filter measures the excursion
+    and no separate anomaly check is needed. The flexed convention does not have that property.
     """
-    spans: list[tuple[int, int, bool]] = []
-    for deep_start, deep_end in deep_runs:
-        before = _last_at_or_above(values, exit_, deep_start)
-        after = _first_at_or_above(values, exit_, deep_end)
-        # Cross the band to identify the rep, then climb to the peak to bound it. Two jobs,
-        # two mechanisms -- see `_climb_backward`.
-        start = 0 if before is None else _climb_backward(values, before)
-        end = len(values) - 1 if after is None else _climb_forward(values, after)
-        spans.append((start, end, before is None or after is None))
+    spans = [_excursion_bounds(values, start, end, exit_) for start, end in deep_runs]
     return _finalize(spans, min_frames)
 
 
 def _windows_from_valleys(
-    values: np.ndarray, deep_runs: list[tuple[int, int]], min_frames: int
+    values: np.ndarray, deep_runs: list[tuple[int, int]], exit_: float, min_frames: int
 ) -> list[RepWindow]:
     """Boundaries at the FLEXED end: a rep runs floor -> lockout -> floor (deadlift).
 
     The span before the first valley and the span after the last are incomplete reps by
     construction, so they are emitted as partial rather than silently dropped.
+
+    WHY THIS PATH FILTERS AND THE EXTENDED ONE DOES NOT. A window here runs valley to valley,
+    so its length is the rep-to-rep PERIOD, not the duration of any one excursion. That breaks
+    the property the extended path relies on -- there, a window IS an excursion, so
+    `_finalize`'s `min_frames` filter is already a duration test on it, and a blip is rejected
+    for being brief. Valley-to-valley spans inherit their length from the distance between
+    valleys instead, so a single anomalous dip in an otherwise still clip produces two long
+    windows and passes `min_frames` comfortably. Left unfiltered, the flexed convention has no
+    anomaly rejection at all: the canonical fixture (90 flat frames, one 6-frame dip) returned
+    two "partial reps" spanning the whole clip.
+
+    So each deep run is tested here on the same quantity the extended path tests it on -- the
+    duration of the excursion it belongs to, via `_excursion_bounds` -- and a run that is too
+    brief to be a repetition is not allowed to define a rep boundary. This is what separates
+    "one valley in an otherwise flat clip" (excursion of a few frames -> discarded) from "a
+    legitimately truncated leading or trailing partial" (a genuine excursion that the clip
+    happens to cut, whose measured extent still spans the descent or ascent it does contain).
+
+    The filter is deliberately applied HERE rather than to `deep_runs` in `segment_reps`, which
+    would read as more symmetrical: a discarded run still participates in `_finalize`'s
+    neighbour clamping on the extended path, so hoisting it moves extended window boundaries by
+    a frame when a brief dip sits directly against a real rep. The extended path already
+    applies this exact test through `_finalize`; giving it a second, earlier one changes
+    behaviour that is not broken.
     """
-    valleys: list[int] = []
+    real_runs: list[tuple[int, int]] = []
     for deep_start, deep_end in deep_runs:
+        start, end, _partial = _excursion_bounds(values, deep_start, deep_end, exit_)
+        if end - start + 1 >= min_frames:
+            real_runs.append((deep_start, deep_end))
+    if not real_runs:
+        return []
+
+    valleys: list[int] = []
+    for deep_start, deep_end in real_runs:
         window = values[deep_start : deep_end + 1]
         offset = int(np.nanargmin(np.where(np.isfinite(window), window, np.inf)))
         valleys.append(deep_start + offset)
