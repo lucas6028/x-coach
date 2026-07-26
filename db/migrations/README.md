@@ -28,5 +28,11 @@ psql "$SUPABASE_DB_URL" -f db/migrations/20260620000000_init_videos_analyses.sql
 | File | What it does |
 |------|--------------|
 | `20260620000000_init_videos_analyses.sql` | `videos` + `analyses` tables, owner-scoped RLS, indexes. `users` is Supabase's `auth.users`. |
+| `20260725000000_analysis_movement.sql` | Adds nullable `analyses.movement` (which detector produced the row). **Apply before deploying the movement-selection backend/frontend** — `store.py` writes this column unconditionally, so against an unmigrated database `POST /api/analyze` still returns 200 but silently drops the row (`analysis_id: null`, error only in the server log) and `GET /api/analyses` hard-500s for every signed-in user. See `backend/README.md` § Auth & persistence. |
 
 After applying, confirm in Table Editor that `videos` and `analyses` exist with RLS enabled.
+
+Note: the table above is missing rows for `20260704000000_conversations.sql` through
+`20260720000000_line_training_summary.sql` (pre-existing gap, not fixed here — see the
+2026-07-25 review). Apply every file in `db/migrations/` in filename order regardless of
+whether it has a row here.

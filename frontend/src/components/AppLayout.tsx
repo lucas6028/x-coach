@@ -17,6 +17,9 @@ interface Props {
   analysis?: Analysis | null;
   loading?: boolean;
   title?: string;
+  // The studio's currently-selected movement, pre-result (see Header's `movement` prop). Ignored
+  // once `title` or `analysis` is set — both already know what to show.
+  movement?: string;
   // The studio supplies a picker opener; other pages fall back to navigating into the studio.
   onOpenLibrary?: () => void;
   // The studio resets its own state for a fresh session; other pages just route into the studio.
@@ -36,6 +39,7 @@ export default function AppLayout({
   analysis = null,
   loading = false,
   title,
+  movement,
   onOpenLibrary,
   onNewAnalysis,
   initialSidebarOpen = true,
@@ -59,7 +63,7 @@ export default function AppLayout({
   // second analysis without leaving LINE.
   if (isInClient) {
     return (
-      <LiffAppShell title={title} onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis}>
+      <LiffAppShell title={title} movement={movement} onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis}>
         {children}
       </LiffAppShell>
     );
@@ -73,6 +77,7 @@ export default function AppLayout({
         analysis={analysis}
         loading={loading}
         title={title}
+        movement={movement}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         onMenu={() => setMobileNav(true)}

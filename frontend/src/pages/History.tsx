@@ -10,7 +10,7 @@ import { Link } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
 import AppLayout from "../components/AppLayout";
 import { useAuth } from "../lib/auth";
-import { useI18n, viewLabel } from "../lib/i18n";
+import { movementLabel, useI18n, viewLabel } from "../lib/i18n";
 
 type Status = "loading" | "ready" | "error";
 
@@ -159,8 +159,16 @@ export default function History() {
                                 view: viewLabel(t, it.view_type ?? "unknown"),
                               })}
                             </p>
-                            <p className="mt-0.5 font-mono text-xs text-muted">
+                            <p className="mt-0.5 flex items-center gap-2 font-mono text-xs text-muted">
                               {fmtTime(it.created_at)}
+                              <span className="rounded bg-content/5 px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                                {/* The promoted column, then Squat. `HistoryItem` carries no
+                                    `result` -- list_analyses selects only the promoted columns, not
+                                    the heavy document -- so there is no per-row echo to fall back
+                                    to here. Rows predating the column are Squat by construction:
+                                    every analysis before this change was pinned to it. */}
+                                {movementLabel(t, it.movement ?? "Squat")}
+                              </span>
                             </p>
                           </div>
                           <span

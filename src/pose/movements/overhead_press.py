@@ -414,7 +414,12 @@ def rule_excessive_back_lean(core: list[CoreFrame], ctx: RuleContext) -> list[Po
             build_detection(
                 fault_id="ohp_lumbar_hyperextension",
                 fault_name="Excessive back-lean / lumbar hyperextension (rib flare)",
-                kg_query="Lumbar Hyperextension",
+                # Verified to resolve: retrieve_graph_context(..., movement="Overhead Press")
+                # returns "Overhead Press:Excessive Lower Back Arching", whose CORRECTED_BY
+                # edges are exactly the cues this fault needs -- Ribcage Down, Gluteus Active,
+                # Core Active. The rule's own fault name says "rib flare"; the node's first
+                # correction is "Ribcage Down". "Lumbar Hyperextension" resolved to NOTHING.
+                kg_query="Excessive Lower Back Arching",
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=values,
@@ -472,7 +477,12 @@ def rule_asymmetric_press(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
             build_detection(
                 fault_id="ohp_asymmetric_press",
                 fault_name="Asymmetric Press (One Side Leading)",
-                kg_query="Asymmetric Press",
+                # Verified to resolve: returns TWO seeds -- a movement-generic "Muscle Imbalance"
+                # Cause node (1 edge, no summary buckets) and "Overhead Press:Muscle Imbalance"
+                # (Fault, 5 edges), which carries the content: risks Shoulder Injury; causes
+                # Overuse, Weak External Rotators, Weak Abductors. Both are returned; the scoped
+                # one supplies the coaching material. "Asymmetric Press" is not a node at all.
+                kg_query="Muscle Imbalance",
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=values,

@@ -26,6 +26,14 @@ Supabase Auth and sends `Authorization: Bearer <access_token>`; the backend veri
 (HS256) and forwards it to Postgres so **RLS** scopes every row to its owner. Apply the schema
 first — see `db/migrations/` (and its README for why migrations don't live under `supabase/`).
 
+**`db/migrations/20260725000000_analysis_movement.sql` must be applied before deploying this
+code.** It is not run automatically. Against an unmigrated database: `store.py` writes the
+`movement` column on every insert, so `POST /api/analyze` still returns 200 but silently drops
+the row (`analysis_id: null` in the response; the actual error only reaches the server log via
+`analyze.py`'s broad exception guard), and `GET /api/analyses` hard-500s for every signed-in
+user (no exception handling around that `select`). See `db/migrations/README.md` for the full
+migration list.
+
 ## Conversational coaching (LLM)
 
 `/api/chat` is the one endpoint that calls an LLM (the analysis pipeline itself is fully offline).
@@ -72,7 +80,8 @@ can be low; there's no env for it yet, so add one if you hit it.
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | GET  | `/api/health` | — | liveness + which data stores are present + `auth_configured` |
-| POST | `/api/analyze` | optional | upload a squat video → extract → rule detection (+retrieval); persists + returns `analysis_id` when authenticated |
+| GET  | `/api/movements` | — | analyzable-movement catalog (canonical name + validated flag), derived from the pose detector registry |
+| POST | `/api/analyze` | optional | upload a video for a given `movement` → extract → rule detection (+retrieval); persists + returns `analysis_id` when authenticated |
 | GET  | `/api/analyses?limit=&offset=` | required | the caller's analysis history (newest first) |
 | GET  | `/api/analyses/{analysis_id}` | required | one of the caller's analyses (full `result`) |
 | GET  | `/api/videos?limit=&offset=&fault=` | — | list precomputed labeled clips (faulty clips first) |

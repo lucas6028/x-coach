@@ -14,11 +14,16 @@ export default function CaptureStudio({
   busy,
   progress,
   onError,
+  movement,
 }: {
   onBlob: (blob: Blob, tier: PoseTier) => void;
   busy: boolean;
   progress: number;
   onError?: (msg: string) => void;
+  /** The movement the user selected upstream, forwarded so the upload prompt names what is
+   *  actually being uploaded. Required rather than defaulted: a default is how the hardcoded
+   *  "squat" copy survived unnoticed next to a movement selector. */
+  movement: string;
 }) {
   const { t } = useI18n();
   const [mode, setMode] = useState<Mode>("upload");
@@ -64,7 +69,7 @@ export default function CaptureStudio({
       </div>
 
       {mode === "upload" ? (
-        <UploadDropzone onFile={(file) => onBlob(file, tier)} />
+        <UploadDropzone onFile={(file) => onBlob(file, tier)} movement={movement} />
       ) : (
         <RecordPanel
           onRecorded={(blob) => onBlob(blob, tier)}

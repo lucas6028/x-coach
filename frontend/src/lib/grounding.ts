@@ -36,5 +36,8 @@ export function buildChatContext(analysis: Analysis): ChatContext {
     fault_count: analysis.detections.length,
     quality: analysis.quality || {},
     faults,
+    // So the coach is grounded in the movement whose rules actually ran, not "squat" by
+    // assumption. Absent for analyses predating per-movement selection; the backend falls back.
+    movement: analysis.movement,
   };
 }

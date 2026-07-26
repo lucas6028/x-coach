@@ -8,7 +8,7 @@ import { retrievalByFault } from "../lib/retrieval";
 import { wasMeasured } from "../lib/quality";
 import { getStoredModel } from "../lib/model";
 import { useAuth } from "../lib/auth";
-import { useI18n } from "../lib/i18n";
+import { movementLabel, useI18n } from "../lib/i18n";
 import FaultCard from "./FaultCard";
 import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
 import { LumenAvatar, LumenLoader } from "./LumenLoader";
@@ -321,7 +321,11 @@ export default function CoachTray({
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-secondary/10">
                   <CheckCircle size={26} weight="fill" className="text-secondary" />
                 </span>
-                <p className="text-sm leading-relaxed text-content">{t("feedback.noFaults")}</p>
+                <p className="text-sm leading-relaxed text-content">
+                  {t("feedback.noFaults", {
+                    movement: movementLabel(t, analysis.movement ?? "Squat"),
+                  })}
+                </p>
               </div>
             ) : (
               <div className="flex items-center gap-3 rounded-xl border border-border-dark bg-surface-dark p-4">

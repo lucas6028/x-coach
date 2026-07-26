@@ -16,7 +16,9 @@ describe("Landing page", () => {
 
   it("renders the hero sub-copy", () => {
     renderWithProviders(<Landing />);
-    expect(screen.getByText(/reads a squat video/i)).toBeInTheDocument();
+    // Copy updated to name all three live movements (Step 9 of the movement-selection mitigation);
+    // no longer claims to read only a squat video.
+    expect(screen.getByText(/reads a squat, push-up or overhead-press video/i)).toBeInTheDocument();
   });
 
   it("renders the 'Open the demo' CTA", () => {

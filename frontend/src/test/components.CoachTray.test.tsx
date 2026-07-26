@@ -50,7 +50,21 @@ describe("CoachTray — coaching feedback", () => {
 
   it("shows the clean-rep message when there are no detections", () => {
     renderWithProviders(<CoachTray analysis={mockCleanAnalysis} currentTime={0} onSeek={vi.fn()} />);
-    expect(screen.getByText(/No biomechanical faults/i)).toBeInTheDocument();
+    // Movement-scoped since 2a5d3e64's mitigation (see components.CoachTray.movement.test.tsx):
+    // mockCleanAnalysis carries no `movement`, so this exercises the "Squat" fallback branch.
+    expect(screen.getByText(/No Squat faults detected/i)).toBeInTheDocument();
+  });
+
+  // An empty `detections` list means BOTH "no faults found" and "no frame was measurable". The
+  // tray co-renders with MetricsCards (App.tsx), so before this gate a knees-up-cropped clip
+  // showed "Faults 0 — not measured" in the HUD and "Clean rep" in the tray, side by side.
+  it("shows the not-measured message, NOT the clean-rep one, when no frame was valid", () => {
+    renderWithProviders(
+      <CoachTray analysis={mockUnmeasuredAnalysis} currentTime={0} onSeek={vi.fn()} />,
+    );
+    expect(screen.getByText(/could be measured/i)).toBeInTheDocument();
+    // Movement-scoped fallback text (see above) — still asserts the clean-rep banner is absent.
+    expect(screen.queryByText(/No Squat faults detected/i)).not.toBeInTheDocument();
   });
 
   // An empty `detections` list means BOTH "no faults found" and "no frame was measurable". The

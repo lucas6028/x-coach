@@ -22,14 +22,14 @@ afterEach(() => {
 
 describe("CaptureStudio", () => {
   it("defaults to upload mode and can switch to record", () => {
-    renderWithProviders(<CaptureStudio onBlob={() => {}} busy={false} progress={0} />);
+    renderWithProviders(<CaptureStudio onBlob={() => {}} busy={false} progress={0} movement="Squat" />);
     fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     expect(screen.getByText("fake-record")).toBeInTheDocument();
   });
 
   it("hands a recorded blob + selected tier to onBlob", () => {
     const onBlob = vi.fn();
-    renderWithProviders(<CaptureStudio onBlob={onBlob} busy={false} progress={0} />);
+    renderWithProviders(<CaptureStudio onBlob={onBlob} busy={false} progress={0} movement="Squat" />);
     fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     fireEvent.click(screen.getByText("fake-record"));
     expect(onBlob).toHaveBeenCalledWith(expect.any(Blob), DEFAULT_ANALYSIS_TIER);
@@ -37,7 +37,7 @@ describe("CaptureStudio", () => {
 
   it("resets to upload mode and reports the error when RecordPanel fails", () => {
     const onError = vi.fn();
-    renderWithProviders(<CaptureStudio onBlob={() => {}} busy={false} progress={0} onError={onError} />);
+    renderWithProviders(<CaptureStudio onBlob={() => {}} busy={false} progress={0} onError={onError} movement="Squat" />);
     fireEvent.click(screen.getByRole("tab", { name: /record/i }));
     fireEvent.click(screen.getByText("fake-error"));
     expect(onError).toHaveBeenCalledWith("cam fail");
@@ -46,7 +46,7 @@ describe("CaptureStudio", () => {
 
   it("hands the selected non-default tier to onBlob", () => {
     const onBlob = vi.fn();
-    renderWithProviders(<CaptureStudio onBlob={onBlob} busy={false} progress={0} onError={vi.fn()} />);
+    renderWithProviders(<CaptureStudio onBlob={onBlob} busy={false} progress={0} onError={vi.fn()} movement="Squat" />);
     fireEvent.click(screen.getByRole("button", { name: /precision/i }));
     fireEvent.change(screen.getByRole("slider"), { target: { value: "0" } });
     fireEvent.mouseUp(screen.getByRole("slider"));

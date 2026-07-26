@@ -28,10 +28,13 @@ export const MOVEMENT_GROUPS = [
 export const ALL_MOVEMENTS = [...LOWER_BODY, ...UPPER_BODY, ...CORE, ...FULL_BODY] as const;
 export type Movement = (typeof ALL_MOVEMENTS)[number];
 
-// Which movements the video pipeline can actually analyse. The rule detector
-// (src/pose/pose_rule_detector.py) is squat-only, and the backend pins every analysis to
-// config.DEFAULT_ANALYSIS_MOVEMENT, so offering the others would run squat rules over a deadlift and
-// report squat faults. Landing a per-movement detector means adding its name here.
-export const ANALYZABLE_MOVEMENTS: readonly string[] = ["Squat"];
-
-export const isAnalyzable = (movement: string) => ANALYZABLE_MOVEMENTS.includes(movement);
+// Which movements the pipeline can analyse is NOT stated here. It comes from GET /api/movements,
+// which derives it from the Python detector registry, so registering a fourth detector surfaces
+// it in the UI with no frontend edit. The previous hand-maintained ANALYZABLE_MOVEMENTS constant
+// was a second list that had to be kept in sync by hand.
+export interface AnalyzableMovement {
+  name: string;
+  /** False when the rules are literature-derived but never checked against labeled ground
+   *  truth — rendered with a Beta tag. */
+  validated: boolean;
+}

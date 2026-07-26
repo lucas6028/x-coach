@@ -601,6 +601,12 @@ def detect_pose_rules_from_payload(
     valid_frames = [c for c in core if c.valid]
     result = {
         "video_id": video_id or (pose_json_path.stem if pose_json_path else ""),
+        # The CANONICAL movement name, taken from the resolved detector rather than the caller's
+        # string, so "push-up" normalises to "Push-up". That exact spelling is simultaneously the
+        # KG `movement` scope and the frontend's movement.<Name> i18n key. Echoing it here (not in
+        # the web layer) means the CLI's written JSON carries it too, and a stored analysis records
+        # which rules produced it -- permanently, without depending on a database column.
+        "movement": detector.name,
         "pose_json_path": str(pose_json_path) if pose_json_path else "",
         "metadata": metadata,
         "view": view_payload,
