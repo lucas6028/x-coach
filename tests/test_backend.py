@@ -172,6 +172,31 @@ class ConfigTests(unittest.TestCase):
         self.assertGreaterEqual(config.MAX_CONCURRENT_ANALYSES, 1)
 
 
+class MaxRepsPlumbingTests(unittest.TestCase):
+    def test_parse_max_reps_accepts_all_and_zero_as_unlimited(self) -> None:
+        from src.pose.pose_rule_detector import parse_max_reps
+
+        self.assertIsNone(parse_max_reps("all"))
+        self.assertIsNone(parse_max_reps("ALL"))
+        self.assertIsNone(parse_max_reps("0"))
+        self.assertEqual(parse_max_reps("3"), 3)
+
+    def test_parse_max_reps_rejects_junk(self) -> None:
+        import argparse
+
+        from src.pose.pose_rule_detector import parse_max_reps
+
+        for bad in ("-1", "three", "", "2.5"):
+            with self.subTest(value=bad):
+                with self.assertRaises(argparse.ArgumentTypeError):
+                    parse_max_reps(bad)
+
+    def test_backend_default_max_reps_is_three(self) -> None:
+        from backend.app import config
+
+        self.assertEqual(config.DEFAULT_MAX_REPS, 3)
+
+
 # --------------------------------------------------------------- services.analysis
 
 
@@ -697,6 +722,56 @@ class AnalyzeRouterTests(_TempConfigBase):
             )
         self.assertEqual(resp.status_code, 200)
         self.assertIsNone(resp.json()["analysis_id"])
+
+    def test_analyze_rejects_out_of_range_max_reps(self) -> None:
+        response = self.client.post(
+            "/api/analyze",
+            files={"file": ("clip.mp4", b"not-a-real-video", "video/mp4")},
+            data={"movement": "Squat", "max_reps": "99"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("max_reps", response.json()["detail"])
+
+    def test_analyze_rejects_negative_max_reps(self) -> None:
+        response = self.client.post(
+            "/api/analyze",
+            files={"file": ("clip.mp4", b"not-a-real-video", "video/mp4")},
+            data={"movement": "Squat", "max_reps": "-1"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("max_reps", response.json()["detail"])
+
+    def test_analyze_max_reps_zero_reaches_detector_as_none(self) -> None:
+        """The client-facing 0 ('every rep') must cross the boundary as the detector's None."""
+        fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
+        with mock.patch.object(
+            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+        ), mock.patch.object(
+            analysis, "analyze_video_file", return_value=fake_result
+        ) as mocked:
+            resp = self.client.post(
+                "/api/analyze",
+                files={"file": ("clip.mp4", b"abcd", "video/mp4")},
+                data={"movement": "Squat", "max_reps": "0"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(mocked.call_args.kwargs["max_reps"])
+
+    def test_analyze_omitted_max_reps_resolves_to_the_configured_default(self) -> None:
+        """A client that sends nothing at all must get the configured default (3), not -1."""
+        fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
+        with mock.patch.object(
+            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+        ), mock.patch.object(
+            analysis, "analyze_video_file", return_value=fake_result
+        ) as mocked:
+            resp = self.client.post(
+                "/api/analyze",
+                files={"file": ("clip.mp4", b"abcd", "video/mp4")},
+                data={"movement": "Squat"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mocked.call_args.kwargs["max_reps"], config.DEFAULT_MAX_REPS)
 
 
 class VideosRouterTests(_TempConfigBase):
