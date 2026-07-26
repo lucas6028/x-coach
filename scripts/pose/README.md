@@ -53,6 +53,12 @@ python scripts/pose/run_pose_rule_detection.py \
 the pose JSON; it defaults to `Squat`, and an unregistered name raises `KeyError` rather than
 silently falling back. Currently `Squat`, `Overhead Press` and `Push-up` are registered.
 
+`--max-reps N` limits how many repetitions are analyzed (default 3, sampled
+first/middle/last rather than the first N — fatigue breakdown shows up in the last
+rep). `--max-reps all` (or `0`) analyzes every repetition. Clips with no detectable
+repetition structure fall back to whole-clip analysis and report why in
+`reps.fallback`.
+
 **Only `Squat` is validated.** Overhead Press and Push-up thresholds are spec-derived and have
 never been checked against labeled data for their movement — the repo contains none (see
 `docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md` §8). Both are therefore
