@@ -18,6 +18,23 @@ def sine_reps(n_reps: int, frames_per_rep: int = 30, low: float = 60.0, high: fl
     return values
 
 
+def paused_rep(
+    hold_frames: int, frames_per_rep: int = 30, jitter: float = 0.0
+) -> list[float]:
+    """One rep of `sine_reps` with the bottom held for `hold_frames` frames.
+
+    A paused squat or a paused deadlift: the athlete stops at the bottom under load. With
+    `jitter=0` the hold is an exact plateau (a frozen reading); with `jitter>0` the held frames
+    wobble by that much, which is what a real pose estimator produces while a human holds a
+    position. Both shapes must segment identically.
+    """
+    base = sine_reps(1, frames_per_rep)
+    bottom_at = frames_per_rep // 2
+    bottom = base[bottom_at]
+    hold = [bottom + (jitter if i % 2 else -jitter) for i in range(hold_frames)]
+    return base[:bottom_at] + hold + base[bottom_at:]
+
+
 class SegmentRepsTests(unittest.TestCase):
     def test_three_clean_reps_are_segmented(self) -> None:
         reps = segment_reps(sine_reps(3), fps=30.0)
@@ -37,6 +54,14 @@ class SegmentRepsTests(unittest.TestCase):
         would open 35% of the dynamic range BELOW the top, so the whole opening third of every
         rep would fall outside every window, be labelled `rest`, and never be scored — taking
         the standing frames `rule_heel_rise` reads for its setup baseline with it.
+
+        Note the scope of the coverage assertion below: this fixture is back-to-back reps with
+        no idle, so the windows tile it almost completely. That is NOT a general property. The
+        climb stops at a plateau, so on a clip with an idle preamble or a rest between reps
+        those idle frames are deliberately in no window at all -- they are rest, and the rep a
+        window describes is only the excursion. What generalises is the second assertion: a
+        window opens AT the top of its own excursion, whether that top is a lone peak or the
+        last frame of a plateau the athlete stood through.
         """
         signal = sine_reps(3)
         reps = segment_reps(signal, fps=30.0)
@@ -161,6 +186,17 @@ class SegmentRepsTests(unittest.TestCase):
         majority of steps to be zero. Reading noise as exactly 0.0 would waive the
         range-vs-noise gate entirely (`noise > 0.0` guards it), so a static clip with one brief
         detection glitch would otherwise report a rep spanning nearly the whole clip.
+
+        THE MECHANISM THIS TEST WAS WRITTEN AGAINST NO LONGER EXISTS -- there is no noise floor
+        in the module any more, because every estimator tried for one false-rejected some
+        ordinary training signal (a paused rep, an inter-rep rest, an idle preamble, a fast
+        cadence). The name and the assertion are kept unchanged because the BEHAVIOUR they pin
+        is still required, and still worth pinning: this fixture must yield no reps. What
+        rejects it now is duration. The 6-frame dip climbs out to an 8-frame window rather than
+        one spanning the whole 90-frame clip, because `_climb_backward` will not cross the flat
+        idle around it, and 8 frames is short of the 12 that `min_rep_seconds=0.4` demands.
+        Still load-bearing: with the plateau rule reverted, this fixture reports
+        `RepWindow(index=1, start=0, end=89)` -- exactly the fake rep described above.
         """
         # Ninety static frames (many exact repeats, i.e. zero-diff steps) plus one isolated
         # 6-frame glitch -- not a repeated movement, just a single bad detection.
@@ -178,6 +214,13 @@ class SegmentRepsTests(unittest.TestCase):
         near-zero step instead of an exact-zero one. `MIN_MOVING_FRACTION` closes this by
         rejecting outright once only a minority of steps show real movement, rather than
         estimating noise from whichever minority survives.
+
+        `MIN_MOVING_FRACTION` IS GONE TOO -- see the test above for why the whole family of
+        step-distribution gates was removed. This fixture is kept because it pins something the
+        duration rule handles structurally rather than by threshold: the stray 1e-6 drift at
+        frame 70 never crosses `enter`, so it is not part of any excursion and cannot influence
+        any window's length. Nothing has to be tuned to ignore it. Still load-bearing: with the
+        plateau rule reverted it reports `RepWindow(index=1, start=0, end=70)`.
         """
         # Same mostly-frozen clip and glitch as the test above, plus ONE additional near-duplicate
         # pair with a sub-threshold (not exactly zero) drift -- the variant a bare `min()` of the
@@ -232,6 +275,63 @@ class SegmentRepsTests(unittest.TestCase):
         signal = [170.0] * 60 + sine_reps(2) + [170.0] * 60
         reps = segment_reps(signal, fps=30.0)
         self.assertEqual(len(reps), 2)
+
+    def test_a_paused_rep_is_still_one_rep(self) -> None:
+        """A paused squat or paused deadlift -- held at the bottom under load -- is ordinary
+        training, not an artefact. Every gate this module has tried that measured the
+        DISTRIBUTION OF FRAME-TO-FRAME STEPS rejected it, because a hold is precisely a stretch
+        of near-zero steps: the longer the athlete pauses, the more the clip looks "frozen" to
+        such a gate, and the harder it argues the rep is not real. Duration is the opposite kind
+        of measure -- a pause makes the rep LONGER, so it can only push a real rep further past
+        `min_rep_seconds`, never below it.
+        """
+        for hold_frames in (12, 14, 20, 28, 30, 60):
+            for jitter in (0.0, 0.3):
+                with self.subTest(hold_frames=hold_frames, jitter=jitter):
+                    signal = paused_rep(hold_frames, jitter=jitter)
+                    reps = segment_reps(signal, fps=30.0)
+                    self.assertEqual(len(reps), 1)
+                    # The whole rep, hold included, is inside the one window.
+                    self.assertEqual(reps[0].start, 0)
+                    self.assertEqual(reps[0].end, len(signal) - 1)
+                    self.assertFalse(reps[0].partial)
+
+    def test_a_rest_between_reps_does_not_dilute_them_away(self) -> None:
+        """Standing idle BETWEEN two reps -- catching a breath, resetting the bar -- is the same
+        shape as an idle preamble, only it falls between the first and last excursion instead of
+        before them. A gate scoped to "the active span" therefore still swallows it, and long
+        enough rests still rejected both perfectly real reps.
+
+        Also pins where the rest frames end up: outside BOTH windows. They are not part of
+        either repetition, and phase assignment must not read a 2-second stand as the second
+        rep's setup.
+        """
+        for rest_frames in (30, 60, 90, 150, 300):
+            with self.subTest(rest_frames=rest_frames):
+                signal = sine_reps(1) + [170.0] * rest_frames + sine_reps(1)
+                reps = segment_reps(signal, fps=30.0)
+                self.assertEqual(len(reps), 2)
+                self.assertFalse(reps[0].partial)
+                self.assertFalse(reps[1].partial)
+                # The first rep ends at the top it climbs back to (the first frame of the
+                # rest), and the second starts at the top it descends from (the last frame of
+                # it) -- so the rest itself belongs to neither.
+                self.assertEqual(reps[0].end, 30)
+                self.assertEqual(reps[1].start, 30 + rest_frames)
+
+    def test_reps_separated_by_rests_are_all_found(self) -> None:
+        # The full shape of a real recording: idle, then reps with a 2-second stand between
+        # each, then idle. Every earlier gate returned [] for this.
+        signal = (
+            [170.0] * 45
+            + sine_reps(1)
+            + [170.0] * 60
+            + sine_reps(1)
+            + [170.0] * 60
+            + sine_reps(1)
+            + [170.0] * 45
+        )
+        self.assertEqual(len(segment_reps(signal, fps=30.0)), 3)
 
 
 if __name__ == "__main__":

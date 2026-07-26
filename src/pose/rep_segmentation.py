@@ -31,33 +31,18 @@ PERCENTILE_HIGH = 95.0
 ENTER_FRACTION = 0.35
 EXIT_FRACTION = 0.65
 
-# A static-but-jittery signal has a frame-to-frame step of roughly uniform size everywhere,
-# so its typical step is a fair estimate of pure noise. A genuine excursion is not uniform: it
-# decelerates through its turnarounds (top and bottom), so its CALMEST frame-to-frame steps
-# approach the same small size jitter has, even while its fast-moving frames are large. Using
-# the median step would conflate that fast-moving portion with noise and, on a fast-cadence
-# movement sampled at only a few frames per rep, wrongly call the whole excursion noise. So
-# noise is read from a low percentile of the steps that actually moved at all (the calm ones)
-# via `NOISE_PERCENTILE`, and compared against the deep excursion's own dynamic range: below
-# this ratio the excursion is noise, and segmenting it would invent repetitions. Both are
-# measured over the ACTIVE SPAN only -- see `_is_noise`, and its docstring for why.
-NOISE_PERCENTILE = 5.0
-MIN_RANGE_TO_NOISE = 6.0
-
-# A repeated pose reading -- a dropped capture frame, a quantised joint angle holding its value
-# -- produces an exact-zero step. Those steps carry no information about ambient noise, so they
-# are excluded before `NOISE_PERCENTILE` is taken. But excluding them is only sound while most
-# of the ACTIVE SPAN still shows real movement: once a MAJORITY of its steps are exact
-# duplicates, whatever handful remain are, definitionally, the entire "signal" the excursion has
-# to offer, and deriving a noise floor from a minority that small just relocates the same bypass
-# to whichever one of them happens to be smallest -- a single near-zero drift or rounding blip
-# among mostly duplicate frames would still collapse the floor toward zero. An excursion that
-# static has no repetition structure regardless of what its few moving frames look like, so
-# below this fraction of moving steps it is rejected outright rather than estimated from.
-MIN_MOVING_FRACTION = 0.5
-
-# Movement-agnostic floor on repetition duration. Fast cyclic movements (jumping jacks, high
-# knees) legitimately run below this and must lower it — see the spec's §3.4 audit.
+# Movement-agnostic floor on repetition duration, and the ONLY thing that separates a real
+# excursion from an anomalous one. It works because a window measures the excursion and nothing
+# else -- see `_climb_backward` for the plateau rule that makes that true. Fast cyclic movements
+# (jumping jacks, high knees) legitimately run below this and must lower it — see the spec's
+# §3.4 audit.
+#
+# There is deliberately NO separate noise-vs-range gate. Four attempts at one (median step, low
+# percentile of steps, then a moving-step fraction over the clip and over the active span) each
+# false-rejected some ordinary training signal -- a paused rep, an inter-rep rest, an idle
+# preamble, a fast cadence -- because all four measured the DISTRIBUTION OF STEPS over a region
+# that legitimately contains still frames. Duration does not have that failure mode: a pause
+# makes a rep longer, never shorter, and idle time sits outside the window entirely.
 DEFAULT_MIN_REP_SECONDS = 0.4
 
 _POLARITIES = ("min", "max")
@@ -108,30 +93,6 @@ def _runs_at_or_below(values: np.ndarray, threshold: float) -> list[tuple[int, i
     return runs
 
 
-def _is_noise(values: np.ndarray, deep_runs: list[tuple[int, int]], span: float) -> bool:
-    """Decide whether the excursion(s) found so far are real movement or just noise.
-
-    Measured over the ACTIVE SPAN -- `deep_runs[0][0]` through `deep_runs[-1][1]` -- not the
-    whole clip. A real recording has idle frames before the first rep and after the last; a
-    clip-wide noise estimate dilutes with however much of that idle time happens to be there,
-    which cuts both ways: enough idle duplicate/frozen frames can zero out the estimate (letting
-    a single glitch elsewhere read as "not noise"), or enough idle frames of any kind can just
-    outnumber two perfectly genuine reps and reject them outright. Neither idle span is part of
-    what is being judged -- only the region between the first and last EXCURSION is -- so only
-    that region's steps are counted.
-    """
-    active_values = values[deep_runs[0][0] : deep_runs[-1][1] + 1]
-    active_finite = active_values[np.isfinite(active_values)]
-    diffs = np.abs(np.diff(active_finite))
-    if diffs.size == 0:
-        return True  # no dynamics at all across the excursion -- nothing to call a repetition
-    moving = diffs[diffs > 0.0]
-    if moving.size < MIN_MOVING_FRACTION * diffs.size:
-        return True
-    noise = float(np.percentile(moving, NOISE_PERCENTILE))
-    return span < MIN_RANGE_TO_NOISE * noise
-
-
 def _last_at_or_above(values: np.ndarray, threshold: float, before: int) -> int | None:
     for index in range(before - 1, -1, -1):
         if np.isfinite(values[index]) and values[index] >= threshold:
@@ -147,21 +108,41 @@ def _first_at_or_above(values: np.ndarray, threshold: float, after: int) -> int 
 
 
 def _climb_backward(values: np.ndarray, index: int) -> int:
-    """Walk back from an `exit_` crossing to the top of the excursion.
+    """Walk back from an `exit_` crossing to the top of the excursion, STOPPING AT A PLATEAU.
 
     The crossing is only where the hysteresis band was pierced; the rep actually begins at the
     standing/extended peak above it. Using the crossing as the boundary would drop the opening
     third of every rep outside the window.
+
+    The climb requires each earlier frame to be STRICTLY higher (`>`, not `>=`), and that
+    strictness is load-bearing rather than a detail. A run of equal values is not part of the
+    excursion -- it is the athlete standing there, before the set or between reps -- and its
+    LAST frame, the one the descent leaves from, is the top just as much as its first is. A
+    non-strict climb cannot tell the two apart, so it walks the whole flat run and the window
+    inherits every idle frame in front of the rep. That is how a one-frame detection glitch in
+    an otherwise static clip used to become a "rep" spanning the entire clip: the glitch's own
+    deep run is a single frame, but the window climbed outward across all 90 flat frames before
+    its length was ever measured, so the `min_frames` filter in `_finalize` -- which is a
+    duration gate on the repetition -- was handed the clip's duration instead of the
+    excursion's. Stopping at the plateau makes a window's length mean what `min_frames` assumes
+    it means, and that single change is what lets an anomalous blip be rejected on duration
+    without any noise estimate, and therefore without the false rejections every noise estimate
+    tried here brought with it.
+
+    Two consequences, both intended: an idle preamble and an inter-rep rest now fall OUTSIDE
+    every window instead of being absorbed into the neighbouring rep (they are rest, and phase
+    assignment should not see them as setup), and a repeated frame mid-descent -- a dropped
+    capture -- stops the climb early, trimming a few frames off the top of that one window.
     """
-    while index > 0 and np.isfinite(values[index - 1]) and values[index - 1] >= values[index]:
+    while index > 0 and np.isfinite(values[index - 1]) and values[index - 1] > values[index]:
         index -= 1
     return index
 
 
 def _climb_forward(values: np.ndarray, index: int) -> int:
-    """The mirror of `_climb_backward` for the end of a rep."""
+    """The mirror of `_climb_backward` for the end of a rep, plateau rule included."""
     last = len(values) - 1
-    while index < last and np.isfinite(values[index + 1]) and values[index + 1] >= values[index]:
+    while index < last and np.isfinite(values[index + 1]) and values[index + 1] > values[index]:
         index += 1
     return index
 
@@ -201,8 +182,6 @@ def segment_reps(
     exit_ = low + EXIT_FRACTION * span
     deep_runs = _runs_at_or_below(values, enter)
     if not deep_runs:
-        return []
-    if _is_noise(values, deep_runs, span):
         return []
 
     if rep_start == "flexed":
@@ -256,11 +235,18 @@ def _windows_from_valleys(
 
 
 def _finalize(spans: list[tuple[int, int, bool]], min_frames: int) -> list[RepWindow]:
-    """De-duplicate, resolve shared boundaries, drop noise-length spans, and number the rest.
+    """De-duplicate, resolve shared boundaries, drop too-short spans, and number the rest.
 
     Adjacent reps meet at a single frame -- the peak between them belongs to the rep that
     STARTS there -- so the earlier window gives it up. Without this, one frame would be
     phase-assigned twice and scored twice.
+
+    The `min_frames` filter here is the module's ONLY rejection of an anomalous excursion, and
+    it is a duration gate: a span is dropped when the movement it describes, measured top to
+    top, is shorter than the caller's `min_rep_seconds`. It can only mean that because
+    `_climb_backward` refuses to extend a window across a plateau -- see there. Note the
+    boundary this implies: a dip is kept once its top-to-top extent reaches `min_frames`, which
+    is roughly `min_frames - 2` frames of dip plus the frames it descends and ascends through.
     """
     unique: list[tuple[int, int, bool]] = []
     seen: set[tuple[int, int]] = set()
