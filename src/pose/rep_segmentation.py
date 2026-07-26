@@ -41,6 +41,13 @@ EXIT_FRACTION = 0.65
 # movements (jumping jacks, high knees) legitimately run below this and must lower it — see the
 # spec's §3.4 audit.
 #
+# On the flexed path, that explicit test has a blind spot at the clip's edges: a BOUNDARY deep
+# run (the first or the last) has no return crossing on one side, so `_excursion_bounds` can
+# only measure roughly HALF a rep period for it, not the full top-to-top duration an interior
+# run gets. The same `min_frames` test applied to that half-period then discards a genuine
+# boundary valley -- not a glitch -- whenever `rep_period < 2 * min_frames`. See
+# `_windows_from_valleys` for why that trade is accepted rather than fixed.
+#
 # There is deliberately NO separate noise-vs-range gate. Four attempts at one (median step, low
 # percentile of steps, then a moving-step fraction over the clip and over the active span) each
 # false-rejected some ordinary training signal -- a paused rep, an inter-rep rest, an idle
@@ -249,10 +256,23 @@ def _windows_from_valleys(
 
     So each deep run is tested here on the same quantity the extended path tests it on -- the
     duration of the excursion it belongs to, via `_excursion_bounds` -- and a run that is too
-    brief to be a repetition is not allowed to define a rep boundary. This is what separates
-    "one valley in an otherwise flat clip" (excursion of a few frames -> discarded) from "a
-    legitimately truncated leading or trailing partial" (a genuine excursion that the clip
-    happens to cut, whose measured extent still spans the descent or ascent it does contain).
+    brief to be a repetition is not allowed to define a rep boundary. For an INTERIOR deep run
+    this cleanly separates "one valley in an otherwise flat clip" (excursion of a few frames ->
+    discarded) from a genuine rep (a full top-to-top excursion, comfortably past `min_frames`).
+
+    It is NOT clean for a BOUNDARY deep run -- the clip's first or last. `_excursion_bounds` has
+    no return crossing to climb from on the side the clip cuts off, so it can only measure the
+    half of the excursion the clip does contain: roughly half a rep period, not the full
+    top-to-top duration an interior run gets. Tested against the same `min_frames`, that means a
+    genuinely truncated leading or trailing partial -- not a glitch -- is discarded here whenever
+    `rep_period < 2 * min_frames`, and folded into a shorter trailing/leading partial by
+    `_windows_from_valleys`'s own leading/trailing-span construction instead of surfacing as its
+    own window. This is an accepted in-contract trade, not an oversight: `min_rep_seconds` is
+    documented as a floor on rep DURATION, not on half of it, and closing the gap would mean
+    giving boundary runs a different, more lenient test than interior ones -- reintroducing the
+    asymmetry a noise-distribution gate had, which is exactly what this duration test was chosen
+    to avoid. See `test_flexed_still_segments_real_reps_and_truncated_partials` for a pinned
+    example of the discarded band.
 
     The filter is deliberately applied HERE rather than to `deep_runs` in `segment_reps`, which
     would read as more symmetrical: a discarded run still participates in `_finalize`'s
