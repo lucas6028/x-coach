@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 import unittest
 from dataclasses import replace
+from pathlib import Path
+from unittest import mock
 
+from src.pose import pose_rule_detector
 from src.pose.pose_rule_detector import (
     LANDMARK_COUNT,
     FrameMetrics,
+    PoseRuleRequest,
     compute_frame_metrics,
     detect_rule_segments,
     json_safe_view_payload,
@@ -218,6 +223,79 @@ class JsonSafeViewPayloadTests(unittest.TestCase):
         # for degenerate/invalid frames (a pre-existing, unrelated gap outside
         # this fix's scope; see task-2-report.md).
         json_module.dumps(result["view"], allow_nan=False)
+
+
+class MaxRepsCliForwardingTests(unittest.TestCase):
+    """main() has two separate detect_pose_rules_from_json call sites (single-file mode and
+    batch mode). --max-reps appearing in --help proves the flag parses; it proves nothing about
+    whether args.max_reps actually reaches the detector on both paths. This class mocks
+    detect_pose_rules_from_json and asserts the forwarded value in each mode, so a future edit
+    that drops max_reps from one call site (but not the other) fails loudly here instead of
+    silently doing nothing in half of the CLI's modes.
+    """
+
+    def _run_main(self, argv: list[str]):
+        calls: list[dict] = []
+
+        def fake_detect(*args, **kwargs):
+            calls.append(kwargs)
+            return {"video_id": "vid", "detections": []}
+
+        with mock.patch.object(sys, "argv", argv), mock.patch.object(
+            pose_rule_detector, "detect_pose_rules_from_json", side_effect=fake_detect
+        ), mock.patch.object(pose_rule_detector, "write_detection_json"):
+            pose_rule_detector.main()
+        return calls
+
+    def test_single_file_mode_forwards_max_reps(self) -> None:
+        calls = self._run_main(
+            [
+                "run_pose_rule_detection.py",
+                "--pose-json",
+                "fake_pose.json",
+                "--max-reps",
+                "7",
+                "--no-retrieval",
+            ]
+        )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["max_reps"], 7)
+
+    def test_batch_mode_forwards_max_reps(self) -> None:
+        fake_request = PoseRuleRequest(
+            split_name="train",
+            video_id="vid1",
+            pose_json_path=Path("fake_pose.json"),
+            output_path=Path("fake_output.json"),
+        )
+        with mock.patch.object(pose_rule_detector, "build_requests", return_value=[fake_request]):
+            calls = self._run_main(
+                [
+                    "run_pose_rule_detection.py",
+                    "--max-reps",
+                    "5",
+                    "--no-retrieval",
+                ]
+            )
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["max_reps"], 5)
+
+    def test_default_max_reps_is_three_in_both_modes(self) -> None:
+        """--max-reps omitted entirely should still forward the argparse default (3)."""
+        single_calls = self._run_main(
+            ["run_pose_rule_detection.py", "--pose-json", "fake_pose.json", "--no-retrieval"]
+        )
+        self.assertEqual(single_calls[0]["max_reps"], 3)
+
+        fake_request = PoseRuleRequest(
+            split_name="train",
+            video_id="vid1",
+            pose_json_path=Path("fake_pose.json"),
+            output_path=Path("fake_output.json"),
+        )
+        with mock.patch.object(pose_rule_detector, "build_requests", return_value=[fake_request]):
+            batch_calls = self._run_main(["run_pose_rule_detection.py", "--no-retrieval"])
+        self.assertEqual(batch_calls[0]["max_reps"], 3)
 
 
 if __name__ == "__main__":
