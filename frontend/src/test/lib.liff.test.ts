@@ -32,6 +32,12 @@ function fakeSdk(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.unstubAllEnvs();
+  // Stub VITE_LIFF_ID to empty EXPLICITLY rather than relying on it being absent. unstubAllEnvs
+  // restores the *ambient* environment, so on a developer machine whose .env supplies a real LIFF
+  // id the "unconfigured" case below was silently configured and the assertion inverted -- the
+  // degradation path stopped being tested exactly where someone had LINE set up locally. The
+  // configured describe re-stubs this to a real id in its own beforeEach, which runs after.
+  vi.stubEnv("VITE_LIFF_ID", "");
   _resetLiffForTests();
   sdkState.sdk = fakeSdk();
 });
