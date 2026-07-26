@@ -212,6 +212,27 @@ class SegmentRepsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             segment_reps(sine_reps(1), fps=30.0, rep_start="middle")
 
+    def test_idle_preamble_does_not_dilute_real_reps_away(self) -> None:
+        """Every real clip has idle frames before the first rep and after the last -- a live
+        camera is recording before the set starts. If the noise/movement estimate is measured
+        over the WHOLE clip, a long enough idle preamble outnumbers two perfectly genuine reps
+        and gets them rejected outright -- a worse failure than any of the noise-floor bugs this
+        estimate exists to catch, since it discards real data instead of accepting bad data.
+        """
+        reps_signal = sine_reps(2)
+        for preamble_frames in (0, 30, 60, 90, 120):
+            with self.subTest(preamble_frames=preamble_frames):
+                signal = [170.0] * preamble_frames + reps_signal
+                reps = segment_reps(signal, fps=30.0)
+                self.assertEqual(len(reps), 2)
+
+    def test_idle_at_both_ends_does_not_dilute_real_reps_away(self) -> None:
+        # Recording starts before the set and keeps rolling after it ends -- idle on both sides
+        # of the two real reps, not just a leading preamble.
+        signal = [170.0] * 60 + sine_reps(2) + [170.0] * 60
+        reps = segment_reps(signal, fps=30.0)
+        self.assertEqual(len(reps), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -38,21 +38,22 @@ EXIT_FRACTION = 0.65
 # the median step would conflate that fast-moving portion with noise and, on a fast-cadence
 # movement sampled at only a few frames per rep, wrongly call the whole excursion noise. So
 # noise is read from a low percentile of the steps that actually moved at all (the calm ones)
-# via `NOISE_PERCENTILE`, and compared against the signal's dynamic range: below this ratio the
-# range is noise, and segmenting it would invent repetitions.
+# via `NOISE_PERCENTILE`, and compared against the deep excursion's own dynamic range: below
+# this ratio the excursion is noise, and segmenting it would invent repetitions. Both are
+# measured over the ACTIVE SPAN only -- see `_is_noise`, and its docstring for why.
 NOISE_PERCENTILE = 5.0
 MIN_RANGE_TO_NOISE = 6.0
 
 # A repeated pose reading -- a dropped capture frame, a quantised joint angle holding its value
 # -- produces an exact-zero step. Those steps carry no information about ambient noise, so they
-# are excluded before `NOISE_PERCENTILE` is taken (see below). But excluding them is only sound
-# while most steps still show real movement: once a MAJORITY of steps are exact duplicates,
-# whatever handful remain are, definitionally, the entire "signal" this clip has to offer, and
-# deriving a noise floor from a minority that small just relocates the same bypass to whichever
-# one of them happens to be smallest -- a single near-zero drift or rounding blip among mostly
-# duplicate frames would still collapse the floor toward zero. A clip that static has no
-# repetition structure regardless of what its few moving frames look like, so below this
-# fraction of moving steps the clip is rejected outright rather than estimated from.
+# are excluded before `NOISE_PERCENTILE` is taken. But excluding them is only sound while most
+# of the ACTIVE SPAN still shows real movement: once a MAJORITY of its steps are exact
+# duplicates, whatever handful remain are, definitionally, the entire "signal" the excursion has
+# to offer, and deriving a noise floor from a minority that small just relocates the same bypass
+# to whichever one of them happens to be smallest -- a single near-zero drift or rounding blip
+# among mostly duplicate frames would still collapse the floor toward zero. An excursion that
+# static has no repetition structure regardless of what its few moving frames look like, so
+# below this fraction of moving steps it is rejected outright rather than estimated from.
 MIN_MOVING_FRACTION = 0.5
 
 # Movement-agnostic floor on repetition duration. Fast cyclic movements (jumping jacks, high
@@ -105,6 +106,30 @@ def _runs_at_or_below(values: np.ndarray, threshold: float) -> list[tuple[int, i
     if start is not None:
         runs.append((start, len(values) - 1))
     return runs
+
+
+def _is_noise(values: np.ndarray, deep_runs: list[tuple[int, int]], span: float) -> bool:
+    """Decide whether the excursion(s) found so far are real movement or just noise.
+
+    Measured over the ACTIVE SPAN -- `deep_runs[0][0]` through `deep_runs[-1][1]` -- not the
+    whole clip. A real recording has idle frames before the first rep and after the last; a
+    clip-wide noise estimate dilutes with however much of that idle time happens to be there,
+    which cuts both ways: enough idle duplicate/frozen frames can zero out the estimate (letting
+    a single glitch elsewhere read as "not noise"), or enough idle frames of any kind can just
+    outnumber two perfectly genuine reps and reject them outright. Neither idle span is part of
+    what is being judged -- only the region between the first and last EXCURSION is -- so only
+    that region's steps are counted.
+    """
+    active_values = values[deep_runs[0][0] : deep_runs[-1][1] + 1]
+    active_finite = active_values[np.isfinite(active_values)]
+    diffs = np.abs(np.diff(active_finite))
+    if diffs.size == 0:
+        return True  # no dynamics at all across the excursion -- nothing to call a repetition
+    moving = diffs[diffs > 0.0]
+    if moving.size < MIN_MOVING_FRACTION * diffs.size:
+        return True
+    noise = float(np.percentile(moving, NOISE_PERCENTILE))
+    return span < MIN_RANGE_TO_NOISE * noise
 
 
 def _last_at_or_above(values: np.ndarray, threshold: float, before: int) -> int | None:
@@ -171,20 +196,13 @@ def segment_reps(
     span = high - low
     if span <= 0.0:
         return []
-    diffs = np.abs(np.diff(finite))
-    moving = diffs[diffs > 0.0]
-    if moving.size < MIN_MOVING_FRACTION * diffs.size:
-        # Most steps show no change at all. Whatever range the few moving frames span, this is
-        # not repetition structure -- see `MIN_MOVING_FRACTION`.
-        return []
-    noise = float(np.percentile(moving, NOISE_PERCENTILE))
-    if span < MIN_RANGE_TO_NOISE * noise:
-        return []
 
     enter = low + ENTER_FRACTION * span
     exit_ = low + EXIT_FRACTION * span
     deep_runs = _runs_at_or_below(values, enter)
     if not deep_runs:
+        return []
+    if _is_noise(values, deep_runs, span):
         return []
 
     if rep_start == "flexed":
