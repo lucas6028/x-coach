@@ -773,6 +773,84 @@ class AnalyzeRouterTests(_TempConfigBase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(mocked.call_args.kwargs["max_reps"], config.DEFAULT_MAX_REPS)
 
+    def test_analyze_accepts_max_reps_upper_bound(self) -> None:
+        """20 is IN range (the check is > 20, not >= 20) and must reach the detector unchanged."""
+        fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
+        with mock.patch.object(
+            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
+        ), mock.patch.object(
+            analysis, "analyze_video_file", return_value=fake_result
+        ) as mocked:
+            resp = self.client.post(
+                "/api/analyze",
+                files={"file": ("clip.mp4", b"abcd", "video/mp4")},
+                data={"movement": "Squat", "max_reps": "20"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(mocked.call_args.kwargs["max_reps"], 20)
+
+    def test_analyze_rejects_max_reps_just_above_bound(self) -> None:
+        """21 is the first value OUT of range; pins the exact off-by-one boundary."""
+        response = self.client.post(
+            "/api/analyze",
+            files={"file": ("clip.mp4", b"not-a-real-video", "video/mp4")},
+            data={"movement": "Squat", "max_reps": "21"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("max_reps", response.json()["detail"])
+
+    def test_analyze_rejects_max_reps_before_save_upload(self) -> None:
+        """A rejected max_reps must cost no disk I/O and never reach the analysis semaphore.
+
+        save_upload is called strictly before the semaphore is acquired in the router, so
+        asserting it was never invoked also proves the semaphore slot was never touched.
+        """
+        with mock.patch.object(analysis, "save_upload") as mocked_save:
+            response = self.client.post(
+                "/api/analyze",
+                files={"file": ("clip.mp4", b"not-a-real-video", "video/mp4")},
+                data={"movement": "Squat", "max_reps": "99"},
+            )
+        self.assertEqual(response.status_code, 400)
+        mocked_save.assert_not_called()
+
+
+class AnalyzePoseRouterTests(_TempConfigBase):
+    """Client-side ``/api/analyze/pose`` coverage for the max_reps validator via TestClient.
+
+    (The direct-call coverage for this endpoint's other behaviour lives in
+    ``tests/test_analyze_pose_endpoint.py``; this class exists specifically to exercise the
+    HTTP-level max_reps validation the same way ``AnalyzeRouterTests`` does for ``/api/analyze``.)
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.client = TestClient(app)
+
+    def test_rejects_out_of_range_max_reps(self) -> None:
+        response = self.client.post(
+            "/api/analyze/pose",
+            data={"movement": "Squat", "pose": json.dumps(_pose_payload()), "max_reps": "99"},
+            files={"file": ("clip.mp4", b"fake", "video/mp4")},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("max_reps", response.json()["detail"])
+
+    def test_rejects_max_reps_before_save_upload(self) -> None:
+        """Same no-compute-on-rejection guarantee as /api/analyze, for the pose-upload path."""
+        with mock.patch.object(analysis, "save_upload") as mocked_save:
+            response = self.client.post(
+                "/api/analyze/pose",
+                data={
+                    "movement": "Squat",
+                    "pose": json.dumps(_pose_payload()),
+                    "max_reps": "99",
+                },
+                files={"file": ("clip.mp4", b"fake", "video/mp4")},
+            )
+        self.assertEqual(response.status_code, 400)
+        mocked_save.assert_not_called()
+
 
 class VideosRouterTests(_TempConfigBase):
     def setUp(self) -> None:
