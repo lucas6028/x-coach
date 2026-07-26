@@ -157,6 +157,7 @@ export default function History() {
                             <p className="truncate font-medium text-content">
                               {t("history.rowTitle", {
                                 view: viewLabel(t, it.view_type ?? "unknown"),
+                                movement: movementLabel(t, it.movement ?? "Squat"),
                               })}
                             </p>
                             <p className="mt-0.5 flex items-center gap-2 font-mono text-xs text-muted">

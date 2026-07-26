@@ -50,7 +50,7 @@ describe("History", () => {
   it("lists saved analyses", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 1, items: [item()] });
     renderHistory();
-    expect(await screen.findByText("Side squat")).toBeInTheDocument();
+    expect(await screen.findByText("Side Squat")).toBeInTheDocument();
     expect(screen.getByText("2 faults")).toBeInTheDocument();
   });
 
@@ -105,6 +105,16 @@ describe("History", () => {
     });
     renderHistory();
     expect(await screen.findByText("Push-up")).toBeInTheDocument();
+  });
+
+  it("titles a row with its own movement, not a hardcoded Squat", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ movement: "Push-up" })],
+    });
+    renderHistory();
+    expect(await screen.findByText("Side Push-up")).toBeInTheDocument();
+    expect(screen.queryByText("Side Squat")).not.toBeInTheDocument();
   });
 
   it("badges a row predating the movement column as Squat", async () => {
