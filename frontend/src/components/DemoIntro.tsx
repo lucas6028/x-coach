@@ -2,11 +2,13 @@ import { Brain, FilmSlate, Graph, PersonSimpleRun, Sparkle, WarningCircle, type 
 import { motion, useReducedMotion } from "motion/react";
 import { movementLabel, useI18n } from "../lib/i18n";
 import type { AnalyzableMovement } from "../lib/movements";
-import UploadDropzone from "./UploadDropzone";
+import CaptureStudio from "./CaptureStudio";
+import type { PoseTier } from "../lib/poseTier";
 import { LumenLoader } from "./LumenLoader";
 
 interface Props {
-  onFile: (file: File) => void;
+  onBlob: (blob: Blob, tier: PoseTier) => void;
+  onError: (msg: string) => void;
   onOpenLibrary: () => void;
   loading: boolean;
   statusMsg: string;
@@ -32,7 +34,8 @@ const STEPS: { Icon: Icon; titleKey: string; bodyKey: string }[] = [
 // follows the app's light/dark toggle). Asymmetric split: actions on the left,
 // an expectation-setting "what comes back" panel on the right.
 export default function DemoIntro({
-  onFile,
+  onBlob,
+  onError,
   onOpenLibrary,
   loading,
   statusMsg,
@@ -105,7 +108,18 @@ export default function DemoIntro({
               // never appears against an unconfirmed movement.
               <LumenLoader variant="scan" caption={statusMsg} />
             ) : (
-              <UploadDropzone onFile={onFile} movement={movement} />
+              // Extraction-progress bar is a deferred follow-up (SP1 Task 9 note): the studio is
+              // never busy here — DemoIntro's own `loading` branch above already covers the
+              // whole waiting state with Lumen.
+              // `movement` is forwarded so the dropzone inside names what is being uploaded
+              // ("Drop a Push-up video…") rather than a hardcoded squat.
+              <CaptureStudio
+                onBlob={onBlob}
+                busy={false}
+                progress={0}
+                onError={onError}
+                movement={movement}
+              />
             )}
 
             <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-faint">

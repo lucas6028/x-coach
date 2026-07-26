@@ -7,6 +7,17 @@ import { AuthProvider } from "../lib/auth";
 import App from "../App";
 import { mockAnalysis } from "./fixtures";
 
+// The upload path now extracts pose client-side before hitting the API (CaptureStudio ->
+// runPoseAnalysis -> extractPoseFromBlob -> api.analyzePose). extractPoseFromBlob's real
+// implementation needs a real <video>/WASM pipeline that jsdom can't run — stub it so these tests
+// exercise the new request path (api.analyzePose against the mocked fetch below) instead.
+vi.mock("../lib/poseExtract", () => ({
+  extractPoseFromBlob: vi.fn().mockResolvedValue({
+    metadata: { fps: 30, width: 1, height: 1, total_frames: 0 },
+    frames: [],
+  }),
+}));
+
 function renderApp() {
   return render(
     <MemoryRouter>

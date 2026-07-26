@@ -2,16 +2,15 @@
 // Isolated here (and excluded from coverage) because it needs WASM + WebGL, none of which exist
 // under jsdom.
 import { FilesetResolver, PoseLandmarker } from "@mediapipe/tasks-vision";
+import { MODEL_URL, type PoseTier } from "../lib/poseTier";
 
 const VERSION = "0.10.35";
 const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${VERSION}/wasm`;
-const MODEL_URL =
-  "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
 
-export async function createPoseLandmarker(): Promise<PoseLandmarker> {
+export async function createPoseLandmarker(tier: PoseTier = "lite"): Promise<PoseLandmarker> {
   const fileset = await FilesetResolver.forVisionTasks(WASM_BASE);
   return PoseLandmarker.createFromOptions(fileset, {
-    baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
+    baseOptions: { modelAssetPath: MODEL_URL[tier], delegate: "GPU" },
     runningMode: "VIDEO",
     numPoses: 1,
   });

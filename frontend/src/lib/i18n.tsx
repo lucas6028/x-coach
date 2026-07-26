@@ -197,6 +197,18 @@ const en: Dict = {
   "upload.prompt": "Drop a {movement} video or tap to upload",
   "upload.hint": "MP4 / MOV · single athlete · side or rear view",
 
+  // Capture studio — input mode + the MediaPipe model-tier picker
+  "capture.upload": "Upload video",
+  "capture.record": "Record live",
+  "capture.progress": "Analysing… {pct}%",
+  "tier.label": "Precision",
+  "tier.aria": "Analysis precision: {name}",
+  "tier.default": "Default",
+  "tier.lite.hint": "Fastest. Agrees with Heavy on only about half of squat verdicts.",
+  "tier.full.hint": "Middle ground between speed and accuracy.",
+  "tier.heavy.hint": "Most accurate — what the fault thresholds were validated against.",
+  "tier.note": "Applies to the analysis only; the live skeleton overlay always runs Lite.",
+
   // Demo onboarding (empty state)
   "demo.heading": "Analyze your {movement} in about 20 seconds.",
   "demo.sub": "Upload a clip or open a labeled sample. You get a skeleton overlay, a fault timeline, and coaching feedback x-coach can trace to the cause.",
@@ -823,6 +835,18 @@ const zhHant: Dict = {
   "upload.analysing": "分析中…",
   "upload.prompt": "拖放{movement}影片或點擊上傳",
   "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
+
+  // Capture studio — input mode + the MediaPipe model-tier picker
+  "capture.upload": "上傳影片",
+  "capture.record": "即時錄影",
+  "capture.progress": "分析中… {pct}%",
+  "tier.label": "分析精度",
+  "tier.aria": "分析精度：{name}",
+  "tier.default": "預設",
+  "tier.lite.hint": "最快，但深蹲判定僅約半數與 Heavy 一致。",
+  "tier.full.hint": "速度與準確度的折衷。",
+  "tier.heavy.hint": "最準確，錯誤門檻即以此驗證。",
+  "tier.note": "僅影響分析；即時骨架疊圖一律使用 Lite。",
 
   // Demo onboarding (empty state)
   "demo.heading": "約 20 秒，分析一段{movement}。",

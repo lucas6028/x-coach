@@ -2,6 +2,7 @@
 
 import { supabase } from "./lib/supabase";
 import type { AnalyzableMovement } from "./lib/movements";
+import type { PoseJson } from "./lib/poseExtract";
 
 export interface VideoMeta {
   fps: number;
@@ -558,6 +559,24 @@ export const api = {
     // a MediaPipe pass, and echoes the canonical spelling back as `movement` on the result.
     form.append("movement", movement);
     const res = await fetch("/api/analyze", {
+      method: "POST",
+      body: form,
+      headers: await authHeader(),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
+    }
+    return (await res.json()) as Analysis;
+  },
+
+  async analyzePose(movement: string, pose: PoseJson, video: Blob): Promise<Analysis> {
+    const form = new FormData();
+    form.append("movement", movement);
+    form.append("pose", JSON.stringify(pose));
+    const ext = video.type.includes("mp4") ? "mp4" : "webm";
+    form.append("file", video, `capture.${ext}`);
+    const res = await fetch("/api/analyze/pose", {
       method: "POST",
       body: form,
       headers: await authHeader(),

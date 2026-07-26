@@ -6,6 +6,17 @@ import { api } from "../api";
 import App from "../App";
 import { mockAnalysis } from "./fixtures";
 
+// The upload path extracts pose client-side before hitting the API (CaptureStudio ->
+// runPoseAnalysis -> extractPoseFromBlob -> api.analyzePose). The real implementation needs a
+// <video>/WASM pipeline jsdom cannot run, so stub it — these tests are about which MOVEMENT
+// reaches the request, not about extraction. Mirrors App.test.tsx's stub.
+vi.mock("../lib/poseExtract", () => ({
+  extractPoseFromBlob: vi.fn().mockResolvedValue({
+    metadata: { fps: 30, width: 1, height: 1, total_frames: 0 },
+    frames: [],
+  }),
+}));
+
 const LIVE = [
   { name: "Squat", validated: true },
   { name: "Overhead Press", validated: false },
@@ -35,14 +46,18 @@ describe("studio movement selection", () => {
     // transitions to the result view once the upload resolves, and VideoPanel/Header/CoachTray
     // destructure fields (metadata, view, retrievals) a partial object doesn't have — which
     // surfaced as an unrelated unhandled render exception, not this test's own failure.
-    const upload = vi
-      .spyOn(api, "analyzeUpload")
+    const analyze = vi
+      .spyOn(api, "analyzePose")
       .mockResolvedValue({ ...mockAnalysis, video_id: "v1", movement: "Push-up" });
     renderWithProviders(<App />, { route: "/app?movement=Push-up" });
     await screen.findByLabelText(/movement/i);
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
-    expect(upload).toHaveBeenCalledWith(expect.any(File), "Push-up");
+    // The movement is analyzePose's FIRST argument. It shipped hardcoded to "Squat" when the
+    // client-capture path landed; this asserts the user's actual selection now reaches it.
+    await vi.waitFor(() =>
+      expect(analyze).toHaveBeenCalledWith("Push-up", expect.anything(), expect.anything())
+    );
   });
 
   it("refuses an unanalyzable movement in the URL without spending an upload", async () => {

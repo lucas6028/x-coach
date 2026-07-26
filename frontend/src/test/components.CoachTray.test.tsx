@@ -67,6 +67,17 @@ describe("CoachTray — coaching feedback", () => {
     expect(screen.queryByText(/No Squat faults detected/i)).not.toBeInTheDocument();
   });
 
+  // An empty `detections` list means BOTH "no faults found" and "no frame was measurable". The
+  // tray co-renders with MetricsCards (App.tsx), so before this gate a knees-up-cropped clip
+  // showed "Faults 0 — not measured" in the HUD and "Clean rep" in the tray, side by side.
+  it("shows the not-measured message, NOT the clean-rep one, when no frame was valid", () => {
+    renderWithProviders(
+      <CoachTray analysis={mockUnmeasuredAnalysis} currentTime={0} onSeek={vi.fn()} />,
+    );
+    expect(screen.getByText(/could be measured/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No biomechanical faults/i)).not.toBeInTheDocument();
+  });
+
   it("calls onSeek with the fault's start_time when its card is clicked", async () => {
     const user = userEvent.setup();
     const onSeek = vi.fn();
