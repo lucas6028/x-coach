@@ -169,6 +169,26 @@ class SegmentRepsTests(unittest.TestCase):
             signal[index] = 60.0
         self.assertEqual(segment_reps(signal, fps=30.0), [])
 
+    def test_a_single_tiny_step_does_not_set_the_noise_floor(self) -> None:
+        """A narrower fix than this one -- falling back to the smallest strictly positive step
+        once the percentile reads zero -- still lets a single outlier control the estimate. A
+        sub-threshold drift (float rounding between two otherwise-frozen frames, a quantised
+        reading landing one ULP off its neighbour) would drive that fallback arbitrarily close
+        to zero and reopen the same "any span reads as not-noise" bypass, just needing a
+        near-zero step instead of an exact-zero one. `MIN_MOVING_FRACTION` closes this by
+        rejecting outright once only a minority of steps show real movement, rather than
+        estimating noise from whichever minority survives.
+        """
+        # Same mostly-frozen clip and glitch as the test above, plus ONE additional near-duplicate
+        # pair with a sub-threshold (not exactly zero) drift -- the variant a bare `min()` of the
+        # nonzero steps would treat as "the noise floor", but which is not itself repetition
+        # structure.
+        signal = [170.0] * 90
+        for index in range(40, 46):
+            signal[index] = 60.0
+        signal[70] = 170.0 + 1e-6
+        self.assertEqual(segment_reps(signal, fps=30.0), [])
+
     def test_short_blips_are_not_reps(self) -> None:
         signal = [170.0] * 60
         signal[30] = 60.0  # one-frame spike

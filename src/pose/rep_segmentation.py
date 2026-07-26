@@ -37,11 +37,23 @@ EXIT_FRACTION = 0.65
 # approach the same small size jitter has, even while its fast-moving frames are large. Using
 # the median step would conflate that fast-moving portion with noise and, on a fast-cadence
 # movement sampled at only a few frames per rep, wrongly call the whole excursion noise. So
-# noise is read from the low percentile of steps (the calm ones) via `NOISE_PERCENTILE`, and
-# compared against the signal's dynamic range: below this ratio the range is noise, and
-# segmenting it would invent repetitions.
+# noise is read from a low percentile of the steps that actually moved at all (the calm ones)
+# via `NOISE_PERCENTILE`, and compared against the signal's dynamic range: below this ratio the
+# range is noise, and segmenting it would invent repetitions.
 NOISE_PERCENTILE = 5.0
 MIN_RANGE_TO_NOISE = 6.0
+
+# A repeated pose reading -- a dropped capture frame, a quantised joint angle holding its value
+# -- produces an exact-zero step. Those steps carry no information about ambient noise, so they
+# are excluded before `NOISE_PERCENTILE` is taken (see below). But excluding them is only sound
+# while most steps still show real movement: once a MAJORITY of steps are exact duplicates,
+# whatever handful remain are, definitionally, the entire "signal" this clip has to offer, and
+# deriving a noise floor from a minority that small just relocates the same bypass to whichever
+# one of them happens to be smallest -- a single near-zero drift or rounding blip among mostly
+# duplicate frames would still collapse the floor toward zero. A clip that static has no
+# repetition structure regardless of what its few moving frames look like, so below this
+# fraction of moving steps the clip is rejected outright rather than estimated from.
+MIN_MOVING_FRACTION = 0.5
 
 # Movement-agnostic floor on repetition duration. Fast cyclic movements (jumping jacks, high
 # knees) legitimately run below this and must lower it — see the spec's §3.4 audit.
@@ -160,18 +172,13 @@ def segment_reps(
     if span <= 0.0:
         return []
     diffs = np.abs(np.diff(finite))
-    noise = float(np.percentile(diffs, NOISE_PERCENTILE))
-    if noise <= 0.0:
-        # A real pose estimator can repeat a frame verbatim (a dropped capture, a quantised
-        # joint angle) often enough that the calmest NOISE_PERCENTILE of steps are exactly
-        # zero, even while the signal is genuinely noisy elsewhere. Trusting that zero at face
-        # value would waive the entire gate below -- any span, however implausible, would read
-        # as "not noise". Fall back to the smallest STRICTLY POSITIVE step instead, so a
-        # signal that is static but for occasional jitter or a detection glitch still has its
-        # noise floor measured from that jitter, not from the unrelated duplicate frames.
-        nonzero = diffs[diffs > 0.0]
-        noise = float(nonzero.min()) if nonzero.size else 0.0
-    if noise > 0.0 and span < MIN_RANGE_TO_NOISE * noise:
+    moving = diffs[diffs > 0.0]
+    if moving.size < MIN_MOVING_FRACTION * diffs.size:
+        # Most steps show no change at all. Whatever range the few moving frames span, this is
+        # not repetition structure -- see `MIN_MOVING_FRACTION`.
+        return []
+    noise = float(np.percentile(moving, NOISE_PERCENTILE))
+    if span < MIN_RANGE_TO_NOISE * noise:
         return []
 
     enter = low + ENTER_FRACTION * span
