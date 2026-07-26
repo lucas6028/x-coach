@@ -64,7 +64,16 @@ class RepsPayloadTests(unittest.TestCase):
 
     def test_partial_only_clip_still_lists_what_was_found(self) -> None:
         """`fallback` explains why the clip was analyzed whole; it must not also erase the
-        evidence that repetitions were there. Same fixture as the run_detector-level test."""
+        evidence that repetitions were there. Same fixture as the run_detector-level test.
+
+        The clip's one repetition genuinely WAS scored -- as part of the whole-clip fallback,
+        not per-repetition -- so `segments[].analyzed` must say `true`. `reps.analyzed` (the
+        list of per-repetition indices) stays `[]` on fallback: that field means "repetition
+        indices scored per-repetition", and on fallback nothing was scored that way, even
+        though the span itself was examined. A UI reading `segments[].analyzed=false` here
+        would wrongly imply this repetition was never looked at, when in fact it produced
+        detections.
+        """
         result = detect_pose_rules_from_payload(
             payload(squat_reps(1, frames_per_rep=90)[:60]), movement="Squat"
         )
@@ -72,9 +81,13 @@ class RepsPayloadTests(unittest.TestCase):
         self.assertGreater(result["reps"]["detected"], 0)
         self.assertTrue(result["reps"]["segments"])
         self.assertTrue(all(s["partial"] for s in result["reps"]["segments"]))
-        self.assertFalse(any(s["analyzed"] for s in result["reps"]["segments"]))
+        self.assertTrue(
+            all(s["analyzed"] for s in result["reps"]["segments"]),
+            "the span WAS scored, as part of the whole-clip fallback -- segments must say so",
+        )
         self.assertEqual(result["reps"]["analyzed"], [])
         self.assertEqual(result["quality"]["analyzed_frames"], result["quality"]["total_frames"])
+        self.assertTrue(result["detections"], "the clip was scored whole; detections must not be empty")
 
     def test_empty_frame_list_does_not_raise(self) -> None:
         result = detect_pose_rules_from_payload(payload([]), movement="Squat")

@@ -111,13 +111,22 @@ def segment_reps(
 1. 取有限值樣本；不足 `2 * min_rep_frames` → 回傳 `[]`
 2. `rectify` 為真時先取絕對值；`polarity == "max"` 時把訊號取負。
    之後一律以「用力點 = 低值」處理
-3. `lo = percentile(5)`、`hi = percentile(95)`；`hi - lo` 小於動態範圍下限 → 回傳 `[]`（靜止片段）
+3. `lo = percentile(5)`、`hi = percentile(95)`；`span = hi - lo`；`span <= 0`（訊號完全平坦，
+   例如靜止片段）→ 回傳 `[]`。**這裡刻意沒有「動態範圍下限」這種門檻**——曾經有過
+   （`MIN_RANGE_TO_NOISE`，要求 `span` 至少是雜訊估計值的幾倍），但四次不同做法的雜訊估計
+   （步幅中位數、步幅低百分位、全片段步幅比例、活動區段內步幅比例）在實測中都會誤傷合法但
+   幅度小的真實訓練訊號——暫停的一下、rep 間的休息、慢節奏、鏡頭抖動——因為這四種做法量的
+   都是「一段本來就含有靜止 frame 的區域」的**步幅分布**。細節與拒絕理由見
+   `src/pose/rep_segmentation.py:34-56` 的模組註解。
 4. `enter = lo + 0.35 * (hi - lo)`（進入底部）、`exit = lo + 0.65 * (hi - lo)`（回到伸展）
 5. 一個 rep = 訊號跌破 `enter` 之後、再回到 `exit` 之上的整個區間；
    起點是跌破 `enter` 前最後一次在 `exit` 之上的位置，終點是之後第一次回到 `exit` 之上的位置。
    `rep_start == "flexed"` 時邊界改放在**谷底**：一個 rep = 從一次跌破 `enter` 的最低點，
    到下一次跌破 `enter` 的最低點（硬舉：地板 → 鎖定 → 地板）
-6. 長度 `< max(min_frames, min_rep_seconds * fps)` 的區間視為雜訊丟棄
+6. 長度 `< max(min_frames, min_rep_seconds * fps)` 的區間視為雜訊丟棄。**這是切割器唯一的
+   雜訊/異常排除機制**：拒絕完全由**激烈期間的長度（duration）**決定，不比較訊號的動態範圍。
+   `_climb_backward` / `_climb_forward` 遇到平台（連續相等值）就停止攀爬，讓一個 window 的長度
+   確實等於該次激烈期間本身的長度，這個 duration 測試才有意義（見同一段模組註解）。
 7. 開頭第一個樣本就在 `enter` 以下 → 該 rep `partial=True`；
    結尾跌破 `enter` 後直到片尾都沒回到 `exit` → 該 rep `partial=True`
 
@@ -282,6 +291,17 @@ rep_count: int = 0                      # len(occurred_reps)
 }
 ```
 
+`reps.analyzed` 是**逐 rep**被評分的 rep index 清單；`fallback` 非 `null` 時一律是 `[]`——不是
+因為那些片段沒被檢查，而是因為 fallback 時整段影片被當一個單位評分，不是逐 rep。
+
+`segments[].analyzed` 回答的是不同的問題：「這個片段本身有沒有被檢查過」。正常路徑下兩者一致
+（只有被選中的 rep 才 `analyzed=true`）；但在任何 fallback 下，`segments[].analyzed` 一律是
+`true`——該片段的 frame 確實包含在整段評分裡，只是評分方式是整段而非逐 rep。`only_partial_reps`
+是最容易看反的例子：clip 只有一個（partial）rep，`reps.analyzed=[]`，但這個 rep 的內容真的被
+評分了（整段當一個單位），所以它的 `segments[0].analyzed` 必須是 `true`——UI 不能因為
+`reps.analyzed` 是空的就把這個片段當成「沒檢查過」，那正是 `segments` 這個欄位存在的理由：
+不能讓介面暗示一段實際被評過分的影片是「沒人看過」。
+
 `quality` 增加 `analyzed_frames` 與 `analyzed_frame_ratio`；**既有欄位的分母不動**。
 `frame_metrics` 仍然每個 frame 一列（rep 外的 `phase` 是 `"rest"`）。
 
@@ -350,7 +370,8 @@ fixture 只釘住「**給定一條 1-D 訊號 → 得到哪些區間**」，這�
 新增 `tests/test_rep_segmentation.py`（純函式，好覆蓋，直接衝 95% gate）：
 
 - 合成 N-rep 正弦波 → 切出 N 個
-- 雜訊平台（動態範圍不足）→ 0 個
+- 完全靜止的平台（`span == 0`，無動態範圍）→ 0 個。注意這只釘住 `span <= 0` 這個退化情況，
+  不是「動態範圍下限」——見 §3.2 步驟 3，切割器刻意沒有那種門檻
 - 單一 rep → 1 個
 - 尾端截斷 → 最後一個 `partial=True`
 - 開頭截斷 → 第一個 `partial=True`

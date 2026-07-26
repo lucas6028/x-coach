@@ -162,7 +162,22 @@ def run_detector(
     if segmented:
         phases = [REST_PHASE] * len(raw)
         for rep in segmented:
-            phases[rep.start : rep.end + 1] = detector.assign_phases(raw[rep.start : rep.end + 1])
+            slice_len = rep.end - rep.start + 1
+            rep_phases = detector.assign_phases(raw[rep.start : rep.end + 1])
+            # List slice-assignment silently RESIZES the list when the right-hand side has a
+            # different length: a longer result shifts every later frame's phase without
+            # raising, and a shorter one only raises IndexError incidentally, later, via the
+            # frame loop below -- neither is a signal a caller can act on. Raise here, at the
+            # source, naming the detector and both lengths, so a detector whose assign_phases
+            # returns the wrong length fails loudly instead of silently mis-phasing every frame
+            # after it. `raise`, not `assert`: assertions are stripped under `python -O`.
+            if len(rep_phases) != slice_len:
+                raise ValueError(
+                    f"{detector.name} assign_phases returned {len(rep_phases)} phases for "
+                    f"rep {rep.index} (frames {rep.start}:{rep.end}, {slice_len} frames); "
+                    "assign_phases must return exactly one phase per input frame."
+                )
+            phases[rep.start : rep.end + 1] = rep_phases
     else:
         phases = detector.assign_phases(raw)
 
