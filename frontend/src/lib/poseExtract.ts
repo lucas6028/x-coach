@@ -32,6 +32,75 @@ export function landmarksToFrame(
   return { frame_index: frameIndex, landmarks: toPts(landmarks), world_landmarks: toPts(worldLandmarks) };
 }
 
+// WHY THIS EXISTS. A MediaRecorder muxes its WebM as a LIVE stream: the Segment has unknown size
+// and the Info element carries only TimecodeScale — no Duration — with no Cues index. Verified by
+// parsing the clips this path actually produced (data/runtime/uploads/*.webm). The browser
+// therefore cannot report a length, and `video.duration` comes back NaN (observed) or Infinity for
+// a RECORDED clip, while an UPLOADED file reports a real number.
+//
+// `extractPoseFromBlob` bounds its sampling loop by that value, so every live recording extracted
+// ZERO frames and the app told the user "no frame in this clip could be measured" — a
+// verdict-shaped message for what was really a container quirk.
+//
+// The remedy is the standard one: seek far past any plausible end. The browser clamps the seek to
+// the true end of the media and fires `durationchange` carrying the recovered duration.
+const SEEK_PROBE = 1e101;
+
+/** The slice of HTMLVideoElement the duration probe touches. Narrow on purpose: jsdom has no
+ *  decoder, so a full <video> cannot be exercised in tests, and this protocol is precisely where
+ *  the live-record bug lived — it needs to be testable. */
+export interface DurationProbe {
+  duration: number;
+  currentTime: number;
+  addEventListener(type: string, listener: () => void): void;
+  removeEventListener(type: string, listener: () => void): void;
+}
+
+/**
+ * Resolve a usable clip length, recovering it from the media itself when the container omits one.
+ *
+ * Rejects rather than returning 0 when the length never arrives: a 0 would flow into the sampling
+ * loop as "no frames", and the app renders an empty frame list as a *form verdict* ("nothing could
+ * be measured") rather than a failure. Reporting a decode problem as a coaching result is the exact
+ * failure this codebase treats as unacceptable, so an honest error wins.
+ */
+export function resolveDuration(video: DurationProbe, timeoutMs = 5000): Promise<number> {
+  // A well-formed upload already knows its length; probing it would be a pointless seek on the one
+  // path that has no bug.
+  if (Number.isFinite(video.duration) && video.duration > 0) return Promise.resolve(video.duration);
+
+  return new Promise<number>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      video.removeEventListener("durationchange", check);
+      video.removeEventListener("seeked", check);
+    };
+    function check() {
+      // `durationchange` can fire while the length is still unknown — keep waiting until it is real.
+      if (settled || !Number.isFinite(video.duration) || video.duration <= 0) return;
+      settled = true;
+      cleanup();
+      video.currentTime = 0; // rewind: the caller samples forward from the start
+      resolve(video.duration);
+    }
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      video.currentTime = 0;
+      reject(new Error("Could not read the clip's length."));
+    }, timeoutMs);
+    // Attached BEFORE the seek: the browser may answer synchronously, and a listener registered
+    // afterwards would miss the only event it will ever get.
+    video.addEventListener("durationchange", check);
+    // Secondary signal only. A recorded clip has no Cues index, so `seeked` firing is not something
+    // this may depend on.
+    video.addEventListener("seeked", check);
+    video.currentTime = SEEK_PROBE;
+  });
+}
+
 /* c8 ignore start — <video>/requestVideoFrameCallback/WASM glue, unrunnable under jsdom */
 export async function extractPoseFromBlob(
   blob: Blob,
@@ -42,16 +111,25 @@ export async function extractPoseFromBlob(
   const video = document.createElement("video");
   video.muted = true;
   video.playsInline = true;
+  // Handlers attached BEFORE `src` is assigned, and before the model download below. `loadedmetadata`
+  // fires once and is not replayed: registering it after an intervening await races the blob's own
+  // load, and losing that race wedges the extraction forever.
+  const metadataReady = new Promise<void>((res, rej) => {
+    video.onloadedmetadata = () => res();
+    video.onerror = () => rej(new Error("Could not decode the video."));
+  });
+  // Keep an early decode failure from surfacing as an unhandled rejection while the model loads;
+  // `await metadataReady` below still sees it.
+  metadataReady.catch(() => undefined);
   video.src = url;
   const landmarker = await createPoseLandmarker(tier);
   const frames: PoseJsonFrame[] = [];
   try {
-    await new Promise<void>((res, rej) => {
-      video.onloadedmetadata = () => res();
-      video.onerror = () => rej(new Error("Could not decode the video."));
-    });
+    await metadataReady;
     const fps = 30;
-    const duration = video.duration || 0;
+    // NOT `video.duration || 0` — a live-recorded clip reports no length and that silently sampled
+    // nothing. See resolveDuration.
+    const duration = await resolveDuration(video);
     let i = 0;
     // Seek-and-detect: step through the clip at a fixed cadence so frame_index is deterministic
     // and aligned to the stored video (rVFC live-rate would drift on drops).
