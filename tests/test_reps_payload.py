@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
+from unittest.mock import patch
 
+from src.pose.movements import registry
 from src.pose.pose_rule_detector import detect_pose_rules_from_payload
 from tests.test_pose_rule_detector import frame
 from tests.test_run_detector_per_rep import squat_reps
@@ -77,6 +80,26 @@ class RepsPayloadTests(unittest.TestCase):
         result = detect_pose_rules_from_payload(payload([]), movement="Squat")
         self.assertEqual(result["reps"]["detected"], 0)
         self.assertEqual(result["quality"]["analyzed_frames"], 0)
+
+    def test_segmentation_disabled_detector_still_gets_analyzed_through_the_payload(self) -> None:
+        """No REGISTERED detector currently sets `rep_signal=None`, so this path is otherwise
+        unreachable through `detect_pose_rules_from_payload`. Patch the registry lookup to force
+        it, mirroring `test_segmentation_disabled_detector_falls_back` in
+        test_run_detector_per_rep.py one layer up. The point of every fallback is that the clip
+        still gets analyzed -- a segmentation failure must never present as 'no faults found'."""
+        disabled = replace(registry.get_detector("Squat"), rep_signal=None)
+        with patch("src.pose.movements.registry.get_detector", return_value=disabled):
+            result = detect_pose_rules_from_payload(payload(squat_reps(3)), movement="Squat")
+
+        reps = result["reps"]
+        self.assertEqual(reps["fallback"], "segmentation_disabled")
+        self.assertEqual(reps["detected"], 0)
+        self.assertEqual(reps["analyzed"], [])
+        self.assertEqual(reps["segments"], [])
+        self.assertTrue(
+            result["detections"], "a segmentation failure must still be analyzed, not read as clean"
+        )
+        self.assertEqual(result["quality"]["analyzed_frames"], result["quality"]["total_frames"])
 
 
 if __name__ == "__main__":
