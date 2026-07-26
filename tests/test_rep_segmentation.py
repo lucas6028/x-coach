@@ -35,6 +35,25 @@ def paused_rep(
     return base[:bottom_at] + hold + base[bottom_at:]
 
 
+def _static_with_glitch() -> list[float]:
+    """Ninety frames of standing still, carrying one 6-frame detection glitch.
+
+    Not a repeated movement -- a single bad detection in an otherwise static clip. Shared by
+    the extended and flexed tests so both conventions are judged on the identical signal.
+    """
+    signal = [170.0] * 90
+    for index in range(40, 46):
+        signal[index] = 60.0
+    return signal
+
+
+def _static_with_glitch_and_drift() -> list[float]:
+    """`_static_with_glitch` plus one near-duplicate pair with a sub-threshold, non-zero drift."""
+    signal = _static_with_glitch()
+    signal[70] = 170.0 + 1e-6
+    return signal
+
+
 class SegmentRepsTests(unittest.TestCase):
     def test_three_clean_reps_are_segmented(self) -> None:
         reps = segment_reps(sine_reps(3), fps=30.0)
@@ -178,59 +197,57 @@ class SegmentRepsTests(unittest.TestCase):
         self.assertEqual(reps[1].start, 30)
         self.assertEqual(reps[1].end, 59)
 
-    def test_duplicate_frames_do_not_zero_out_the_noise_floor(self) -> None:
-        """A real pose estimator can repeat a frame verbatim on a dropped capture, driving many
-        frame-to-frame steps to exactly zero. `NOISE_PERCENTILE=5.0` only needs the calmest 5%
-        of steps to be zero for the naive percentile-based noise estimate to read 0.0 -- far
-        easier to trigger than the brief's original median-based estimate, which needed a
-        majority of steps to be zero. Reading noise as exactly 0.0 would waive the
-        range-vs-noise gate entirely (`noise > 0.0` guards it), so a static clip with one brief
-        detection glitch would otherwise report a rep spanning nearly the whole clip.
+    def test_a_static_clip_with_one_glitch_yields_no_reps(self) -> None:
+        """A clip of someone standing still, carrying a single bad detection, must yield no
+        reps rather than invent one. (Renamed from
+        `test_duplicate_frames_do_not_zero_out_the_noise_floor`: it was written against a
+        noise-floor estimate that no longer exists, and a stale name is what shows up in CI
+        output and greps. The fixture and the assertion are unchanged.)
 
-        THE MECHANISM THIS TEST WAS WRITTEN AGAINST NO LONGER EXISTS -- there is no noise floor
-        in the module any more, because every estimator tried for one false-rejected some
-        ordinary training signal (a paused rep, an inter-rep rest, an idle preamble, a fast
-        cadence). The name and the assertion are kept unchanged because the BEHAVIOUR they pin
-        is still required, and still worth pinning: this fixture must yield no reps. What
-        rejects it now is duration. The 6-frame dip climbs out to an 8-frame window rather than
-        one spanning the whole 90-frame clip, because `_climb_backward` will not cross the flat
-        idle around it, and 8 frames is short of the 12 that `min_rep_seconds=0.4` demands.
-        Still load-bearing: with the plateau rule reverted, this fixture reports
-        `RepWindow(index=1, start=0, end=89)` -- exactly the fake rep described above.
+        What rejects it is duration. The 6-frame dip climbs out to an 8-frame window rather
+        than one spanning the whole 90-frame clip, because `_climb_backward` will not cross the
+        flat idle around it, and 8 frames is short of the 12 that `min_rep_seconds=0.4`
+        demands. Load-bearing: with the plateau rule reverted this reports
+        `RepWindow(index=1, start=0, end=89)`.
+
+        SCOPE OF THIS GUARANTEE, precisely. What is pinned is the EXACT-PLATEAU idle case. The
+        protection degrades on jittery idle, because jitter makes short stretches locally
+        monotonic and the climb walks further: measured at sigma=0.2 over 40 seeds, this same
+        6-frame glitch produces a rep in 5/40 raw and 20/40 after the caller median-5 smooths
+        it (smoothing lengthens the monotonic stretches, so it makes this worse, not better).
+        That is a real limit and it is not claimed away here. Two things bound it: a purely
+        jittery static clip with no glitch at all already false-positives at a similar rate
+        (13/30) and did so before any of this work, so jittery signals were never covered; and
+        closing it would need an estimate of how noisy the signal is -- exactly the family of
+        gate that was tried four times and false-rejected paused reps, inter-rep rests, idle
+        preambles and fast cadences in turn. Narrowing the claim is the honest option, not
+        adding a fifth mechanism.
         """
         # Ninety static frames (many exact repeats, i.e. zero-diff steps) plus one isolated
         # 6-frame glitch -- not a repeated movement, just a single bad detection.
-        signal = [170.0] * 90
-        for index in range(40, 46):
-            signal[index] = 60.0
-        self.assertEqual(segment_reps(signal, fps=30.0), [])
+        self.assertEqual(segment_reps(_static_with_glitch(), fps=30.0), [])
 
-    def test_a_single_tiny_step_does_not_set_the_noise_floor(self) -> None:
-        """A narrower fix than this one -- falling back to the smallest strictly positive step
-        once the percentile reads zero -- still lets a single outlier control the estimate. A
-        sub-threshold drift (float rounding between two otherwise-frozen frames, a quantised
-        reading landing one ULP off its neighbour) would drive that fallback arbitrarily close
-        to zero and reopen the same "any span reads as not-noise" bypass, just needing a
-        near-zero step instead of an exact-zero one. `MIN_MOVING_FRACTION` closes this by
-        rejecting outright once only a minority of steps show real movement, rather than
-        estimating noise from whichever minority survives.
+    def test_a_stray_sub_threshold_drift_does_not_make_a_glitch_a_rep(self) -> None:
+        """The same static-clip-plus-glitch shape, plus one near-duplicate pair whose step is
+        tiny but not exactly zero -- float rounding between two otherwise-frozen frames, or a
+        quantised reading landing one ULP off its neighbour. (Renamed from
+        `test_a_single_tiny_step_does_not_set_the_noise_floor` for the same reason as the test
+        above; fixture and assertion unchanged.)
 
-        `MIN_MOVING_FRACTION` IS GONE TOO -- see the test above for why the whole family of
-        step-distribution gates was removed. This fixture is kept because it pins something the
-        duration rule handles structurally rather than by threshold: the stray 1e-6 drift at
-        frame 70 never crosses `enter`, so it is not part of any excursion and cannot influence
-        any window's length. Nothing has to be tuned to ignore it. Still load-bearing: with the
-        plateau rule reverted it reports `RepWindow(index=1, start=0, end=70)`.
+        Every noise-floor estimate this module tried was vulnerable to exactly this value:
+        whichever one is smallest sets the floor, so a single 1e-6 step collapses it and any
+        span then reads as "not noise". The duration rule is not vulnerable to it at all, and
+        structurally rather than by threshold: the drift at frame 70 never crosses `enter`, so
+        it is not part of any excursion and cannot influence any window's length. Nothing has
+        to be tuned to ignore it. Load-bearing: with the plateau rule reverted this reports
+        `RepWindow(index=1, start=0, end=70)`. The exact-plateau caveat on the test above
+        applies here too.
         """
         # Same mostly-frozen clip and glitch as the test above, plus ONE additional near-duplicate
         # pair with a sub-threshold (not exactly zero) drift -- the variant a bare `min()` of the
         # nonzero steps would treat as "the noise floor", but which is not itself repetition
         # structure.
-        signal = [170.0] * 90
-        for index in range(40, 46):
-            signal[index] = 60.0
-        signal[70] = 170.0 + 1e-6
-        self.assertEqual(segment_reps(signal, fps=30.0), [])
+        self.assertEqual(segment_reps(_static_with_glitch_and_drift(), fps=30.0), [])
 
     def test_short_blips_are_not_reps(self) -> None:
         signal = [170.0] * 60
@@ -318,6 +335,67 @@ class SegmentRepsTests(unittest.TestCase):
                 # it) -- so the rest itself belongs to neither.
                 self.assertEqual(reps[0].end, 30)
                 self.assertEqual(reps[1].start, 30 + rest_frames)
+
+    def test_flexed_rejects_a_static_clip_with_one_glitch(self) -> None:
+        """The flexed convention needs its OWN anomaly rejection, and for a while it had none.
+
+        `min_rep_seconds` only rejects an anomalous excursion where a window IS an excursion,
+        which is true of the extended path and false here: `_windows_from_valleys` builds spans
+        valley to valley, so a window's length is the rep-to-rep PERIOD. One stray dip in a
+        still clip therefore yields two long windows -- both "partial", both spanning half the
+        clip -- and they sail past a `min_frames` filter that is measuring the wrong thing.
+        That breaks the module's headline promise of returning [] rather than a guess, on the
+        path the brief names for deadlifts.
+
+        Same two fixtures as the extended tests above, so the two conventions are held to the
+        same standard on the same signals.
+        """
+        for label, signal in (("glitch", _static_with_glitch()), ("glitch+drift", _static_with_glitch_and_drift())):
+            with self.subTest(fixture=label):
+                self.assertEqual(segment_reps(signal, fps=30.0, rep_start="flexed"), [])
+                # Held to the same standard as the extended convention on the same signal.
+                self.assertEqual(segment_reps(signal, fps=30.0), [])
+
+    def test_flexed_still_segments_real_reps_and_truncated_partials(self) -> None:
+        """The other half of the anomaly rejection above: it must discard a lone glitch WITHOUT
+        discarding a legitimately truncated leading or trailing rep, which is the case it is
+        easiest to break. Both look "incomplete"; what separates them is that a truncated rep
+        still contains a genuine descent or ascent, so the excursion it belongs to is long,
+        while a glitch's is a handful of frames however the clip is cut.
+        """
+        # Clean reps are untouched: 3 valleys -> 2 full reps between them, plus a leading and a
+        # trailing partial.
+        reps = segment_reps(sine_reps(3), fps=30.0, rep_start="flexed")
+        self.assertEqual(len(reps), 4)
+        self.assertTrue(reps[0].partial)
+        self.assertTrue(reps[-1].partial)
+        # A clip cut off mid-descent: its final, truncated valley must still count as a rep
+        # boundary. Boundaries are pinned rather than only the count, because the count alone
+        # does NOT discriminate -- filtering on deep-run length instead of excursion length
+        # (round 5's falsified variant C, which drops that valley) yields three windows too,
+        # just the wrong three. What changes is the last window: kept here as a complete rep
+        # ending at the truncated valley, versus swallowed into a trailing partial.
+        trailing = segment_reps(sine_reps(2) + sine_reps(1)[:15], fps=30.0, rep_start="flexed")
+        self.assertEqual(
+            trailing,
+            [
+                RepWindow(index=1, start=0, end=14, partial=True),
+                RepWindow(index=2, start=15, end=44, partial=False),
+                RepWindow(index=3, start=45, end=73, partial=False),
+            ],
+        )
+        # A clip that starts already at the bottom: the leading valley is at frame 0, so there
+        # is no leading partial, and the truncated tail is the partial one.
+        leading = segment_reps(sine_reps(2)[15:], fps=30.0, rep_start="flexed")
+        self.assertEqual(
+            leading,
+            [
+                RepWindow(index=1, start=0, end=29, partial=False),
+                RepWindow(index=2, start=30, end=44, partial=True),
+            ],
+        )
+        # And a paused rep is a rep here too, for the same reason as on the extended path.
+        self.assertEqual(len(segment_reps(paused_rep(20) + paused_rep(20), fps=30.0, rep_start="flexed")), 3)
 
     def test_reps_separated_by_rests_are_all_found(self) -> None:
         # The full shape of a real recording: idle, then reps with a 2-second stand between
