@@ -80,11 +80,35 @@ class RunResult:
     fallback: str | None
 
 
-# `merge_by_fault` does not exist yet -- Task 5 collapses a fault that recurs across reps into
-# one PoseRuleDetection with `occurred_reps`/`rep_count` populated. This is a temporary
-# pass-through so the module imports; it must be replaced, not extended, when that task lands.
 def merge_by_fault(detections: list[PoseRuleDetection]) -> list[PoseRuleDetection]:
-    return detections
+    """Collapse each fault to its worst occurrence, recording which reps it fired in.
+
+    One card per fault rather than one per rep: three near-identical "knees inward" entries
+    read as three problems. Severity, timing and evidence all come from the SAME (worst)
+    occurrence so the surfaced numbers stay internally consistent -- a merged entry must never
+    pair one rep's severity with another rep's evidence.
+    """
+    worst: dict[str, PoseRuleDetection] = {}
+    reps: dict[str, set[int]] = {}
+    order: list[str] = []
+    for detection in detections:
+        fault_id = detection.fault_id
+        if fault_id not in worst:
+            order.append(fault_id)
+            reps[fault_id] = set()
+        incumbent = worst.get(fault_id)
+        if incumbent is None or (detection.severity, -detection.start_frame) > (
+            incumbent.severity,
+            -incumbent.start_frame,
+        ):
+            worst[fault_id] = detection
+        reps[fault_id].update(detection.occurred_reps)
+
+    merged: list[PoseRuleDetection] = []
+    for fault_id in order:
+        occurred = tuple(sorted(reps[fault_id]))
+        merged.append(replace(worst[fault_id], occurred_reps=occurred, rep_count=len(occurred)))
+    return merged
 
 
 def run_detector(

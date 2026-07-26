@@ -154,6 +154,19 @@ class RunDetectorPerRepTests(unittest.TestCase):
                 self.assertGreaterEqual(detection.start_frame, start)
                 self.assertLessEqual(detection.end_frame, end)
 
+    def test_a_fault_firing_in_several_reps_is_reported_once(self) -> None:
+        result = run_detector(
+            registry.get_detector("Squat"), squat_reps(3), 30.0, "rear", 0.8, max_reps=0
+        )
+        fault_ids = [d.fault_id for d in result.detections]
+        self.assertEqual(len(fault_ids), len(set(fault_ids)), "each fault must appear once")
+        repeated = [d for d in result.detections if d.rep_count > 1]
+        self.assertTrue(repeated, "a fault present in every rep must record rep_count > 1")
+        for detection in repeated:
+            with self.subTest(fault=detection.fault_id):
+                self.assertEqual(detection.rep_count, len(detection.occurred_reps))
+                self.assertIn(detection.rep_index, detection.occurred_reps)
+
 
 if __name__ == "__main__":
     unittest.main()
