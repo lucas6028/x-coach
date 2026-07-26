@@ -886,14 +886,20 @@ class RunDetectorPerRepTests(unittest.TestCase):
                 self.assertGreaterEqual(detection.start_frame, 20)
 
     def test_only_partial_reps_are_still_reported_even_though_the_clip_is_analyzed_whole(self) -> None:
-        """A clip trimmed to one mid-rep excerpt -- the labeled research dataset's shape."""
+        """A clip cut off before the lifter stands back up -- the labeled dataset's shape.
+
+        One slow rep truncated two-thirds of the way through: long enough to clear the
+        `2 * min_frames` guard, but the signal never returns above `exit` at the end, so the
+        only window found is partial.
+        """
         result = run_detector(
-            registry.get_detector("Squat"), squat_reps(1)[8:22], 30.0, "rear", 0.8
+            registry.get_detector("Squat"), squat_reps(1, frames_per_rep=90)[:60], 30.0, "rear", 0.8
         )
-        if result.fallback == "only_partial_reps":
-            self.assertTrue(result.reps, "partial reps must still be reported")
-            self.assertEqual(result.analyzed, [])
-            self.assertTrue(result.detections, "the clip must still be analyzed whole")
+        self.assertEqual(result.fallback, "only_partial_reps")
+        self.assertTrue(result.reps, "partial reps must still be reported")
+        self.assertTrue(all(rep.partial for rep in result.reps))
+        self.assertEqual(result.analyzed, [])
+        self.assertTrue(result.detections, "the clip must still be analyzed whole")
 
     def test_static_clip_falls_back_to_whole_clip_analysis(self) -> None:
         """A segmentation failure must never present as 'no faults found'."""
@@ -1418,17 +1424,17 @@ class RepsPayloadTests(unittest.TestCase):
 
     def test_partial_only_clip_still_lists_what_was_found(self) -> None:
         """`fallback` explains why the clip was analyzed whole; it must not also erase the
-        evidence that repetitions were there."""
-        result = detect_pose_rules_from_payload(payload(squat_reps(1)[8:22]), movement="Squat")
-        if result["reps"]["fallback"] == "only_partial_reps":
-            self.assertGreater(result["reps"]["detected"], 0)
-            self.assertTrue(result["reps"]["segments"])
-            self.assertTrue(all(s["partial"] for s in result["reps"]["segments"]))
-            self.assertFalse(any(s["analyzed"] for s in result["reps"]["segments"]))
-            self.assertEqual(result["reps"]["analyzed"], [])
-            self.assertEqual(
-                result["quality"]["analyzed_frames"], result["quality"]["total_frames"]
-            )
+        evidence that repetitions were there. Same fixture as the run_detector-level test."""
+        result = detect_pose_rules_from_payload(
+            payload(squat_reps(1, frames_per_rep=90)[:60]), movement="Squat"
+        )
+        self.assertEqual(result["reps"]["fallback"], "only_partial_reps")
+        self.assertGreater(result["reps"]["detected"], 0)
+        self.assertTrue(result["reps"]["segments"])
+        self.assertTrue(all(s["partial"] for s in result["reps"]["segments"]))
+        self.assertFalse(any(s["analyzed"] for s in result["reps"]["segments"]))
+        self.assertEqual(result["reps"]["analyzed"], [])
+        self.assertEqual(result["quality"]["analyzed_frames"], result["quality"]["total_frames"])
 
     def test_empty_frame_list_does_not_raise(self) -> None:
         result = detect_pose_rules_from_payload(payload([]), movement="Squat")
@@ -1875,6 +1881,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - **A vacuous noise-suppression assertion.** The original `assertIn(detection.start_frame - 0, rep_positions | {detection.start_frame})` cannot fail — the right-hand set contains the left-hand value by construction — and it compared sequence positions against `frame_index` values. It was also the *only* check on this change's headline claim. Rewritten to convert units once and require every detection to lie inside an analyzed rep, with idle frames built in a fault-triggering posture so the test cannot pass for the wrong reason.
 - **A vacuous absolute-index assertion.** `end_frame < 90` is satisfied by rep-relative indices too. Now each detection's frames must lie inside the window of the rep its `rep_index` names.
 - **`only_partial_reps` erased its own evidence.** Setting `reps = []` made the payload report `detected: 0` with empty `segments` even though partial reps were found. `reps` (reported) and `segmented` (used for phasing/scoring) are now separate.
+- **Two conditional tests that could assert nothing.** Both `only_partial_reps` tests were wrapped in `if result.fallback == "only_partial_reps":` — and the fixture could never satisfy it: a 14-frame slice trips `segment_reps`' `finite.size < 2 * min_frames` guard (24 at 30fps) and returns `[]`, yielding `no_reps_detected`. Now unconditional, with a fixture built to reach the state: one slow rep (`frames_per_rep=90`) truncated at 60 frames, long enough to clear the guard while never returning above `exit`. **If the fixture does not produce `only_partial_reps`, adjust the truncation until it does — do not restore the conditional.**
 
 ---
 
