@@ -43,7 +43,7 @@ Status: **設計已核准，待實作** · Created 2026-07-27
 
 **做**
 
-- 瀏覽器擷取管線改成兩趟：粗掃切 rep → 密集抽選中區間
+- 瀏覽器擷取管線改成兩趟：粗掃切 rep → 密集抽選中區間 → 在密集訊號上精修邊界
 - `rep_segmentation.py` 的 TS 移植（`segmentReps` / `selectReps`），共用 SP1 的 fixture
 - squat rep 訊號的 TS 移植（`avgKneeAngle` + `centeredMedian`）
 - `poseExtract.ts` 重構成「一個取樣函式，兩個呼叫端」
@@ -80,8 +80,27 @@ blob
  │
  ├─ 3. 密集抽取  對集合內每個 frame_index seek（使用者選的 tier）
  │
- └─ 4. 組 payload：全長 frames（未抽取為 null）+ reps 區塊
+ ├─ 4. 邊界精修  對每個 padded span 的 30fps 訊號再跑一次 segmentReps
+ │      → 得到「整片密集抽取本來會給的邊界」
+ │
+ └─ 5. 組 payload：全長 frames（未抽取為 null）+ 精修後的 reps 區塊
 ```
+
+### 2.1.1 邊界精修（步驟 4）
+
+密集抽取完 `[start - PAD, end + PAD]` 之後，那一段**已經有 30fps 的完整訊號**。對這一小段再跑
+一次 `segmentReps`（同樣的參數、`fps=30`、平滑窗回到 SP1 的 5），取其中與粗掃區間重疊最多的那個
+window 當作精修結果。
+
+**這讓粗掃的邊界誤差完全消失，而不是被 padding 蓋住。** 差別很實際：`assign_phases` 把區間的前
+15% 當 setup，所以起點晚 3 幀就會讓「setup」落在下降段中間——正是 SP1 整份 spec 在修的那個 bug，
+只是換了個原因重新發生。padding 加寬區間只能用猜的蓋住它，而且會把站立幀吸進區間（SP1 的
+`_climb_backward` 特地不吸收 idle，那等於部分回退）。精修則是直接算對。
+
+**退化情況**：精修在該 span 內切不出任何 window（訊號太爛、或粗掃切錯了）→ **退回粗掃給的邊界**，
+並在該 segment 上記 `refined: false`。不中斷、不丟棄，也不假裝精修過。
+
+`reps.segments[]` 送出的是**精修後**的 `start_frame` / `end_frame`。
 
 ### 2.2 稀疏 payload 的表達：全長陣列 + null
 
@@ -208,22 +227,30 @@ Squat 目前量到的是 0 個這種案例，但這是「已量到 0」，不是
 | 任務 | 怎麼做 | 決定什麼 |
 |---|---|---|
 | **T1 訊號 parity** | 拿一支真實深蹲影片密集抽取一次，同一份 landmarks 分別餵 TS 的 `avgKneeAngle` 與 Python 的 `compute_raw`，逐幀比對 | TS 移植對不對。差異應為浮點級 |
-| **T2 邊界誤差 → padding** | 同一支片，(a) 密集訊號切出的區間 vs (b) 粗掃訊號切出的區間，比對邊界差幾幀 | **`REP_PADDING_FRAMES` 的值** |
+| **T2 span 要多寬才包得住真邊界** | 同一支片，量 (a) 全片密集訊號切出的真邊界 與 (b) 粗掃邊界 的距離分布，取上尾 | **`REP_PADDING_FRAMES` 的值** |
 | **T3 粗掃佔比** | 量粗掃與密集各自的牆鐘時間（含模型載入） | 之後要不要接即時 landmarks（§2.4）；並驗證整體真的變快 |
 
 **T1 與 T2 必須在 TS 移植（§7 步驟 2）之後跑**——它們比對的正是移植的產物。§7 的順序已照此排。
 
-`REP_PADDING_FRAMES` 先寫 **8 幀（0.27 秒）**當佔位，**T2 出數字後改掉**。它要吸收三種誤差：
+**padding 的定義（§2.1.1 的精修讓它變乾淨了）**：padding 不吸收邊界誤差——精修才做那件事。
+padding 只需要**大到讓真正的邊界確定落在 padded span 之內**，加上平滑要的鄰居：
 
-1. 平滑半徑（2 幀）——`centered_median`（`geometry.py:117`）在窗內跳過 NaN，所以洞不會污染
-   鄰居，只會縮小取樣數；padding ≥ 2 幀即保證 rep 內每幀都有完整的 5 點窗
-2. 粗掃跨步的量化——**合成訊號上已量到 ≤ 3 幀**（§2.8）
-3. 粗掃與密集訊號在真實影片上的差異（未知，T2 量）
+```
+REP_PADDING_FRAMES = 真邊界與粗掃邊界的距離（T2 量，取上尾）+ 平滑半徑 2 幀
+```
 
-佔位值 8 幀是 (1)+(2) 的和再留一點餘裕；它的正當性完全來自 T2，在 T2 跑完前不要當成已驗證的數字。
+平滑半徑那一項是硬的：`centered_median`（`geometry.py:117`）在窗內跳過 NaN，所以洞不會污染鄰居、
+只會縮小取樣數；≥ 2 幀即保證 rep 內每幀都有完整的 5 點窗。
 
-**padding 只服務平滑與邊界容錯，不進 rep 區間本身**：`assign_phases` 拿到的仍是切出來的 rep
-區間，padding 幀 phase 是 `"rest"`、不被評分。
+**這個定義是可以保守取值的，而舊定義不是。** 舊定義下 padding 直接決定最終答案的誤差，取太大
+會吃掉節省、取太小會切錯；新定義下 padding 只決定「真邊界有沒有被包進來」，往大取只損失一點
+抽取量，不影響正確性。
+
+先寫 **8 幀（0.27 秒）**當佔位，T2 出數字後改掉。它的正當性完全來自 T2，在 T2 跑完前不要當成
+已驗證的數字。
+
+**padding 幀不進 rep 區間**：它們的 phase 是 `"rest"`、不被評分。`assign_phases` 拿到的是
+**精修後**的 rep 區間。
 
 ---
 
@@ -254,10 +281,14 @@ fallback，行為與今天逐位元相同——**SP2 因此不會擋住任何動
   "fallback": null,
   "segments": [
     {"index": 1, "start_frame": 12, "end_frame": 58, "partial": false, "analyzed": true},
-    {"index": 2, "start_frame": 59, "end_frame": 104, "partial": false, "analyzed": false}
+    {"index": 2, "start_frame": 59, "end_frame": 104, "partial": false, "analyzed": false,
+     "refined": false}
   ]
 }
 ```
+
+`refined` 只對 `analyzed` 為真的 segment 有意義（沒被密集抽取的 segment 無從精修，一律 `false`）。
+它是**診斷欄位**，後端不因它改變行為——見 §8 為什麼不丟棄未精修的 rep。
 
 **這個 `reps` 與 SP1 §5 回傳 payload 裡的 `reps` 不是同一個形狀，不要混用。** 這裡是**輸入**，
 用 `segments[].analyzed` 表達選取；SP1 的是**輸出**，另有 `detected` 計數與 `analyzed` 索引
@@ -332,6 +363,9 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
   的 flexed 動作一啟用就會撞到它
 - `avgKneeAngle` / `centeredMedian` 對已知 landmarks 的數值（T1 的自動化版本）
 - padding 展開 + 重疊區間合併
+- **邊界精修**：粗掃邊界刻意偏移 ±3 幀，精修後回到密集訊號的正確邊界；span 內切不出 window 時
+  退回粗掃邊界並記 `refined: false`；精修結果的挑選（與粗掃區間重疊最多的 window）在 span 內有
+  多個 window 時仍選對
 - `frame_index` 落在 30fps 格點（粗掃與密集都是）
 - 三種 fallback 各自產生「全片 frame 清單」
 - payload 組裝：全長 frames、未抽取為 null、`total_frames == frames.length`
@@ -354,7 +388,8 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 2. TS 移植：`repSegmentation.ts` + `repSignal.ts`，測試先行，唯一的門檻是 fixture 全綠
    ＋ §6 的抽樣比對
 3. T1 / T2 實測（**必須在步驟 2 之後**，它們比對的就是移植的產物）→ 定 `REP_PADDING_FRAMES`
-4. `poseExtract.ts` 重構成 `sampleFrames` + 兩個呼叫端 → T3（量粗掃佔比與整體是否真的變快）
+4. `poseExtract.ts` 重構成 `sampleFrames` + 粗掃/密集兩個呼叫端 + 邊界精修（§2.1.1）
+   → T3（量粗掃佔比與整體是否真的變快）
 5. 後端：`run_detector` 的 `rep_plan` + `/api/analyze/pose` 驗證 + `quality` 附加欄位
 6. UI 三處
 7. 全套測試 + 覆蓋率
@@ -365,8 +400,8 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 
 | 風險 | 處理 |
 |---|---|
-| 粗掃訊號太稀疏，切出的邊界與密集訊號差太多 | 合成訊號上已量到 ≤ 3 幀（§2.8）；T2 量真實影片。padding 訂在誤差的舒適上方。若誤差大到 padding 吃掉大部分節省，就**降低 `COARSE_STRIDE`**（取樣更密）重量一次 |
-| 粗掃在異常拒絕上比密集寬鬆，可能切出密集會拒絕的區間，而後端信任它 | §2.8 已量到 squat（extended 路徑）0 個案例，但 flexed 路徑有 1 個。§6 的抽樣比對是常設測試；新增 flexed 動作時必須重跑 |
+| 粗掃訊號太稀疏，切出的邊界與密集訊號差太多 | §2.1.1 的精修直接消除這一項——最終邊界來自密集訊號。粗掃誤差只需小到讓真邊界落在 padded span 內（合成訊號上 ≤ 3 幀，§2.8；T2 量真實影片）。若誤差大到 padding 吃掉大部分節省，就**降低 `COARSE_STRIDE`**（取樣更密）重量一次 |
+| 粗掃在異常拒絕上比密集寬鬆，可能切出密集會拒絕的區間，而後端信任它 | §2.8 已量到 squat（extended 路徑）0 個案例，flexed 路徑 1 個。§6 的抽樣比對是常設測試；新增 flexed 動作時必須重跑。**精修不解決這一項**：一個假 rep 在精修時會切不出 window，但那與「訊號太雜」無法區分，所以只記 `refined: false`、不丟棄——丟棄會讓一個合法但雜訊大的 rep 靜靜消失。這是已知限制，不是疏漏 |
 | TS 與 Python 的訊號實作漂移，且後端信任 client 而不會察覺 | T1 對拍 + `avgKneeAngle` 的數值測試。這是選擇移植同一個量而非改用 proxy 的全部理由 |
 | `reps` 是使用者可竄改的輸入 | §4.3 的驗證，違規回 400 而非默默忽略 |
 | N=3 一定會漏掉沒被選中的 rep 上的錯誤，且 SP2 之後那些 rep **連骨架都沒有** | §5 的三處 UI。這比 SP1 更需要處理，因為洞現在是看得見的 |
