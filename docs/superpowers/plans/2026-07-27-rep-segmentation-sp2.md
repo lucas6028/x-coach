@@ -586,6 +586,14 @@ describe("selectReps", () => {
     expect(selectReps(ten, 3).map((r) => r.index)).toEqual([1, 5, 10]);
   });
 
+  it("agrees with numpy.linspace on a tie that rounds UP", () => {
+    // n=8,k=3 puts the middle at 3.5, which half-to-even sends to 4 -- the same way Math.round
+    // would. Included because the two rules only differ in one direction, and a port that got
+    // the direction backwards would still pass the two cases above.
+    const eight = Array.from({ length: 8 }, (_, i) => win(i + 1, i * 10, i * 10 + 9));
+    expect(selectReps(eight, 3).map((r) => r.index)).toEqual([1, 5, 8]);
+  });
+
   it("returns [] for no reps", () => {
     expect(selectReps([], 3)).toEqual([]);
   });
@@ -896,7 +904,15 @@ git commit -m "feat(pose): port the rep segmenter to TypeScript against the shar
   - `mergeSpans(spans: FrameSpan[]): FrameSpan[]`
   - `spanFrameIndices(spans: FrameSpan[]): number[]`
   - `type Refinement = true | false | "clipped"`
-  - `refineWindow(denseSignal: (number | undefined)[], span: FrameSpan, coarse: FrameSpan, fps: number): { start: number; end: number; refined: Refinement }`
+  - `refineWindow(denseSignal: (number | undefined)[], span: FrameSpan, coarse: FrameSpan, fps: number, lastFrameIndex: number): { start: number; end: number; refined: Refinement }`
+
+**精修的效果已實測**（同一組 46 clips / 70 reps）：精修後的邊界與「整片密集抽取」的邊界
+**95.7% 完全相同**（0 幀誤差），p95 = 0、max = 27（就是那唯一一個被切到的 rep）。粗掃邊界則是
+p50 2 / p95 21 / max 45。換句話說，精修不是理論上的改進，它把誤差消到 0。
+
+**`clipped` 的判定有一個容易寫錯的地方**：window 貼齊 span 邊緣時，若那個邊緣**同時是片子的
+邊緣**，就不是被切到——外面根本沒有東西可抽。用錯的定義量出 43% 被切；排除片緣後是 **1.4%**，
+與 §2.8 的 98.6% 涵蓋率吻合。所以 `refineWindow` 必須知道 `lastFrameIndex`。
 
 - [ ] **Step 1: 寫失敗的測試（附加到 `lib.repSpans.test.ts`）**
 
@@ -983,27 +999,45 @@ describe("spanFrameIndices", () => {
 });
 
 describe("refineWindow", () => {
-  // A dense 90-frame rep sitting inside a 120-frame span starting at frame 0.
-  const dense: (number | undefined)[] = new Array(120).fill(undefined);
+  // A dense 90-frame rep sitting inside a 200-frame clip, spanned from frame 0 to 119.
+  const LAST = 199;
+  const dense: (number | undefined)[] = new Array(LAST + 1).fill(undefined);
   repSignal(1, 90).forEach((v, i) => { dense[i + 15] = v; });
 
   it("recovers the dense boundary from a coarse one that is 10 frames late", () => {
-    const out = refineWindow(dense, { start: 0, end: 119 }, { start: 25, end: 100 }, 30);
+    const out = refineWindow(dense, { start: 0, end: 119 }, { start: 25, end: 100 }, 30, LAST);
     expect(out.refined).toBe(true);
     expect(Math.abs(out.start - 15)).toBeLessThanOrEqual(2);
   });
 
-  it("reports 'clipped' when the refined window touches the span edge", () => {
-    // The rep now runs to the very last frame of the span, so the span cut it off.
-    const flush: (number | undefined)[] = new Array(90).fill(undefined);
-    repSignal(1, 90).forEach((v, i) => { flush[i] = v; });
-    const out = refineWindow(flush, { start: 0, end: 89 }, { start: 0, end: 89 }, 30);
+  it("reports 'clipped' when the span cut the rep off mid-clip", () => {
+    // The span ends at 89 while the clip runs to 199, so there WAS more to extract and the
+    // padding was too small — the one case that must stay visible.
+    const out = refineWindow(dense, { start: 15, end: 89 }, { start: 20, end: 85 }, 30, LAST);
     expect(out.refined).toBe("clipped");
   });
 
+  it("does NOT report 'clipped' when the span edge is the clip's own edge", () => {
+    // Nothing exists beyond the clip, so touching that edge is not a padding failure. Measured:
+    // conflating the two reported 43% of real reps as clipped instead of the true 1.4%.
+    const flush: (number | undefined)[] = new Array(90).fill(undefined);
+    repSignal(1, 90).forEach((v, i) => { flush[i] = v; });
+    const out = refineWindow(flush, { start: 0, end: 89 }, { start: 0, end: 89 }, 30, 89);
+    expect(out.refined).toBe(true);
+  });
+
+  it("picks the window overlapping the coarse one when padding caught a neighbour", () => {
+    // mergeSpans can fuse two adjacent reps into one span, so the span legitimately holds two
+    // windows and the overlap tiebreak decides — it is load-bearing, not a safety net.
+    const two: (number | undefined)[] = new Array(LAST + 1).fill(undefined);
+    repSignal(2, 90).forEach((v, i) => { two[i] = v; });
+    const out = refineWindow(two, { start: 0, end: 179 }, { start: 95, end: 175 }, 30, LAST);
+    expect(out.start).toBeGreaterThanOrEqual(80);
+  });
+
   it("falls back to the coarse boundary when the span holds no window", () => {
-    const flat: (number | undefined)[] = new Array(120).fill(5);
-    const out = refineWindow(flat, { start: 0, end: 119 }, { start: 20, end: 100 }, 30);
+    const flat: (number | undefined)[] = new Array(LAST + 1).fill(5);
+    const out = refineWindow(flat, { start: 0, end: 119 }, { start: 20, end: 100 }, 30, LAST);
     expect(out).toEqual({ start: 20, end: 100, refined: false });
   });
 });
@@ -1100,10 +1134,19 @@ export type Refinement = true | false | "clipped";
  * which is exactly the bug SP1 exists to fix, arriving by a new route. Padding cannot correct
  * that; only measuring the boundary on data that exists at full rate can.
  *
+ * MEASURED, on the same 46 clips REP_PADDING_FRAMES came from: the refined boundary equals the
+ * whole-clip dense boundary EXACTLY for 95.7% of reps (p95 0 frames, max 27), against the coarse
+ * boundary's p50 2 / p95 21 / max 45. Re-deriving the hysteresis band from one span's percentiles
+ * rather than the whole clip's was the obvious worry here, and it does not materialise.
+ *
  * `denseSignal` is indexed by frame_index, with `undefined` wherever nothing was extracted.
+ * `lastFrameIndex` is the clip's own end, and it is not optional bookkeeping: a window touching a
+ * span edge that IS the clip edge has not been clipped -- nothing exists beyond it to extract.
+ * Conflating the two reported 43% of real reps as clipped instead of the true 1.4%.
  */
 export function refineWindow(
-  denseSignal: (number | undefined)[], span: FrameSpan, coarse: FrameSpan, fps: number
+  denseSignal: (number | undefined)[], span: FrameSpan, coarse: FrameSpan,
+  fps: number, lastFrameIndex: number
 ): { start: number; end: number; refined: Refinement } {
   const slice = [];
   for (let i = span.start; i <= span.end; i += 1) {
@@ -1118,7 +1161,9 @@ export function refineWindow(
   const best = windows.reduce((a, b) => (overlap(b, span, coarse) > overlap(a, span, coarse) ? b : a));
   const start = span.start + best.start;
   const end = span.start + best.end;
-  const clipped = start === span.start || end === span.end;
+  const clipped =
+    (start === span.start && span.start > 0) ||
+    (end === span.end && span.end < lastFrameIndex);
   return { start, end, refined: clipped ? "clipped" : true };
 }
 
@@ -1203,10 +1248,13 @@ COARSE_SMOOTH_WINDOW = 3
 DENSE_SMOOTH_WINDOW = 5
 REP_PADDING_FRAMES = 24
 
-MIN_CLIPS = 20          # below this the percentiles below mean nothing
-MAX_VALLEY_ERROR = 5    # measured max across 70 reps
-MIN_SPAN_COVERAGE = 0.98
+MIN_CLIPS = 20            # below this the percentiles below mean nothing
+MAX_VALLEY_ERROR = 5      # measured max across 70 reps
+MIN_SPAN_COVERAGE = 0.98  # measured 98.6%
 MAX_COUNT_MISMATCHES = 2
+MIN_REFINED_EXACT = 0.95  # measured 95.7% of reps refine to the whole-clip boundary exactly
+MAX_REFINED_P95 = 0.0     # measured: p95 of the refined error is zero frames
+MAX_CLIPPED_SHARE = 0.03  # measured 1.4%
 
 
 def _clips() -> list[tuple[str, float, list[float]]]:
@@ -1241,20 +1289,20 @@ CLIPS = _clips()
 class CoarseSegmentationCorpusTest(unittest.TestCase):
     def setUp(self) -> None:
         self.valley_errors: list[int] = []
+        self.refined_errors: list[int] = []
         self.covered = 0
+        self.clipped = 0
         self.total_reps = 0
         self.mismatches = 0
         for _name, fps, values in CLIPS:
-            dense = segment_reps(centered_median(values, window=DENSE_SMOOTH_WINDOW), fps=fps)
-            coarse = segment_reps(
-                centered_median(values[::COARSE_STRIDE], window=COARSE_SMOOTH_WINDOW),
-                fps=fps / COARSE_STRIDE,
-            )
+            dense_signal = centered_median(values, window=DENSE_SMOOTH_WINDOW)
+            coarse_signal = centered_median(values[::COARSE_STRIDE], window=COARSE_SMOOTH_WINDOW)
+            dense = segment_reps(dense_signal, fps=fps)
+            coarse = segment_reps(coarse_signal, fps=fps / COARSE_STRIDE)
             if len(dense) != len(coarse):
                 self.mismatches += 1
                 continue
-            dense_signal = centered_median(values, window=DENSE_SMOOTH_WINDOW)
-            coarse_signal = centered_median(values[::COARSE_STRIDE], window=COARSE_SMOOTH_WINDOW)
+            last = len(values) - 1
             for d, c in zip(dense, coarse):
                 self.total_reps += 1
                 valley = _valley(coarse_signal, c) * COARSE_STRIDE
@@ -1262,6 +1310,20 @@ class CoarseSegmentationCorpusTest(unittest.TestCase):
                 half = (c.end - c.start + 1) * COARSE_STRIDE // 2 + REP_PADDING_FRAMES
                 if valley - half <= d.start and d.end <= valley + half:
                     self.covered += 1
+
+                # Refinement: re-segment the DENSE signal restricted to the padded span, then take
+                # the window overlapping the coarse one most (padding can catch a neighbour).
+                span_start, span_end = max(0, valley - half), min(last, valley + half)
+                windows = segment_reps(dense_signal[span_start : span_end + 1], fps=fps)
+                if not windows:
+                    continue
+                coarse_start, coarse_end = c.start * COARSE_STRIDE, c.end * COARSE_STRIDE
+                best = max(windows, key=lambda w: max(
+                    0, min(span_start + w.end, coarse_end) - max(span_start + w.start, coarse_start) + 1))
+                start, end = span_start + best.start, span_start + best.end
+                self.refined_errors.append(max(abs(start - d.start), abs(end - d.end)))
+                if (start == span_start and span_start > 0) or (end == span_end and span_end < last):
+                    self.clipped += 1
 
     def test_valley_location_survives_decimation(self) -> None:
         """The span's anchor. If this drifts, anchoring on the valley stops being the cheap option."""
@@ -1277,6 +1339,26 @@ class CoarseSegmentationCorpusTest(unittest.TestCase):
         never extracted, and the user is told a rep count that is simply wrong (spec §8)."""
         self.assertLessEqual(self.mismatches, MAX_COUNT_MISMATCHES)
 
+    def test_refinement_recovers_the_whole_clip_boundary(self) -> None:
+        """The claim refinement rests on, and the obvious way it could fail.
+
+        Refining re-derives the hysteresis band from ONE span's percentiles rather than the whole
+        clip's, which is narrower and could plausibly shift the boundary -- the very thing
+        refinement exists to get right, since assign_phases takes a window's first 15% as setup.
+        Measured on this corpus it does not: the refined boundary is EXACTLY the whole-clip one for
+        95.7% of reps, against the coarse boundary's p50 2 / p95 21 / max 45 frames. If this goes
+        red, refinement needs the whole-clip band passed in rather than re-derived per span.
+        """
+        exact = sum(1 for error in self.refined_errors if error == 0)
+        self.assertGreaterEqual(exact / len(self.refined_errors), MIN_REFINED_EXACT)
+        self.assertLessEqual(float(np.percentile(self.refined_errors, 95)), MAX_REFINED_P95)
+
+    def test_spans_rarely_cut_a_rep_short(self) -> None:
+        """`clipped` counts ONLY a span edge that is not also the clip's edge -- nothing exists
+        beyond the clip to extract, so touching that is not a padding failure. Conflating the two
+        reported 43% of these reps as clipped instead of the true 1.4%."""
+        self.assertLessEqual(self.clipped / self.total_reps, MAX_CLIPPED_SHARE)
+
 
 if __name__ == "__main__":
     unittest.main()
@@ -1285,7 +1367,11 @@ if __name__ == "__main__":
 - [ ] **Step 2: 跑測試**
 
 `.venv\Scripts\python.exe -m pytest tests/test_coarse_segmentation_corpus.py -v`
-預期：3 passed（本機有資料）。若 skip，先確認 `data/runtime/pose_json` 存在。
+預期：5 passed（本機有資料）。若 skip，先確認 `data/runtime/pose_json` 存在。
+
+**這五個斷言的數字全部已經量過**（46 clips / 70 reps）：谷底誤差 max 5、span 涵蓋 98.6%、
+數量不一致 2 個 clip、精修完全命中 95.7%（p95 = 0 幀）、真正被切到 1.4%。所以這個測試應該
+**第一次跑就綠**。若不綠，是實作與量測時的參數不一致，不是門檻訂太嚴。
 
 - [ ] **Step 3: 確認整套沒被影響**
 
@@ -1462,7 +1548,7 @@ export function planReps(
 
 /** Replace each analyzed segment's coarse boundary with the one the dense signal gives (§2.1.1). */
 export function refineSegments(
-  plan: RepsPlan, spans: FrameSpan[], denseSignal: (number | undefined)[]
+  plan: RepsPlan, spans: FrameSpan[], denseSignal: (number | undefined)[], lastFrameIndex: number
 ): RepsPlan {
   if (plan.fallback !== null) return plan;
   const segments = plan.segments.map((segment) => {
@@ -1471,7 +1557,8 @@ export function refineSegments(
     const span = spans.find((s) => s.start <= coarse.start && coarse.end <= s.end)
       ?? spans.find((s) => s.start <= coarse.end && coarse.start <= s.end);
     if (!span) return segment;
-    const { start, end, refined } = refineWindow(denseSignal, span, coarse, CANONICAL_FPS);
+    const { start, end, refined } =
+      refineWindow(denseSignal, span, coarse, CANONICAL_FPS, lastFrameIndex);
     return { ...segment, start_frame: start, end_frame: end, refined };
   });
   return { ...plan, segments };
@@ -1589,7 +1676,7 @@ export async function extractPoseWithReps(
         },
         frames,
       },
-      reps: refineSegments(plan, spans, denseSignal),
+      reps: refineSegments(plan, spans, denseSignal, lastFrameIndex),
     };
   } finally {
     coarseLandmarker.close();
