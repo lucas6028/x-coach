@@ -76,7 +76,8 @@ blob
  │      → selectReps(reps, 3)
  │      → 位置 × COARSE_STRIDE 換回 frame_index
  │
- ├─ 2. padding + 合併重疊區間 → 要密集抽取的 frame_index 集合
+ ├─ 2. 對每個選中 rep 取粗掃谷底 → span = 谷底 ± (coarseHalf + PAD)
+ │      合併重疊 span → 要密集抽取的 frame_index 集合          ← 錨在谷底，見 §2.8
  │
  ├─ 3. 密集抽取  對集合內每個 frame_index seek（使用者選的 tier）
  │
@@ -99,6 +100,9 @@ window 當作精修結果。
 
 **退化情況**：精修在該 span 內切不出任何 window（訊號太爛、或粗掃切錯了）→ **退回粗掃給的邊界**，
 並在該 segment 上記 `refined: false`。不中斷、不丟棄，也不假裝精修過。
+
+**被 span 切到**：精修出的 window 貼齊 span 邊緣 → 記 `refined: "clipped"`（見 §2.8）。這是唯一
+能看見「padding 不夠」的地方，所以它必須是一個獨立的值，不能併進 `false`。
 
 `reps.segments[]` 送出的是**精修後**的 `start_frame` / `end_frame`。
 
@@ -194,31 +198,58 @@ sampleFrames(video, landmarker, frameIndices: number[], onProgress) → PoseJson
 
 ---
 
-### 2.8 粗掃取樣對切割結果的影響（已實測）
+### 2.8 粗掃取樣對切割結果的影響（已實測，真實影片）
 
-寫這份 spec 時已經量過一次：把 `tests/fixtures/rep_segmentation_cases.json` 的每個 case 抽三取一
-（`signal[::3]`、`fps/3`），模擬粗掃，再與密集結果比對。
+寫這份 spec 時量了兩輪。**第一輪用合成 fixture，結論是錯的**，記在這裡因為它示範了合成訊號會
+低估多少：把 `tests/fixtures/rep_segmentation_cases.json` 每個 case 抽三取一，11 個中 10 個 rep
+數量相同、邊界誤差 ≤ 3 幀。看起來粗掃幾乎無損。
 
-**11 個 case 中 10 個 rep 數量完全相同，邊界誤差 ≤ 3 幀（換算回 30fps 格點）。**
+**第二輪用本機真實 squat pose JSON（46 clips、70 reps，`data/runtime/pose_json` +
+`data/Fitness-AQA/Squat/.../pose_json`），數字完全不同：**
 
-這是 `REP_PADDING_FRAMES` 的第一個有證據的下限：合成訊號上量化誤差不超過 3 幀。真實影片會更差
-（MediaPipe 抖動），所以 T2 仍要跑，但數量級確認了。
+| 量 | 合成 fixture | 真實影片 |
+|---|---|---|
+| 粗掃**邊界**誤差（幀 @30fps） | ≤ 3 | p50 1、p90 11、**p95 15、p99 36、max 45** |
+| 粗掃**谷底**（argmin）誤差 | — | p50 4、p90 5、**p99 5、max 5** |
+| rep 數量不一致 | 1/11（flexed 路徑） | **2/46 clips**（extended 路徑也會） |
 
-**唯一的分歧必須寫下來**：`flexed_static_glitch` 這個 case，密集路徑正確判定「0 下」（靜止片段
-裡的一個抖動不是 rep），**粗掃路徑卻切出 2 下**。原因是抽樣改變了百分位的分布，連帶改變
-`enter`/`exit` 帶的位置，讓那個抖動相對於帶變「寬」，於是通過了 `_windows_from_valleys` 的
-duration 測試。
+**邊界誤差不是解析度問題。** 掃過 stride 2/3/4/6 與平滑窗 3/5，p95 落在 10–20 幀之間，
+**沒有隨取樣加密而改善**。原因是 `enter`/`exit` 帶由取樣分布的百分位導出，抽樣改變分布就改變帶
+的位置；而 `_climb_backward` 從穿越點往上爬到峰頂，帶位置一動，平坦的頂部就會讓落點跑很遠。
+加密粗掃救不了這一項。
 
-兩件事因此成立：
+**但谷底穩如磐石**（max 5 幀 ≈ stride 量化 3 + 平滑）。兩者差兩個數量級，直接決定了設計：
 
-1. **這只發生在 `rep_start="flexed"`**（硬舉）。Squat 走 `"extended"`，SP2 唯一實作的動作不受
-   影響。但**任何未來要在 TS 側啟用切割的 flexed 動作，必須先重跑這個比對**，不能假設 squat
-   驗過就通用。
-2. 這個抽樣比對要成為**常設測試**（§6），把 `flexed_static_glitch` 釘成已知分歧，讓這個不對稱
-   永遠看得見，而不是留在一份 spec 的段落裡。
+> **padded span 錨在粗掃的谷底，不是錨在粗掃的邊界。**
+> `span = [valley − (coarseHalf + PAD), valley + (coarseHalf + PAD)]`，
+> `coarseHalf` 是該粗掃 window 自己的半寬。
 
-一般性的結論：**粗掃在異常拒絕上比密集寬鬆**。它可能切出密集路徑會拒絕的區間，而後端信任它。
-Squat 目前量到的是 0 個這種案例，但這是「已量到 0」，不是「不可能」。
+實測涵蓋率（span 是否包住密集路徑算出的真區間，n=70 reps）：
+
+| `REP_PADDING_FRAMES` | 涵蓋率 | 中位 span |
+|---|---|---|
+| 8 | 95.7% | 3.3 s |
+| 16 | 97.1% | 3.9 s |
+| **24（採用）** | **98.6%** | 4.4 s |
+| 32 | 100%（n=70，樣本不足以宣稱「總是」） | 4.9 s |
+
+採用 **24**。取 32 換那 1.4% 要多付 0.5 秒 × 每個 rep，而漏掉的那一端**看得見**——見下。
+
+**span 切到真區間時要看得出來，不能假裝沒發生。** 精修（§2.1.1）算出的 window 若貼齊 span 的
+邊緣（`start == span.start` 或 `end == span.end`），代表真區間延伸到 span 之外被切掉了。這種
+segment 記 `refined: "clipped"`，與正常的 `true` / 退回的 `false` 區分開。
+
+**兩個必須誠實記錄的殘餘限制：**
+
+1. **粗掃可能整個漏掉一下，或無中生有一下**（2/46 clips ≈ 4%：一個 0→1、一個 3→2）。漏掉的
+   那一下不會被抽取，`reps.detected` 也會少報，而使用者只會看到「偵測到 2 下」——**沒有任何
+   地方告訴他其實有 3 下**。精修不解決這一項（它只在已知 span 內重算）。這是 SP2 的已知代價，
+   不是可以被 padding 蓋掉的東西。
+2. 合成 fixture 的 `flexed_static_glitch` 分歧（密集 0 下 / 粗掃 2 下）仍然成立，且真實資料顯示
+   **extended 路徑也會數錯**，所以先前「只影響 flexed」的說法是錯的，已在上表更正。
+
+抽樣比對要成為**常設測試**（§6），並且**在真實 pose JSON 上跑**（`skipUnless` 資料存在，比照
+`tests/test_view_regression_corpus.py` 的作法）——合成 fixture 這一輪已經證明它會低估。
 
 ---
 
@@ -227,27 +258,24 @@ Squat 目前量到的是 0 個這種案例，但這是「已量到 0」，不是
 | 任務 | 怎麼做 | 決定什麼 |
 |---|---|---|
 | **T1 訊號 parity** | 拿一支真實深蹲影片密集抽取一次，同一份 landmarks 分別餵 TS 的 `avgKneeAngle` 與 Python 的 `compute_raw`，逐幀比對 | TS 移植對不對。差異應為浮點級 |
-| **T2 span 要多寬才包得住真邊界** | 同一支片，量 (a) 全片密集訊號切出的真邊界 與 (b) 粗掃邊界 的距離分布，取上尾 | **`REP_PADDING_FRAMES` 的值** |
+| ~~T2 span 要多寬~~ **已完成** | 見 §2.8：46 clips / 70 reps 的真實 pose JSON | **`REP_PADDING_FRAMES = 24`**（98.6% 涵蓋）。TS 移植後只需重跑同一支腳本確認 TS 與 Python 給同一組 span |
 | **T3 粗掃佔比** | 量粗掃與密集各自的牆鐘時間（含模型載入） | 之後要不要接即時 landmarks（§2.4）；並驗證整體真的變快 |
 
-**T1 與 T2 必須在 TS 移植（§7 步驟 2）之後跑**——它們比對的正是移植的產物。§7 的順序已照此排。
+**T1 必須在 TS 移植（§7 步驟 2）之後跑**——它比對的正是移植的產物。§7 的順序已照此排。
 
-**padding 的定義（§2.1.1 的精修讓它變乾淨了）**：padding 不吸收邊界誤差——精修才做那件事。
-padding 只需要**大到讓真正的邊界確定落在 padded span 之內**，加上平滑要的鄰居：
+**`REP_PADDING_FRAMES = 24`，來自 §2.8 的實測**，不是估計值。padding 不吸收邊界誤差——精修才
+做那件事。它只需要大到讓真區間落在 span 之內，而 span 錨在**谷底**：
 
 ```
-REP_PADDING_FRAMES = 真邊界與粗掃邊界的距離（T2 量，取上尾）+ 平滑半徑 2 幀
+span = [valley − (coarseHalf + REP_PADDING_FRAMES),
+        valley + (coarseHalf + REP_PADDING_FRAMES)]
 ```
 
-平滑半徑那一項是硬的：`centered_median`（`geometry.py:117`）在窗內跳過 NaN，所以洞不會污染鄰居、
-只會縮小取樣數；≥ 2 幀即保證 rep 內每幀都有完整的 5 點窗。
+平滑要的 2 幀鄰居被這個數字遠遠涵蓋（`centered_median`（`geometry.py:117`）在窗內跳過 NaN，
+所以洞不會污染鄰居、只會縮小取樣數；≥ 2 幀即保證 rep 內每幀都有完整的 5 點窗）。
 
-**這個定義是可以保守取值的，而舊定義不是。** 舊定義下 padding 直接決定最終答案的誤差，取太大
-會吃掉節省、取太小會切錯；新定義下 padding 只決定「真邊界有沒有被包進來」，往大取只損失一點
-抽取量，不影響正確性。
-
-先寫 **8 幀（0.27 秒）**當佔位，T2 出數字後改掉。它的正當性完全來自 T2，在 T2 跑完前不要當成
-已驗證的數字。
+**換錨點才是這個常數變得可保守取值的原因，不是調參。** 錨在粗掃邊界時，padding 得吃下 p99 = 36
+幀的誤差；錨在谷底後只需吃下 p95 = 7 幀的「額外半寬」（§2.8），24 已是三倍餘裕。
 
 **padding 幀不進 rep 區間**：它們的 phase 是 `"rest"`、不被評分。`assign_phases` 拿到的是
 **精修後**的 rep 區間。
@@ -287,8 +315,13 @@ fallback，行為與今天逐位元相同——**SP2 因此不會擋住任何動
 }
 ```
 
-`refined` 只對 `analyzed` 為真的 segment 有意義（沒被密集抽取的 segment 無從精修，一律 `false`）。
-它是**診斷欄位**，後端不因它改變行為——見 §8 為什麼不丟棄未精修的 rep。
+`refined` 有三個值：`true`（精修成功）、`false`（span 內切不出 window，退回粗掃邊界）、
+`"clipped"`（精修出的 window 貼齊 span 邊緣，真區間被 span 切掉了）。只對 `analyzed` 為真的
+segment 有意義；沒被密集抽取的 segment 一律 `false`。
+
+它是**診斷欄位**，後端不因它改變行為——見 §8 為什麼不丟棄未精修的 rep。`"clipped"` 必須與
+`false` 分開，因為它是唯一能看見「`REP_PADDING_FRAMES` 不夠」的訊號（§2.8 量到 1.4% 的 rep
+會落在這裡）。
 
 **這個 `reps` 與 SP1 §5 回傳 payload 裡的 `reps` 不是同一個形狀，不要混用。** 這裡是**輸入**，
 用 `segments[].analyzed` 表達選取；SP1 的是**輸出**，另有 `detected` 計數與 `analyzed` 索引
@@ -357,10 +390,9 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 
 - `repSegmentation.ts` 跑完 `tests/fixtures/rep_segmentation_cases.json` 的**每一個 case**
   ——這是與 Python 的唯一硬約束
-- **抽樣比對（常設，不只是 T1 的一次性檢查）**：每個 case 抽三取一、`fps/3` 再切割，斷言 rep
-  數量與密集相同且邊界誤差 ≤ `REP_PADDING_FRAMES`。`flexed_static_glitch` 釘成**已知分歧**
-  （密集 0 下 / 粗掃 2 下，見 §2.8），測試明確斷言它就是這樣——讓這個不對稱永遠看得見，且新增
-  的 flexed 動作一啟用就會撞到它
+- **抽樣比對（常設）**：每個 case 抽三取一、`fps/3` 再切割，斷言**谷底**誤差 ≤ 5 幀
+  （不是邊界誤差——§2.8 量到邊界誤差 p99 = 36 幀，斷言它會是假的通過）。
+  `flexed_static_glitch` 釘成**已知分歧**（密集 0 下 / 粗掃 2 下），測試明確斷言它就是這樣
 - `avgKneeAngle` / `centeredMedian` 對已知 landmarks 的數值（T1 的自動化版本）
 - padding 展開 + 重疊區間合併
 - **邊界精修**：粗掃邊界刻意偏移 ±3 幀，精修後回到密集訊號的正確邊界；span 內切不出 window 時
@@ -376,6 +408,10 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 - 非法 `reps` → 400（每一種違規各一個 case）
 - 稀疏 payload 的 `quality` 欄位正確、`frame_metrics` 仍每幀一列
 - 沒給 `rep_plan` 時行為與 SP1 逐位元相同
+- **真實語料的粗掃迴歸**（新檔 `tests/test_coarse_segmentation_corpus.py`，`skipUnless` 資料
+  存在，比照 `tests/test_view_regression_corpus.py`）：對本機所有 squat pose JSON 重跑 §2.8 的
+  比較，斷言谷底誤差 max ≤ 5 幀、`coarseHalf + 24` 的 span 涵蓋率 ≥ 98%、rep 數量不一致的
+  clip 數 ≤ 2/46。**合成 fixture 已經證明它會低估**（§2.8 第一輪），所以這個測試不可省略
 - 覆蓋率 `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95`
 
 **與 CI 對齊**（`.github/workflows/ci.yml`）後才宣稱通過。
@@ -400,8 +436,10 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 
 | 風險 | 處理 |
 |---|---|
-| 粗掃訊號太稀疏，切出的邊界與密集訊號差太多 | §2.1.1 的精修直接消除這一項——最終邊界來自密集訊號。粗掃誤差只需小到讓真邊界落在 padded span 內（合成訊號上 ≤ 3 幀，§2.8；T2 量真實影片）。若誤差大到 padding 吃掉大部分節省，就**降低 `COARSE_STRIDE`**（取樣更密）重量一次 |
-| 粗掃在異常拒絕上比密集寬鬆，可能切出密集會拒絕的區間，而後端信任它 | §2.8 已量到 squat（extended 路徑）0 個案例，flexed 路徑 1 個。§6 的抽樣比對是常設測試；新增 flexed 動作時必須重跑。**精修不解決這一項**：一個假 rep 在精修時會切不出 window，但那與「訊號太雜」無法區分，所以只記 `refined: false`、不丟棄——丟棄會讓一個合法但雜訊大的 rep 靜靜消失。這是已知限制，不是疏漏 |
+| 粗掃邊界與密集邊界差很多（真實影片 p95 15、max 45 幀） | §2.1.1 的精修消除它——最終邊界來自密集訊號。span 錨在**谷底**（誤差 max 5 幀）而非邊界，所以 padding 只需 24 幀（§2.8）。**加密粗掃救不了邊界誤差**（stride 2→6 幾乎不變），不要往那個方向調 |
+| **粗掃整個漏掉一下，或無中生有一下**（實測 2/46 clips ≈ 4%） | 已知代價，無法用 padding 或精修修掉。漏掉的 rep 不會被抽取，`reps.detected` 也少報，而 UI 只會說「偵測到 2 下」——**使用者不會知道其實有 3 下**。若這個比例在真機上更糟，唯一的出路是提高粗掃 tier 或放棄粗掃改用即時 landmarks（§2.4），兩者都不在 SP2 |
+| 假 rep 通過精修 | 一個假 rep 在精修時切不出 window，但那與「訊號太雜的真 rep」無法區分，所以只記 `refined: false`、**不丟棄**——丟棄會讓合法但雜訊大的 rep 靜靜消失 |
+| `REP_PADDING_FRAMES = 24` 不夠，真區間被 span 切掉（實測 1.4%） | `refined: "clipped"` 讓它看得見。§6 的真實語料測試會在比例惡化時變紅 |
 | TS 與 Python 的訊號實作漂移，且後端信任 client 而不會察覺 | T1 對拍 + `avgKneeAngle` 的數值測試。這是選擇移植同一個量而非改用 proxy 的全部理由 |
 | `reps` 是使用者可竄改的輸入 | §4.3 的驗證，違規回 400 而非默默忽略 |
 | N=3 一定會漏掉沒被選中的 rep 上的錯誤，且 SP2 之後那些 rep **連骨架都沒有** | §5 的三處 UI。這比 SP1 更需要處理，因為洞現在是看得見的 |
