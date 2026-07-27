@@ -4,6 +4,7 @@
 // in extractPoseFromBlob is impure and coverage-excluded like the other detector boundaries.
 import { createPoseLandmarker } from "../components/poseLandmarker";
 import type { PoseTier } from "./poseTier";
+import { CANONICAL_FPS, frameIndexAt } from "./repSpans";
 
 const LANDMARK_COUNT = 33;
 
@@ -126,19 +127,19 @@ export async function extractPoseFromBlob(
   const frames: PoseJsonFrame[] = [];
   try {
     await metadataReady;
-    const fps = 30;
+    const fps = CANONICAL_FPS;
     // NOT `video.duration || 0` — a live-recorded clip reports no length and that silently sampled
     // nothing. See resolveDuration.
     const duration = await resolveDuration(video);
-    let i = 0;
     // Seek-and-detect: step through the clip at a fixed cadence so frame_index is deterministic
-    // and aligned to the stored video (rVFC live-rate would drift on drops).
+    // and aligned to the stored video (rVFC live-rate would drift on drops). The index comes from
+    // the TIMESTAMP, not a counter — the coarse pass steps differently and must agree. See
+    // repSpans.frameIndexAt.
     for (let t = 0; t < duration; t += 1 / fps) {
       video.currentTime = t;
       await new Promise<void>((r) => { video.onseeked = () => r(); });
       const result = landmarker.detectForVideo(video, Math.round(t * 1000));
-      frames.push(landmarksToFrame(i, result.landmarks?.[0], result.worldLandmarks?.[0]));
-      i += 1;
+      frames.push(landmarksToFrame(frameIndexAt(t), result.landmarks?.[0], result.worldLandmarks?.[0]));
       onProgress?.(duration ? Math.min(1, t / duration) : 1);
     }
     onProgress?.(1);
