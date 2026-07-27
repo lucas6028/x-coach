@@ -175,7 +175,35 @@ sampleFrames(video, landmarker, frameIndices: number[], onProgress) → PoseJson
 
 ---
 
-## 3. 實測任務（先做，數字決定常數）
+### 2.8 粗掃取樣對切割結果的影響（已實測）
+
+寫這份 spec 時已經量過一次：把 `tests/fixtures/rep_segmentation_cases.json` 的每個 case 抽三取一
+（`signal[::3]`、`fps/3`），模擬粗掃，再與密集結果比對。
+
+**11 個 case 中 10 個 rep 數量完全相同，邊界誤差 ≤ 3 幀（換算回 30fps 格點）。**
+
+這是 `REP_PADDING_FRAMES` 的第一個有證據的下限：合成訊號上量化誤差不超過 3 幀。真實影片會更差
+（MediaPipe 抖動），所以 T2 仍要跑，但數量級確認了。
+
+**唯一的分歧必須寫下來**：`flexed_static_glitch` 這個 case，密集路徑正確判定「0 下」（靜止片段
+裡的一個抖動不是 rep），**粗掃路徑卻切出 2 下**。原因是抽樣改變了百分位的分布，連帶改變
+`enter`/`exit` 帶的位置，讓那個抖動相對於帶變「寬」，於是通過了 `_windows_from_valleys` 的
+duration 測試。
+
+兩件事因此成立：
+
+1. **這只發生在 `rep_start="flexed"`**（硬舉）。Squat 走 `"extended"`，SP2 唯一實作的動作不受
+   影響。但**任何未來要在 TS 側啟用切割的 flexed 動作，必須先重跑這個比對**，不能假設 squat
+   驗過就通用。
+2. 這個抽樣比對要成為**常設測試**（§6），把 `flexed_static_glitch` 釘成已知分歧，讓這個不對稱
+   永遠看得見，而不是留在一份 spec 的段落裡。
+
+一般性的結論：**粗掃在異常拒絕上比密集寬鬆**。它可能切出密集路徑會拒絕的區間，而後端信任它。
+Squat 目前量到的是 0 個這種案例，但這是「已量到 0」，不是「不可能」。
+
+---
+
+## 3. 實測任務（數字決定常數）
 
 | 任務 | 怎麼做 | 決定什麼 |
 |---|---|---|
@@ -183,12 +211,16 @@ sampleFrames(video, landmarker, frameIndices: number[], onProgress) → PoseJson
 | **T2 邊界誤差 → padding** | 同一支片，(a) 密集訊號切出的區間 vs (b) 粗掃訊號切出的區間，比對邊界差幾幀 | **`REP_PADDING_FRAMES` 的值** |
 | **T3 粗掃佔比** | 量粗掃與密集各自的牆鐘時間（含模型載入） | 之後要不要接即時 landmarks（§2.4）；並驗證整體真的變快 |
 
+**T1 與 T2 必須在 TS 移植（§7 步驟 2）之後跑**——它們比對的正是移植的產物。§7 的順序已照此排。
+
 `REP_PADDING_FRAMES` 先寫 **8 幀（0.27 秒）**當佔位，**T2 出數字後改掉**。它要吸收三種誤差：
 
 1. 平滑半徑（2 幀）——`centered_median`（`geometry.py:117`）在窗內跳過 NaN，所以洞不會污染
    鄰居，只會縮小取樣數；padding ≥ 2 幀即保證 rep 內每幀都有完整的 5 點窗
-2. 粗掃跨步的量化（±3 幀）
-3. 粗掃與密集訊號本身的差異（未知，T2 量）
+2. 粗掃跨步的量化——**合成訊號上已量到 ≤ 3 幀**（§2.8）
+3. 粗掃與密集訊號在真實影片上的差異（未知，T2 量）
+
+佔位值 8 幀是 (1)+(2) 的和再留一點餘裕；它的正當性完全來自 T2，在 T2 跑完前不要當成已驗證的數字。
 
 **padding 只服務平滑與邊界容錯，不進 rep 區間本身**：`assign_phases` 拿到的仍是切出來的 rep
 區間，padding 幀 phase 是 `"rest"`、不被評分。
@@ -246,6 +278,10 @@ fallback，行為與今天逐位元相同——**SP2 因此不會擋住任何動
 - **`reps` 是不可信輸入，必須驗證**：index 遞增、`start <= end`、落在 frames 範圍內、
   區間不重疊、數量有上限。不合法 → **400，不是默默忽略**。默默忽略會讓後端拿有洞的訊號重新
   切割，產出看起來正常但錯誤的區間——正是本設計最該避免的失效方式。
+- **上面那串檢查漏掉最重要的一種違規**，必須另外加：`analyzed` 為真的區間，**至少要有一幀
+  landmarks 非 null**。一個指向未抽取區段的區間會通過所有排序/範圍/重疊檢查，然後在全部
+  `valid=False` 的幀上被指派 phase 並評分，產出**空的 detection 清單**——也就是「拿沒量到的
+  資料生出乾淨判定」，`quality.ts` 整個檔案就是為了防這件事而存在的。違反 → 400。
 - `quality` **附加** `extracted_frames` / `extracted_frame_ratio`（landmarks 非 null 的幀數）。
   既有欄位的計算一行不改。
 
@@ -290,6 +326,10 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 
 - `repSegmentation.ts` 跑完 `tests/fixtures/rep_segmentation_cases.json` 的**每一個 case**
   ——這是與 Python 的唯一硬約束
+- **抽樣比對（常設，不只是 T1 的一次性檢查）**：每個 case 抽三取一、`fps/3` 再切割，斷言 rep
+  數量與密集相同且邊界誤差 ≤ `REP_PADDING_FRAMES`。`flexed_static_glitch` 釘成**已知分歧**
+  （密集 0 下 / 粗掃 2 下，見 §2.8），測試明確斷言它就是這樣——讓這個不對稱永遠看得見，且新增
+  的 flexed 動作一啟用就會撞到它
 - `avgKneeAngle` / `centeredMedian` 對已知 landmarks 的數值（T1 的自動化版本）
 - padding 展開 + 重疊區間合併
 - `frame_index` 落在 30fps 格點（粗掃與密集都是）
@@ -310,10 +350,11 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 
 ## 7. 交付順序（供 writing-plans 展開）
 
-1. T1 / T2 / T3 實測 → 定 `REP_PADDING_FRAMES`，並驗證整體真的變快
-2. `frame_index` 改成 `round(t * 30)`（先修既有隱患，獨立可驗證）
-3. TS 移植：`repSegmentation.ts` + `repSignal.ts`，測試先行、fixture 全綠
-4. `poseExtract.ts` 重構成 `sampleFrames` + 兩個呼叫端
+1. `frame_index` 改成 `round(t * 30)`（先修既有隱患，與其餘無相依、獨立可驗證）
+2. TS 移植：`repSegmentation.ts` + `repSignal.ts`，測試先行，唯一的門檻是 fixture 全綠
+   ＋ §6 的抽樣比對
+3. T1 / T2 實測（**必須在步驟 2 之後**，它們比對的就是移植的產物）→ 定 `REP_PADDING_FRAMES`
+4. `poseExtract.ts` 重構成 `sampleFrames` + 兩個呼叫端 → T3（量粗掃佔比與整體是否真的變快）
 5. 後端：`run_detector` 的 `rep_plan` + `/api/analyze/pose` 驗證 + `quality` 附加欄位
 6. UI 三處
 7. 全套測試 + 覆蓋率
@@ -324,7 +365,8 @@ frame 確實被評分了，只是評分方式是整段而非逐 rep。UI 不能�
 
 | 風險 | 處理 |
 |---|---|
-| 粗掃訊號太稀疏，切出的邊界與密集訊號差太多 | T2 直接量它，padding 訂在誤差的舒適上方。若誤差大到 padding 吃掉大部分節省，就調高 `COARSE_STRIDE` 的密度重量一次 |
+| 粗掃訊號太稀疏，切出的邊界與密集訊號差太多 | 合成訊號上已量到 ≤ 3 幀（§2.8）；T2 量真實影片。padding 訂在誤差的舒適上方。若誤差大到 padding 吃掉大部分節省，就**降低 `COARSE_STRIDE`**（取樣更密）重量一次 |
+| 粗掃在異常拒絕上比密集寬鬆，可能切出密集會拒絕的區間，而後端信任它 | §2.8 已量到 squat（extended 路徑）0 個案例，但 flexed 路徑有 1 個。§6 的抽樣比對是常設測試；新增 flexed 動作時必須重跑 |
 | TS 與 Python 的訊號實作漂移，且後端信任 client 而不會察覺 | T1 對拍 + `avgKneeAngle` 的數值測試。這是選擇移植同一個量而非改用 proxy 的全部理由 |
 | `reps` 是使用者可竄改的輸入 | §4.3 的驗證，違規回 400 而非默默忽略 |
 | N=3 一定會漏掉沒被選中的 rep 上的錯誤，且 SP2 之後那些 rep **連骨架都沒有** | §5 的三處 UI。這比 SP1 更需要處理，因為洞現在是看得見的 |
