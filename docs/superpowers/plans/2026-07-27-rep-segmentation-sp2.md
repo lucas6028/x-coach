@@ -1454,13 +1454,15 @@ describe("planReps", () => {
   });
 
   it("falls back when every rep is partial", () => {
-    // Half a rep: descends and never returns, so the single window is partial.
-    const halfRep = coarseRepSignal(1, 60).slice(0, 30);
-    const { plan, spans } = planReps(halfRep, 3, 89, "Squat");
-    if (plan.segments.length > 0) {
-      expect(plan.fallback).toBe("only_partial_reps");
-      expect(spans).toEqual([{ start: 0, end: 89 }]);
-    }
+    // A clip that STARTS at the bottom and only rises: the single window has no crossing to climb
+    // from on its left, so it is partial. Verified against Python — segment_reps returns exactly
+    // one window with partial=True — so this asserts unconditionally.
+    const rising = Array.from({ length: 30 }, (_, i) =>
+      115 - 55 * Math.cos((2 * Math.PI * i) / 60));
+    const { plan, spans } = planReps(rising, 3, 89, "Squat");
+    expect(plan.fallback).toBe("only_partial_reps");
+    expect(plan.segments).toEqual([]);
+    expect(spans).toEqual([{ start: 0, end: 89 }]);
   });
 
   it("NEVER returns an empty span list — a fallback still extracts everything", () => {
@@ -2503,36 +2505,134 @@ git commit -m "feat(ui): show which spans of a clip were never examined"
 **T2 已在寫 spec 時完成**（§2.8，46 clips / 70 reps，`REP_PADDING_FRAMES = 24`）。這個 Task 收尾
 剩下的兩項，並把結果寫進 `notes/`。
 
+**T1 用 golden file 而不是跨語言執行**：Python 產生「真實 landmarks → 期望角度」的檔案，vitest
+讀它比對。這樣不需要 node 跑 TS，而且比對變成**常設測試**，不是一次性腳本——`repSignal.ts` 之後
+任何改動都會被擋下。
+
 **Files:**
-- Create: `scripts/pose/compare_ts_rep_signal.py`
+- Create: `scripts/pose/capture_rep_signal_golden.py`
+- Create: `tests/fixtures/rep_signal_golden.json`（由上面的腳本產生，**要進版控**：只有幾十幀，
+  且沒有它 vitest 那側就沒有 ground truth）
+- Create: `frontend/src/test/lib.repSignal.golden.test.ts`
 - Create: `notes/rep_segmentation_sp2_measurements.md`
 
 **Interfaces:**
-- Consumes: Task 2/3 的 TS 模組（以 `node` 執行）、Python 的 `compute_raw`
-- Produces: 無（量測產出）
+- Consumes: Task 2 的 `avgKneeAngle`；Python 的 `raw_frame_metrics`
+- Produces: `tests/fixtures/rep_signal_golden.json`
 
-- [ ] **Step 1: 寫比對腳本**
+- [ ] **Step 1: 寫 golden file 產生腳本**
 
-`scripts/pose/compare_ts_rep_signal.py`：讀一支真實 pose JSON，用 Python 算
-`avg_knee_angle`，同時把 landmarks 丟給 `node --experimental-strip-types` 執行的一小段 TS
-（`import { avgKneeAngle } from "frontend/src/lib/repSignal.ts"`），逐幀比對並印出最大絕對差。
+`scripts/pose/capture_rep_signal_golden.py`：
 
-- [ ] **Step 2: 跑 T1**
+```python
+"""Freeze real landmarks and the angle Python computes from them, for the TypeScript port to match.
 
-`.venv\Scripts\python.exe scripts/pose/compare_ts_rep_signal.py data/runtime/pose_json/<某支>.json`
-預期：最大絕對差 < 1e-6（浮點級）。**若差異更大，是移植有 bug，回 Task 2 修，不要調容差。**
+RS-SP2 recomputes the squat rep signal in the browser, and the backend then TRUSTS the rep windows
+that signal produces -- so a divergence between the two implementations would never surface on its
+own (spec §2.3, §2.7). tests/fixtures/rep_segmentation_cases.json pins signal->windows; this file
+pins landmarks->signal, which is the other half and the one nothing else covers.
 
-- [ ] **Step 3: 跑 T3（真機或桌機瀏覽器）**
+Regenerate only when the Python formula deliberately changes:
+    .venv\\Scripts\\python.exe scripts/pose/capture_rep_signal_golden.py <pose.json>
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from src.pose.pose_rule_detector import raw_frame_metrics  # noqa: E402
+
+OUTPUT = REPO_ROOT / "tests" / "fixtures" / "rep_signal_golden.json"
+# Enough frames to cover a full rep's range of angles without bloating the repo.
+STRIDE = 3
+MAX_FRAMES = 60
+
+
+def main(source: Path) -> None:
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    fps = float((payload.get("metadata") or {}).get("fps", 30.0) or 30.0)
+    cases = []
+    for frame in payload.get("frames", [])[::STRIDE][:MAX_FRAMES]:
+        metrics = raw_frame_metrics(frame, fps)
+        angle = metrics.get("avg_knee_angle")
+        cases.append({
+            "landmarks": frame.get("landmarks"),
+            # null encodes "no measurable angle" -- JSON has no NaN, and the TS side asserts
+            # Number.isNaN for these rather than an equality that would silently pass on undefined.
+            "avg_knee_angle": None if angle is None or not math.isfinite(angle) else float(angle),
+        })
+    OUTPUT.write_text(json.dumps({"source": source.name, "cases": cases}), encoding="utf-8")
+    print(f"wrote {len(cases)} cases from {source.name} to {OUTPUT}")
+
+
+if __name__ == "__main__":
+    main(Path(sys.argv[1]))
+```
+
+- [ ] **Step 2: 產生 golden file**
+
+`.venv\Scripts\python.exe scripts/pose/capture_rep_signal_golden.py data/runtime/pose_json/<某支>.json`
+
+挑一支**有完整深蹲**的（角度範圍夠寬）。確認輸出的 `avg_knee_angle` 不是清一色 `null`。
+
+- [ ] **Step 3: 寫 vitest 比對（T1 本體）**
+
+`frontend/src/test/lib.repSignal.golden.test.ts`：
+
+```ts
+import { readFileSync } from "node:fs";
+import { describe, it, expect } from "vitest";
+import { avgKneeAngle, type SignalLandmark } from "../lib/repSignal";
+
+// Ground truth generated by scripts/pose/capture_rep_signal_golden.py from a REAL clip. The shared
+// segmentation fixture pins signal->windows; this pins landmarks->signal, and nothing else does.
+const golden = JSON.parse(
+  readFileSync(new URL("../../../tests/fixtures/rep_signal_golden.json", import.meta.url), "utf-8")
+) as { source: string; cases: { landmarks: SignalLandmark[] | null; avg_knee_angle: number | null }[] };
+
+describe("avgKneeAngle matches Python on real landmarks", () => {
+  it("has a golden file with measurable frames in it", () => {
+    expect(golden.cases.length).toBeGreaterThan(0);
+    expect(golden.cases.some((c) => c.avg_knee_angle !== null)).toBe(true);
+  });
+
+  it("agrees to floating-point precision on every frame", () => {
+    for (const [i, testCase] of golden.cases.entries()) {
+      const got = avgKneeAngle(testCase.landmarks);
+      if (testCase.avg_knee_angle === null) {
+        expect(Number.isNaN(got), `frame ${i} should be unmeasurable`).toBe(true);
+      } else {
+        // A real port difference (2-D instead of 3-D, a different visibility gate) shows up far
+        // above this; anything at 1e-6 is float32-vs-float64 in the Python side's arithmetic.
+        expect(Math.abs(got - testCase.avg_knee_angle), `frame ${i}`).toBeLessThan(1e-6);
+      }
+    }
+  });
+});
+```
+
+- [ ] **Step 4: 跑 T1**
+
+cwd = `frontend/`，執行：`yarn test src/test/lib.repSignal.golden.test.ts`
+預期：PASS。**若不過，是 Task 2 的移植有 bug，回去修，不要放寬容差。**
+
+- [ ] **Step 5: 跑 T3（真機或桌機瀏覽器）**
 
 用 `yarn dev` 開起來，錄一段 ~30 秒 5 下的深蹲，在 devtools console 量：
 (a) 粗掃牆鐘時間、(b) 密集牆鐘時間、(c) 兩次模型載入時間、(d) SP2 之前的總時間（切到 main 對照）。
 
-- [ ] **Step 4: 記錄結果**
+- [ ] **Step 6: 記錄結果**
 
 `notes/rep_segmentation_sp2_measurements.md` 寫下 T1、T2（引用 §2.8）、T3 的數字，
 以及 T3 對「要不要接即時 landmarks」（spec §2.4）的結論。**如實記錄，包含整體沒有變快的情況。**
 
-- [ ] **Step 5: 跑完整驗證**
+- [ ] **Step 7: 跑完整驗證**
 
 ```
 .venv\Scripts\python.exe -m pytest tests/
@@ -2540,11 +2640,12 @@ git commit -m "feat(ui): show which spans of a clip were never examined"
 ```
 cwd = `frontend/`：`yarn test:coverage` 然後 `yarn build`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add scripts/pose/compare_ts_rep_signal.py notes/rep_segmentation_sp2_measurements.md
-git commit -m "test(pose): verify the TS rep signal matches Python and record SP2 timings"
+git add scripts/pose/capture_rep_signal_golden.py tests/fixtures/rep_signal_golden.json \
+        frontend/src/test/lib.repSignal.golden.test.ts notes/rep_segmentation_sp2_measurements.md
+git commit -m "test(pose): pin the TS rep signal against Python on real landmarks"
 ```
 
 ---
