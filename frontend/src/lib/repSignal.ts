@@ -23,12 +23,21 @@ export interface SignalLandmark { x: number; y: number; z: number; visibility: n
 
 type Point = [number, number, number];
 
-/** geometry.py:42-49. Returns null for an absent, non-finite, or insufficiently visible point. */
-function visiblePoint(lms: SignalLandmark[], index: number): Point | null {
+/**
+ * geometry.py:42-49. Returns null for an absent, non-finite, or insufficiently visible point.
+ *
+ * Only the first `dims` coordinates are checked. The validity gate (pose_rule_detector.py:134)
+ * uses dims=2 to allow frames where z is missing; angle_degrees uses dims=3 for full 3-D
+ * calculation. This separation is critical: a frame may be valid for segmentation but have
+ * one ankle's z as NaN, and that frame's metric must come from the other side only.
+ */
+function visiblePoint(lms: SignalLandmark[], index: number, dims: number = 3): Point | null {
   const lm = lms[index];
   if (!lm) return null;
   const { x, y, z, visibility } = lm;
-  if (![x, y, z, visibility].every(Number.isFinite)) return null;
+  // Only check the first `dims` coordinates plus visibility.
+  const coords = [x, y, z].slice(0, dims);
+  if (![...coords, visibility].every(Number.isFinite)) return null;
   if (visibility < VISIBILITY_THRESHOLD) return null;
   return [x, y, z];
 }
@@ -86,7 +95,8 @@ export function centeredMedian(values: number[], window: number): number[] {
 export function avgKneeAngle(landmarks: SignalLandmark[] | null | undefined): number {
   if (!landmarks || landmarks.length < LANDMARK_COUNT) return NaN;
   const required = [LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE];
-  if (required.some((index) => visiblePoint(landmarks, index) === null)) return NaN;
+  // Validity gate uses dims=2 (pose_rule_detector.py:134) to allow NaN z.
+  if (required.some((index) => visiblePoint(landmarks, index, 2) === null)) return NaN;
   return meanFinite([
     angleDegrees(landmarks, LEFT_HIP, LEFT_KNEE, LEFT_ANKLE),
     angleDegrees(landmarks, RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE),

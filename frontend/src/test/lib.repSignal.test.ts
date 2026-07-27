@@ -67,6 +67,28 @@ describe("avgKneeAngle", () => {
     });
     expect(avgKneeAngle(inZ)).toBeCloseTo(90, 4);
   });
+
+  it("allows NaN z during the validity gate, computing the metric from the other side", () => {
+    // Right ankle has NaN z but finite x/y/visibility. The validity gate (dims=2) must pass
+    // because x/y are visible, and the right knee angle must be NaN so mean_finite drops it.
+    // Python returns 180.0 here (the left side alone), not NaN. This is the critical
+    // divergence the reviewer caught: a naive 3-D gate would reject this frame entirely.
+    const rightAnkleZisNaN = skeleton({
+      23: [0, 0, 0], 25: [0, 1, 0], 27: [0, 2, 0],   // left: straight
+      24: [1, 0, 0], 26: [1, 1, 0], 28: [1, 2, NaN], // right: z is NaN
+    });
+    expect(avgKneeAngle(rightAnkleZisNaN)).toBeCloseTo(180, 4);
+  });
+
+  it("includes landmarks at visibility exactly 0.5 (boundary case)", () => {
+    // visibility >= VISIBILITY_THRESHOLD must be true, so 0.5 is included.
+    const atBoundary = skeleton({
+      23: [0, 0, 0], 25: [0, 1, 0], 27: [0, 2, 0],
+      24: [1, 0, 0], 26: [1, 1, 0], 28: [1, 2, 0],
+    });
+    atBoundary[27] = { ...atBoundary[27], visibility: 0.5 };
+    expect(avgKneeAngle(atBoundary)).toBeCloseTo(180, 4);
+  });
 });
 
 describe("centeredMedian", () => {
