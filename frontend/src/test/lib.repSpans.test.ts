@@ -25,6 +25,22 @@ describe("coarseBand", () => {
   it("returns null when the signal has no finite samples", () => {
     expect(coarseBand([NaN, NaN])).toBeNull();
   });
+
+  it("orients before taking percentiles, so polarity changes the band", () => {
+    // `segmentReps` compares `band` against `oriented(signal, polarity, rectify)`, never the raw
+    // signal -- see SegmentOptions.band. A `coarseBand` that took percentiles of the raw array
+    // would return the SAME {low, high} regardless of polarity, and that band would be silently
+    // wrong for any movement using polarity: "max" (Squat's default "min" makes oriented() the
+    // identity, which is why the 46-clip corpus measurement cannot catch this). Proof the
+    // orientation step is real, not decorative: min and max must disagree, and max's own values
+    // are exactly the negated-and-swapped min ones.
+    const signal = [1, 2, 3, 4];
+    const min = coarseBand(signal, "min");
+    const max = coarseBand(signal, "max");
+    expect(min).toEqual({ low: 1.15, high: 3.85 });   // np.percentile([1,2,3,4], [5,95])
+    expect(max).toEqual({ low: -3.85, high: -1.15 }); // same, over [-1,-2,-3,-4]
+    expect(max).not.toEqual(min);
+  });
 });
 
 describe("frameIndexAt", () => {

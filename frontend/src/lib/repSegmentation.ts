@@ -41,9 +41,10 @@ export interface SegmentOptions {
   repStart?: RepStart;
   minRepSeconds?: number;
   /** In ORIENTED space -- i.e. already run through `oriented(signal, polarity, rectify)` below,
-   *  not the caller's raw signal. Callers deriving a band externally (see `coarseBand` in
-   *  repSpans.ts) must orient their own signal the same way before taking percentiles, or the
-   *  band and the values it is compared against live in different spaces. */
+   *  not the caller's raw signal. `coarseBand` in repSpans.ts orients internally, using the same
+   *  `oriented()` exported from this module, so a `{ polarity, rectify }` matching the ones
+   *  passed here is what keeps the two in the same space -- there is no raw-space variant to
+   *  misuse. */
   band?: { low: number; high: number };
 }
 
@@ -67,7 +68,7 @@ function roundHalfToEven(value: number): number {
 }
 
 /** Normalise any movement's signal to the convention "the effort peak is a LOW value". */
-function oriented(signal: number[], polarity: Polarity, rectify: boolean): number[] {
+export function oriented(signal: number[], polarity: Polarity, rectify: boolean): number[] {
   return signal.map((value) => {
     // A bipolar signal (torso twist: centre -> A -> centre -> B) has two excursions in opposite
     // directions. Rectifying makes each swing its own excursion from zero.

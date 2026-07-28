@@ -10,8 +10,10 @@ import { centeredMedian } from "./repSignal";
 import {
   PERCENTILE_HIGH,
   PERCENTILE_LOW,
+  oriented,
   percentile as percentileOf,
   segmentReps,
+  type Polarity,
   type RepWindow,
 } from "./repSegmentation";
 
@@ -62,18 +64,22 @@ export function valleyPosition(signal: number[], window: RepWindow): number {
 /**
  * The whole-clip dynamic range, taken from the pass that covers the whole clip (spec §2.1.1).
  *
- * Returns a band in the SAME space `SegmentOptions.band` expects: `segmentReps` compares its
- * band against `oriented(signal, polarity, rectify)`, not the raw signal, so this function takes
- * percentiles of whatever `coarseSignal` it is handed with no orientation of its own -- the
- * caller (poseExtract's `refineSegments`, Task 6) must pass a `coarseSignal` already run through
- * the SAME `oriented()` it will use for the movement's `polarity`/`rectify`, or hand this band to
- * a `segmentReps` call using different ones. For Squat (`polarity: "min"`, `rectify: false`)
- * orientation is the identity, so calling this on the raw coarse signal is correct and the 46-clip
- * measurement above cannot tell a mismatch apart from a match. A `polarity: "max"` or `rectify:
- * true` movement is NOT safe to wire up this way without orienting first.
+ * Orients internally with `oriented()` -- the SAME function `segmentReps` uses to build the
+ * values it compares `band` against -- before taking percentiles, so the returned band is
+ * GUARANTEED to be in the same space `SegmentOptions.band` expects. There is no raw-space call
+ * to make by mistake: `polarity`/`rectify` here must simply match whatever `segmentReps({
+ * polarity, rectify, band })` call the result is handed to. Defaults match `SegmentOptions`'s own
+ * (`polarity: "min"`, `rectify: false`), so every current Squat call site is unaffected.
+ *
+ * For Squat, `oriented()` is the identity, so the 46-clip measurement `refineWindow` cites cannot
+ * distinguish an oriented call from an unoriented one -- see the coarseBand test with
+ * `polarity: "max"` for the case that does.
  */
-export function coarseBand(coarseSignal: number[]): { low: number; high: number } | null {
-  const finite = coarseSignal.filter(Number.isFinite).sort((a, b) => a - b);
+export function coarseBand(
+  coarseSignal: number[], polarity: Polarity = "min", rectify = false
+): { low: number; high: number } | null {
+  const values = oriented(coarseSignal, polarity, rectify);
+  const finite = values.filter(Number.isFinite).sort((a, b) => a - b);
   if (finite.length === 0) return null;
   return { low: percentileOf(finite, PERCENTILE_LOW), high: percentileOf(finite, PERCENTILE_HIGH) };
 }
