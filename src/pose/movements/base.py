@@ -70,6 +70,24 @@ DEFAULT_MAX_REPS = 3
 
 
 @dataclass(frozen=True)
+class RepPlan:
+    """Repetition boundaries decided elsewhere, for `run_detector` to use instead of its own.
+
+    RS-SP2 extracts only the selected repetitions in the browser, so the frames between them do
+    not exist by the time this module sees the clip. `segment_reps` cannot re-derive windows from
+    data that was never captured -- it is underdetermined, not merely unreliable -- so the client
+    supplies them and is validated at the API boundary instead (see the SP2 spec §2.3, §4.3).
+
+    `fallback` carries the client's own reason string (the same three values this module produces)
+    so a clip the browser could not segment is analysed whole here, exactly as SP1 would have.
+    """
+
+    reps: tuple[RepWindow, ...]
+    analyzed: tuple[RepWindow, ...]
+    fallback: str | None
+
+
+@dataclass(frozen=True)
 class RunResult:
     core: list[CoreFrame]
     detections: list[PoseRuleDetection]
@@ -119,13 +137,16 @@ def run_detector(
     view_confidence: float,
     *,
     max_reps: int | None = DEFAULT_MAX_REPS,
+    rep_plan: RepPlan | None = None,
 ) -> RunResult:
     """Compute metrics over the whole clip, then phase and score one repetition at a time.
 
-    Smoothing stays GLOBAL (all frames exist here), and only phase assignment and rule
-    execution are per-rep. RS-SP2 extracts only the selected windows, at which point smoothing
-    necessarily becomes per-padded-window -- that is an SP2 change, not a constraint on this
-    one.
+    Smoothing stays GLOBAL. When `rep_plan` is supplied the clip is SPARSE -- only the planned
+    windows carry landmarks -- and `centered_median` skips the non-finite gaps, so a window padded
+    by at least the smoothing radius still sees a full window at every frame inside it.
+
+    `rep_plan` OVERRIDES `max_reps`: the client already applied its own cap when deciding what to
+    extract, so re-selecting here could only score fewer reps than were actually measured.
     """
     raw = detector.compute_raw(frames, fps)
     smoothed = {
@@ -133,10 +154,11 @@ def run_detector(
         for key in detector.metric_keys
     }
 
-    reps: list[RepWindow] = []
-    fallback: str | None = None
-    if detector.rep_signal is None:
-        fallback = "segmentation_disabled"
+    if rep_plan is not None:
+        reps = list(rep_plan.reps)
+        fallback = rep_plan.fallback
+    elif detector.rep_signal is None:
+        reps, fallback = [], "segmentation_disabled"
     else:
         reps = segment_reps(
             smoothed[detector.rep_signal],
@@ -146,6 +168,7 @@ def run_detector(
             rep_start=detector.rep_start,
             min_rep_seconds=detector.min_rep_seconds,
         )
+        fallback = None
         if not reps:
             fallback = "no_reps_detected"
         elif all(rep.partial for rep in reps):
@@ -196,7 +219,7 @@ def run_detector(
 
     min_frames = max(3, int(math.ceil(max(fps, 1.0) * 0.20)))
     ctx = RuleContext(fps=fps, view_type=view_type, view_confidence=view_confidence, min_frames=min_frames)
-    analyzed = select_reps(segmented, max_reps)
+    analyzed = list(rep_plan.analyzed) if rep_plan is not None else select_reps(segmented, max_reps)
 
     detections: list[PoseRuleDetection] = []
     if analyzed:
