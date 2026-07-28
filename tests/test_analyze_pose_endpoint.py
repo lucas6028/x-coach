@@ -213,6 +213,49 @@ class AnalyzePoseRepsValidationTests(unittest.TestCase):
         the exact failure frontend/src/lib/quality.ts exists to prevent."""
         self._assert_400(_pose(range(40, 60)), _reps([_segment(1, 0, 29)]))
 
+    def test_rejects_an_analyzed_window_with_only_partial_landmark_coverage(self) -> None:
+        """`any(...)` over the window only checks EXISTENCE, not coverage -- a 0..500 window with a
+        single landmark-carrying frame at 500 would pass it. `run_detector` still scores every
+        frame in the window; the 500 frames without landmarks are all-invalid and contribute
+        nothing but padding, so a client could smuggle a mostly-unmeasured window past this guard
+        the same way `test_rejects_an_analyzed_window_over_unextracted_frames` smuggles a fully
+        unmeasured one. Every frame in an analyzed window must carry landmarks."""
+        self._assert_400(
+            _pose(range(500, 501), total=600), _reps([_segment(1, 0, 500)])
+        )
+
+    def test_rejects_a_non_fallback_plan_with_nothing_analyzed(self) -> None:
+        """`fallback: null` asserts "I segmented this clip myself" -- if it then analyzes NOTHING,
+        `run_detector` still takes the per-rep phasing path (`segmented = reps`) because `reps` is
+        non-empty, but scores an empty `analyzed` list, i.e. rules run over the WHOLE sparse clip.
+        The extracted frames are valid, so `valid_frames > 0`, `wasMeasured` reads true, and an
+        empty detection list renders as a clean rep on a clip that was mostly never measured --
+        the exact failure frontend/src/lib/quality.ts exists to prevent."""
+        self._assert_400(
+            _pose(range(0, 30), total=60),
+            _reps([_segment(1, 0, 29, analyzed=False), _segment(2, 30, 59, analyzed=False)]),
+        )
+
+    def test_accepts_a_fallback_plan_with_nothing_analyzed(self) -> None:
+        """The legitimate counterpart to the two tests above: `fallback: "only_partial_reps"` (or
+        either other fallback string) with a non-empty `reps` and an empty `analyzed` is Task 9's
+        accepted shape -- the span WAS scored, as part of the whole-clip fallback. The new
+        'must analyze at least one segment' guard is scoped to `fallback is None` and must not
+        reject this, or a later tightening to an unconditional `if not analyzed: raise` would break
+        a real client path while this suite stayed green."""
+        result = self._run(
+            _pose(range(0, 30)),
+            _reps([_segment(1, 0, 29, analyzed=False)], fallback="only_partial_reps"),
+        )
+        plan = result["rep_plan"]
+        self.assertEqual(plan.fallback, "only_partial_reps")
+        self.assertEqual(plan.analyzed, ())
+
+    def test_rejects_a_non_fallback_plan_with_no_segments_at_all(self) -> None:
+        """The degenerate case of the same guard: an empty `segments` list with `fallback: null`
+        analyzes nothing just as surely as an all-unanalyzed list does."""
+        self._assert_400(_pose(range(0, 30)), _reps([]))
+
     def test_allows_an_UNanalyzed_window_over_unextracted_frames(self) -> None:
         """Reps that were found but not scored legitimately have no landmarks — that is the whole
         point of SP2, and `segments[].analyzed=False` is how the payload says so."""
@@ -237,6 +280,24 @@ class AnalyzePoseRepsValidationTests(unittest.TestCase):
 
     def test_rejects_malformed_reps_json(self) -> None:
         self._assert_400(_pose(range(0, 30)), "{not json")
+
+    def test_clipped_segments_are_logged(self) -> None:
+        """`refined: "clipped"` never reaches `RepWindow` (no such field on the dataclass), so
+        without a log line it is write-only -- the spec's claim that it "makes an insufficient
+        REP_PADDING_FRAMES visible" would otherwise be false in production. This is the smallest
+        fix that makes it true: log, don't change behaviour."""
+        clipped = {"index": 1, "start_frame": 0, "end_frame": 29,
+                   "partial": False, "analyzed": True, "refined": "clipped"}
+        with self.assertLogs(analyze_router.logger, level="INFO") as ctx:
+            self._run(_pose(range(0, 30)), _reps([clipped]))
+        self.assertTrue(any("clipped" in message for message in ctx.output))
+
+    def test_non_clipped_segments_do_not_log(self) -> None:
+        with self.assertRaises(AssertionError):
+            # assertLogs itself raises AssertionError when nothing was logged at INFO+ -- the
+            # happy-path plan (refined: true, via `_segment`) must not emit this line.
+            with self.assertLogs(analyze_router.logger, level="INFO"):
+                self._run(_pose(range(0, 30)), _reps([_segment(1, 0, 29)]))
 
     def test_omitting_reps_keeps_todays_behaviour(self) -> None:
         """The CLI, the research datasets and old clients send no `reps` and must be unaffected."""

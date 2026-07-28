@@ -126,6 +126,13 @@ def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
 
     windows: list[RepWindow] = []
     analyzed: list[RepWindow] = []
+    # `segment["refined"]` never reaches `RepWindow` -- the dataclass has no such field, so the
+    # value is write-only past this function (spec §4.2 calls it a diagnostic field the backend
+    # "does not change behaviour" for, which is true, but the spec also claims `"clipped"` is what
+    # makes an insufficient REP_PADDING_FRAMES visible; on its own it reaches no log, no store, no
+    # UI, so nothing was actually visible). Logging it here is the smallest fix that makes the spec's
+    # claim true in production, without giving the value any behavioural power it shouldn't have.
+    clipped_indices: list[int] = []
     previous_end = -1
     for position, segment in enumerate(segments):
         if not isinstance(segment, dict):
@@ -146,6 +153,8 @@ def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
 
         window = RepWindow(index=index, start=start, end=end, partial=bool(segment.get("partial")))
         windows.append(window)
+        if segment.get("refined") == "clipped":
+            clipped_indices.append(index)
         if segment.get("analyzed"):
             if fallback is not None:
                 # A fallback means the whole clip was analysed as one unit -- see run_detector,
@@ -161,14 +170,42 @@ def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
             # The check the others miss: a window over frames that were never extracted scores
             # all-invalid data and yields an empty detection list, i.e. a clean verdict from
             # nothing. See the test that pins this.
-            if not any(
+            #
+            # EVERY frame, not `any(...)`: `any` only checks existence somewhere in the window, so
+            # a 0-500 window with a single landmark-carrying frame at 500 would pass. The shipped
+            # client (poseExtract.ts's `planReps`/`refineSegments`) derives every analyzed window
+            # from inside its own extracted span, so full coverage holds by construction there --
+            # this is the check that keeps a hand-crafted request from claiming otherwise.
+            if not all(
                 isinstance(frames[i], dict) and frames[i].get("landmarks")
                 for i in range(start, end + 1)
             ):
                 raise HTTPException(
-                    status_code=400, detail="An analyzed rep window contains no extracted frames."
+                    status_code=400,
+                    detail="An analyzed rep window contains frames that were never extracted.",
                 )
             analyzed.append(window)
+
+    # A non-fallback plan asserts "I segmented this clip into reps myself" -- if it then analyzes
+    # NONE of them, run_detector takes the per-rep phasing path (`segmented = reps`) but scores an
+    # empty `analyzed` list, i.e. rules run over the whole sparse clip while phases are per-rep. The
+    # extracted frames within `reps` are still valid, so `valid_frames > 0` and an empty detection
+    # list renders as a clean rep on a clip that was mostly never measured -- the exact failure
+    # frontend/src/lib/quality.ts exists to prevent. Fallback plans are exempt: their `analyzed` is
+    # legitimately empty because the WHOLE clip was scored as one unit (see the fallback check above).
+    if fallback is None and not analyzed:
+        raise HTTPException(
+            status_code=400, detail="A reps plan without a fallback must analyze at least one segment."
+        )
+
+    if clipped_indices:
+        # The only place this ever surfaces: `refined: "clipped"` means the dense-refined window
+        # touched the edge of its padded span (not the clip's own edge), i.e. REP_PADDING_FRAMES=24
+        # (repSpans.ts) was not wide enough for that rep and part of it was cut off. See spec §2.8.
+        logger.info(
+            "reps plan carries clipped segment(s) (REP_PADDING_FRAMES may be insufficient): rep index %s",
+            clipped_indices,
+        )
 
     return RepPlan(reps=tuple(windows), analyzed=tuple(analyzed), fallback=fallback)
 
