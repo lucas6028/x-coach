@@ -600,6 +600,7 @@ def detect_pose_rules_from_payload(
     # -1 (not None) is the "caller said nothing" sentinel: None is a meaningful value here,
     # meaning "analyze every rep".
     max_reps: int | None = -1,
+    rep_plan: object | None = None,
 ) -> dict[str, Any]:
     metadata = payload.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -631,12 +632,20 @@ def detect_pose_rules_from_payload(
         view_type,
         view_confidence,
         max_reps=effective_max_reps,
+        rep_plan=rep_plan,
     )
     core, detections = run.core, run.detections
 
     analyzed_indices = [rep.index for rep in run.analyzed]
     analyzed_frames = sum(rep.end - rep.start + 1 for rep in run.analyzed) or len(core)
     valid_frames = [c for c in core if c.valid]
+    # ADDITIVE (SP2 §4.4). Under RS-SP2 the frames outside the extracted spans carry no landmarks,
+    # so valid_frame_ratio legitimately falls -- its denominator stays whole-clip by SP1's rule.
+    # This is the denominator that answers "was tracking good WHERE WE LOOKED", which is what
+    # MetricsCards must show instead, or a deliberate design reads to the user as bad tracking.
+    extracted_frames = sum(
+        1 for f in frames if isinstance(f, dict) and f.get("landmarks")
+    )
     result = {
         "video_id": video_id or (pose_json_path.stem if pose_json_path else ""),
         # The CANONICAL movement name, taken from the resolved detector rather than the caller's
@@ -660,6 +669,8 @@ def detect_pose_rules_from_payload(
             # src/knowledge/perception_to_graph.py.
             "analyzed_frames": analyzed_frames if core else 0,
             "analyzed_frame_ratio": round(analyzed_frames / len(frames), 4) if frames else 0.0,
+            "extracted_frames": extracted_frames,
+            "extracted_frame_ratio": round(extracted_frames / len(frames), 4) if frames else 0.0,
         },
         "detections": [asdict(detection) for detection in detections],
         "retrievals": [],
