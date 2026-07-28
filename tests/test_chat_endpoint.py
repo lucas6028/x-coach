@@ -137,6 +137,32 @@ class SystemPromptTests(unittest.TestCase):
         # Absent from the payload => no line at all (and see the next test for the verdict).
         self.assertNotIn("Measurable frames", chat_service._build_system_prompt(_FAULT_CTX))
 
+    def test_measurable_frames_line_uses_extracted_denominator_under_sp2(self) -> None:
+        """RS-SP2: under per-rep extraction `valid_frame_ratio`'s denominator stays whole-clip
+        (~30% on a healthy analysis), which would read to the model -- and then the user -- as a
+        tracking problem. When the payload carries `extracted_frames`, the line must report
+        valid/extracted instead, phrased as the extracted spans rather than the clip."""
+        ctx = dict(
+            _CLEAN_CTX,
+            quality={
+                "valid_frame_ratio": 0.30,
+                "valid_frames": 81,
+                "total_frames": 270,
+                "extracted_frames": 90,
+                "extracted_frame_ratio": 0.33,
+            },
+        )
+        prompt = chat_service._build_system_prompt(ctx)
+        self.assertIn("Measurable frames: 90% of the extracted spans", prompt)
+        self.assertNotIn("30% of the clip", prompt)
+
+    def test_measurable_frames_line_keeps_whole_clip_denominator_pre_sp2(self) -> None:
+        """A payload with no `extracted_frames` (pre-SP2 stored analyses, CLI output) must read
+        exactly as it always has."""
+        prompt = chat_service._build_system_prompt(_CLEAN_CTX)
+        self.assertIn("Measurable frames: 94% of the clip", prompt)
+        self.assertNotIn("extracted spans", prompt)
+
     def test_absent_valid_frame_ratio_is_treated_as_unmeasured(self) -> None:
         """"The payload did not say" must not resolve to "everything is fine". The analyze pipeline
         always emits `valid_frame_ratio`, so its absence is missing information, not evidence of a
