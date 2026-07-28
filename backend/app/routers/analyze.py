@@ -93,6 +93,74 @@ def _validate_pose_landmarks(payload: dict) -> None:
                 raise HTTPException(status_code=400, detail="Malformed pose landmarks.")
 
 
+MAX_REP_SEGMENTS = 200
+_FALLBACKS = {None, "no_reps_detected", "only_partial_reps", "segmentation_disabled"}
+
+
+def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
+    """Turn a client-supplied rep plan into a RepPlan, rejecting anything malformed.
+
+    EVERY violation is a 400 rather than a silent fall-through to the backend's own segmentation.
+    Under RS-SP2 the frames outside the extracted spans carry no landmarks, so re-segmenting that
+    signal does not fail loudly -- it produces plausible windows over data that was never
+    measured, and the result reads like a normal analysis (spec §4.3).
+    """
+    from src.pose.movements.base import RepPlan
+    from src.pose.rep_segmentation import RepWindow
+
+    if raw is None:
+        return None
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Malformed reps JSON.") from exc
+    if not isinstance(plan, dict) or not isinstance(plan.get("segments"), list):
+        raise HTTPException(status_code=400, detail="reps must have a 'segments' list.")
+    if plan.get("fallback") not in _FALLBACKS:
+        raise HTTPException(status_code=400, detail="Unknown reps.fallback value.")
+
+    segments = plan["segments"]
+    if len(segments) > MAX_REP_SEGMENTS:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_REP_SEGMENTS} rep segments.")
+
+    windows: list[RepWindow] = []
+    analyzed: list[RepWindow] = []
+    previous_end = -1
+    for position, segment in enumerate(segments):
+        if not isinstance(segment, dict):
+            raise HTTPException(status_code=400, detail="Malformed rep segment.")
+        try:
+            index = int(segment["index"])
+            start = int(segment["start_frame"])
+            end = int(segment["end_frame"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Malformed rep segment.") from exc
+        if index != position + 1:
+            raise HTTPException(status_code=400, detail="rep indices must run 1..N in order.")
+        if start < 0 or end >= len(frames) or start > end:
+            raise HTTPException(status_code=400, detail="rep window out of range.")
+        if start <= previous_end:
+            raise HTTPException(status_code=400, detail="rep windows must not overlap.")
+        previous_end = end
+
+        window = RepWindow(index=index, start=start, end=end, partial=bool(segment.get("partial")))
+        windows.append(window)
+        if segment.get("analyzed"):
+            # The check the others miss: a window over frames that were never extracted scores
+            # all-invalid data and yields an empty detection list, i.e. a clean verdict from
+            # nothing. See the test that pins this.
+            if not any(
+                isinstance(frames[i], dict) and frames[i].get("landmarks")
+                for i in range(start, end + 1)
+            ):
+                raise HTTPException(
+                    status_code=400, detail="An analyzed rep window contains no extracted frames."
+                )
+            analyzed.append(window)
+
+    return RepPlan(reps=tuple(windows), analyzed=tuple(analyzed), fallback=plan.get("fallback"))
+
+
 @router.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
@@ -167,6 +235,7 @@ async def analyze_pose(
     pose: str = Form(...),
     file: UploadFile = File(...),
     max_reps: int | None = Form(None),
+    reps: str | None = Form(None),
     user: CurrentUser | None = Depends(get_optional_user),
 ) -> dict:
     """Analyze a client-extracted pose JSON (no server-side MediaPipe).
@@ -189,6 +258,7 @@ async def analyze_pose(
     if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list):
         raise HTTPException(status_code=400, detail="Pose JSON must have a 'frames' list.")
     _validate_pose_landmarks(payload)
+    rep_plan = _validate_reps(reps, payload["frames"])
 
     data = await file.read()
     if not data:
@@ -204,6 +274,7 @@ async def analyze_pose(
                 movement=movement,
                 video_id=video_id,
                 max_reps=resolved_max_reps,
+                rep_plan=rep_plan,
             )
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

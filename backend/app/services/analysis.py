@@ -113,6 +113,7 @@ def _run_detector(
     pose_json_path: Path,
     movement: str,
     max_reps: int | None = -1,
+    rep_plan: object | None = None,
 ) -> dict[str, Any]:
     # Deferred import: the detector drags in numpy/networkx; keep module import light.
     from src.pose.pose_rule_detector import detect_pose_rules_from_payload
@@ -127,6 +128,7 @@ def _run_detector(
         rag_db_dir=config.RAG_DB_DIR,
         movement=movement,
         max_reps=config.DEFAULT_MAX_REPS if max_reps == -1 else max_reps,
+        rep_plan=rep_plan,
     )
 
 
@@ -158,6 +160,7 @@ def analyze_pose_payload(
     movement: str,
     video_id: str | None = None,
     max_reps: int | None = -1,
+    rep_plan: object | None = None,
 ) -> dict[str, Any]:
     """Analyze a client-supplied pose JSON payload — no server-side MediaPipe.
 
@@ -165,6 +168,8 @@ def analyze_pose_payload(
     skeleton-only 'analysis pending' result (the video is still stored by the caller).
 
     ``max_reps`` follows the same ``-1`` sentinel convention as ``analyze_video_file``.
+    ``rep_plan`` is the API layer's validated client-supplied rep boundaries (RS-SP2); ``None``
+    means "let the detector segment for itself", exactly today's behaviour.
     """
     vid = video_id or f"upload_{uuid.uuid4().hex[:12]}"
     pose_block = build_pose_block_from_payload(payload)
@@ -184,7 +189,7 @@ def analyze_pose_payload(
     config.ensure_runtime_dirs()
     pose_json_path = config.UPLOAD_POSE_DIR / f"{vid}.json"
     pose_json_path.write_text(json.dumps(payload), encoding="utf-8")
-    result = _run_detector(payload, vid, pose_json_path, movement, max_reps=max_reps)
+    result = _run_detector(payload, vid, pose_json_path, movement, max_reps=max_reps, rep_plan=rep_plan)
     result = _strip_frame_metrics(result)
     result["pose"] = pose_block
     result["source"] = "upload"
