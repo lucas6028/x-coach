@@ -94,7 +94,9 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
               ? t("timeline.wholeClip")
               : t("timeline.repsSummary", {
                   detected: analysis.reps.detected,
-                  list: analysis.reps.analyzed.join("、"),
+                  // Separator is translated data (see `timeline.repsListSeparator`), not a
+                  // hardcoded character here — a full-width "、" reads wrong inside English text.
+                  list: analysis.reps.analyzed.join(t("timeline.repsListSeparator")),
                 })}
           </span>
         )}

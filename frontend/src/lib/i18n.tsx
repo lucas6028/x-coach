@@ -78,6 +78,11 @@ const en: Dict = {
   "timeline.neutral": "Neutral",
   "timeline.unanalyzed": "Not analyzed",
   "timeline.repsSummary": "{detected} reps found, analyzed #{list}",
+  // The separator joining `timeline.repsSummary`'s rep-number list. Lives beside the two string
+  // tables (not hardcoded at the `.join()` call site in Timeline.tsx) so it is translated data,
+  // not layout — a third locale picks up its own separator automatically. zh-Hant uses the
+  // full-width enumeration comma "、"; an ASCII list inside a Latin sentence should not.
+  "timeline.repsListSeparator": ", ",
   "timeline.wholeClip": "Whole clip analyzed",
 
   // Metrics
@@ -728,6 +733,7 @@ const zhHant: Dict = {
   "timeline.neutral": "正常",
   "timeline.unanalyzed": "未分析",
   "timeline.repsSummary": "共 {detected} 下，分析了第 {list} 下",
+  "timeline.repsListSeparator": "、",
   "timeline.wholeClip": "整段分析",
 
   // Metrics
