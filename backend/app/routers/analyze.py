@@ -171,12 +171,19 @@ def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
             # all-invalid data and yields an empty detection list, i.e. a clean verdict from
             # nothing. See the test that pins this.
             #
-            # EVERY frame, not `any(...)`: `any` only checks existence somewhere in the window, so
-            # a 0-500 window with a single landmark-carrying frame at 500 would pass. The shipped
-            # client (poseExtract.ts's `planReps`/`refineSegments`) derives every analyzed window
-            # from inside its own extracted span, so full coverage holds by construction there --
-            # this is the check that keeps a hand-crafted request from claiming otherwise.
-            if not all(
+            # `any(...)`, deliberately NOT `all(...)`: this is a "was this span ever extracted"
+            # check, not a "is every frame in it detected" check -- those are different questions.
+            # The shipped client's dense sampling (poseExtract.ts's `sampleFrames`) calls
+            # `landmarksToFrame` for every index in the span unconditionally, but `toPts` returns
+            # `null` per-frame whenever MediaPipe found no pose that frame -- motion blur at the
+            # bottom of a squat, brief self-occlusion, a barbell crossing the hips. Ordinary
+            # home-recording behaviour, not a sign the span was never sampled. `all()` was tried
+            # here once already and reverted: it turned a single such dropout, deep inside an
+            # otherwise-normal rep, into a hard 400 on the whole upload -- a worse outcome than the
+            # empty-detections failure this guard exists to catch. `any()` still catches that real
+            # failure (an analyzed window entirely over an unextracted span has zero landmark-
+            # carrying frames) without punishing a window that's mostly fine.
+            if not any(
                 isinstance(frames[i], dict) and frames[i].get("landmarks")
                 for i in range(start, end + 1)
             ):

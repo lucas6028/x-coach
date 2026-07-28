@@ -213,16 +213,20 @@ class AnalyzePoseRepsValidationTests(unittest.TestCase):
         the exact failure frontend/src/lib/quality.ts exists to prevent."""
         self._assert_400(_pose(range(40, 60)), _reps([_segment(1, 0, 29)]))
 
-    def test_rejects_an_analyzed_window_with_only_partial_landmark_coverage(self) -> None:
-        """`any(...)` over the window only checks EXISTENCE, not coverage -- a 0..500 window with a
-        single landmark-carrying frame at 500 would pass it. `run_detector` still scores every
-        frame in the window; the 500 frames without landmarks are all-invalid and contribute
-        nothing but padding, so a client could smuggle a mostly-unmeasured window past this guard
-        the same way `test_rejects_an_analyzed_window_over_unextracted_frames` smuggles a fully
-        unmeasured one. Every frame in an analyzed window must carry landmarks."""
-        self._assert_400(
+    def test_accepts_an_analyzed_window_with_partial_landmark_coverage(self) -> None:
+        """The inverse of the above: a window with landmarks on SOME but not all of its frames is
+        accepted, not rejected. This represents a real MediaPipe dropout mid-rep -- motion blur at
+        the bottom of a squat, brief self-occlusion, a barbell crossing the hips -- where the frame
+        was sampled but no pose was detected for it. The browser client (`poseExtract.ts`'s
+        `sampleFrames`) calls `landmarksToFrame` for every index in the dense span unconditionally,
+        so a sampled span can legitimately carry a `landmarks: null` frame or two without that
+        meaning the span itself was never extracted. Requiring every frame to carry landmarks
+        (an earlier `all(...)` form of this guard) would 400 this kind of ordinary clip. Fails
+        against that `all(...)` form."""
+        result = self._run(
             _pose(range(500, 501), total=600), _reps([_segment(1, 0, 500)])
         )
+        self.assertEqual([w.index for w in result["rep_plan"].analyzed], [1])
 
     def test_rejects_a_non_fallback_plan_with_nothing_analyzed(self) -> None:
         """`fallback: null` asserts "I segmented this clip myself" -- if it then analyzes NOTHING,
