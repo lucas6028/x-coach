@@ -245,6 +245,13 @@ export function selectReps(reps: RepWindow[], maxReps: number | null): RepWindow
   if (candidates.length === 0) return [];
   if (!maxReps || maxReps <= 0 || candidates.length <= maxReps) return candidates;
 
+  // np.linspace(start, stop, num) with num === 1 returns [start], not a division by (num - 1);
+  // that division only makes sense for spacing out 2+ points. Guarding it here mirrors that
+  // numpy behaviour directly instead of letting `(last * i) / (maxReps - 1)` divide by zero at
+  // i === 0, which would produce NaN and silently smuggle `candidates[NaN] === undefined` into
+  // the result. Python's `select_reps(reps, max_reps=1)` returns `[candidates[0]]`.
+  if (maxReps === 1) return [candidates[0]];
+
   const last = candidates.length - 1;
   const positions = new Set<number>();
   for (let i = 0; i < maxReps; i += 1) {

@@ -133,4 +133,21 @@ describe("selectReps", () => {
   it("returns [] for no reps", () => {
     expect(selectReps([], 3)).toEqual([]);
   });
+
+  // THE OTHER TRAP. Python's np.linspace(0, last, 1) returns [0] -- a single-point axis starts at
+  // `start`, it does not divide by (num - 1). A literal port of the spacing formula divides by
+  // zero at i=0 when maxReps===1, producing NaN -> candidates[NaN] -> undefined smuggled into a
+  // typed RepWindow[]. Measured: Python's select_reps(reps, max_reps=1) returns [candidates[0]].
+  it("returns exactly the first candidate when maxReps is 1, with no undefined slipped in", () => {
+    const got = selectReps(five, 1);
+    expect(got).toHaveLength(1);
+    expect(got.map((r) => r.index)).toEqual([1]);
+    expect(got.every((r) => r !== undefined)).toBe(true);
+  });
+
+  it("still takes the single candidate when maxReps is 1 and there is only one rep", () => {
+    // Covered by the existing candidates.length <= maxReps early return, not the new guard --
+    // pinned here so that guard can't regress this path unnoticed.
+    expect(selectReps([win(1, 0, 9)], 1).map((r) => r.index)).toEqual([1]);
+  });
 });
