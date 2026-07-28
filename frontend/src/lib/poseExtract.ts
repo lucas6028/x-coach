@@ -141,7 +141,12 @@ export function planReps(
   const fallbackPlan = (fallback: RepsFallback, segments: RepSegment[] = []) =>
     ({ plan: { max_reps: maxReps, fallback, segments }, spans: wholeClip });
 
-  if (!(movement in TS_REP_SIGNALS)) return fallbackPlan("segmentation_disabled");
+  // NOT `movement in TS_REP_SIGNALS`: `in` walks the prototype chain, so a movement named
+  // "toString" or "constructor" would pass the guard and then be called as a signal function,
+  // producing garbage instead of the segmentation_disabled fallback this guard exists to give it.
+  if (!Object.prototype.hasOwnProperty.call(TS_REP_SIGNALS, movement)) {
+    return fallbackPlan("segmentation_disabled");
+  }
 
   const smoothed = centeredMedian(coarseSignal, COARSE_SMOOTH_WINDOW);
   const reps = segmentReps(smoothed, { fps: CANONICAL_FPS / COARSE_STRIDE });
@@ -222,6 +227,11 @@ async function sampleFrames(
   return out;
 }
 
+// The coarse pass is a fixed fraction of reported progress; the dense pass gets what's left.
+// Named and single-sourced so the two shares cannot drift apart under independent edits.
+const COARSE_PROGRESS_SHARE = 0.3;
+const DENSE_PROGRESS_SHARE = 1 - COARSE_PROGRESS_SHARE;
+
 /**
  * Two-pass extraction: find the reps cheaply, then measure only the selected ones (spec §2.1).
  *
@@ -260,23 +270,35 @@ export async function extractPoseWithReps(
     const coarseIndices: number[] = [];
     for (let i = 0; i <= lastFrameIndex; i += COARSE_STRIDE) coarseIndices.push(i);
     const coarseFrames = await sampleFrames(video, coarseLandmarker, coarseIndices,
-      (p) => onProgress?.(p * 0.3));
+      (p) => onProgress?.(p * COARSE_PROGRESS_SHARE));
     const signal = TS_REP_SIGNALS[movement];
     const coarseSignal = coarseFrames.map((f) =>
       signal ? signal(f.landmarks as SignalLandmark[] | null) : NaN);
     const { plan, spans } = planReps(coarseSignal, maxReps, lastFrameIndex, movement);
 
-    // Pass 2 — dense, at the user's tier, over the padded spans only.
+    // Pass 2 — dense, at the user's tier, over the padded spans only. ALWAYS a fresh instance,
+    // even when tier === LIVE_OVERLAY_TIER ("Lite" is a real user-selectable analysis tier, not
+    // just the live-overlay default): createPoseLandmarker builds with runningMode: "VIDEO", and
+    // MediaPipe requires the timestamp passed to detectForVideo to increase monotonically on a
+    // given instance. The coarse pass runs the whole clip and its last call is near the final
+    // frame; the dense pass then starts again at the first selected rep, an EARLIER frame — a
+    // decrease on a shared instance. That is not a rare edge case: it fires on essentially every
+    // Lite-tier clip where segmentation succeeds, because the selected reps almost never start at
+    // frame 0. A shared incrementing counter would dodge the monotonicity error but is not the
+    // fix — VIDEO mode can use the delta between calls, so a synthetic counter would change what
+    // the model computes relative to extractPoseFromBlob, which passes real milliseconds; that
+    // trades a loud failure for a silent divergence between the two extraction paths. Two real
+    // instances keep both passes on real, ascending, per-instance timestamps. The cost is one
+    // extra model load when the analysis tier happens to be Lite — see Task 12 for where that
+    // gets quantified.
     const denseIndices = spanFrameIndices(spans);
-    const denseLandmarker = tier === LIVE_OVERLAY_TIER
-      ? coarseLandmarker
-      : await createPoseLandmarker(tier);
+    const denseLandmarker = await createPoseLandmarker(tier);
     let denseFrames: PoseJsonFrame[];
     try {
       denseFrames = await sampleFrames(video, denseLandmarker, denseIndices,
-        (p) => onProgress?.(0.3 + p * 0.7));
+        (p) => onProgress?.(COARSE_PROGRESS_SHARE + p * DENSE_PROGRESS_SHARE));
     } finally {
-      if (denseLandmarker !== coarseLandmarker) denseLandmarker.close();
+      denseLandmarker.close();
     }
 
     // Full-length frame list: extracted frames in place, `null` landmarks everywhere else.
