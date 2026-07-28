@@ -1,7 +1,8 @@
 // Client-side pose extraction: decode a recorded/uploaded clip frame-by-frame, run MediaPipe,
 // and emit pose JSON byte-compatible with src/pose/process_videos.py so the backend detector is
 // untouched. The pure serializer (landmarksToFrame) is unit-tested; the <video>/rVFC/WASM glue
-// in extractPoseFromBlob is impure and coverage-excluded like the other detector boundaries.
+// in extractPoseWithReps (and the sampleFrames helper it shares with the coarse pass) is impure
+// and coverage-excluded like the other detector boundaries.
 import { createPoseLandmarker } from "../components/poseLandmarker";
 import type { PoseTier } from "./poseTier";
 import { LIVE_OVERLAY_TIER } from "./poseTier";
@@ -45,8 +46,8 @@ export function landmarksToFrame(
 // therefore cannot report a length, and `video.duration` comes back NaN (observed) or Infinity for
 // a RECORDED clip, while an UPLOADED file reports a real number.
 //
-// `extractPoseFromBlob` bounds its sampling loop by that value, so every live recording extracted
-// ZERO frames and the app told the user "no frame in this clip could be measured" — a
+// `extractPoseWithReps`'s sampling loops bound themselves by that value, so every live recording
+// extracted ZERO frames and the app told the user "no frame in this clip could be measured" — a
 // verdict-shaped message for what was really a container quirk.
 //
 // The remedy is the standard one: seek far past any plausible end. The browser clamps the seek to
@@ -309,8 +310,8 @@ export async function extractPoseWithReps(
     // Lite-tier clip where segmentation succeeds, because the selected reps almost never start at
     // frame 0. A shared incrementing counter would dodge the monotonicity error but is not the
     // fix — VIDEO mode can use the delta between calls, so a synthetic counter would change what
-    // the model computes relative to extractPoseFromBlob, which passes real milliseconds; that
-    // trades a loud failure for a silent divergence between the two extraction paths. Two real
+    // the model computes relative to the real milliseconds `sampleFrames` passes today; that
+    // trades a loud failure for a silent divergence between the coarse and dense passes. Two real
     // instances keep both passes on real, ascending, per-instance timestamps. The cost is one
     // extra model load when the analysis tier happens to be Lite — see Task 12 for where that
     // gets quantified.
@@ -357,56 +358,6 @@ export async function extractPoseWithReps(
     };
   } finally {
     coarseLandmarker.close();
-    URL.revokeObjectURL(url);
-  }
-}
-
-export async function extractPoseFromBlob(
-  blob: Blob,
-  tier: PoseTier,
-  onProgress?: (p: number) => void
-): Promise<PoseJson> {
-  const url = URL.createObjectURL(blob);
-  const video = document.createElement("video");
-  video.muted = true;
-  video.playsInline = true;
-  // Handlers attached BEFORE `src` is assigned, and before the model download below. `loadedmetadata`
-  // fires once and is not replayed: registering it after an intervening await races the blob's own
-  // load, and losing that race wedges the extraction forever.
-  const metadataReady = new Promise<void>((res, rej) => {
-    video.onloadedmetadata = () => res();
-    video.onerror = () => rej(new Error("Could not decode the video."));
-  });
-  // Keep an early decode failure from surfacing as an unhandled rejection while the model loads;
-  // `await metadataReady` below still sees it.
-  metadataReady.catch(() => undefined);
-  video.src = url;
-  const landmarker = await createPoseLandmarker(tier);
-  const frames: PoseJsonFrame[] = [];
-  try {
-    await metadataReady;
-    const fps = CANONICAL_FPS;
-    // NOT `video.duration || 0` — a live-recorded clip reports no length and that silently sampled
-    // nothing. See resolveDuration.
-    const duration = await resolveDuration(video);
-    // Seek-and-detect: step through the clip at a fixed cadence so frame_index is deterministic
-    // and aligned to the stored video (rVFC live-rate would drift on drops). The index comes from
-    // the TIMESTAMP, not a counter — the coarse pass steps differently and must agree. See
-    // repSpans.frameIndexAt.
-    for (let t = 0; t < duration; t += 1 / fps) {
-      video.currentTime = t;
-      await new Promise<void>((r) => { video.onseeked = () => r(); });
-      const result = landmarker.detectForVideo(video, Math.round(t * 1000));
-      frames.push(landmarksToFrame(frameIndexAt(t), result.landmarks?.[0], result.worldLandmarks?.[0]));
-      onProgress?.(duration ? Math.min(1, t / duration) : 1);
-    }
-    onProgress?.(1);
-    return {
-      metadata: { fps, width: video.videoWidth, height: video.videoHeight, total_frames: frames.length },
-      frames,
-    };
-  } finally {
-    landmarker.close();
     URL.revokeObjectURL(url);
   }
 }
