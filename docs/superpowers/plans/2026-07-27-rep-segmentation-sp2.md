@@ -1488,8 +1488,8 @@ cwd = `frontend/`，執行：`yarn test src/test/lib.poseExtract.test.ts`
 import { TS_REP_SIGNALS, centeredMedian, type SignalLandmark } from "./repSignal";
 import { segmentReps, selectReps } from "./repSegmentation";
 import {
-  COARSE_SMOOTH_WINDOW, COARSE_STRIDE, CANONICAL_FPS, frameIndexAt, mergeSpans, refineWindow,
-  spanForRep, spanFrameIndices, valleyPosition, type FrameSpan, type Refinement,
+  COARSE_SMOOTH_WINDOW, COARSE_STRIDE, CANONICAL_FPS, coarseBand, frameIndexAt, mergeSpans,
+  refineWindow, spanForRep, spanFrameIndices, valleyPosition, type FrameSpan, type Refinement,
 } from "./repSpans";
 
 export type RepsFallback =
@@ -1552,11 +1552,24 @@ export function planReps(
   return { plan: { max_reps: maxReps, fallback: null, segments }, spans };
 }
 
-/** Replace each analyzed segment's coarse boundary with the one the dense signal gives (§2.1.1). */
+/**
+ * Replace each analyzed segment's coarse boundary with the one the dense signal gives (§2.1.1).
+ *
+ * `coarseSignal` is here for its BAND, not its samples: a span holds about one repetition's worth
+ * of samples, and percentiles taken over that narrow a slice shift the hysteresis band and move
+ * the boundary with it. Measured on 46 clips — per-span percentiles refine 92.9% of reps exactly
+ * (p95 15.3 frames, max 46); the same spans given the coarse pass's whole-clip range refine 98.6%
+ * exactly (p95 0, max 1). The coarse pass covers the whole clip, which is why that range exists to
+ * be handed over at all.
+ */
 export function refineSegments(
-  plan: RepsPlan, spans: FrameSpan[], denseSignal: (number | undefined)[], lastFrameIndex: number
+  plan: RepsPlan, spans: FrameSpan[], denseSignal: (number | undefined)[],
+  lastFrameIndex: number, coarseSignal: number[]
 ): RepsPlan {
   if (plan.fallback !== null) return plan;
+  // Squat's defaults; a movement with rep knobs would pass its own, and coarseBand orients
+  // internally so the band lands in the same space segmentReps compares against.
+  const band = coarseBand(coarseSignal);
   const segments = plan.segments.map((segment) => {
     if (!segment.analyzed) return segment;
     const coarse = { start: segment.start_frame, end: segment.end_frame };
@@ -1564,7 +1577,7 @@ export function refineSegments(
       ?? spans.find((s) => s.start <= coarse.end && coarse.start <= s.end);
     if (!span) return segment;
     const { start, end, refined } =
-      refineWindow(denseSignal, span, coarse, CANONICAL_FPS, lastFrameIndex);
+      refineWindow(denseSignal, span, coarse, CANONICAL_FPS, lastFrameIndex, band);
     return { ...segment, start_frame: start, end_frame: end, refined };
   });
   return { ...plan, segments };
@@ -1682,7 +1695,7 @@ export async function extractPoseWithReps(
         },
         frames,
       },
-      reps: refineSegments(plan, spans, denseSignal, lastFrameIndex),
+      reps: refineSegments(plan, spans, denseSignal, lastFrameIndex, coarseSignal),
     };
   } finally {
     coarseLandmarker.close();
