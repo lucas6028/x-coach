@@ -3,6 +3,7 @@ import {
   CANONICAL_FPS,
   COARSE_STRIDE,
   REP_PADDING_FRAMES,
+  coarseBand,
   frameIndexAt,
   mergeSpans,
   refineWindow,
@@ -11,6 +12,20 @@ import {
   valleyPosition,
 } from "../lib/repSpans";
 import { segmentReps } from "../lib/repSegmentation";
+
+describe("coarseBand", () => {
+  it("returns the coarse signal's 5th/95th percentiles", () => {
+    // The whole-clip range, computed from the pass that DOES cover the whole clip.
+    const band = coarseBand([1, 2, 3, 4]);
+    expect(band).not.toBeNull();
+    expect(band!.low).toBeCloseTo(1.15, 6);   // numpy: np.percentile([1,2,3,4], 5)
+    expect(band!.high).toBeCloseTo(3.85, 6);  // numpy: np.percentile([1,2,3,4], 95)
+  });
+
+  it("returns null when the signal has no finite samples", () => {
+    expect(coarseBand([NaN, NaN])).toBeNull();
+  });
+});
 
 describe("frameIndexAt", () => {
   it("puts every sample on the canonical 30fps grid", () => {
@@ -129,7 +144,7 @@ describe("refineWindow", () => {
   repSignal(1, 90).forEach((v, i) => { dense[i + 15] = v; });
 
   it("recovers the dense boundary from a coarse one that is 10 frames late", () => {
-    const out = refineWindow(dense, { start: 0, end: 119 }, { start: 25, end: 100 }, 30, LAST);
+    const out = refineWindow(dense, { start: 0, end: 119 }, { start: 25, end: 100 }, 30, LAST, null);
     expect(out.refined).toBe(true);
     expect(Math.abs(out.start - 15)).toBeLessThanOrEqual(2);
   });
@@ -137,7 +152,7 @@ describe("refineWindow", () => {
   it("reports 'clipped' when the span cut the rep off mid-clip", () => {
     // The span ends at 89 while the clip runs to 199, so there WAS more to extract and the
     // padding was too small — the one case that must stay visible.
-    const out = refineWindow(dense, { start: 15, end: 89 }, { start: 20, end: 85 }, 30, LAST);
+    const out = refineWindow(dense, { start: 15, end: 89 }, { start: 20, end: 85 }, 30, LAST, null);
     expect(out.refined).toBe("clipped");
   });
 
@@ -146,7 +161,7 @@ describe("refineWindow", () => {
     // conflating the two reported 43% of real reps as clipped instead of the true 1.4%.
     const flush: (number | undefined)[] = new Array(90).fill(undefined);
     repSignal(1, 90).forEach((v, i) => { flush[i] = v; });
-    const out = refineWindow(flush, { start: 0, end: 89 }, { start: 0, end: 89 }, 30, 89);
+    const out = refineWindow(flush, { start: 0, end: 89 }, { start: 0, end: 89 }, 30, 89, null);
     expect(out.refined).toBe(true);
   });
 
@@ -155,13 +170,13 @@ describe("refineWindow", () => {
     // windows and the overlap tiebreak decides — it is load-bearing, not a safety net.
     const two: (number | undefined)[] = new Array(LAST + 1).fill(undefined);
     repSignal(2, 90).forEach((v, i) => { two[i] = v; });
-    const out = refineWindow(two, { start: 0, end: 179 }, { start: 95, end: 175 }, 30, LAST);
+    const out = refineWindow(two, { start: 0, end: 179 }, { start: 95, end: 175 }, 30, LAST, null);
     expect(out.start).toBeGreaterThanOrEqual(80);
   });
 
   it("falls back to the coarse boundary when the span holds no window", () => {
     const flat: (number | undefined)[] = new Array(LAST + 1).fill(5);
-    const out = refineWindow(flat, { start: 0, end: 119 }, { start: 20, end: 100 }, 30, LAST);
+    const out = refineWindow(flat, { start: 0, end: 119 }, { start: 20, end: 100 }, 30, LAST, null);
     expect(out).toEqual({ start: 20, end: 100, refined: false });
   });
 });

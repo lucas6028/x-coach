@@ -22,7 +22,13 @@ import numpy as np
 
 from src.pose.geometry import centered_median
 from src.pose.movements import registry
-from src.pose.rep_segmentation import RepWindow, segment_reps
+from src.pose.rep_segmentation import (
+    PERCENTILE_HIGH,
+    PERCENTILE_LOW,
+    RepWindow,
+    _oriented,
+    segment_reps,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CORPUS_DIRS = (
@@ -40,7 +46,7 @@ MIN_CLIPS = 20            # below this the percentiles below mean nothing
 MAX_VALLEY_ERROR = 5      # measured max across 70 reps
 MIN_SPAN_COVERAGE = 0.98  # measured 98.6%
 MAX_COUNT_MISMATCHES = 2
-MIN_REFINED_EXACT = 0.95  # measured 95.7% of reps refine to the whole-clip boundary exactly
+MIN_REFINED_EXACT = 0.98  # measured 98.6% of reps refine to the whole-clip boundary exactly
 MAX_REFINED_P95 = 0.0     # measured: p95 of the refined error is zero frames
 MAX_CLIPPED_SHARE = 0.03  # measured 1.4%
 
@@ -92,6 +98,19 @@ class CoarseSegmentationCorpusTest(unittest.TestCase):
                 cls.mismatches += 1
                 continue
             last = len(values) - 1
+
+            # The whole-clip band refinement is measured against below: the coarse pass ALREADY
+            # covers the whole clip, so its percentiles -- taken after the same orientation
+            # segment_reps applies internally -- are the production-available whole-clip range.
+            # `segment_reps` was called above with its default polarity="min"/rectify=False, so
+            # this must match, or the band would not be in the same space as `coarse_signal`.
+            oriented_coarse = _oriented(coarse_signal, "min", False)
+            finite_coarse = oriented_coarse[np.isfinite(oriented_coarse)]
+            coarse_band = (
+                (float(np.percentile(finite_coarse, PERCENTILE_LOW)),
+                 float(np.percentile(finite_coarse, PERCENTILE_HIGH)))
+                if finite_coarse.size else None
+            )
             for d, c in zip(dense, coarse):
                 cls.total_reps += 1
                 valley = _valley(coarse_signal, c) * COARSE_STRIDE
@@ -110,7 +129,7 @@ class CoarseSegmentationCorpusTest(unittest.TestCase):
                 span_start, span_end = max(0, valley - half), min(last, valley + half)
                 coarse_start, coarse_end = c.start * COARSE_STRIDE, c.end * COARSE_STRIDE
                 span_signal = centered_median(values[span_start : span_end + 1], window=DENSE_SMOOTH_WINDOW)
-                windows = segment_reps(span_signal, fps=fps)
+                windows = segment_reps(span_signal, fps=fps, band=coarse_band)
                 if not windows:
                     # Mirrors refineWindow's fallback: when re-segmentation finds nothing, production
                     # returns the coarse boundary with refined=False rather than dropping the rep --
@@ -142,12 +161,22 @@ class CoarseSegmentationCorpusTest(unittest.TestCase):
     def test_refinement_recovers_the_whole_clip_boundary(self) -> None:
         """The claim refinement rests on, and the obvious way it could fail.
 
-        Refining re-derives the hysteresis band from ONE span's percentiles rather than the whole
-        clip's, which is narrower and could plausibly shift the boundary -- the very thing
-        refinement exists to get right, since assign_phases takes a window's first 15% as setup.
-        Measured on this corpus it does not: the refined boundary is EXACTLY the whole-clip one for
-        95.7% of reps, against the coarse boundary's p50 2 / p95 21 / max 45 frames. If this goes
-        red, refinement needs the whole-clip band passed in rather than re-derived per span.
+        Refining re-derives the hysteresis band from a span's OWN percentiles, and a span holds
+        only about one repetition's worth of samples -- narrow enough to plausibly shift the band,
+        and with it the boundary, which is the very thing refinement exists to get right, since
+        assign_phases takes a window's first 15% as setup.
+
+        SUPERSEDED NUMBER: that plausible failure is not hypothetical -- it is what this test
+        measured before `segment_reps` grew the `band` parameter above. Per-span percentiles
+        refined only 92.9% of reps to the whole-clip boundary exactly (p95 15.3 frames, max 46).
+        That is not acceptable: a 46-frame boundary error puts "setup" in the middle of a descent,
+        which is the bug this whole rep-segmentation line of work exists to fix, arriving by a new
+        route.
+
+        Handing refinement the COARSE PASS's whole-clip band instead -- it already covers the
+        whole clip, so its percentiles are exactly the whole-clip range, and it is available in
+        production -- raises that to 98.6% exact, p95 0, max 1. If this goes red, refinement is
+        deriving or applying the band differently from how it is measured here.
         """
         exact = sum(1 for error in self.refined_errors if error == 0)
         self.assertGreaterEqual(exact / len(self.refined_errors), MIN_REFINED_EXACT)

@@ -7,7 +7,13 @@
 // passes now derive the index from the TIMESTAMP, so they share one coordinate system.
 
 import { centeredMedian } from "./repSignal";
-import { segmentReps, type RepWindow } from "./repSegmentation";
+import {
+  PERCENTILE_HIGH,
+  PERCENTILE_LOW,
+  percentile as percentileOf,
+  segmentReps,
+  type RepWindow,
+} from "./repSegmentation";
 
 /** The grid every frame_index is expressed on, matching poseExtract's fixed sampling cadence. */
 export const CANONICAL_FPS = 30;
@@ -51,6 +57,25 @@ export function valleyPosition(signal: number[], window: RepWindow): number {
     if (Number.isFinite(signal[i]) && signal[i] < bestValue) { bestValue = signal[i]; best = i; }
   }
   return best;
+}
+
+/**
+ * The whole-clip dynamic range, taken from the pass that covers the whole clip (spec §2.1.1).
+ *
+ * Returns a band in the SAME space `SegmentOptions.band` expects: `segmentReps` compares its
+ * band against `oriented(signal, polarity, rectify)`, not the raw signal, so this function takes
+ * percentiles of whatever `coarseSignal` it is handed with no orientation of its own -- the
+ * caller (poseExtract's `refineSegments`, Task 6) must pass a `coarseSignal` already run through
+ * the SAME `oriented()` it will use for the movement's `polarity`/`rectify`, or hand this band to
+ * a `segmentReps` call using different ones. For Squat (`polarity: "min"`, `rectify: false`)
+ * orientation is the identity, so calling this on the raw coarse signal is correct and the 46-clip
+ * measurement above cannot tell a mismatch apart from a match. A `polarity: "max"` or `rectify:
+ * true` movement is NOT safe to wire up this way without orienting first.
+ */
+export function coarseBand(coarseSignal: number[]): { low: number; high: number } | null {
+  const finite = coarseSignal.filter(Number.isFinite).sort((a, b) => a - b);
+  if (finite.length === 0) return null;
+  return { low: percentileOf(finite, PERCENTILE_LOW), high: percentileOf(finite, PERCENTILE_HIGH) };
 }
 
 /** The frames to extract densely for one coarse-detected rep, in canonical frame_index space. */
@@ -101,10 +126,14 @@ export type Refinement = true | false | "clipped";
  * which is exactly the bug SP1 exists to fix, arriving by a new route. Padding cannot correct
  * that; only measuring the boundary on data that exists at full rate can.
  *
- * MEASURED, on the same 46 clips REP_PADDING_FRAMES came from: the refined boundary equals the
- * whole-clip dense boundary EXACTLY for 95.7% of reps (p95 0 frames, max 27), against the coarse
- * boundary's p50 2 / p95 21 / max 45. Re-deriving the hysteresis band from one span's percentiles
- * rather than the whole clip's was the obvious worry here, and it does not materialise.
+ * MEASURED, on the same 46 clips REP_PADDING_FRAMES came from: re-deriving the hysteresis band
+ * from one span's OWN percentiles -- a span holds only about one repetition's worth of samples --
+ * refines just 92.9% of reps to the whole-clip dense boundary EXACTLY (p95 15.3 frames, max 46).
+ * Handing the same spans the WHOLE CLIP's range instead (the `band` parameter below, sourced from
+ * `coarseBand` on the coarse pass's signal -- it already covers the whole clip) raises that to
+ * 98.6% exact, p95 0, max 1. The 46-frame tail is not a rounding error: it lands "setup" in the
+ * middle of a descent, which is the bug this whole rep-segmentation line of work exists to fix,
+ * arriving by a new route. Pass `band`; do not let this re-derive its own.
  *
  * `denseSignal` is indexed by frame_index, with `undefined` wherever nothing was extracted.
  * `lastFrameIndex` is the clip's own end, and it is not optional bookkeeping: a window touching a
@@ -113,14 +142,14 @@ export type Refinement = true | false | "clipped";
  */
 export function refineWindow(
   denseSignal: (number | undefined)[], span: FrameSpan, coarse: FrameSpan,
-  fps: number, lastFrameIndex: number
+  fps: number, lastFrameIndex: number, band: { low: number; high: number } | null
 ): { start: number; end: number; refined: Refinement } {
   const slice: number[] = [];
   for (let i = span.start; i <= span.end; i += 1) {
     const value = denseSignal[i];
     slice.push(value === undefined ? NaN : value);
   }
-  const windows = segmentReps(centeredMedian(slice, DENSE_SMOOTH_WINDOW), { fps });
+  const windows = segmentReps(centeredMedian(slice, DENSE_SMOOTH_WINDOW), { fps, band: band ?? undefined });
   if (windows.length === 0) return { start: coarse.start, end: coarse.end, refined: false };
 
   // The coarse window says WHICH rep this span is about; pick the refined window that overlaps it

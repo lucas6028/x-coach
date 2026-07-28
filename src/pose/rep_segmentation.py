@@ -166,11 +166,31 @@ def segment_reps(
     rectify: bool = False,
     rep_start: str = "extended",
     min_rep_seconds: float = DEFAULT_MIN_REP_SECONDS,
+    band: tuple[float, float] | None = None,
 ) -> list[RepWindow]:
     """Segment `signal` into repetitions.
 
     Returns `[]` — never a guess — when the signal carries no repetition structure. The caller
     is required to fall back to whole-clip analysis in that case, NOT to report no faults.
+
+    `band`, when given, REPLACES the percentile-derived `(low, high)` used to build the
+    hysteresis band — it does not adjust them. RS-SP2 refines a rep's boundary inside a padded
+    span extracted around it, and a span's OWN percentiles are computed over roughly one
+    repetition's worth of samples: narrow enough that the band shifts and the boundary moves
+    with it. Measured on 46 real clips (70 reps): per-span percentiles refine 92.9% of reps to
+    the whole-clip boundary exactly (p95 15.3 frames, max 46); the same spans given the whole
+    clip's range instead refine 98.6% exactly (p95 0, max 1). The whole-clip range is available
+    in production because the coarse pass already covers the whole clip — see the SP2 spec
+    §2.1.1 and `coarseBand` in `frontend/src/lib/repSpans.ts`, its TypeScript twin.
+
+    `band` is compared directly against `values` below, i.e. it is expected in ORIENTED space —
+    already run through `_oriented(signal, polarity, rectify)` — not the caller's raw signal. A
+    caller deriving `band` from a separate whole-clip pass (as `tests/test_coarse_segmentation_
+    corpus.py` does, and as `refineSegments` will in production) must orient that pass's signal
+    with the SAME `polarity`/`rectify` before taking its percentiles. Squat uses the defaults
+    (`polarity="min"`, `rectify=False`), for which `_oriented` is the identity, so this module's
+    own 46-clip measurement cannot distinguish an oriented band from an unoriented one; a
+    `polarity="max"` or `rectify=True` movement is NOT safe to wire up without orienting first.
     """
     if polarity not in _POLARITIES:
         raise ValueError(f"polarity must be one of {_POLARITIES}, got {polarity!r}")
@@ -183,8 +203,11 @@ def segment_reps(
     if finite.size < 2 * min_frames:
         return []
 
-    low = float(np.percentile(finite, PERCENTILE_LOW))
-    high = float(np.percentile(finite, PERCENTILE_HIGH))
+    if band is not None:
+        low, high = float(band[0]), float(band[1])
+    else:
+        low = float(np.percentile(finite, PERCENTILE_LOW))
+        high = float(np.percentile(finite, PERCENTILE_HIGH))
     span = high - low
     if span <= 0.0:
         return []

@@ -80,6 +80,26 @@ describe("segmentReps degenerate inputs", () => {
   });
 });
 
+describe("segmentReps with an externally supplied band", () => {
+  it("uses the given range instead of the slice's own percentiles", () => {
+    // Same slice, two bands. A slice whose own dynamic range is narrow gets a DIFFERENT
+    // hysteresis band than one told the whole clip's range — that difference is the entire
+    // reason this parameter exists (spec §2.1.1).
+    const slice = Array.from({ length: 60 }, (_, i) => 115 + 55 * Math.cos((2 * Math.PI * i) / 60));
+    const own = segmentReps(slice, { fps: 30 });
+    const wide = segmentReps(slice, { fps: 30, band: { low: 0, high: 340 } });
+    expect(own).toHaveLength(1);
+    // A band twice as wide puts `enter` far above anything in the slice, so every sample is
+    // "deep" and the excursion spans the whole slice.
+    expect(wide[0].start).toBeLessThanOrEqual(own[0].start);
+  });
+
+  it("ignores a degenerate band rather than dividing by a zero span", () => {
+    const slice = Array.from({ length: 60 }, (_, i) => 115 + 55 * Math.cos((2 * Math.PI * i) / 60));
+    expect(segmentReps(slice, { fps: 30, band: { low: 5, high: 5 } })).toEqual([]);
+  });
+});
+
 const win = (index: number, start: number, end: number, partial = false): RepWindow =>
   ({ index, start, end, partial });
 

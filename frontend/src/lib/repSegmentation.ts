@@ -40,10 +40,15 @@ export interface SegmentOptions {
   rectify?: boolean;
   repStart?: RepStart;
   minRepSeconds?: number;
+  /** In ORIENTED space -- i.e. already run through `oriented(signal, polarity, rectify)` below,
+   *  not the caller's raw signal. Callers deriving a band externally (see `coarseBand` in
+   *  repSpans.ts) must orient their own signal the same way before taking percentiles, or the
+   *  band and the values it is compared against live in different spaces. */
+  band?: { low: number; high: number };
 }
 
 /** numpy.percentile's default linear interpolation, over values that are already sorted. */
-function percentile(sorted: number[], p: number): number {
+export function percentile(sorted: number[], p: number): number {
   if (sorted.length === 1) return sorted[0];
   const position = ((sorted.length - 1) * p) / 100;
   const lower = Math.floor(position);
@@ -216,8 +221,15 @@ export function segmentReps(signal: number[], options: SegmentOptions): RepWindo
   const minFrames = Math.max(3, roundHalfToEven(minRepSeconds * Math.max(options.fps, 1)));
   if (finite.length < 2 * minFrames) return [];
 
-  const low = percentile(finite, PERCENTILE_LOW);
-  const high = percentile(finite, PERCENTILE_HIGH);
+  // The band may be supplied by the caller. RS-SP2 refines a rep's boundary inside a padded span,
+  // and a span's OWN percentiles are computed over one repetition's worth of samples -- narrow
+  // enough that the hysteresis band shifts and the boundary moves with it. Measured on 46 real
+  // clips: per-span percentiles refine 92.9% of reps exactly (p95 15.3 frames, max 46), while the
+  // same spans given the whole clip's range refine 98.6% exactly (p95 0, max 1). The caller has a
+  // whole-clip range available because the coarse pass covers the whole clip. See the SP2 spec
+  // §2.1.1, and `coarseBand` in repSpans.ts.
+  const low = options.band ? options.band.low : percentile(finite, PERCENTILE_LOW);
+  const high = options.band ? options.band.high : percentile(finite, PERCENTILE_HIGH);
   const span = high - low;
   if (span <= 0) return [];
 
