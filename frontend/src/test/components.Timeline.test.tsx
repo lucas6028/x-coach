@@ -108,6 +108,34 @@ describe("Timeline", () => {
       <Timeline analysis={analysis} duration={3} currentTime={0} onSeek={vi.fn()} />
     );
     expect(screen.queryAllByTestId("unanalyzed-span")).toHaveLength(0);
+    expect(screen.getByText("Whole clip analyzed")).toBeInTheDocument();
+  });
+
+  // Discriminating regression test: on a REAL fallback (e.g. "only_partial_reps" — see
+  // src/pose/movements/base.py) `run.reps` is NOT necessarily empty, and the backend marks every
+  // segment `analyzed: true` even though `reps.analyzed` itself stays `[]` (nothing was scored
+  // PER-REP; the whole clip was scored as one unit — see pose_rule_detector.py:707-713). A span
+  // map that reads `reps.analyzed.includes(segment.index)` instead of `segment.analyzed` would
+  // wrongly mark this segment unexamined. The "no_reps_detected" fixture above can't catch that
+  // bug because its `segments` array is empty either way.
+  it("does not mark a segment unanalyzed on a fallback that still reports a rep span", () => {
+    const analysis = {
+      ...mockAnalysis,
+      reps: {
+        detected: 1,
+        analyzed: [],
+        max_reps: 3,
+        fallback: "only_partial_reps",
+        segments: [
+          { index: 1, start_frame: 0, end_frame: 89, start_time: 0, end_time: 3, analyzed: true, partial: true },
+        ],
+      },
+    };
+    renderWithProviders(
+      <Timeline analysis={analysis} duration={3} currentTime={0} onSeek={vi.fn()} />
+    );
+    expect(screen.queryAllByTestId("unanalyzed-span")).toHaveLength(0);
+    expect(screen.getByText("Whole clip analyzed")).toBeInTheDocument();
   });
 
   it("renders no unanalyzed spans and no rep summary for analyses without a `reps` field", () => {
@@ -115,5 +143,7 @@ describe("Timeline", () => {
       <Timeline analysis={mockAnalysis} duration={10} currentTime={0} onSeek={vi.fn()} />
     );
     expect(screen.queryAllByTestId("unanalyzed-span")).toHaveLength(0);
+    expect(screen.queryByText(/reps found/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Whole clip analyzed")).not.toBeInTheDocument();
   });
 });
