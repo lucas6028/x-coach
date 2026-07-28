@@ -55,6 +55,7 @@ export default function MetricsCards({ analysis, portrait = false }: Props) {
   const topSeverity = faults.reduce((m, d) => Math.max(m, d.severity), 0);
   const visibility = (q.lower_body_visibility_mean ?? 0) * 100;
   const validRatio = (q.valid_frame_ratio ?? 0) * 100;
+  const extracted = q.extracted_frames ?? 0;
   const hasFaults = faults.length > 0;
   // The detector returns an empty `detections` list for BOTH "no faults found" and "the clip was
   // never measurable", so `faults.length` alone printed a green "Faults 0 / clean rep" card
@@ -90,10 +91,16 @@ export default function MetricsCards({ analysis, portrait = false }: Props) {
         tone={hasFaults ? "danger" : measured ? "good" : "default"}
       />
       <Stat label={t("metric.lowerBodyVis")} value={`${visibility.toFixed(0)}%`} />
+      {/* Denominator: the frames that were EXTRACTED, when the payload says. Under RS-SP2 only the
+          scored reps carry landmarks, so the whole-clip ratio legitimately falls to ~30% and would
+          read as bad tracking — a pipeline decision presented as a measurement problem. Analyses
+          predating SP2 (and CLI output) have no extracted_frames and keep the old denominator. */}
       <Stat
         label={t("metric.validFrames")}
-        value={`${validRatio.toFixed(0)}%`}
-        sub={t("metric.framesRatio", { valid: q.valid_frames ?? 0, total: q.total_frames ?? 0 })}
+        value={`${(extracted > 0 ? (q.valid_frames ?? 0) / extracted * 100 : validRatio).toFixed(0)}%`}
+        sub={extracted > 0
+          ? t("metric.framesRatioExtracted", { valid: q.valid_frames ?? 0, extracted })
+          : t("metric.framesRatio", { valid: q.valid_frames ?? 0, total: q.total_frames ?? 0 })}
       />
     </motion.div>
   );

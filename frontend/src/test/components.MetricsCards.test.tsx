@@ -77,4 +77,30 @@ describe("MetricsCards", () => {
     renderWithProviders(<MetricsCards analysis={mockAnalysis} />);
     expect(screen.getByText("276/300 frames")).toBeInTheDocument();
   });
+
+  it("counts valid frames against the frames that were EXTRACTED, not the whole clip", () => {
+    // Under RS-SP2 only the scored reps carry landmarks, so a whole-clip denominator would show
+    // "30%" for a deliberately partial extraction and read as bad tracking.
+    const analysis = {
+      ...mockAnalysis,
+      quality: {
+        ...mockAnalysis.quality,
+        total_frames: 900,
+        valid_frames: 260,
+        extracted_frames: 270,
+        extracted_frame_ratio: 0.3,
+        valid_frame_ratio: 0.289,
+      },
+    };
+    renderWithProviders(<MetricsCards analysis={analysis} />);
+    expect(screen.getByText("96%")).toBeInTheDocument();
+  });
+
+  it("falls back to the whole-clip denominator for analyses with no extracted_frames", () => {
+    renderWithProviders(<MetricsCards analysis={mockAnalysis} />);
+    // mockAnalysis has no extracted_frames — old stored analyses and CLI output look like this.
+    expect(
+      screen.getByText(`${Math.round((mockAnalysis.quality.valid_frame_ratio ?? 0) * 100)}%`)
+    ).toBeInTheDocument();
+  });
 });

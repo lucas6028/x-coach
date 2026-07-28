@@ -34,6 +34,24 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
           className="absolute h-2 rounded-full bg-gradient-to-r from-primary to-cyan-400 shadow-[0_0_8px_theme(colors.primary)]"
           style={{ width: pct(currentTime) }}
         />
+        {/* Spans that carry no pose data because RS-SP2 never extracted them. NEUTRAL, never a
+            warning colour: they are not a problem, they are unexamined — and an empty timeline
+            must not read as "these reps were fine". */}
+        {(analysis.reps?.segments ?? [])
+          .filter((s) => !s.analyzed)
+          .map((s) => (
+            <div
+              key={`un-${s.index}`}
+              data-testid="unanalyzed-span"
+              title={t("timeline.unanalyzed")}
+              className="absolute h-2 rounded-full bg-track opacity-70
+                         [background-image:repeating-linear-gradient(45deg,transparent,transparent_3px,rgba(255,255,255,0.12)_3px,rgba(255,255,255,0.12)_6px)]"
+              style={{
+                left: pct(s.start_time),
+                width: `${Math.max(1.5, ((s.end_time - s.start_time) / dur) * 100)}%`,
+              }}
+            />
+          ))}
         {/* fault segments */}
         {analysis.detections.map((d, i) => (
           <div
@@ -70,6 +88,16 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
           <span className="w-2.5 h-2.5 rounded-full bg-track inline-block" />
           {t("timeline.neutral")}
         </span>
+        {analysis.reps && (
+          <span className="text-muted">
+            {analysis.reps.fallback
+              ? t("timeline.wholeClip")
+              : t("timeline.repsSummary", {
+                  detected: analysis.reps.detected,
+                  list: analysis.reps.analyzed.join("、"),
+                })}
+          </span>
+        )}
       </div>
     </div>
   );

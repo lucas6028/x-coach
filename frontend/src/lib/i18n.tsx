@@ -76,6 +76,9 @@ const en: Dict = {
   // Timeline
   "timeline.fault": "Fault",
   "timeline.neutral": "Neutral",
+  "timeline.unanalyzed": "Not analyzed",
+  "timeline.repsSummary": "{detected} reps found, analyzed #{list}",
+  "timeline.wholeClip": "Whole clip analyzed",
 
   // Metrics
   "metric.cameraView": "Camera View",
@@ -90,6 +93,7 @@ const en: Dict = {
   "metric.notMeasured": "not measured",
   "metric.landmarkConf": "landmark confidence",
   "metric.framesRatio": "{valid}/{total} frames",
+  "metric.framesRatioExtracted": "{valid} / {extracted} extracted",
 
   // Chat input — disabled fallback (auth/LLM not configured) + the working grounded chat.
   "chat.placeholder": "Ask Lumen… (LLM layer coming soon)",
@@ -722,6 +726,9 @@ const zhHant: Dict = {
   // Timeline
   "timeline.fault": "錯誤",
   "timeline.neutral": "正常",
+  "timeline.unanalyzed": "未分析",
+  "timeline.repsSummary": "共 {detected} 下，分析了第 {list} 下",
+  "timeline.wholeClip": "整段分析",
 
   // Metrics
   "metric.cameraView": "拍攝視角",
@@ -734,6 +741,7 @@ const zhHant: Dict = {
   "metric.notMeasured": "無法判讀",
   "metric.landmarkConf": "關鍵點信心度",
   "metric.framesRatio": "{valid}/{total} 影格",
+  "metric.framesRatioExtracted": "{valid} / {extracted} 已抽取",
 
   // Chat input — disabled fallback (auth/LLM not configured) + the working grounded chat.
   "chat.placeholder": "詢問 Lumen…（LLM 功能即將推出）",
