@@ -159,19 +159,20 @@ class CoarseSegmentationCorpusTest(unittest.TestCase):
         self.assertLessEqual(self.mismatches, MAX_COUNT_MISMATCHES)
 
     def test_refinement_recovers_the_whole_clip_boundary(self) -> None:
-        """The claim refinement rests on, and the obvious way it could fail.
+        """The claim refinement rests on, and the obvious way it could have failed.
 
-        Refining re-derives the hysteresis band from a span's OWN percentiles, and a span holds
-        only about one repetition's worth of samples -- narrow enough to plausibly shift the band,
-        and with it the boundary, which is the very thing refinement exists to get right, since
-        assign_phases takes a window's first 15% as setup.
+        Re-deriving the hysteresis band from a span's OWN percentiles would be the natural way to
+        implement refinement, and a span holds only about one repetition's worth of samples --
+        narrow enough to plausibly shift the band, and with it the boundary, which is the very
+        thing refinement exists to get right, since assign_phases takes a window's first 15% as
+        setup.
 
         SUPERSEDED NUMBER: that plausible failure is not hypothetical -- it is what this test
-        measured before `segment_reps` grew the `band` parameter above. Per-span percentiles
-        refined only 92.9% of reps to the whole-clip boundary exactly (p95 15.3 frames, max 46).
-        That is not acceptable: a 46-frame boundary error puts "setup" in the middle of a descent,
-        which is the bug this whole rep-segmentation line of work exists to fix, arriving by a new
-        route.
+        measured before `segment_reps` grew the `band` parameter above, back when refinement DID
+        re-derive the band from each span's own percentiles. Per-span percentiles refined only
+        92.9% of reps to the whole-clip boundary exactly (p95 15.3 frames, max 46). That is not
+        acceptable: a 46-frame boundary error puts "setup" in the middle of a descent, which is
+        the bug this whole rep-segmentation line of work exists to fix, arriving by a new route.
 
         Handing refinement the COARSE PASS's whole-clip band instead -- it already covers the
         whole clip, so its percentiles are exactly the whole-clip range, and it is available in
