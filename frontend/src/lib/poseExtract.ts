@@ -206,6 +206,23 @@ export function refineSegments(
 
 /* c8 ignore start — <video>/requestVideoFrameCallback/WASM glue, unrunnable under jsdom */
 
+// T3 (spec §3, §2.4) needs real wall-clock numbers for the coarse pass, the dense pass, and each
+// model load, to decide whether reusing the live overlay's landmarks is worth the complexity.
+// Off by default and read once per call (not per frame): a normal analysis pays one localStorage
+// read and zero console output. A developer opts in from devtools with
+// `localStorage.setItem("xcoach.repSignalTiming", "1")` before recording/uploading a clip, then
+// reads the five numbers straight out of the console — see notes/rep_segmentation_sp2_measurements.md.
+const TIMING_STORAGE_KEY = "xcoach.repSignalTiming";
+
+function timingEnabled(): boolean {
+  return typeof localStorage !== "undefined" && localStorage.getItem(TIMING_STORAGE_KEY) === "1";
+}
+
+function logTiming(label: string, ms: number): void {
+  // eslint-disable-next-line no-console -- the opt-in diagnostic path this whole block exists for.
+  console.log(`[repSignalTiming] ${label}: ${ms.toFixed(1)}ms`);
+}
+
 /** Seek to each frame_index in turn and run the landmarker. Shared by both passes. */
 async function sampleFrames(
   video: HTMLVideoElement,
@@ -249,6 +266,8 @@ export async function extractPoseWithReps(
   maxReps: number,
   onProgress?: (p: number) => void
 ): Promise<{ pose: PoseJson; reps: RepsPlan }> {
+  const timing = timingEnabled();
+  const totalStart = timing ? performance.now() : 0;
   const url = URL.createObjectURL(blob);
   const video = document.createElement("video");
   video.muted = true;
@@ -260,7 +279,9 @@ export async function extractPoseWithReps(
   metadataReady.catch(() => undefined);
   video.src = url;
 
+  const coarseLoadStart = timing ? performance.now() : 0;
   const coarseLandmarker = await createPoseLandmarker(LIVE_OVERLAY_TIER);
+  if (timing) logTiming("coarse model load", performance.now() - coarseLoadStart);
   try {
     await metadataReady;
     const duration = await resolveDuration(video);
@@ -269,8 +290,10 @@ export async function extractPoseWithReps(
     // Pass 1 — coarse. Lite, every COARSE_STRIDE-th frame, only to locate repetitions.
     const coarseIndices: number[] = [];
     for (let i = 0; i <= lastFrameIndex; i += COARSE_STRIDE) coarseIndices.push(i);
+    const coarsePassStart = timing ? performance.now() : 0;
     const coarseFrames = await sampleFrames(video, coarseLandmarker, coarseIndices,
       (p) => onProgress?.(p * COARSE_PROGRESS_SHARE));
+    if (timing) logTiming("coarse pass", performance.now() - coarsePassStart);
     const signal = TS_REP_SIGNALS[movement];
     const coarseSignal = coarseFrames.map((f) =>
       signal ? signal(f.landmarks as SignalLandmark[] | null) : NaN);
@@ -292,11 +315,15 @@ export async function extractPoseWithReps(
     // extra model load when the analysis tier happens to be Lite — see Task 12 for where that
     // gets quantified.
     const denseIndices = spanFrameIndices(spans);
+    const denseLoadStart = timing ? performance.now() : 0;
     const denseLandmarker = await createPoseLandmarker(tier);
+    if (timing) logTiming("dense model load", performance.now() - denseLoadStart);
     let denseFrames: PoseJsonFrame[];
     try {
+      const densePassStart = timing ? performance.now() : 0;
       denseFrames = await sampleFrames(video, denseLandmarker, denseIndices,
         (p) => onProgress?.(COARSE_PROGRESS_SHARE + p * DENSE_PROGRESS_SHARE));
+      if (timing) logTiming("dense pass", performance.now() - densePassStart);
     } finally {
       denseLandmarker.close();
     }
@@ -315,6 +342,9 @@ export async function extractPoseWithReps(
       }
     }
     onProgress?.(1);
+    // Total covers both passes and both model loads, for comparison against the pre-SP2 single-pass
+    // baseline (spec §2.4's "did this get faster overall" question) — checkout main for that side.
+    if (timing) logTiming("total", performance.now() - totalStart);
     return {
       pose: {
         metadata: {
