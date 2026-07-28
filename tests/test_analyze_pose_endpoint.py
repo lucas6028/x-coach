@@ -222,6 +222,19 @@ class AnalyzePoseRepsValidationTests(unittest.TestCase):
         )
         self.assertEqual([w.index for w in result["rep_plan"].analyzed], [1])
 
+    def test_rejects_an_analyzed_segment_alongside_any_fallback(self) -> None:
+        """A fallback means the whole clip was analysed as one unit (run_detector forces
+        whole-clip phase assignment whenever `fallback is not None`). A segment marked
+        `analyzed=True` on top of that would be scored per-rep against phases that were never
+        assigned per-rep -- the mis-phasing this whole line of work exists to eliminate, reached
+        through `reps` instead of through re-segmentation. All three fallback strings must be
+        guarded, not just one -- looping so a partial guard still fails this test."""
+        for fallback in ("no_reps_detected", "only_partial_reps", "segmentation_disabled"):
+            with self.subTest(fallback=fallback):
+                self._assert_400(
+                    _pose(range(0, 30)), _reps([_segment(1, 0, 29)], fallback=fallback)
+                )
+
     def test_rejects_malformed_reps_json(self) -> None:
         self._assert_400(_pose(range(0, 30)), "{not json")
 

@@ -219,7 +219,17 @@ def run_detector(
 
     min_frames = max(3, int(math.ceil(max(fps, 1.0) * 0.20)))
     ctx = RuleContext(fps=fps, view_type=view_type, view_confidence=view_confidence, min_frames=min_frames)
-    analyzed = list(rep_plan.analyzed) if rep_plan is not None else select_reps(segmented, max_reps)
+    if rep_plan is not None:
+        # A non-None `fallback` already forced `segmented = []` above, so `phases` was just
+        # assigned WHOLE-CLIP, not per-rep. Scoring `rep_plan.analyzed` per-rep against those
+        # phases would be incoherent -- rules would run over `core[rep.start:rep.end+1]` slices
+        # whose phases were never assigned at that granularity. The HTTP boundary's
+        # `_validate_reps` (backend/app/routers/analyze.py) already rejects a plan shaped this
+        # way, but `run_detector` is also called directly -- by the CLI and by tests -- so the
+        # same rule is enforced again here, unconditionally, rather than trusted from the caller.
+        analyzed = [] if fallback is not None else list(rep_plan.analyzed)
+    else:
+        analyzed = select_reps(segmented, max_reps)
 
     detections: list[PoseRuleDetection] = []
     if analyzed:

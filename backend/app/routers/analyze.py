@@ -116,7 +116,8 @@ def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
         raise HTTPException(status_code=400, detail="Malformed reps JSON.") from exc
     if not isinstance(plan, dict) or not isinstance(plan.get("segments"), list):
         raise HTTPException(status_code=400, detail="reps must have a 'segments' list.")
-    if plan.get("fallback") not in _FALLBACKS:
+    fallback = plan.get("fallback")
+    if fallback not in _FALLBACKS:
         raise HTTPException(status_code=400, detail="Unknown reps.fallback value.")
 
     segments = plan["segments"]
@@ -146,6 +147,17 @@ def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
         window = RepWindow(index=index, start=start, end=end, partial=bool(segment.get("partial")))
         windows.append(window)
         if segment.get("analyzed"):
+            if fallback is not None:
+                # A fallback means the whole clip was analysed as one unit -- see run_detector,
+                # where a non-None fallback forces whole-clip phase assignment. No individual rep
+                # can ALSO be marked as separately scored: that combination is exactly the
+                # mis-phasing this module exists to prevent, just reached through `reps` instead
+                # of through re-segmentation -- rules would run per-rep over phases that were
+                # never assigned per-rep.
+                raise HTTPException(
+                    status_code=400,
+                    detail="A rep segment cannot be 'analyzed' when reps.fallback is set.",
+                )
             # The check the others miss: a window over frames that were never extracted scores
             # all-invalid data and yields an empty detection list, i.e. a clean verdict from
             # nothing. See the test that pins this.
@@ -158,7 +170,7 @@ def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
                 )
             analyzed.append(window)
 
-    return RepPlan(reps=tuple(windows), analyzed=tuple(analyzed), fallback=plan.get("fallback"))
+    return RepPlan(reps=tuple(windows), analyzed=tuple(analyzed), fallback=fallback)
 
 
 @router.post("/analyze")
