@@ -115,7 +115,7 @@ export function refineWindow(
   denseSignal: (number | undefined)[], span: FrameSpan, coarse: FrameSpan,
   fps: number, lastFrameIndex: number
 ): { start: number; end: number; refined: Refinement } {
-  const slice = [];
+  const slice: number[] = [];
   for (let i = span.start; i <= span.end; i += 1) {
     const value = denseSignal[i];
     slice.push(value === undefined ? NaN : value);

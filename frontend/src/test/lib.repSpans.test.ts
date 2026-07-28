@@ -65,12 +65,30 @@ describe("spanForRep", () => {
     expect(span).toEqual({ start: 0, end: 89 });
   });
 
-  it("clamps to the clip", () => {
-    const coarse = repSignal(1, 30);
-    const [rep] = segmentReps(coarse, { fps: 10 });
-    const span = spanForRep(coarse, rep, 89);
-    expect(span.start).toBeGreaterThanOrEqual(0);
-    expect(span.end).toBeLessThanOrEqual(89);
+  it("computes the exact frame span from the valley, coarseHalf, and padding when nothing clamps", () => {
+    // A synthetic 10-sample coarse window [40, 49] with its lone minimum at coarse position 45,
+    // chosen so the padded span lands comfortably inside [0, 300] and neither edge clamps — this
+    // pins the arithmetic itself, not clamping behaviour.
+    //   valleyFrame = 45 * COARSE_STRIDE(3)                 = 135
+    //   coarseHalf  = floor((49 - 40 + 1) * COARSE_STRIDE / 2) = floor(10 * 3 / 2) = 15
+    //   half        = coarseHalf(15) + REP_PADDING_FRAMES(24)  = 39
+    //   span        = [135 - 39, 135 + 39]                     = [96, 174]
+    const coarse = new Array(50).fill(100);
+    coarse[45] = 10;
+    const rep = { index: 1, start: 40, end: 49, partial: false };
+    const span = spanForRep(coarse, rep, 300);
+    expect(span).toEqual({ start: 96, end: 174 });
+  });
+
+  it("clamps only the edge that actually exceeds the clip", () => {
+    // Same rep as above (unclamped span [96, 174]), but the clip now ends at frame 150 — short
+    // enough that the end clamps (174 > 150) while the start (96) does not. A stub that returns
+    // {0, lastFrameIndex} unconditionally would produce {0, 150} here, not {96, 150}.
+    const coarse = new Array(50).fill(100);
+    coarse[45] = 10;
+    const rep = { index: 1, start: 40, end: 49, partial: false };
+    const span = spanForRep(coarse, rep, 150);
+    expect(span).toEqual({ start: 96, end: 150 });
   });
 
   it("pads by the measured constant", () => {
