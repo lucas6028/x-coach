@@ -2,7 +2,7 @@
 
 import { supabase } from "./lib/supabase";
 import type { AnalyzableMovement } from "./lib/movements";
-import type { PoseJson } from "./lib/poseExtract";
+import type { PoseJson, RepsPlan } from "./lib/poseExtract";
 
 export interface VideoMeta {
   fps: number;
@@ -102,6 +102,20 @@ export interface Analysis {
   /** Which detector produced this analysis. Absent on analyses predating per-movement
    *  selection; consumers fall back to "Squat". */
   movement?: string;
+  // Present only when the request carried a client-planned `reps` (see `analyzePose`'s `reps`
+  // param). NOT the same shape as the request's RepsPlan: the backend reports which segments it
+  // actually analyzed (`analyzed` indices) and adds `start_time`/`end_time` per segment, derived
+  // server-side from fps — the browser's plan only knows frame indices.
+  reps?: {
+    detected: number;
+    analyzed: number[];
+    max_reps: number | null;
+    fallback: string | null;
+    segments: {
+      index: number; start_frame: number; end_frame: number;
+      start_time: number; end_time: number; analyzed: boolean; partial: boolean;
+    }[];
+  };
 }
 
 // A row in the user's history list (the promoted columns, no heavy result payload).
@@ -570,10 +584,13 @@ export const api = {
     return (await res.json()) as Analysis;
   },
 
-  async analyzePose(movement: string, pose: PoseJson, video: Blob): Promise<Analysis> {
+  async analyzePose(movement: string, pose: PoseJson, video: Blob, reps?: RepsPlan): Promise<Analysis> {
     const form = new FormData();
     form.append("movement", movement);
     form.append("pose", JSON.stringify(pose));
+    // Only sent when the browser actually planned the extraction. Omitting it keeps the endpoint
+    // on its pre-SP2 path, which is what the CLI and any old client rely on.
+    if (reps) form.append("reps", JSON.stringify(reps));
     const ext = video.type.includes("mp4") ? "mp4" : "webm";
     form.append("file", video, `capture.${ext}`);
     const res = await fetch("/api/analyze/pose", {

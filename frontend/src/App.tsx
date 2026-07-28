@@ -7,8 +7,9 @@ import CoachTray from "./components/CoachTray";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
-import { extractPoseFromBlob } from "./lib/poseExtract";
+import { extractPoseWithReps } from "./lib/poseExtract";
 import type { PoseTier } from "./lib/poseTier";
+import { DEFAULT_MAX_REPS } from "./lib/repSpans";
 import { useI18n } from "./lib/i18n";
 import type { AnalyzableMovement } from "./lib/movements";
 
@@ -111,18 +112,19 @@ export default function App() {
   const movementError =
     !movementsLoaded || known ? "" : t("studio.movementUnavailable", { movement });
 
-  // Client-side capture path: extraction happens in-browser (extractPoseFromBlob), then the pose
-  // JSON + original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
+  // Client-side capture path: extraction happens in-browser (extractPoseWithReps — the two-pass
+  // RS-SP2 extractor, which also plans which reps to analyze), then the pose JSON + rep plan +
+  // original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
   const runPoseAnalysis = useCallback(async (blob: Blob, tier: PoseTier) => {
     setLoading(true);
     setError("");
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
     try {
-      const pose = await extractPoseFromBlob(blob, tier);
+      const { pose, reps } = await extractPoseWithReps(blob, tier, canonicalMovement, DEFAULT_MAX_REPS);
       // The user's selected movement, not a hardcoded "Squat". `analyzePose` has taken a movement
       // since the client-capture path landed; this is the caller that finally supplies a real one.
-      const data = await api.analyzePose(canonicalMovement, pose, blob);
+      const data = await api.analyzePose(canonicalMovement, pose, blob, reps);
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;

@@ -20,6 +20,12 @@ import {
 /** The grid every frame_index is expressed on, matching poseExtract's fixed sampling cadence. */
 export const CANONICAL_FPS = 30;
 
+// How many reps the client-capture path (App.tsx's runPoseAnalysis -> extractPoseWithReps) plans
+// for by default. Must equal backend/app/config.py's DEFAULT_MAX_REPS (3) — that constant is what
+// the server falls back to when a request omits `reps` entirely, and RS-SP2 requires the two
+// paths to make the same first/middle/last selection for the same clip.
+export const DEFAULT_MAX_REPS = 3;
+
 /** The frame_index of the sample at `t` seconds. */
 export function frameIndexAt(t: number): number {
   return Math.round(t * CANONICAL_FPS);
