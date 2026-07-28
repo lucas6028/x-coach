@@ -162,7 +162,19 @@ export function refineWindow(
     slice.push(value === undefined ? NaN : value);
   }
   const windows = segmentReps(centeredMedian(slice, DENSE_SMOOTH_WINDOW), { fps, band: band ?? undefined });
-  if (windows.length === 0) return { start: coarse.start, end: coarse.end, refined: false };
+  if (windows.length === 0) {
+    // Fall back to the coarse boundary, but clamped INTO the extracted span: `coarse` is the
+    // pre-padding rep window, and the valley anchor (spec §2.8) only guarantees the valley itself
+    // sits inside `span`, not that the whole coarse window does — a coarse window wider than
+    // `coarseHalf + REP_PADDING_FRAMES` on one side can still poke out. Returning a boundary
+    // outside `span` would point at frames that were never densely extracted (all-null landmarks),
+    // which is exactly the "clean verdict from nothing" failure `_validate_reps` exists to reject.
+    return {
+      start: Math.max(span.start, coarse.start),
+      end: Math.min(span.end, coarse.end),
+      refined: false,
+    };
+  }
 
   // The coarse window says WHICH rep this span is about; pick the refined window that overlaps it
   // most, so a neighbouring rep caught by the padding cannot steal the boundary.

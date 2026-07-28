@@ -191,7 +191,14 @@ export function refineSegments(
   if (plan.fallback !== null) return plan;
   // Squat's defaults; a movement with rep knobs would pass its own, and coarseBand orients
   // internally so the band lands in the same space segmentReps compares against.
-  const band = coarseBand(coarseSignal);
+  //
+  // SMOOTHED, not raw: `planReps` (above) derives every rep boundary — and REP_PADDING_FRAMES's
+  // 98.6% coverage figure was measured — from `centeredMedian(coarseSignal, COARSE_SMOOTH_WINDOW)`,
+  // not the raw decimated signal. tests/test_coarse_segmentation_corpus.py's `coarse_band` is built
+  // the same smoothed way. Handing coarseBand the raw signal here would derive the refinement band
+  // from a different array than the one the corpus test (and REP_PADDING_FRAMES) certify, even
+  // though both are called `coarseSignal` — a certification gap, not (as measured) a numeric one.
+  const band = coarseBand(centeredMedian(coarseSignal, COARSE_SMOOTH_WINDOW));
   const segments = plan.segments.map((segment) => {
     if (!segment.analyzed) return segment;
     const coarse = { start: segment.start_frame, end: segment.end_frame };
@@ -202,7 +209,36 @@ export function refineSegments(
       refineWindow(denseSignal, span, coarse, CANONICAL_FPS, lastFrameIndex, band);
     return { ...segment, start_frame: start, end_frame: end, refined };
   });
-  return { ...plan, segments };
+  return { ...plan, segments: clampAgainstNeighbours(segments) };
+}
+
+/**
+ * Enforce non-overlap between adjacent segments after refinement (spec §2.1.1 clamps a rep's
+ * boundary to its OWN span, but nothing upstream of this clamps it against its NEIGHBOURS).
+ *
+ * Analyzed reps get dense-accurate boundaries; unanalyzed reps keep the coarse ones, whose error
+ * against the dense truth runs up to p95 15 / max 45 frames (repSpans.REP_PADDING_FRAMES). Nothing
+ * stops a refined `end_frame` from reaching or passing the next segment's (possibly still-coarse)
+ * `start_frame` — which would trip `_validate_reps`' overlap check on the backend and 400 the whole
+ * analysis. Mirrors `finalize`'s rule inside repSegmentation.ts: when two windows would share
+ * ground, the EARLIER one gives it up, computed left-to-right so a chain of overlaps resolves in
+ * one pass regardless of which side moved.
+ *
+ * DELIBERATELY does not touch `refined` when a clamp fires: that field stays whatever
+ * `refineWindow` reported (`true`/`false`/`"clipped"`) even though the boundary it describes has
+ * since moved. It is a write-only diagnostic (`_validate_reps` never lets it affect scoring — see
+ * the whole-branch review's item 8), and a clamp is expected to be rare and small (a handful of
+ * frames at most against reps that are themselves tens of frames long), so a stale label there is
+ * lower cost than adding a fourth `Refinement` value with no consumer.
+ */
+function clampAgainstNeighbours(segments: RepSegment[]): RepSegment[] {
+  const clamped = segments.map((s) => ({ ...s }));
+  for (let i = 0; i + 1 < clamped.length; i += 1) {
+    if (clamped[i].end_frame >= clamped[i + 1].start_frame) {
+      clamped[i].end_frame = Math.max(clamped[i].start_frame, clamped[i + 1].start_frame - 1);
+    }
+  }
+  return clamped;
 }
 
 /* c8 ignore start — <video>/requestVideoFrameCallback/WASM glue, unrunnable under jsdom */

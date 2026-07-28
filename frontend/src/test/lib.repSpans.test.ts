@@ -195,4 +195,15 @@ describe("refineWindow", () => {
     const out = refineWindow(flat, { start: 0, end: 119 }, { start: 20, end: 100 }, 30, LAST, null);
     expect(out).toEqual({ start: 20, end: 100, refined: false });
   });
+
+  it("clamps the coarse-boundary fallback INTO the span, not past it", () => {
+    // The valley anchor (spec §2.8) only guarantees the valley sits inside `span` — not that the
+    // whole pre-padding coarse window does. A coarse window wider than `coarseHalf +
+    // REP_PADDING_FRAMES` on one side can poke out, so an unclamped fallback here would point at
+    // frames that were never densely extracted (all-null landmarks outside the span) — exactly the
+    // "clean verdict from nothing" failure `_validate_reps` exists to reject on the backend.
+    const flat: (number | undefined)[] = new Array(LAST + 1).fill(5);
+    const out = refineWindow(flat, { start: 30, end: 90 }, { start: 0, end: 120 }, 30, LAST, null);
+    expect(out).toEqual({ start: 30, end: 90, refined: false });
+  });
 });
