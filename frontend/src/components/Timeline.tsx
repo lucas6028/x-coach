@@ -36,7 +36,15 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
         />
         {/* Spans that carry no pose data because RS-SP2 never extracted them. NEUTRAL, never a
             warning colour: they are not a problem, they are unexamined — and an empty timeline
-            must not read as "these reps were fine". */}
+            must not read as "these reps were fine".
+            The stripe colour rides `--c-hatch` (index.css): dark-on-track in light theme, and the
+            ORIGINAL white-on-track value unchanged in dark theme (a dedicated variable, not
+            `--c-content`, so the dark treatment stays byte-identical rather than picking up
+            `--c-content`'s own alpha/tone). The timeline sits on the page's own light/dark
+            surface, not the always-black video panel MetricsCards is exempted for (see that
+            file's header comment) — light is the default theme, and a white-on-white-track
+            stripe there was invisible, which let an unexamined span read as a clean one. Inline
+            `style` (not a Tailwind arbitrary value) so the gradient can reference the CSS var. */}
         {(analysis.reps?.segments ?? [])
           .filter((s) => !s.analyzed)
           .map((s) => (
@@ -44,11 +52,13 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
               key={`un-${s.index}`}
               data-testid="unanalyzed-span"
               title={t("timeline.unanalyzed")}
-              className="absolute h-2 rounded-full bg-track opacity-70
-                         [background-image:repeating-linear-gradient(45deg,transparent,transparent_3px,rgba(255,255,255,0.12)_3px,rgba(255,255,255,0.12)_6px)]"
+              className="absolute h-2 rounded-full bg-track opacity-70"
               style={{
                 left: pct(s.start_time),
                 width: `${Math.max(1.5, ((s.end_time - s.start_time) / dur) * 100)}%`,
+                backgroundImage:
+                  "repeating-linear-gradient(45deg, transparent, transparent 3px, " +
+                  "var(--c-hatch) 3px, var(--c-hatch) 6px)",
               }}
             />
           ))}
