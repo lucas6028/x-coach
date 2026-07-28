@@ -1095,7 +1095,11 @@ export function spanForRep(
   coarseSignal: number[], rep: RepWindow, lastFrameIndex: number
 ): FrameSpan {
   const valleyFrame = valleyPosition(coarseSignal, rep) * COARSE_STRIDE;
-  const coarseHalf = Math.ceil(((rep.end - rep.start + 1) * COARSE_STRIDE) / 2);
+  // floor, not ceil: the 98.6% coverage figure REP_PADDING_FRAMES is set from was measured with
+  // Python's `(end - start + 1) * STRIDE // 2`, and tests/test_coarse_segmentation_corpus.py
+  // re-measures it the same way. A one-frame difference is immaterial next to a 24-frame pad, but
+  // the constant's justification is only reproducible if both sides compute the span identically.
+  const coarseHalf = Math.floor(((rep.end - rep.start + 1) * COARSE_STRIDE) / 2);
   const half = coarseHalf + REP_PADDING_FRAMES;
   return {
     start: Math.max(0, valleyFrame - half),
