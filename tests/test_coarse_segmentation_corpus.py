@@ -100,13 +100,24 @@ class CoarseSegmentationCorpusTest(unittest.TestCase):
                 if valley - half <= d.start and d.end <= valley + half:
                     cls.covered += 1
 
-                # Refinement: re-segment the DENSE signal restricted to the padded span, then take
-                # the window overlapping the coarse one most (padding can catch a neighbour).
+                # Refinement: re-segment the padded span, then take the window overlapping the
+                # coarse one most (padding can catch a neighbour). The slice is smoothed from RAW
+                # values WITHIN the span -- not sliced out of the whole-clip-smoothed dense_signal
+                # -- because that is what the browser's refineWindow does: it only ever sees the
+                # extracted span, so the ~2 frames at each edge (DENSE_SMOOTH_WINDOW radius) get a
+                # shrunken window there, and this must reproduce that rather than borrow context
+                # from frames the client never extracted.
                 span_start, span_end = max(0, valley - half), min(last, valley + half)
-                windows = segment_reps(dense_signal[span_start : span_end + 1], fps=fps)
-                if not windows:
-                    continue
                 coarse_start, coarse_end = c.start * COARSE_STRIDE, c.end * COARSE_STRIDE
+                span_signal = centered_median(values[span_start : span_end + 1], window=DENSE_SMOOTH_WINDOW)
+                windows = segment_reps(span_signal, fps=fps)
+                if not windows:
+                    # Mirrors refineWindow's fallback: when re-segmentation finds nothing, production
+                    # returns the coarse boundary with refined=False rather than dropping the rep --
+                    # exactly the poor result this file exists to measure, so it must count as an
+                    # error here too rather than shrink the denominator.
+                    cls.refined_errors.append(max(abs(coarse_start - d.start), abs(coarse_end - d.end)))
+                    continue
                 best = max(windows, key=lambda w: max(
                     0, min(span_start + w.end, coarse_end) - max(span_start + w.start, coarse_start) + 1))
                 start, end = span_start + best.start, span_start + best.end
