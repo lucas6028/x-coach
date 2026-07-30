@@ -90,28 +90,51 @@ more anterior foot". **Anterior is exactly the axis that collapses in a frontal 
 two of the four rules are frontal, so the anterior half of that definition is not usable
 where it is most needed.
 
-**Implementation:** lead leg = **the leg whose knee is more flexed at the bottom frame**
+**Implementation:** lead leg = **the leg whose knee is more flexed at the rep's bottom frame**
 (smaller knee angle), which is measurable from every view. This is a **substitution, not a
 restatement**, and is documented in-code as such per the project's anti-hallucination rule.
 
-It is also the one design choice in this document that is directly checkable:
-`exercise_subtype` gives the true lead leg on all 174 reps, so **lead-leg accuracy is a
-measured number** in the validation output, not an assumption. If it is poor, every
+**Where that reduction happens is load-bearing, and the obvious placement is wrong.**
+`run_detector` calls `compute_raw(frames, fps)` over the **whole clip, before**
+`segment_reps` — so at metric-computation time there are no rep boundaries and therefore no
+"bottom frame" to resolve the lead side against. A per-frame "whichever knee is more flexed
+right now" is all `compute_raw` could produce, and during `setup` and `recovery` both knees
+sit near extension within noise of each other, so the chosen side **flickers frame to frame**.
+Every lead-relative metric would then swap legs mid-clip, and `centered_median` would blend
+two different legs into a single ratio that describes neither. A `lead_side` in `metric_keys`
+would additionally be median-smoothed as though `±1` were a continuous quantity.
+
+This defect would have been **invisible to the validation harness**, which hands each rep
+window in as its own clip (§4.2) — a clip-level lead side is per-rep by construction there.
+Validation would pass while production broke on any clip alternating legs, which is how
+lunges are normally performed.
+
+**Therefore:** `compute_raw` emits **both sides** symmetrically and resolves nothing
+(`left_/right_knee_forward_ratio`, `left_/right_knee_medial_offset_ratio`, and so on). Each
+**rule** resolves the lead side **over its own window**, which `run_detector` already hands it
+as a per-rep slice. The reduction belongs where the rep boundary exists, not upstream of it.
+On a fallback path the rule sees the whole clip and the resolution degrades exactly as
+everything else on that path does — stated, not hidden.
+
+Lead-leg identification is also the one design choice in this document that is directly
+checkable: `exercise_subtype` gives the true lead leg on all 174 reps, so **lead-leg accuracy
+is a measured number** in the validation output, not an assumption. If it is poor, every
 downstream lunge rule inherits the error, and the validation must say so.
 
 ### 3.3 Metrics
 
 All normalized and scale-free; MediaPipe normalized image coordinates, **y grows DOWNWARD**.
 
+Per §3.2, every side-specific metric is emitted **for both legs**; no metric names a "lead"
+leg, because `compute_raw` cannot know which leg that is.
+
 | key | definition |
 |---|---|
 | `left_knee_angle` / `right_knee_angle` | `angle_degrees(hip, knee, ankle)` per side |
 | `min_knee_angle` | the more-flexed (smaller) of the two finite sides; the rep signal |
-| `lead_side` | `-1` left / `+1` right / NaN — from the more-flexed knee at the bottom |
-| `lead_knee_angle` | knee angle of the lead side |
-| `lead_knee_forward_ratio` | `(proj(knee−ankle onto (toe−ankle)) − foot_len) / foot_len` on the lead leg — the squat detector's existing construction |
-| `lead_knee_medial_offset_ratio` | signed offset of the lead knee from the lead hip→ankle line, **positive = toward the mid-hip (medial)**, normalized by hip width |
-| `pelvis_tilt_deg` | `angle_from_horizontal(L_hip(23) → R_hip(24))`, signed so positive = contralateral (non-lead) hip lower |
+| `left_knee_forward_ratio` / `right_knee_forward_ratio` | `(proj(knee−ankle onto (toe−ankle)) − foot_len) / foot_len` per side — the squat detector's existing construction |
+| `left_knee_medial_offset_ratio` / `right_knee_medial_offset_ratio` | signed offset of that knee from its own hip→ankle line, **positive = toward the mid-hip (medial)**, normalized by hip width |
+| `pelvis_tilt_signed_deg` | `angle_from_horizontal(L_hip(23) → R_hip(24))`, signed in a **fixed** left/right convention — the rule converts it to "contralateral hip lower" once it knows the lead side |
 | `trunk_lateral_lean_deg` | `angle_from_vertical(shoulder_mid → hip_mid)` in the x–y plane |
 | `hip_width` | `distance(23, 24)` — the normalizer, emitted for diagnostics |
 
@@ -187,10 +210,41 @@ does need the sagittal plane and does take the hard gate, matching `rule_knees_f
 
 ## 4. Validation harness design
 
-### 4.1 Pose extraction
+### 4.1 Pose extraction — and it happens FIRST, before any rule is written
 
-`scripts/pose/run_pose_extraction.py` over the 18 Ex5 clips (9 video ids × cam17/cam18) →
-standard pose JSON **with the visibility channel**. The existing
+**Sequencing is deliberate.** Extraction and a view-estimation reconnaissance run come before
+detector implementation, because their result changes what `lunge_knee_past_toes` can claim.
+
+The measured precedent is discouraging: across the 45 real pose JSONs in this repo, the view
+estimator emitted `side` **exactly once**, and that one verdict was the fabricated degenerate
+fixture since removed — the corpus is 30 `rear_oblique`, 13 `rear`, 2 `unknown`. If cam18's
+genuinely sagittal Ex5 clips also come back `rear_oblique`, then `lunge_knee_past_toes` —
+hard-gated on `side` + `view_confidence ≥ 0.20` (§3.4) — **fires zero times in production**.
+§3.5 argues the two frontal rules dodge the `pushup_elbow_flare` permanently-silent trap; if
+that happens, the sagittal rule walks straight into it, and the spec would be claiming the
+escape while shipping the trap.
+
+**This is one cheap run over the extracted pose JSON and it must precede rule implementation.**
+It decides whether `lunge_knee_past_toes` ships production-live or is honestly recorded as
+oracle-validatable-only. Either outcome is fine; discovering it after the rule is written is
+not.
+
+**Verified extraction route** (interface read, not assumed —
+`scripts/pose/run_pose_extraction.py` `--dataset unlabeled` rglobs arbitrary mp4 directories
+and shells out per video):
+
+```
+.venv\Scripts\python.exe scripts/pose/run_pose_extraction.py ^
+  --dataset unlabeled ^
+  --video-dir data/REHAB24-6/Ex5 ^
+  --output-dir data/REHAB24-6/processed/lunge_pose_json ^
+  --no-video
+```
+
+`data/REHAB24-6/Ex5` holds exactly the 18 target mp4s (9 ids × cam17/cam18), so the rglob
+needs no filtering.
+
+The result is standard pose JSON **with the visibility channel**. The existing
 `data/REHAB24-6/processed/mediapipe_landmarks_cache/*.npz` cannot be reused: it stores only
 `image` `(N,33,2)` and `world` `(N,33,3)` arrays, with no visibility, and the detector's
 frame-validity gate requires it.
@@ -239,23 +293,32 @@ The gap between them is the point. If `lunge_knee_past_toes` never fires in the 
 pass, that pass alone cannot distinguish "the rule is wrong" from "the `side` gate never
 opened". Running both separates a **gate failure** from a **rule failure**.
 
-**Free by-product:** the production pass compares estimated view against 174 labeled
-orientations — the first time view estimation has been measured against ground truth in this
-repository. Note in advance that `allow_front=False` means front-facing clips *cannot* be
-labeled `front`; the comparison must score that as a known structural limit, not as an error.
+**By-product — and it is narrower than it first looks.** The dataset's orientation vocabulary
+is `{front, half-profile, profile}`; the estimator's reachable labels under
+`allow_front=False` are `{side, rear, rear_oblique, unknown}`. There is no `front` for the
+estimator to hit and no `rear` in the data, so these are not two labelings of the same space
+and **no 174-rep confusion matrix exists**. What is genuinely checkable is one cell: *does
+cam18, on a rep the dataset calls cam17-`front` and therefore cam18-`side`, actually read
+`side`?* That single question is the §4.1 gate. Report it as that, not as "view estimation
+validated against ground truth" — `notes/` must not inherit the larger sentence.
 
 ### 4.5 What gets reported
 
 Per rule:
 
+- **Per-subject AUC of the underlying continuous metric against correctness — median and
+  range across the 8 subjects — reported as the headline.** Pooled AUC is secondary. The 174
+  reps are **not independent**: they are ~22 reps from each of 8 people, and pooling them
+  lets one subject's separation masquerade as a population result. This project has already
+  been burned twice by exactly this shape of optimism (a fixed-λ ridge fabricating a null; a
+  1-sequence oracle-debiased preview running 2.2× optimistic), so the conservative statistic
+  leads. **No p-value is computed on pooled reps** — the independence assumption it needs
+  does not hold here.
+- AUC is threshold-free, which is what explains *why* a threshold did or did not separate —
+  e.g. a genuinely informative metric whose spec threshold happens to sit in the tail.
 - 2×2 contingency of fired/not-fired against correct/incorrect, with sensitivity and
-  specificity.
-- **Threshold-free AUC** of the underlying continuous metric against correctness. This is the
-  diagnostic that explains *why* a threshold did or did not separate — e.g. a good metric
-  whose spec threshold sits in the distribution's tail.
+  specificity, per subject and pooled.
 - Where the spec threshold falls in that metric's distribution (percentile).
-- **Per-person breakdown across the 8 subjects.** A rule that separates on one subject and
-  nowhere else is noise, and an aggregate number would hide that.
 
 Plus, once for the whole dataset:
 
@@ -286,6 +349,11 @@ Matching the repo's existing split:
   contingency math — with synthetic inputs and no data dependency.
 - **Local-only:** the data-backed validation run is `skipUnless` the files exist, following
   `tests/test_view_regression_corpus.py`, because `data/` is gitignored.
+- **CI-visible, and the one test that must exist:** an **alternating-lead multi-rep fixture** —
+  a synthetic clip whose reps lead left, right, left — asserting each rep's fault is attributed
+  to the leg that actually led it. This is the test the harness structurally cannot provide
+  (§3.2: it feeds one rep per clip), and it is the regression guard on the lead-side reduction
+  living in the rules rather than in `compute_raw`.
 - **Regression:** `tests/test_movement_registry.py` gains Lunge resolution
   (`get_detector("Lunge")` and `get_detector("lunge")`), and the existing squat
   byte-for-byte gate must still pass — Squat is production.
@@ -313,9 +381,14 @@ These are binding on how results are written up, not optional caveats.
    real and simply invisible in this dataset; that is a stated possibility, not a hidden one.
 4. **A validated rule is validated on THIS dataset.** REHAB24-6 is a lab recording with fixed
    cameras, controlled lighting and instructed errors. Any claim must be scoped to it.
-5. **`lunge_pelvic_drop` may have no true positives here.** Nothing guarantees the dataset's
-   instructed errors include a Trendelenburg pattern. If its fire rate is near zero on both
-   classes, the honest conclusion is "not exercised by this dataset", **not** "the rule works".
+5. **`lunge_pelvic_drop`'s likely failure is false positives, not silence.** In a frontal view
+   of a **split stance** the `L_hip → R_hip` vector is rotated in the transverse plane, so its
+   image projection **shortens**, and `atan2(dy, dx)` on a shortened `dx` **inflates** the
+   apparent tilt — the deeper the lunge, the worse. So the first number to read for this rule
+   is **specificity on correct reps**, not sensitivity: the failure mode to expect is firing
+   on deep, correctly-performed reps. Separately, nothing guarantees the dataset's instructed
+   errors include a Trendelenburg pattern at all; if the fire rate is near zero on **both**
+   classes the honest conclusion is "not exercised by this dataset", **not** "the rule works".
 
 ---
 
@@ -325,7 +398,9 @@ These are binding on how results are written up, not optional caveats.
 |---|---|
 | cam18 `-transposed` rotation not baked into pixels | Verify first; STOP condition, invalidates all sagittal results |
 | Lead-leg heuristic inaccurate | Measured directly against `exercise_subtype`; if poor, every rule inherits it and the writeup says so |
-| `side` gate never opens on cam18 | The oracle pass exists precisely to separate this from rule failure |
+| **Lead side resolved in the wrong place** (`compute_raw`, where no rep boundary exists) → flickering side, two legs blended by `centered_median`, and a defect the harness cannot see | §3.2 puts the reduction in the rules; the alternating-lead multi-rep fixture (§5) is the guard |
+| `side` gate never opens on cam18 → `lunge_knee_past_toes` permanently silent in production | Checked **before** the rule is written (§4.1); the oracle pass then separates gate failure from rule failure |
+| `lunge_pelvic_drop` inflated by split-stance foreshortening | Read specificity on correct reps first (§6.5) |
 | MediaPipe locks onto the wrong person on contaminated cam17 clips | cam17 reported with and without the 40 level-2/3 reps; cam18 clean throughout |
 | Extraction cost | 18 clips ≈ 1300 frames each; CPU MediaPipe, one-time |
 | Scope creep into shipping Lunge to users | Explicitly out of scope; `DEFAULT_ANALYSIS_MOVEMENT` stays `"Squat"` and `ANALYZABLE_MOVEMENTS` stays `["Squat"]`, confirmed as a final step |
