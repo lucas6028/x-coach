@@ -122,9 +122,16 @@ the same module-level documentation push-up received.
 
 ### 3.4 Rules
 
-Four rules, all four implementable. Thresholds AND severity ramps are copied from the parent
-spec — unlike the Push-up section, the Lunge section states ramps explicitly, so nothing here
-is a rule-level invention.
+Four rules, all four implementable. Unlike the Push-up section — which states no severity
+ramp at all, forcing five rule-level choices — the Lunge section states its ramps, so
+**nothing here is a rule-level invention**. Three ramps are given as explicit `ramp a → b`
+lines (`lunge_knee_valgus` 0.10 → 0.25, `lunge_insufficient_depth` 100° → 130°,
+`lunge_pelvic_drop` 8° → 20°). The fourth, `lunge_knee_past_toes`, is written as
+"flag when > 0.10 … severe ≥ 0.30" — identical wording to the squat's `knees_forward` entry,
+which this repo already reads as a 0.10 → 0.30 ramp via `KNEE_FORWARD_MILD` /
+`KNEE_FORWARD_SEVERE` in `src/pose/pose_rule_detector.py`. **Lunge reuses those two constants
+rather than restating the numbers**, so the reading stays single-sourced and no new number
+enters the codebase.
 
 | fault_id | Fire threshold | Severity ramp | View handling | Precedent followed |
 |---|---|---|---|---|
