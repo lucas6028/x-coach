@@ -246,106 +246,212 @@ def _lm(x: float, y: float, visibility: float = 0.95) -> dict:
     return {"x": x, "y": y, "z": 0.0, "visibility": visibility}
 
 
-def _knee_xy(
+def _knee_at(
     hip_xy: tuple[float, float],
     ankle_xy: tuple[float, float],
-    knee_angle: float,
-    lateral_sign: float,
+    along: float,
+    perpendicular: float,
 ) -> tuple[float, float]:
-    """Place the knee so interior angle(hip, knee, ankle) == `knee_angle` by construction.
+    """Place a knee at (`along`, `perpendicular`) in the leg's own frame.
 
-    Same perpendicular-bisector construction as tests/test_pushup.py::_elbow_xy (d = h /
-    tan(angle/2), h = half the hip-ankle distance), which is the proven way to make a
-    requested joint angle actually materialise. `lateral_sign` picks which side of the
-    hip-ankle line the knee sits on, which is what lets a test place a knee medially or
-    laterally without disturbing the angle.
+    `along` is the fraction of the way from hip to ankle; `perpendicular` is the signed
+    displacement off the hip-ankle line in ABSOLUTE image units, positive along the leg's
+    left-hand normal.
+
+    WHY NOT the perpendicular-bisector angle construction that tests/test_pushup.py::_elbow_xy
+    uses: for THIS metric that construction is the wrong control. `_medial_offset_ratio`
+    measures exactly the perpendicular displacement, so a fixture that requests a knee ANGLE
+    is implicitly requesting a perpendicular offset -- and a 90-degree in-image knee bend over
+    a 0.40-long leg puts the knee 0.20 off the line, which is 1.7 HIP WIDTHS, an order of
+    magnitude past the spec's 0.10 fire threshold. Controlling the offset directly makes
+    `left_knee_medial_offset_ratio` equal the requested value BY CONSTRUCTION, which is the
+    property a fixture is supposed to have; the knee angle is then derived and asserted as
+    measured rather than requested.
     """
     hx, hy = hip_xy
     ax, ay = ankle_xy
-    mx, my = (hx + ax) / 2.0, (hy + ay) / 2.0
-    half_len = math.hypot(hx - ax, hy - ay) / 2.0
-    d = 0.0 if knee_angle >= 179 else half_len / math.tan(math.radians(knee_angle) / 2.0)
     dx, dy = ax - hx, ay - hy
     norm = math.hypot(dx, dy)
-    perp = (1.0, 0.0) if norm < 1e-9 else (-dy / norm, dx / norm)
-    return (mx + lateral_sign * d * perp[0], my + lateral_sign * d * perp[1])
+    ux, uy = (0.0, 1.0) if norm < 1e-9 else (dx / norm, dy / norm)
+    px, py = -uy, ux
+    return (hx + along * dx + perpendicular * px, hy + along * dy + perpendicular * py)
 
 
 def lunge_frame(
-    left_knee_angle: float = 170.0,
-    right_knee_angle: float = 170.0,
-    left_lateral_sign: float = -1.0,
-    right_lateral_sign: float = 1.0,
+    lead: str = "left",
+    lead_medial: float = 0.0,
+    trail_medial: float = 0.0,
+    lead_anterior: float = 0.60,
     pelvis_tilt_deg: float = 0.0,
+    lead_offset: float = 0.10,
     frame_index: int = 0,
 ) -> dict:
-    """One lunge frame, upright subject seen frontally, y growing DOWNWARD.
+    """One OBLIQUE-view lunge frame, y growing DOWNWARD. Split stance along image x.
 
     Knobs:
-      left/right_knee_angle -- interior hip-knee-ankle angle for that leg (see `_knee_xy`).
-      left/right_lateral_sign -- which side of its own hip-ankle line each knee sits on.
-                        The hips are at x=0.44 (left) and x=0.56 (right), so the mid-hip is
-                        x=0.50 and MEDIAL means +x for the left leg and -x for the right.
-                        Passing left_lateral_sign=+1 therefore drives the LEFT knee medially.
-      pelvis_tilt_deg -- rotates the hip pair about the mid-hip, positive = RIGHT hip lower,
-                        matching `pelvis_tilt_signed_deg`'s convention exactly.
+      lead          -- "left" or "right"; which leg is forward. The lead ankle is displaced
+                       by `lead_offset` along image x, which is what gives the lead leg a
+                       genuinely different in-image knee angle from the trailing leg.
+      lead_medial   -- lead-knee displacement toward the midline, IN HIP WIDTHS.
+      trail_medial  -- the same for the trailing leg.
+      lead_anterior -- lead-knee displacement in the ANTERIOR (step) direction, in hip widths.
+                       This is what bends the lead knee in-image; the default 0.60 gives a
+                       clearly-flexed lead leg against a straight trailing one.
+      pelvis_tilt_deg -- rotates the hip pair about the mid-hip; POSITIVE = RIGHT hip lower,
+                       matching `pelvis_tilt_signed_deg`'s convention exactly.
+
+    ------------------------------------------------------------------------------------
+    TWO PROJECTION FACTS THIS FIXTURE ENCODES. Both are properties of monocular geometry,
+    not fixture conveniences, and both must be carried into `rule_knee_valgus`'s docstring.
+    ------------------------------------------------------------------------------------
+
+    (1) IN A STRICTLY FRONTAL VIEW, in-image knee flexion and medial offset are the SAME
+        degree of freedom. A knee on the hip-ankle line has an interior angle of exactly
+        180 degrees, so the ONLY way to bend a knee in-image is to move it off that line --
+        which is precisely what `_medial_offset_ratio` measures. A lunge's real flexion is
+        sagittal and projects onto the leg line frontally, contributing nothing to either.
+        Consequence: `resolve_lead_side` and `rule_knee_valgus` read the same quantity in a
+        pure frontal view. This fixture uses an OBLIQUE stance to break the degeneracy, and
+        `front_oblique`/`rear_oblique` are the labels production actually reaches anyway.
+
+    (2) OBLIQUELY, ANTERIOR KNEE TRAVEL CONTAMINATES THE VALGUS PROXY. `lead_anterior` and
+        `lead_medial` add to the SAME perpendicular axis, because an oblique camera gives the
+        anterior direction an in-image component. So `_medial_offset_ratio` cannot separate
+        "knee travelled forward" from "knee caved inward" off-axis; it is clean only in a true
+        frontal view, which is the view production never emits. That is a genuine limitation
+        of the spec's frontal-plane proxy under this pipeline's reachable view labels, and it
+        is documented rather than corrected -- correcting it needs depth this pipeline lacks.
+
+    THE OPEN QUESTIONS THESE RAISE, which Phase 2 must answer on real data: does
+    `resolve_lead_side` work on the 88 cam17 reps the dataset calls `front` (if in-image knee
+    angles there are near-symmetric, the ambiguity guard fires and the frontal rules go silent
+    on exactly the camera routed to them), and does `lunge_knee_valgus` fire in proportion to
+    step depth rather than to correctness (the signature of contamination (2))? Task 8 Step 3
+    reports the unresolved rate and Step 4 reads the valgus/depth relationship for exactly
+    these reasons -- do not treat either as a harness bug.
     """
     half_hip = 0.06
     tilt = math.radians(pelvis_tilt_deg)
     left_hip = (0.50 - half_hip * math.cos(tilt), 0.50 - half_hip * math.sin(tilt))
     right_hip = (0.50 + half_hip * math.cos(tilt), 0.50 + half_hip * math.sin(tilt))
-    left_ankle = (0.44, 0.90)
-    right_ankle = (0.56, 0.90)
+    # The lead ankle steps forward along image x; the trailing ankle stays under its hip.
+    lead_shift = lead_offset if lead == "left" else -lead_offset
+    left_ankle = (0.44 + (lead_shift if lead == "left" else 0.0), 0.90)
+    right_ankle = (0.56 + (lead_shift if lead == "right" else 0.0), 0.90)
+
+    hip_width = math.dist(left_hip, right_hip)
+    # Medial is toward the mid-hip. `_knee_at`'s +perpendicular is the leg's left-hand normal,
+    # which points toward the midline for one leg and away for the other, so the sign flips.
+    left_sign = 1.0 if left_hip[0] < right_hip[0] else -1.0
+    left_medial = lead_medial if lead == "left" else trail_medial
+    right_medial = lead_medial if lead == "right" else trail_medial
+    # Anterior travel lands on the same perpendicular axis -- see fact (2) in the docstring.
+    # It is applied to the LEAD leg only; the trailing leg stays straight.
+    left_anterior = lead_anterior if lead == "left" else 0.0
+    right_anterior = lead_anterior if lead == "right" else 0.0
 
     lm = [_lm(0.50, 0.50) for _ in range(33)]
     lm[11], lm[12] = _lm(0.44, 0.25), _lm(0.56, 0.25)
     lm[23], lm[24] = _lm(*left_hip), _lm(*right_hip)
-    lm[25] = _lm(*_knee_xy(left_hip, left_ankle, left_knee_angle, left_lateral_sign))
-    lm[26] = _lm(*_knee_xy(right_hip, right_ankle, right_knee_angle, right_lateral_sign))
+    lm[25] = _lm(*_knee_at(left_hip, left_ankle, 0.5,
+                           left_sign * (left_medial + left_anterior) * hip_width))
+    lm[26] = _lm(*_knee_at(right_hip, right_ankle, 0.5,
+                           -left_sign * (right_medial + right_anterior) * hip_width))
     lm[27], lm[28] = _lm(*left_ankle), _lm(*right_ankle)
-    lm[29], lm[30] = _lm(0.42, 0.92), _lm(0.58, 0.92)
-    lm[31], lm[32] = _lm(0.48, 0.94), _lm(0.60, 0.94)
+    lm[29], lm[30] = _lm(left_ankle[0] - 0.02, 0.92), _lm(right_ankle[0] - 0.02, 0.92)
+    lm[31], lm[32] = _lm(left_ankle[0] + 0.04, 0.94), _lm(right_ankle[0] + 0.04, 0.94)
     return {"frame_index": frame_index, "landmarks": lm}
 
 
+def mirrored(frame: dict) -> dict:
+    """The same body FACING THE OTHER WAY: left/right landmark CONTENTS swapped, then the
+    whole thing reflected about x=0.5.
+
+    Reflecting x alone is not a facing flip -- it moves landmark 23 to the right-hand side of
+    the image while leaving it the "left hip", and since `pelvis_tilt_signed_deg` reads
+    `right_hip[1] - left_hip[1]` and reflection does not touch y, such a test passes trivially
+    without exercising anything. Swapping the contents of every left/right pair is what a real
+    turn-around does.
+    """
+    lm = [dict(item) for item in frame["landmarks"]]
+    for left, right in ((11, 12), (23, 24), (25, 26), (27, 28), (29, 30), (31, 32), (7, 8)):
+        lm[left], lm[right] = lm[right], lm[left]
+    for item in lm:
+        item["x"] = 1.0 - item["x"]
+    return {"frame_index": frame.get("frame_index", 0), "landmarks": lm}
+
+
 class LungeMetricTests(unittest.TestCase):
-    def test_knee_angles_track_the_requested_values(self) -> None:
-        from src.pose.movements.lunge import lunge_compute_raw
-
-        raw = lunge_compute_raw([lunge_frame(left_knee_angle=85.0, right_knee_angle=165.0)], 30.0)
-        self.assertTrue(raw[0]["valid"])
-        self.assertAlmostEqual(raw[0]["left_knee_angle"], 85.0, delta=3.0)
-        self.assertAlmostEqual(raw[0]["right_knee_angle"], 165.0, delta=3.0)
-
-    def test_min_knee_angle_picks_the_more_flexed_leg(self) -> None:
-        from src.pose.movements.lunge import lunge_compute_raw
-
-        raw = lunge_compute_raw([lunge_frame(left_knee_angle=85.0, right_knee_angle=165.0)], 30.0)
-        self.assertAlmostEqual(raw[0]["min_knee_angle"], 85.0, delta=3.0)
-
-    def test_medial_offset_is_positive_toward_the_midline_on_both_legs(self) -> None:
-        # The sign convention is the whole point: "medial" must mean toward the mid-hip for
-        # BOTH legs, which is opposite image-x directions for left and right.
+    def test_medial_offset_equals_the_requested_displacement(self) -> None:
+        # Controlled by construction: `lead_medial` is in hip widths and the metric normalizes
+        # by hip width, so the two must agree to within the fixture's rounding.
         from src.pose.movements.lunge import lunge_compute_raw
 
         raw = lunge_compute_raw(
-            [lunge_frame(left_knee_angle=90.0, right_knee_angle=90.0,
-                         left_lateral_sign=1.0, right_lateral_sign=-1.0)],
-            30.0,
+            [lunge_frame(lead="left", lead_medial=0.18, lead_anterior=0.0)], 30.0
         )
-        self.assertGreater(raw[0]["left_knee_medial_offset_ratio"], 0.0)
-        self.assertGreater(raw[0]["right_knee_medial_offset_ratio"], 0.0)
+        self.assertTrue(raw[0]["valid"])
+        self.assertAlmostEqual(raw[0]["left_knee_medial_offset_ratio"], 0.18, delta=0.01)
 
-    def test_medial_offset_is_negative_when_the_knee_tracks_outside(self) -> None:
+    def test_medial_offset_means_toward_the_midline_on_the_right_leg_too(self) -> None:
+        # The sign convention is the whole point: "medial" is toward the mid-hip for BOTH
+        # legs, which is opposite image-x directions for left and right.
         from src.pose.movements.lunge import lunge_compute_raw
 
         raw = lunge_compute_raw(
-            [lunge_frame(left_knee_angle=90.0, right_knee_angle=90.0,
-                         left_lateral_sign=-1.0, right_lateral_sign=1.0)],
-            30.0,
+            [lunge_frame(lead="right", lead_medial=0.18, lead_anterior=0.0)], 30.0
+        )
+        self.assertAlmostEqual(raw[0]["right_knee_medial_offset_ratio"], 0.18, delta=0.01)
+
+    def test_a_knee_tracking_outside_reads_negative(self) -> None:
+        from src.pose.movements.lunge import lunge_compute_raw
+
+        raw = lunge_compute_raw(
+            [lunge_frame(lead="left", lead_medial=-0.18, lead_anterior=0.0)], 30.0
         )
         self.assertLess(raw[0]["left_knee_medial_offset_ratio"], 0.0)
-        self.assertLess(raw[0]["right_knee_medial_offset_ratio"], 0.0)
+
+    def test_a_well_tracked_lunge_sits_below_the_fire_threshold(self) -> None:
+        # THE SCALE CHECK. Without it, the rule-level boundary tests (which inject the metric
+        # directly) would prove `severity_from_range` works while never establishing that
+        # `_medial_offset_ratio` produces spec-scale values from an actual body. A correct
+        # lunge must land well under the spec's 0.10; a caved one inside its 0.10-0.25 ramp.
+        from src.pose.movements.lunge import lunge_compute_raw
+
+        good = lunge_compute_raw(
+            [lunge_frame(lead="left", lead_medial=0.02, lead_anterior=0.0)], 30.0
+        )[0]
+        self.assertLess(abs(good["left_knee_medial_offset_ratio"]), 0.10)
+
+        caved = lunge_compute_raw(
+            [lunge_frame(lead="left", lead_medial=0.18, lead_anterior=0.0)], 30.0
+        )[0]
+        self.assertGreater(caved["left_knee_medial_offset_ratio"], 0.10)
+        self.assertLess(caved["left_knee_medial_offset_ratio"], 0.25)
+
+    def test_anterior_knee_travel_contaminates_the_valgus_proxy(self) -> None:
+        # PINNED ON PURPOSE -- this documents a limitation, it does not endorse it. Off-axis,
+        # anterior travel and medial collapse land on the same perpendicular measurement, so a
+        # deep, perfectly-tracked lunge reads as valgus. The rule ships with this stated in its
+        # docstring; if someone later separates the two (it needs depth this pipeline lacks),
+        # this test should fail and force a spec conversation rather than silently changing
+        # what a stored `lunge_knee_valgus` severity meant.
+        from src.pose.movements.lunge import lunge_compute_raw
+
+        deep_but_clean = lunge_compute_raw(
+            [lunge_frame(lead="left", lead_medial=0.0, lead_anterior=0.60)], 30.0
+        )[0]
+        self.assertGreater(deep_but_clean["left_knee_medial_offset_ratio"], 0.10)
+
+    def test_the_lead_leg_reads_a_smaller_knee_angle_than_the_trailing_leg(self) -> None:
+        # Derived, not requested: the split stance is what makes the lead knee measurably more
+        # flexed in-image. Asserting the ORDERING (not a specific angle) is what
+        # `resolve_lead_side` actually depends on.
+        from src.pose.movements.lunge import lunge_compute_raw
+
+        raw = lunge_compute_raw([lunge_frame(lead="left")], 30.0)
+        self.assertLess(raw[0]["left_knee_angle"], raw[0]["right_knee_angle"])
+        self.assertAlmostEqual(raw[0]["min_knee_angle"], raw[0]["left_knee_angle"], places=6)
 
     def test_pelvis_tilt_is_positive_when_the_right_hip_is_lower(self) -> None:
         from src.pose.movements.lunge import lunge_compute_raw
@@ -354,16 +460,12 @@ class LungeMetricTests(unittest.TestCase):
         self.assertAlmostEqual(raw[0]["pelvis_tilt_signed_deg"], 12.0, delta=1.0)
 
     def test_pelvis_tilt_sign_does_not_depend_on_facing(self) -> None:
-        # Mirroring the body about x=0.5 swaps which hip is on which side of the image but
-        # does NOT change which hip is physically lower, so the metric must not flip.
+        # A real turn-around (see `mirrored`): left/right landmark CONTENTS swap and the image
+        # reflects. Which hip is physically lower is unchanged, so the metric must not flip.
+        # A tilt built with the RIGHT hip lower stays positive after the subject turns around.
         from src.pose.movements.lunge import lunge_compute_raw
 
-        frame = lunge_frame(pelvis_tilt_deg=12.0)
-        mirrored = {
-            "frame_index": 0,
-            "landmarks": [_lm(1.0 - lm["x"], lm["y"]) for lm in frame["landmarks"]],
-        }
-        raw = lunge_compute_raw([mirrored], 30.0)
+        raw = lunge_compute_raw([mirrored(lunge_frame(pelvis_tilt_deg=12.0))], 30.0)
         self.assertAlmostEqual(raw[0]["pelvis_tilt_signed_deg"], 12.0, delta=1.0)
 
     def test_a_frame_missing_a_required_landmark_is_invalid_and_carries_no_metrics(self) -> None:
@@ -559,11 +661,12 @@ Run: `.venv\Scripts\python.exe -m pytest tests/test_lunge.py -v`
 ```python
 class LungePhaseTests(unittest.TestCase):
     def _descend_and_rise(self) -> list[dict]:
-        # 30 frames: knee angle 170 -> 80 -> 170, i.e. one clean rep on the left leg.
-        angles = list(np.linspace(170, 80, 15)) + list(np.linspace(80, 170, 15))
+        # 30 frames: the lead knee bends in and back out, i.e. one clean rep on the left leg.
+        # Depth is driven by `lead_anterior`, which is what bends the knee in-image.
+        depths = list(np.linspace(0.0, 0.80, 15)) + list(np.linspace(0.80, 0.0, 15))
         return [
-            lunge_frame(left_knee_angle=float(a), right_knee_angle=170.0, frame_index=i)
-            for i, a in enumerate(angles)
+            lunge_frame(lead="left", lead_anterior=float(d), frame_index=i)
+            for i, d in enumerate(depths)
         ]
 
     def test_phases_run_setup_descent_bottom_ascent(self) -> None:
@@ -1139,6 +1242,18 @@ def rule_knee_valgus(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDe
     the midline from in front of the subject or behind. So `rear`/`rear_oblique` -- the labels
     production actually reaches -- earn the same `high` rating, matching
     `squat.rule_knees_inward`, which resolves the same fault family the same way.
+
+    KNOWN CONTAMINATION, NOT CORRECTED HERE -- carry this over verbatim from the projection
+    facts in tests/test_lunge.py::lunge_frame, and do not let the `high` rating above be read
+    as a claim of cleanliness. A knee's perpendicular displacement from its hip-ankle line is
+    the sum of its MEDIAL travel and its ANTERIOR travel projected into the image. In a true
+    frontal view the anterior component projects onto the leg line and vanishes, leaving the
+    proxy clean -- but `front` is exactly the label production can never emit. In the oblique
+    views it does reach, a deep, perfectly-tracked lunge produces a positive reading with no
+    valgus present (pinned by test_anterior_knee_travel_contaminates_the_valgus_proxy).
+    Separating the two needs a depth estimate this pipeline does not have, so the limitation is
+    documented rather than corrected, and Phase 2 checks whether firing tracks step depth
+    rather than correctness.
     """
     lead = resolve_lead_side(core)
     if lead is None:
@@ -1367,12 +1482,10 @@ class LungeAlternatingLeadTests(unittest.TestCase):
         frames: list[dict] = []
         index = 0
         for lead in ("left", "right", "left"):
-            angles = list(np.linspace(170, 85, 12)) + list(np.linspace(85, 170, 12))
-            for a in angles:
-                left = float(a) if lead == "left" else 168.0
-                right = 168.0 if lead == "left" else float(a)
+            depths = list(np.linspace(0.0, 0.80, 12)) + list(np.linspace(0.80, 0.0, 12))
+            for depth in depths:
                 frames.append(
-                    lunge_frame(left_knee_angle=left, right_knee_angle=right, frame_index=index)
+                    lunge_frame(lead=lead, lead_anterior=float(depth), frame_index=index)
                 )
                 index += 1
         return frames
@@ -1547,6 +1660,8 @@ git commit -m "feat(pose): register the lunge detector and expose it via --movem
   which **already implements** the cam17→cam18 mapping, so do not reimplement it)
 - Produces:
   - `RULE_CAMERAS: dict[str, str]` — fault_id → `"cam17"` / `"cam18"`
+  - `ORACLE_VIEWS: dict[str, str]` and `ORACLE_VIEW_CONFIDENCE: float` — the dataset-orientation
+    → view-label mapping the oracle pass feeds the rules, pinned in Task 8 Step 1
   - `slice_rep(frames: list[dict], first_frame: int, last_frame: int) -> list[dict]`
   - `contingency(fired: Sequence[bool], correct: Sequence[bool]) -> dict[str, int]` with keys
     `tp, fp, tn, fn` where "positive" means **the rep is incorrect**
@@ -1794,10 +1909,33 @@ For each Ex5 segment and each of the two cameras:
 1. Load that camera's pose JSON, `slice_rep` the labeled window.
 2. Estimate the view for the **whole clip** (not the window) via `estimate_view_for_pose`.
 3. **Production pass:** `run_detector(LUNGE_DETECTOR, window, 30.0, estimated_view, estimated_conf)`.
-4. **Oracle pass:** the same call with the dataset's orientation substituted
-   (`camera_orientation(segment, camera)`, mapped onto the estimator's vocabulary — `profile`
-   and `half-profile` have no exact estimator equivalents, so state the mapping used in the
-   writeup and keep it in one named function, not inline).
+4. **Oracle pass:** the same call with the dataset's orientation substituted. The mapping is
+   **fixed here, not chosen at implementation time** — put it in `lunge_rule_validation.py` as
+   a named constant with this comment:
+
+```python
+# Dataset orientation -> the view label the ORACLE pass feeds the rules. `view_confidence` is
+# pinned at 1.0 alongside it, since the premise of this pass is that the view is known.
+#
+# `front` DELIBERATELY maps to "front", a label production can NEVER emit: the production path
+# calls estimate_view_for_pose(allow_front=False). That is the whole point of the oracle pass
+# -- it asks "would this rule fire if the view label were correct?", which requires bypassing
+# the gate rather than reproducing it. Any oracle-pass result on a `front` rep is therefore a
+# statement about the RULE, never about what a user would see, and the writeup must say so
+# wherever it quotes one.
+#
+# `half-profile` maps to "front_oblique" rather than "rear_oblique" because the dataset does
+# not record which way the subject faced, and the two are equivalent for every lunge rule:
+# `rule_knee_valgus` and `rule_pelvic_drop` treat both as fully observable, and the other two
+# rules ignore the oblique labels entirely. Stated so nobody reads significance into the pick.
+ORACLE_VIEWS: dict[str, str] = {
+    "front": "front",
+    "side": "side",
+    "half-profile": "front_oblique",
+    "profile": "side",   # unused by Ex5 (0 reps), present for completeness
+}
+ORACLE_VIEW_CONFIDENCE = 1.0
+```
 5. Record per rep: `person_id`, `correctness`, `exercise_subtype`, which faults fired in each
    pass with their severities, the `RunResult.fallback` path, the frame-validity rate, the
    resolved lead side, and the per-rule continuous score (the rule's `primary_value` when it
@@ -1847,6 +1985,12 @@ Structure it so the caveat cannot be missed:
      cameras, controlled lighting and instructed errors. Scope the claim.
    - A rule that does not separate may be real and simply invisible here. Say that, and do
      **not** move its threshold.
+   - For `lunge_knee_valgus`, report **whether firing tracks step depth rather than
+     correctness**. The proxy sums medial and anterior knee travel in every view production
+     reaches (Task 4 docstring), so a rule that fires on deep reps of both classes equally is
+     showing contamination, not valgus. Correlate its metric against the lead knee's flexion
+     within the **correct** reps only: a strong relationship there is the contamination
+     signature, since correct reps by definition have no valgus to find.
    - For `lunge_pelvic_drop` specifically, read **specificity on correct reps first**: the
      split-stance foreshortening documented in its docstring predicts false positives on deep
      correct reps, so a low specificity there is the expected failure, not a surprise. If its
@@ -1917,8 +2061,21 @@ Phase 2 measures them but cannot measure per-fault precision, and Task 8 Step 4 
 limit stated up front rather than buried. No task permits a threshold to move in response to
 a result.
 
+**Late addition, recorded rather than smoothed over.** Rebuilding the test fixture on realistic
+geometry surfaced two projection facts that were not in the design spec: (1) in a strictly
+frontal view a knee's in-image flexion and its medial offset are the same degree of freedom,
+so `resolve_lead_side` and `rule_knee_valgus` read the same quantity there; and (2) in the
+oblique views production actually reaches, anterior knee travel adds to the valgus proxy, so a
+deep well-tracked lunge reads as valgus. Neither is correctable without depth. Both are now
+documented in `lunge_frame`, pinned by `test_anterior_knee_travel_contaminates_the_valgus_proxy`,
+carried into `rule_knee_valgus`'s docstring, and turned into a question Phase 2 answers. They
+should be added to the design spec's §7 risk table when Task 6 Step 7 updates the specs.
+
 **Risk register.**
 - Task 1 Step 2 (cam18 transpose) is a hard STOP for Phase 2. Phase 1 may still proceed.
+- `lunge_knee_valgus` may prove to be measuring step depth rather than valgus (see above).
+  Task 8 Step 4 tests for it; if confirmed, that is a finding about the spec's frontal-plane
+  proxy under monocular projection, and the threshold still does not move.
 - Task 1 may find the `side` gate never opens. That is a recorded finding, not a reason to
   weaken the gate.
 - Task 6 Step 1 may find no KG node for a fault. Leave it unretrieved and record the gap —
