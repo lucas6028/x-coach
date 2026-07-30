@@ -137,18 +137,21 @@ def lunge_frame(
 
 
 def mirrored(frame: dict) -> dict:
-    """The same body FACING THE OTHER WAY: left/right landmark CONTENTS swapped, then the
-    whole thing reflected about x=0.5.
+    """The same body FACING THE OTHER WAY: positions reflect about x=0.5, indices unchanged.
 
-    Reflecting x alone is not a facing flip -- it moves landmark 23 to the right-hand side of
-    the image while leaving it the "left hip", and since `pelvis_tilt_signed_deg` reads
-    `right_hip[1] - left_hip[1]` and reflection does not touch y, such a test passes trivially
-    without exercising anything. Swapping the contents of every left/right pair is what a real
-    turn-around does.
+    MediaPipe labels landmarks ANATOMICALLY -- index 23 is the subject's left hip whether they
+    face the camera or away from it -- so turning around reflects where each landmark projects
+    without renumbering anything. (Swapping the CONTENTS of 23/24 would model a left/right
+    identity swap, a different operation, and would negate `pelvis_tilt_signed_deg` by
+    construction for any implementation -- see task-2-report.md's fix-report addendum for the
+    arithmetic.)
+
+    This transform is what makes the facing-independence test discriminating: reflection flips
+    `sign(right_hip.x - left_hip.x)`, so an implementation using SIGNED dx reads 168 degrees
+    here while the `abs(dx)` form the metric actually uses holds at 12. Which hip is physically
+    lower is unchanged by turning around, and the metric must agree.
     """
     lm = [dict(item) for item in frame["landmarks"]]
-    for left, right in ((11, 12), (23, 24), (25, 26), (27, 28), (29, 30), (31, 32), (7, 8)):
-        lm[left], lm[right] = lm[right], lm[left]
     for item in lm:
         item["x"] = 1.0 - item["x"]
     return {"frame_index": frame.get("frame_index", 0), "landmarks": lm}
@@ -233,9 +236,12 @@ class LungeMetricTests(unittest.TestCase):
         self.assertAlmostEqual(raw[0]["pelvis_tilt_signed_deg"], 12.0, delta=1.0)
 
     def test_pelvis_tilt_sign_does_not_depend_on_facing(self) -> None:
-        # A real turn-around (see `mirrored`): left/right landmark CONTENTS swap and the image
-        # reflects. Which hip is physically lower is unchanged, so the metric must not flip.
+        # A real turn-around (see `mirrored`): landmark indices stay anatomically bound, only
+        # x reflects. Which hip is physically lower is unchanged, so the metric must not flip.
         # A tilt built with the RIGHT hip lower stays positive after the subject turns around.
+        # THIS TEST HAS TEETH: reflection flips sign(right_hip.x - left_hip.x), so a signed-dx
+        # implementation of this metric would read 168.0 here, not 12.0 -- `mirrored()` is
+        # exactly the transform that discriminates `abs(dx)` from a signed dx.
         from src.pose.movements.lunge import lunge_compute_raw
 
         raw = lunge_compute_raw([mirrored(lunge_frame(pelvis_tilt_deg=12.0))], 30.0)
