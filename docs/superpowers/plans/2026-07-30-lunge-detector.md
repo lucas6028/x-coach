@@ -726,6 +726,45 @@ git commit -m "feat(pose): lunge raw metrics for both legs, and phase segmentati
 **Both of this phase's rule-level numbers appear here and must be labeled as such:**
 `LEAD_SIDE_MIN_SEPARATION_DEG` and `LUNGE_ACTIVE_PHASES`.
 
+- [ ] **Step 0: Resolve ALL FOUR `kg_query` strings against the live graph, before any rule is written**
+
+Done once, here, so that no rule is ever committed carrying an unresolved placeholder. The OHP
+detector shipped with three `kg_query` strings that resolve to **no KG node at all**, recorded
+as an open item in the parent spec — this step is what stops that recurring.
+
+First read the signature (`grep -n "def resolve_nodes" -A 10 src/knowledge/graph_retrieval.py`)
+and adjust the call below to match it. Then:
+
+```
+.venv\Scripts\python.exe -c "import sys; sys.path.insert(0, '.')
+from src.knowledge.graph_retrieval import resolve_nodes
+for q in ['Knee Valgus', 'Lead Knee Extends Beyond Toe', 'Excessive Knee Flexion',
+          'Anterior Trunk Tilt', 'Poor Dynamic Stability', 'Knee Anterior Displacement',
+          'Reduced Hip Flexion Angles', 'Compensatory Trunk Lean']:
+    print(f'{q!r:38s} ->', resolve_nodes(q, movement='Lunge'))"
+```
+
+Pick, for each of the four faults, a query that **resolves to a real `Lunge:`-scoped node**,
+and define the four as module constants next to the threshold constants so a reader sees at a
+glance which node each rule grounds against:
+
+```python
+# Each string was checked against data/kg/sports_kg_v3.graphml via
+# graph_retrieval.resolve_nodes BEFORE being written here -- see this task's report for the
+# resolution output. The OHP detector shipped three queries that resolve to nothing; these do
+# not repeat that.
+LUNGE_PAST_TOES_KG_QUERY = "..."      # fill from the command's output
+LUNGE_VALGUS_KG_QUERY = "..."
+LUNGE_DEPTH_KG_QUERY = "..."
+LUNGE_PELVIC_DROP_KG_QUERY = "..."
+```
+
+Record the four choices in the task report; Tasks 4 and 5 import them without re-deriving.
+
+If no node exists for a fault, do **NOT** invent a near-miss: set that rule's
+`retrieval_mode` to the codebase's no-retrieval value (check what `build_detection` callers
+use) and record the gap in the report so Task 6 Step 7 can write it into the spec.
+
 - [ ] **Step 1: Write the failing lead-resolution tests**
 
 ```python
@@ -988,7 +1027,7 @@ def rule_insufficient_depth(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
             build_detection(
                 fault_id="lunge_insufficient_depth",
                 fault_name="Insufficient Depth",
-                kg_query=...,          # resolved in Task 6; see that task before filling in
+                kg_query=LUNGE_DEPTH_KG_QUERY,   # the string resolved in Step 0
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=angles,
@@ -1196,7 +1235,7 @@ def rule_knee_past_toes(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
             build_detection(
                 fault_id="lunge_knee_past_toes",
                 fault_name="Lead Knee Past Toes / Anterior Knee Translation",
-                kg_query=...,          # Task 6
+                kg_query=LUNGE_PAST_TOES_KG_QUERY,   # resolved in Task 3 Step 0
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=ratios,
@@ -1280,7 +1319,7 @@ def rule_knee_valgus(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDe
             build_detection(
                 fault_id="lunge_knee_valgus",
                 fault_name="Lead Knee Valgus / Medial Collapse",
-                kg_query=...,          # Task 6
+                kg_query=LUNGE_VALGUS_KG_QUERY,   # resolved in Task 3 Step 0
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=offsets,
@@ -1312,7 +1351,7 @@ git commit -m "feat(pose): lunge knee-past-toes and lead-knee valgus cited rules
 
 ---
 
-### Task 5: `lunge_pelvic_drop` and the alternating-lead regression guard
+### Task 5: `lunge_pelvic_drop`
 
 **Files:**
 - Modify: `src/pose/movements/lunge.py`, `tests/test_lunge.py`
@@ -1321,9 +1360,6 @@ git commit -m "feat(pose): lunge knee-past-toes and lead-knee valgus cited rules
 - Produces: `rule_pelvic_drop(core, ctx) -> list[PoseRuleDetection]`,
   `LUNGE_PELVIC_TILT_MILD_DEG`, `LUNGE_PELVIC_TILT_SEVERE_DEG`
 
-The alternating-lead test in Step 4 is **the single most important test in this plan**: it
-covers the defect the Phase 2 harness structurally cannot see, because that harness feeds one
-rep per clip.
 
 - [ ] **Step 1: Write the failing pelvic-drop tests**
 
@@ -1435,7 +1471,7 @@ def rule_pelvic_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDe
             build_detection(
                 fault_id="lunge_pelvic_drop",
                 fault_name="Pelvic Drop / Contralateral Trunk Lean (Trendelenburg)",
-                kg_query=...,          # Task 6
+                kg_query=LUNGE_PELVIC_DROP_KG_QUERY,   # resolved in Task 3 Step 0
                 retrieval_mode="kg",
                 segment_metrics=segment,
                 score_values=drops,
@@ -1461,11 +1497,45 @@ def rule_pelvic_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDe
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_lunge.py -k PelvicDrop -v`
 
-- [ ] **Step 4: Write the alternating-lead multi-rep regression test**
+- [ ] **Step 4: Commit**
 
-This test needs the assembled detector, so place it in `tests/test_lunge.py` and mark that it
-depends on Task 6's `LUNGE_DETECTOR`. **If Task 6 has not run yet, write it now and let it
-fail; Task 6 Step 4 is where it must go green.**
+```bash
+git add src/pose/movements/lunge.py tests/test_lunge.py
+git commit -m "feat(pose): lunge contralateral pelvic drop, with the sign the fault actually needs"
+```
+
+---
+
+### Task 6: Assemble, register, guard, document
+
+**Files:**
+- Modify: `src/pose/movements/lunge.py` (detector assembly + the `kg_query` strings left as
+  `...` in Tasks 3–5), `src/pose/movements/registry.py`, `tests/test_movement_registry.py`,
+  `scripts/pose/README.md`, both specs
+
+**Interfaces:**
+- Produces: `LUNGE_DETECTOR: MovementDetector`, registered under `"Lunge"`
+
+- [ ] **Step 1: Audit the citations and KG queries already in place**
+
+The four `kg_query` constants were resolved against the live graph in Task 3 Step 0, so
+nothing is unresolved by now. This step is the audit, not the derivation:
+
+1. Re-run Task 3 Step 0's `resolve_nodes` command and confirm all four constants still
+   resolve to real `Lunge:`-scoped nodes.
+2. Open `docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md`, read the
+   four Lunge entries, and **diff each `citation` / `citation_support` string in the code
+   against the spec text**. They must match the source, not a paraphrase of it. This is the
+   project's anti-hallucination premise and it is worth the five minutes.
+3. Record any fault left without a resolving KG node so Step 7 writes it into the spec, the
+   way the parent spec records the OHP gap.
+
+- [ ] **Step 2: Write the alternating-lead multi-rep regression test**
+
+This is the single most important test in the plan: it covers the defect the Phase 2 harness
+structurally cannot see, because that harness feeds one rep per clip. It needs the assembled
+detector, so it lands here rather than with the rules. Write it **before** Step 3 and watch it
+fail on the missing `LUNGE_DETECTOR`, then go green once Step 3 assembles it.
 
 ```python
 class LungeAlternatingLeadTests(unittest.TestCase):
@@ -1477,8 +1547,8 @@ class LungeAlternatingLeadTests(unittest.TestCase):
     """
 
     def _alternating_clip(self) -> list[dict]:
-        # Three reps: lead left, lead right, lead left. Each rep descends to 85 degrees on its
-        # lead leg and returns to 170; the trailing leg stays near-extended throughout.
+        # Three reps: lead left, lead right, lead left. Depth is driven by `lead_anterior`,
+        # which is what bends the lead knee in-image.
         frames: list[dict] = []
         index = 0
         for lead in ("left", "right", "left"):
@@ -1510,51 +1580,8 @@ class LungeAlternatingLeadTests(unittest.TestCase):
             )
 ```
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/pose/movements/lunge.py tests/test_lunge.py
-git commit -m "feat(pose): lunge contralateral pelvic drop, with the sign the fault actually needs"
-```
-
----
-
-### Task 6: Assemble, resolve KG queries, register, document
-
-**Files:**
-- Modify: `src/pose/movements/lunge.py` (detector assembly + the `kg_query` strings left as
-  `...` in Tasks 3–5), `src/pose/movements/registry.py`, `tests/test_movement_registry.py`,
-  `scripts/pose/README.md`, both specs
-
-**Interfaces:**
-- Produces: `LUNGE_DETECTOR: MovementDetector`, registered under `"Lunge"`
-
-- [ ] **Step 1: Resolve every `kg_query` against the real graph BEFORE writing it**
-
-The OHP detector shipped with three `kg_query` strings that resolve to **no KG node at all**,
-recorded as an open item in the parent spec. Do not repeat it. Candidates are listed in the
-design spec §3.4; verify each:
-
-```
-.venv\Scripts\python.exe -c "import sys; sys.path.insert(0, '.')
-from src.knowledge.graph_retrieval import resolve_nodes
-for q in ['Knee Valgus', 'Lead Knee Extends Beyond Toe', 'Excessive Knee Flexion', 'Anterior Trunk Tilt', 'Poor Dynamic Stability']:
-    print(f'{q!r:40s} ->', resolve_nodes(q, movement='Lunge'))"
-```
-
-Check `resolve_nodes`' actual signature first (`grep -n 'def resolve_nodes' -A 8
-src/knowledge/graph_retrieval.py`) and adjust the call. Pick, for each of the four faults, a
-query that **resolves to a real `Lunge:`-scoped node**. If no node exists for a fault, do NOT
-invent a near-miss: leave that rule's `retrieval_mode="none"` (or whatever the codebase's
-no-retrieval value is — check `build_detection` callers) and record the gap in Step 6, exactly
-as the parent spec records the OHP gap.
-
-- [ ] **Step 2: Fill in the `kg_query` values and the citation strings**
-
-Replace every `...` placeholder left in Tasks 3–5 with the verified query string, and confirm
-each `citation` / `citation_support` was copied from
-`docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md` rather than typed
-from memory. Re-read the four Lunge entries and diff them against what is in the code.
+If segmentation does not find the reps, fix the FIXTURE (deepen the excursion or lengthen the
+reps), never the detector — a rep-segmentation change would move squat behavior.
 
 - [ ] **Step 3: Assemble and register the detector**
 
@@ -1583,12 +1610,9 @@ Add the side-effect import to `src/pose/movements/registry.py`, next to the exis
 from src.pose.movements import lunge  # noqa: E402,F401
 ```
 
-- [ ] **Step 4: Run the alternating-lead test from Task 5 Step 4 → it must now PASS**
+- [ ] **Step 4: Run the Step 2 alternating-lead test → it must now PASS**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_lunge.py -k AlternatingLead -v`
-
-If segmentation does not find the reps, fix the FIXTURE (make the excursion deeper or the reps
-longer), never the detector — a rep-segmentation change would move squat behavior.
 
 - [ ] **Step 5: Add registry tests**
 
@@ -2031,11 +2055,11 @@ git commit -m "measure(rehab24): validate the lunge rules against 174 labeled re
 ## Self-Review
 
 **Spec coverage.** Every section of `docs/superpowers/specs/2026-07-30-lunge-detector-design.md`
-maps to a task: §3.1 phases → Task 2; §3.2 lead leg → Task 3 (+ the Task 5 alternating-lead
-guard); §3.3 metrics → Task 2; §3.4 the four rules → Tasks 3–5; §3.5 view gating → Tasks 4–5
+maps to a task: §3.1 phases → Task 2; §3.2 lead leg → Task 3 (+ the Task 6 Step 2
+alternating-lead guard); §3.3 metrics → Task 2; §3.4 the four rules → Tasks 3–5; §3.5 view gating → Tasks 4–5
 docstrings; §4.1 extraction + the side-gate gate → Task 1; §4.2 harness → Tasks 7–8; §4.3
 camera routing → `RULE_CAMERAS`, Task 7; §4.4 two passes → Task 8 Step 1; §4.5 reporting →
-Task 8 Step 3; §5 testing → Tasks 2–5, 7; §6 honesty → Task 8 Step 4; §7 risks → Task 1
+Task 8 Step 3; §5 testing → Tasks 2–6, 7; §6 honesty → Task 8 Step 4; §7 risks → Task 1
 Step 2 (transpose STOP), Task 3 (lead ambiguity), Task 5 (foreshortening), Task 6 Step 7
 (CLI-only confirmation). All four parent-spec Lunge rules are implemented; none is dropped.
 
@@ -2080,5 +2104,6 @@ should be added to the design spec's §7 risk table when Task 6 Step 7 updates t
   weaken the gate.
 - Task 6 Step 1 may find no KG node for a fault. Leave it unretrieved and record the gap —
   never re-point a query at a near-miss node.
-- The alternating-lead test (Task 5 Step 4) fails until Task 6 assembles the detector. That is
-  expected and called out in both tasks.
+- The alternating-lead test lives in Task 6 Step 2, with the detector it needs. Writing it in
+  Task 5 would have committed a knowingly-failing test, which a task review would rightly
+  reject.
