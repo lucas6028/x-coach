@@ -31,3 +31,4 @@ def list_detectors() -> list[MovementDetector]:
 from src.pose.movements import squat  # noqa: E402,F401
 from src.pose.movements import overhead_press  # noqa: E402,F401
 from src.pose.movements import pushup  # noqa: E402,F401
+from src.pose.movements import lunge  # noqa: E402,F401

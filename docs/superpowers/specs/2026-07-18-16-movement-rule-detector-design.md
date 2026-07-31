@@ -1615,3 +1615,114 @@ and `"Limited Shoulder Elevation"` do resolve. There is no near-miss node to re-
 (the closest OHP-scoped nodes are `Near Lockout`, `Thoracolumbar Extension`,
 `Elbow Extensor Torque`), so this needs KG content work, not a string tweak. Those three faults
 currently reach the chat layer with citations but no retrieved grounding.
+
+**Status (2026-07-30) — Lunge detector registered.** `src/pose/movements/lunge.py` is now
+assembled as `LUNGE_DETECTOR` and registered under `"Lunge"`, reachable from
+`scripts/pose/run_pose_rule_detection.py --movement "Lunge"`. All **4 of 4** Lunge rules are
+present and can fire: `rule_knee_past_toes`, `rule_knee_valgus`, `rule_insufficient_depth`,
+`rule_pelvic_drop`. No Lunge fault is permanently silent by design, unlike push-up's
+`rule_scapular_winging`.
+
+- **The lead-leg substitution, and why it lives in the RULES, not `lunge_compute_raw`.** This
+  spec's Lunge entries define the lead leg as "the more flexed / more anterior foot". The
+  `more anterior` half is exactly the axis that collapses in a frontal view, where two of the
+  four rules live, so the implementation (`resolve_lead_side`) uses the more-flexed half only,
+  evaluated at a window's bottom frame. It cannot live in `lunge_compute_raw`: `run_detector`
+  calls `compute_raw` over the whole clip before `segment_reps`, so at metric time there is no
+  rep boundary and therefore no bottom frame to resolve "which leg is loaded THIS rep" against.
+  A per-frame heuristic would flicker through `setup`/`recovery`, where both knees sit near
+  extension within landmark noise of each other, corrupting every lead-relative metric and
+  `centered_median`'s smoothing across the swap. `lunge_compute_raw` therefore emits every
+  side-specific metric for BOTH legs (`left_*`/`right_*`), and `resolve_lead_side` chooses
+  between them only once a per-rep window exists.
+- **The two rule-level numbers, both labeled as such in-code, neither from this spec:**
+  `LEAD_SIDE_MIN_SEPARATION_DEG = 5.0` (the minimum left/right knee-angle gap at the bottom
+  before a lead leg is claimed — this spec names no such floor, and the constant can only
+  *silence*: an unresolved lead side emits nothing rather than a guessed, mis-attributed one)
+  and `LUNGE_ACTIVE_PHASES = {descent, bottom, ascent}` (this spec scopes only
+  `lunge_knee_past_toes` to phases; applying the same set to the other rules follows the squat
+  detector's `ACTIVE_PHASES` precedent rather than a spec requirement — cost: a fault visible
+  only during `setup`/`recovery` is missed). Every other threshold and severity ramp in the four
+  rules is this spec's own number, verbatim (re-confirmed by Step 1's audit below).
+- **`KNEE_FORWARD_MILD`/`KNEE_FORWARD_SEVERE` reuse.** `rule_knee_past_toes`'s fire/ramp
+  (0.10 → 0.30) is worded identically to the Squat entry's, so the implementation imports
+  Squat's existing constants from `src/pose/pose_rule_detector.py` rather than re-typing the
+  literals, so the two movements cannot drift apart independently.
+- **`rule_pelvic_drop`'s split-stance foreshortening bias, documented not corrected.** In a
+  frontal view of a split stance the L-hip→R-hip vector is rotated in the transverse plane, so
+  its image projection shortens and `atan2(dy, |dx|)` *inflates* the apparent tilt — the deeper
+  the lunge, the worse. The expected failure mode is therefore **false positives on deep,
+  correctly-performed reps**, not silence. Correcting it needs a depth estimate this pipeline
+  does not have, so Phase 2 reads specificity on correct reps first for exactly this reason.
+- **`rule_knee_valgus`'s known contamination, the mirror-image bias.** Obliquely, anterior knee
+  travel and medial knee travel project onto the same perpendicular axis, so a deep,
+  perfectly-tracked lunge can read as valgus in every view this pipeline reaches (`front`,
+  which would separate the two cleanly, is never emitted downstream). Pinned by
+  `test_anterior_knee_travel_contaminates_the_valgus_proxy` in `tests/test_lunge.py`. Phase 2
+  checks whether firing tracks step depth rather than correctness.
+- **Task 3's depth-scope correction.** The brief's example KG candidate for insufficient depth,
+  "Excessive Knee Flexion", resolves to a real node but the wrong one — its only edge is
+  `INCREASES_RISK_OF → Achilles Tendon Injury`, the wrong fault direction (this spec's own
+  `citation_support` describes *reduced* flexion marking impaired function). `LUNGE_DEPTH_KG_QUERY`
+  is `"Decreased Knee Flexion"` instead, the node whose edges (`CAUSED_BY ← Weak Quadriceps`,
+  `INCREASES_RISK_OF → ACL Injury`) match the cited sentence.
+- **Step 1 audit, re-run for this status entry, not assumed:** `resolve_nodes` against
+  `data/kg/sports_kg_v3.graphml` confirms all four `*_KG_QUERY` constants still resolve to
+  exactly one `Lunge:`-scoped node apiece (`Knee Anterior To Toes`, `Knee Valgus`,
+  `Decreased Knee Flexion`, `Trendelenburg Posture`) — no drift since Task 3. Every
+  `citation`/`citation_support` string in `src/pose/movements/lunge.py` was extracted
+  programmatically from a live-fired `PoseRuleDetection` (not read by eye) and confirmed to be
+  a byte-exact substring of this spec's text for all four rules. **No fault is left without a
+  resolving KG node** — unlike OHP's three-of-five gap above, Lunge has no open KG item.
+  `tests/test_kg_query_resolution.py::test_every_kg_query_resolves` ran locally (the graph is
+  present in this checkout) and passed, corroborating the audit independently of it.
+- **A test-infrastructure fix, generalized rather than special-cased.** Unlike squat/push-up/OHP,
+  which pass `kg_query=` as an inline string literal at each `build_detection` call,
+  `lunge.py` passes it as a reference to a module-level constant
+  (`kg_query=LUNGE_PAST_TOES_KG_QUERY`, etc.) — deliberate, so the Step 0 provenance comment
+  attached to each constant stays a single source of truth instead of being re-typed at every
+  call site. `tests/test_kg_query_resolution.py`'s AST-based `_kg_queries` scanner only
+  recognized literal `ast.Constant` values, so it read zero queries out of `lunge.py` and its
+  own `test_queries_were_actually_found` gate failed. Fixed by teaching the scanner to also
+  resolve `ast.Name` references against the module's top-level string-constant assignments,
+  which generalizes the helper for any future module rather than adding a lunge-shaped
+  exception to it.
+- **Product-surface consequence of registration — read, not assumed.** `backend/app/config.py`'s
+  `DEFAULT_ANALYSIS_MOVEMENT` is unchanged, still `"Squat"` (its own comment already calls it
+  "the FALLBACK movement, not a pin"). But unlike when the Push-up status block above was
+  written, the frontend's `ANALYZABLE_MOVEMENTS` constant this spec used to name **no longer
+  exists** — `frontend/src/lib/movements.ts` now derives which movements are analyzable
+  entirely from `GET /api/movements`, which in turn is generated live from
+  `src/pose/movements/registry.py` (`backend/app/routers/movements.py`'s own docstring states
+  this as the design: *"registering a fourth detector surfaces it in the UI with no backend or
+  frontend edit"*). Confirmed by reading `frontend/src/App.tsx`: it reads `?movement=` from the
+  URL, validates it against the fetched catalog, and passes the resolved name — not a hardcoded
+  `"Squat"` — to the analyze call. So registering `LUNGE_DETECTOR` here makes Lunge appear in
+  `GET /api/movements`, makes its `/movements` menu card clickable instead of inert "Soon", and
+  makes it genuinely analyzable end-to-end through `/api/analyze` and `/api/analyze/pose` for any
+  visitor of the public `/app` demo. This is **not** a defect introduced by this task and this
+  task does not add code to suppress it (that would be new production policy against an explicit
+  "do not change" instruction, and the router's documented design is to auto-surface every
+  registered detector). The mitigating fact: it surfaces with `validated=False`, so the frontend
+  renders it with a Beta tag — the same signal Push-up and Overhead Press already carry, which,
+  by the same mechanism, are *also* already live in the product today despite the "CLI-only"
+  framing of their own status blocks above (written before the `ANALYZABLE_MOVEMENTS` frontend
+  refactor). `tests/test_movements_endpoint.py`'s two exhaustive-list assertions were updated to
+  include Lunge/Beta accordingly; nothing was added to gate it out.
+- **The Task 1 view-gate finding — PENDING, stated as such, not answered either way.**
+  `lunge_knee_past_toes` is hard-gated on a confidently-classified `side` view
+  (`SIDE_VIEW_CONF_THRESHOLD`), mirroring squat's `rule_knees_forward`. Whether a true sagittal
+  Lunge clip is actually classified `side` by `estimate_view_for_pose` in production is an open
+  question Task 1 (REHAB24-6 Ex5 pose extraction + view-gate reconnaissance) was measuring at the
+  time this detector was registered, and Task 1 had **not completed** — extraction for the 18 Ex5
+  clips was still running. What is known so far: across the 45 real pose JSONs already in this
+  repository, the view estimator emitted `side` exactly once, and that single verdict was a
+  fabricated degenerate case since removed. Whether the gate ever opens on real sagittal footage
+  is therefore **being measured, not settled** — this status block does not assert an answer in
+  either direction, and Task 7/8's validation work is what will.
+- **All four Lunge thresholds are spec-derived and UNVALIDATED against labeled data at this
+  point.** `tests/test_lunge.py` proves geometry, sign conventions and the fault-attribution
+  contract (including the alternating-lead multi-rep regression the Phase 2 harness structurally
+  cannot see, since that harness feeds one rep per clip), not real-world fault detection accuracy.
+  Phase 2 (REHAB24-6 Ex5) is what changes that; flipping `validated` to `True` is a separate,
+  evidence-backed decision made after Phase 2 produces numbers, not part of this task.

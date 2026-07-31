@@ -30,14 +30,37 @@ MODULE_MOVEMENTS = {
     "squat.py": "Squat",
     "pushup.py": "Push-up",
     "overhead_press.py": "Overhead Press",
+    "lunge.py": "Lunge",
 }
 
 
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    """Top-level `NAME = "literal"` assignments, so a `kg_query=SOME_NAME` reference can be
+    resolved to the string it names. `lunge.py` deliberately passes its four `kg_query` values
+    as module constants (`LUNGE_PAST_TOES_KG_QUERY`, etc. -- see that module's Step 0 docstring)
+    rather than retyping the literal at each call site, unlike squat/push-up/OHP which inline
+    the string directly. Only MODULE-LEVEL assignments are resolved; anything else (an
+    imported name, a computed value) is left unresolved and simply drops out of the corpus,
+    same as before this function existed."""
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                constants[target.id] = node.value.value
+    return constants
+
+
 def _kg_queries(module_path: Path) -> list[str]:
-    """Every literal kg_query= value in a detector module, paired with the retrieval_mode of
-    the same build_detection call. Parsed from the AST rather than imported, so this gate does
-    not depend on numpy/detector import side effects."""
+    """Every kg_query= value in a detector module (literal string OR a reference to a
+    module-level string constant), paired with the retrieval_mode of the same build_detection
+    call. Parsed from the AST rather than imported, so this gate does not depend on
+    numpy/detector import side effects."""
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    constants = _module_string_constants(tree)
     found: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -45,11 +68,15 @@ def _kg_queries(module_path: Path) -> list[str]:
         kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg}
         query = kwargs.get("kg_query")
         mode = kwargs.get("retrieval_mode")
-        if not isinstance(query, ast.Constant) or not isinstance(query.value, str):
+        if isinstance(query, ast.Constant) and isinstance(query.value, str):
+            value = query.value
+        elif isinstance(query, ast.Name) and query.id in constants:
+            value = constants[query.id]
+        else:
             continue
         if isinstance(mode, ast.Constant) and mode.value != "kg":
             continue  # rag-mode rules query the vector DB, not the graph
-        found.append(query.value)
+        found.append(value)
     return found
 
 

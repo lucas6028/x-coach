@@ -256,6 +256,23 @@ class LungeMetricTests(unittest.TestCase):
         self.assertFalse(raw[0]["valid"])
         self.assertNotIn("left_knee_angle", raw[0])
 
+    def test_lunge_metric_keys_match_the_emitted_metrics(self) -> None:
+        """TWO-WAY equality, mirroring
+        test_movement_registry.py::test_pushup_metric_keys_match_the_emitted_metrics.
+        `run_detector` builds each CoreFrame's metrics dict FROM `LUNGE_METRIC_KEYS`, so a key
+        `lunge_compute_raw` emits but the tuple omits is silently dropped and reads back as
+        NaN -- for `left_knee_angle`/`right_knee_angle` that would permanently silence
+        `resolve_lead_side` with no error anywhere."""
+        from src.pose.movements.lunge import LUNGE_METRIC_KEYS, lunge_compute_raw
+
+        raw = lunge_compute_raw([lunge_frame()], 30.0)
+        self.assertTrue(raw[0]["valid"], "fixture frame must be valid for this comparison")
+        framework_keys = {"frame_index", "time", "valid", "lower_body_visibility"}
+        emitted = set(raw[0]) - framework_keys
+        self.assertEqual(set(LUNGE_METRIC_KEYS), emitted)
+        # No duplicates hiding a missing key behind a matching set size.
+        self.assertEqual(len(LUNGE_METRIC_KEYS), len(set(LUNGE_METRIC_KEYS)))
+
 
 class LungePhaseTests(unittest.TestCase):
     def _descend_and_rise(self) -> list[dict]:
@@ -707,6 +724,48 @@ class LungePelvicDropRuleTests(unittest.TestCase):
         self.assertAlmostEqual(
             detections[0].confidence, round(detections[0].severity * 0.65, 4), places=3
         )
+
+
+class LungeAlternatingLeadTests(unittest.TestCase):
+    """The regression guard on lead-side resolution living in the RULES, not in compute_raw.
+
+    The Phase 2 validation harness feeds ONE REP PER CLIP, so a clip-level lead side is
+    per-rep by construction there and this defect would be invisible to it. Lunges are
+    normally performed alternating legs, so production sees exactly this shape.
+    """
+
+    def _alternating_clip(self) -> list[dict]:
+        # Three reps: lead left, lead right, lead left. Depth is driven by `lead_anterior`,
+        # which is what bends the lead knee in-image.
+        frames: list[dict] = []
+        index = 0
+        for lead in ("left", "right", "left"):
+            depths = list(np.linspace(0.0, 0.80, 12)) + list(np.linspace(0.80, 0.0, 12))
+            for depth in depths:
+                frames.append(
+                    lunge_frame(lead=lead, lead_anterior=float(depth), frame_index=index)
+                )
+                index += 1
+        return frames
+
+    def test_each_rep_attributes_its_fault_to_the_leg_that_actually_led_it(self) -> None:
+        from src.pose.movements.lunge import LUNGE_DETECTOR
+
+        result = run_detector(LUNGE_DETECTOR, self._alternating_clip(), 30.0, "front_oblique", 0.9)
+        self.assertGreaterEqual(len(result.reps), 2, "segmentation did not find the reps")
+        # Whatever fires, no detection may name a lead side whose knee was the EXTENDED one:
+        # that is the signature of a lead side resolved over the wrong window.
+        for detection in result.detections:
+            lead = detection.evidence.get("lead_side")
+            if lead is None:
+                continue
+            peak = next(f for f in result.core if f.frame_index == detection.peak_frame)
+            self.assertLess(
+                peak.m(f"{lead}_knee_angle"),
+                peak.m("left_knee_angle" if lead == "right" else "right_knee_angle"),
+                f"detection {detection.fault_id} named {lead} as the lead leg, but that leg "
+                f"was the more EXTENDED one at its peak frame",
+            )
 
 
 if __name__ == "__main__":

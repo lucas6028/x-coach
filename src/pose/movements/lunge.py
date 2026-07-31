@@ -61,7 +61,8 @@ from src.pose.geometry import (
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility,
     knee_forward_ratio, distance, contiguous_true_segments, severity_from_range,
 )
-from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
+from src.pose.movements import registry
 from src.pose.pose_rule_detector import (
     KNEE_FORWARD_MILD,
     KNEE_FORWARD_SEVERE,
@@ -758,3 +759,28 @@ def rule_pelvic_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDe
             )
         )
     return detections
+
+
+# All FOUR of the spec's Lunge rules are listed and all four can fire -- unlike push-up's
+# permanently-silent `rule_scapular_winging`, no Lunge fault lacks a monocular-observable
+# proxy. `LUNGE_METRIC_KEYS` must stay a two-way match with what `lunge_compute_raw` emits
+# (pinned by `test_lunge_metric_keys_match_the_emitted_metrics` in tests/test_lunge.py,
+# mirroring push-up's equivalent in tests/test_movement_registry.py): a key the tuple omits is
+# dropped by `run_detector` (which builds each CoreFrame's metrics dict FROM this tuple) and
+# read back as NaN.
+LUNGE_DETECTOR = MovementDetector(
+    "Lunge",
+    LUNGE_METRIC_KEYS,
+    lunge_compute_raw,
+    lunge_assign_phases,
+    (rule_knee_past_toes, rule_knee_valgus, rule_insufficient_depth, rule_pelvic_drop),
+    # `validated` is left at its default False: these thresholds have not been checked against
+    # labeled data at the time this detector is registered, so it surfaces as Beta. Phase 2
+    # measures them; flipping this flag is a SEPARATE, evidence-backed decision, not part of
+    # shipping the rules.
+    rep_signal="min_knee_angle",
+    rep_polarity="min",
+    rep_start="extended",
+)
+
+registry.register(LUNGE_DETECTOR)

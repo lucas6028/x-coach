@@ -57,6 +57,36 @@ class MovementRegistryTests(unittest.TestCase):
             with self.subTest(spelling=spelling):
                 self.assertEqual(registry.get_detector(spelling).name, "Push-up")
 
+    def test_lunge_detector_resolves_case_insensitively(self) -> None:
+        from src.pose.movements.registry import get_detector
+
+        self.assertEqual(get_detector("Lunge").name, "Lunge")
+        self.assertEqual(get_detector("lunge").name, "Lunge")
+
+    def test_lunge_is_not_marked_validated(self) -> None:
+        # Thresholds are spec-derived; Phase 2 measures them. Beta until evidence says otherwise.
+        from src.pose.movements.registry import get_detector
+
+        self.assertFalse(get_detector("Lunge").validated)
+
+    def test_lunge_registers_all_four_spec_rules(self) -> None:
+        """All four fire, unlike push-up's permanently-silent `rule_scapular_winging` --
+        mirrors `test_pushup_registers_all_five_spec_rules`."""
+        from src.pose.movements import lunge
+
+        detector = registry.get_detector("Lunge")
+        self.assertEqual(
+            [rule.__name__ for rule in detector.rules],
+            [
+                "rule_knee_past_toes",
+                "rule_knee_valgus",
+                "rule_insufficient_depth",
+                "rule_pelvic_drop",
+            ],
+        )
+        self.assertIs(detector.compute_raw, lunge.lunge_compute_raw)
+        self.assertIs(detector.assign_phases, lunge.lunge_assign_phases)
+
     def test_pushup_registers_all_five_spec_rules(self) -> None:
         """Four firing rules plus the permanently-silent `rule_scapular_winging`, which is
         registered so the spec and the code stay 1:1 (see its docstring)."""
@@ -179,6 +209,7 @@ class MovementRegistryTests(unittest.TestCase):
             "Squat": ("avg_knee_angle", "min"),
             "Push-up": ("min_elbow_angle", "min"),
             "Overhead Press": ("avg_elbow_angle", "max"),
+            "Lunge": ("min_knee_angle", "min"),
         }
         for name, (signal, polarity) in expected.items():
             with self.subTest(movement=name):
@@ -187,7 +218,7 @@ class MovementRegistryTests(unittest.TestCase):
                 self.assertEqual(detector.rep_polarity, polarity)
                 self.assertIn(detector.rep_signal, detector.metric_keys)
                 # The other knobs exist for movements RS-SP1 does not implement (spec §3.4);
-                # these three use the defaults.
+                # these four use the defaults.
                 self.assertFalse(detector.rep_rectify)
                 self.assertEqual(detector.rep_start, "extended")
 
@@ -216,19 +247,22 @@ class MovementRegistryTests(unittest.TestCase):
 
 
 class TestMovementRegistry(unittest.TestCase):
-    def test_lists_all_three_detectors_in_registration_order(self) -> None:
+    def test_lists_all_four_detectors_in_registration_order(self) -> None:
         from src.pose.movements import registry
 
         names = [d.name for d in registry.list_detectors()]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up"])
+        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge"])
 
     def test_only_squat_is_validated(self) -> None:
-        """Push-up and Overhead Press rules are literature-derived and never checked against
-        ground-truth labels. The UI marks them Beta off this flag."""
+        """Push-up, Overhead Press and Lunge rules are literature-derived and never checked
+        against ground-truth labels. The UI marks them Beta off this flag."""
         from src.pose.movements import registry
 
         validated = {d.name: d.validated for d in registry.list_detectors()}
-        self.assertEqual(validated, {"Squat": True, "Overhead Press": False, "Push-up": False})
+        self.assertEqual(
+            validated,
+            {"Squat": True, "Overhead Press": False, "Push-up": False, "Lunge": False},
+        )
 
     def test_validated_defaults_to_false(self) -> None:
         """A new detector must fail toward Beta, never silently present as validated."""
@@ -244,5 +278,5 @@ class TestMovementRegistry(unittest.TestCase):
 
         self.assertEqual(
             {d.name for d in registry.list_detectors()},
-            {"Squat", "Push-up", "Overhead Press"},
+            {"Squat", "Push-up", "Overhead Press", "Lunge"},
         )
