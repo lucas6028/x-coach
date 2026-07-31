@@ -1765,7 +1765,12 @@ against labeled ground truth" and is the user's decision with these numbers in h
   reps (an independent re-derivation got 37%) — that is measurement error, not anatomy; the two
   premise rates disagree by 12 points across those same views; and recomputing the identical
   angle in the image plane alone, dropping MediaPipe's pseudo-depth `z`, swings cam17 from
-  **59.8% to 17.2%** (independent re-derivation: 14.8%) while moving cam18 the other way. The
+  **59.8% to 17.2%** while moving cam18 the other way. (Both controls are reported on two frame
+  populations — the `segment_reps`-re-cut scored window and the full labeled window. Same
+  geometry, different frame, and the harness computes both: the scored-window variants read
+  **58/156 = 37.2%** and **24/169 = 14.2%**. The **full-window figures are the quoted ones
+  because they are segmentation-independent**, which is the property this argument must not
+  borrow from the harness's own windowing; every conclusion holds on both populations.) The
   supported claim is therefore **"the more-flexed-knee cue, as this pipeline measures it, does
   not identify the labeled lead leg from either view available here"** — which still fully
   condemns `resolve_lead_side` as shipped and still bounds all four rules. **The distinction
@@ -1810,8 +1815,9 @@ against labeled ground truth" and is the user's decision with these numbers in h
   and must not be used to retire it: the half-profile stratum's **1.000 specificity is vacuous**
   — the rule fired zero times there because the view mislabel below gated it off on all 39
   correct reps, and a specificity for a silenced rule measures nothing — while the overall
-  **0.923 counts 54 of its 78 correct reps as true negatives when 37 were view-gated and 18 could
-  not fire**. On the **24 correct reps where the rule could actually act it false-fired on 6:
+  **0.923 counts 54 of its 78 correct reps as true negatives on reps where the rule was
+  structurally silent** (37 view-gated OR 18 could-not-fire, overlapping on 1 — union 54, not
+  55). On the **24 correct reps where the rule could actually act it false-fired on 6:
   specificity 0.750, a 25% false-positive rate**, which is the shape §6.5 predicted rather than
   its refutation. Excluding the 40 level-2/3 extra-person reps moves that conditional specificity
   to 0.895 and the per-subject median AUC to 0.679, so person-locking is not the cause. The
@@ -1831,10 +1837,14 @@ against labeled ground truth" and is the user's decision with these numbers in h
   are misleading without it.** A rep can be unable to fire because its **view gate** was shut, its
   masked phase was shorter than `min_frames` (6 at 30 fps), or its lead side was unresolved —
   and `contingency` counts every such rep as a true or false NEGATIVE, deflating sensitivity and
-  inflating specificity invisibly. Production counts: `lunge_knee_past_toes` 86 view-gated + 32
-  could-not-fire; `lunge_insufficient_depth` 48 could-not-fire (26 of them windows whose `bottom`
-  phase is shorter than the floor); `lunge_knee_valgus` 32; `lunge_pelvic_drop` 84 view-gated +
-  33. So "6 fires in 174" for depth and "10 in 174" for pelvic drop are partly statements about
+  inflating specificity invisibly. **The categories OVERLAP and must never be added** — every
+  count below is a union, with its components and their overlap given so a reader's own
+  arithmetic reconciles. Production, out of 174 reps each: `lunge_knee_past_toes` **98
+  non-actionable** (86 view-gated OR 32 could-not-fire, overlapping on 20) leaving 76;
+  `lunge_insufficient_depth` **48** (none view-gated; 26 of them windows whose `bottom` phase is
+  shorter than the floor) leaving 126; `lunge_knee_valgus` **32** (none view-gated) leaving 142;
+  `lunge_pelvic_drop` **111** (84 view-gated OR 33 could-not-fire, overlapping on 6) leaving 63.
+  So "6 fires in 174" for depth and "10 in 174" for pelvic drop are partly statements about
   window length and view labeling, not only about which errors the dataset contains. The
   conditional tables restricted to the reps where each rule could act are in
   `notes/lunge-rule-validation.md` §4 and do not rescue either rule.

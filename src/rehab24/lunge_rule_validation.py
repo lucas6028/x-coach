@@ -222,8 +222,16 @@ def gate_open(fault_id: str, view_type: str, view_confidence: float) -> bool:
 
     A restatement of the only two HARD gates in `lunge.py` -- `rule_knee_past_toes` requires a
     confident `side`, `rule_pelvic_drop` returns `[]` on `side`. The other two rules downgrade
-    observability off-view but never go silent, so they are always open. Pinned against the rule
-    module by `test_gate_open_matches_each_rule_hard_gate`.
+    observability off-view but never go silent, so they are always open.
+
+    A restatement is a drift risk, and every conditional contingency table in
+    `notes/lunge-rule-validation.md` depends on this one being right, so it is pinned by
+    EXECUTION rather than by a second copy of the same logic:
+    `GateOpenTests.test_agrees_with_what_the_rules_actually_emit_across_every_view_label` drives
+    each rule with a window it would fire on and compares emit/silence against this function for
+    all six view labels, and a companion test walks the `side` confidence floor the same way.
+    A gate change in `lunge.py` therefore fails the suite instead of silently invalidating the
+    writeup.
 
     WHY A CONTINGENCY TABLE NEEDS THIS. Without it a rep the VIEW silenced is counted as a true
     negative, which inflates specificity and reports a rule as well-behaved on reps where it
@@ -562,6 +570,9 @@ def evaluate_rep(frames: list[dict], segment, camera: str) -> dict | None:
     Returns None when the labeled window starts past the end of the clip (reported as a
     skipped rep, never silently dropped).
     """
+    from src.pose.geometry import (
+        landmarks_to_array, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE,
+    )
     from src.pose.movements.base import run_detector
     from src.pose.movements.lunge import LUNGE_DETECTOR, resolve_lead_side
     from src.rehab24.dataset import camera_orientation
@@ -627,6 +638,25 @@ def evaluate_rep(frames: list[dict], segment, camera: str) -> dict | None:
             bottom = _bottom_frame(window)
             record["bottom_left_knee_angle"] = None if bottom is None else _round_finite(bottom.m("left_knee_angle"))
             record["bottom_right_knee_angle"] = None if bottom is None else _round_finite(bottom.m("right_knee_angle"))
+            # The SAME image-plane control `full_window_premise` applies, but at the SCORED
+            # window's bottom frame. Carrying both makes the scored-window/full-window split the
+            # only difference between the two sets of premise figures, so a reader can see that
+            # the variants differ by which frame is chosen and by nothing else.
+            record["bottom_left_knee_angle_2d"] = None
+            record["bottom_right_knee_angle_2d"] = None
+            if bottom is not None:
+                # `lunge_compute_raw` copies each frame's own `frame_index`, and `window_frames`
+                # is a contiguous slice starting at `segment.first_frame`, so this maps a
+                # CoreFrame back to the landmark payload it was computed from.
+                position = int(bottom.frame_index) - int(segment.first_frame)
+                if 0 <= position < len(window_frames):
+                    points = landmarks_to_array(window_frames[position].get("landmarks"))
+                    record["bottom_left_knee_angle_2d"] = _round_finite(
+                        angle_2d(points, LEFT_HIP, LEFT_KNEE, LEFT_ANKLE)
+                    )
+                    record["bottom_right_knee_angle_2d"] = _round_finite(
+                        angle_2d(points, RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE)
+                    )
     return record
 
 
@@ -755,6 +785,15 @@ def subset_stats(
         "view_gated": sum(
             1 for r in records if not r[pass_name].get("gate_open", {}).get(fault_id, True)
         ),
+        # `view_gated` and `cannot_fire` OVERLAP -- a rep can be both. Reporting only the two
+        # component counts invites a reader to add them and get a total larger than the number
+        # of reps, which is why the union (and the overlap that explains it) is carried too.
+        "silence_overlap": sum(
+            1 for r in records
+            if not r[pass_name].get("gate_open", {}).get(fault_id, True)
+            and r[pass_name]["cannot_fire"].get(fault_id)
+        ),
+        "n_non_actionable": len(records) - len(act_index),
         "unresolved_lead": sum(1 for r in records if r[pass_name]["lead_side"] is None),
         "n_actionable": len(act_index),
         "actionable_table": act_table,
@@ -780,9 +819,12 @@ def _stats_lines(label: str, stats: dict, threshold: float) -> list[str]:
         f"      fired {stats['fired']:>3}  "
         f"[tp {t['tp']:>3} fp {t['fp']:>3} tn {t['tn']:>3} fn {t['fn']:>3}]  "
         f"sens {_fmt(stats['sensitivity'])}  spec {_fmt(stats['specificity'])}",
-        f"      STRUCTURAL SILENCE inside that table: view-gated {stats['view_gated']}, "
-        f"could-not-fire {stats['cannot_fire']} (of which unresolved lead side "
-        f"{stats['unresolved_lead']}) -- all counted above as true negatives / false negatives",
+        f"      STRUCTURAL SILENCE inside that table: {stats['n_non_actionable']} reps "
+        f"(= {stats['view_gated']} view-gated OR {stats['cannot_fire']} could-not-fire, "
+        f"overlapping on {stats['silence_overlap']}; of the latter "
+        f"{stats['unresolved_lead']} are an unresolved lead side) -- all counted above as "
+        f"true negatives / false negatives. THE TWO COMPONENTS DO NOT ADD; the union is what "
+        f"leaves {stats['n_actionable']} actionable.",
         f"      CONDITIONAL on the {stats['n_actionable']} reps where the rule could act: "
         f"[tp {a['tp']:>3} fp {a['fp']:>3} tn {a['tn']:>3} fn {a['fn']:>3}]  "
         f"sens {_fmt(stats['actionable_sensitivity'])}  "
@@ -931,15 +973,20 @@ def build_report(payload: dict) -> str:
     add("  PREMISE CHECK -- is the labeled lead leg actually the MORE FLEXED knee at the bottom?")
     add("  (`resolve_lead_side` substitutes the more-flexed half of the spec's")
     add("  \"more flexed / more anterior\" definition; this asks whether that half holds here.)")
-    add("  Three variants, because the answer depends on how the angle is measured:")
-    add("    [scored window] from the frames the rules saw (re-cut by segment_reps on most reps)")
-    add("    [full window]   from the whole labeled window, no segmentation, no smoothing")
-    add("    [image plane]   the same full-window angle with MediaPipe's pseudo-depth z dropped")
+    add("  FOUR variants on a 2x2: which BOTTOM FRAME (scored window vs full labeled window) x")
+    add("  which GEOMETRY (all three coordinates vs image plane only). Reading them as a grid is")
+    add("  what shows that the frame choice and the pseudo-depth channel are separate effects.")
+    add("    [scored window] the frames the rules saw (re-cut by segment_reps on most reps)")
+    add("    [full window]   the whole labeled window, no segmentation, no smoothing")
+    add("    [ +2d ]         the same frame's angle with MediaPipe's pseudo-depth z dropped")
+    add("  THE FULL-WINDOW ROWS ARE THE QUOTED ONES: they are segmentation-independent, which is")
+    add("  exactly the property this argument must not borrow from the harness's own windowing.")
     for camera in ("cam17", "cam18"):
         for variant, left_key, right_key, source in (
             ("scored window", "bottom_left_knee_angle", "bottom_right_knee_angle", None),
+            ("scored window +2d", "bottom_left_knee_angle_2d", "bottom_right_knee_angle_2d", None),
             ("full window", "left_knee_angle", "right_knee_angle", "full_window"),
-            ("image plane", "left_knee_angle_2d", "right_knee_angle_2d", "full_window"),
+            ("full window +2d", "left_knee_angle_2d", "right_knee_angle_2d", "full_window"),
         ):
             hits, gaps, misses = 0, [], []
             for record in records:
@@ -960,24 +1007,30 @@ def build_report(payload: dict) -> str:
             total = len(gaps)
             med, _, _, _ = median_and_range(gaps)
             miss_med, _, _, _ = median_and_range(misses)
-            add(f"    {camera} [{variant:>13}]: {hits}/{total} = "
+            add(f"    {camera} [{variant:>17}]: {hits}/{total} = "
                 f"{_fmt(hits / total if total else math.nan)}; median |L-R| separation "
                 f"{_fmt(med, 1)} deg overall, {_fmt(miss_med, 1)} deg ON THE REPS IT GETS WRONG")
-    paired_flex: dict[tuple[str, str], dict[str, str]] = defaultdict(dict)
-    for record in records:
-        window = record.get("full_window") or {}
-        left, right = window.get("left_knee_angle"), window.get("right_knee_angle")
-        if left is None or right is None:
-            continue
-        paired_flex[(record["video_id"], record["repetition_number"])][record["camera"]] = (
-            "left" if left < right else "right"
-        )
-    pairs = [v for v in paired_flex.values() if "cam17" in v and "cam18" in v]
-    disagree = sum(1 for v in pairs if v["cam17"] != v["cam18"])
     add("  CROSS-CAMERA CONTROL -- the two cameras film the SAME body at the SAME instant, so")
-    add("  any disagreement about which knee is more flexed is measurement error, not anatomy:")
-    add(f"    they disagree on {disagree}/{len(pairs)} = "
-        f"{_fmt(disagree / len(pairs) if pairs else math.nan)} of reps")
+    add("  any disagreement about which knee is more flexed is measurement error, not anatomy.")
+    add("  Reported on the same two frame populations, because the frame choice is the ONLY")
+    add("  thing that differs between them:")
+    for variant, left_key, right_key, source in (
+        ("scored window", "bottom_left_knee_angle", "bottom_right_knee_angle", None),
+        ("full window", "left_knee_angle", "right_knee_angle", "full_window"),
+    ):
+        paired_flex: dict[tuple[str, str], dict[str, str]] = defaultdict(dict)
+        for record in records:
+            holder = record if source is None else record.get(source) or {}
+            left, right = holder.get(left_key), holder.get(right_key)
+            if left is None or right is None:
+                continue
+            paired_flex[(record["video_id"], record["repetition_number"])][record["camera"]] = (
+                "left" if left < right else "right"
+            )
+        pairs = [v for v in paired_flex.values() if "cam17" in v and "cam18" in v]
+        disagree = sum(1 for v in pairs if v["cam17"] != v["cam18"])
+        add(f"    [{variant:>13}] they disagree on {disagree}/{len(pairs)} = "
+            f"{_fmt(disagree / len(pairs) if pairs else math.nan)} of reps")
     add("")
 
     add("-" * 88)

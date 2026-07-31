@@ -153,6 +153,11 @@ measured first, and it changes how everything after it must be read.
 | Resolved (not `None`) | 154/174 (unresolved **11.5%**) | 152/174 (unresolved **12.6%**) |
 | **Accuracy vs `exercise_subtype`** | **96/154 = 0.623** | **72/152 = 0.474** |
 
+Secondary, and superseded as an instrument by §3.1's control: on the 132 reps where both cameras
+resolved a lead side, they **agree with each other on only 89 = 0.674**. That is a self-consistency
+figure for the whole heuristic; §3.1's cross-camera *flexion* disagreement is the sharper
+instrument because it isolates the cue itself from the 5° ambiguity guard layered on top of it.
+
 cam18 is **below chance**. The cross-tabulation shows it is a bias, not a left/right label
 inversion: on cam17, `front leg right` reps resolve `right` 71/79 (90%), but `front leg left`
 reps also resolve `right` 50/75 — the heuristic calls the right leg the lead in 121 of 154
@@ -176,17 +181,40 @@ scored windows the rules actually saw, the same numbers are 105/169 = 62.1% and 
 **But three controls say this is a statement about the measurement, not about lunges.**
 
 1. **The two cameras disagree with each other.** They film the same body at the same instant,
-   yet they disagree about which knee is more flexed on **52/156 = 33%** of reps. (An
-   independent re-derivation with its own geometry got 58/156 = 37%.) That is measurement error;
-   anatomy cannot differ between two simultaneous views of one body.
+   yet they disagree about which knee is more flexed on **52/156 = 33.3%** of reps. That is
+   measurement error; anatomy cannot differ between two simultaneous views of one body.
 2. **The two premise rates disagree by 12 points across those same simultaneous views**
    (59.8% vs 47.8%). Two reads of one physical premise cannot both be right.
 3. **The number is dominated by MediaPipe's pseudo-depth.** `geometry.angle_degrees` uses all
    three coordinates, so a "knee angle" here is partly a function of a learned `z` channel.
    Recomputing the identical angle in the image plane alone collapses cam17 from **59.8% to
-   17.2%** and moves cam18 the other way, from 47.8% to 57.1%. (The independent re-derivation
-   got 14.8% for cam17 — same collapse.) A cue whose answer swings that far on whether one
-   coordinate is included is not measuring knee flexion reliably.
+   17.2%** and moves cam18 the other way, from 47.8% to 57.1%. A cue whose answer swings that
+   far on whether one coordinate is included is not measuring knee flexion reliably.
+
+**Which frame the control is read on matters, and the full-window rows are the quoted ones.**
+An earlier draft attributed a 37% cross-camera disagreement and a 14.8% image-plane figure to
+"an independent re-derivation with its own geometry". That was wrong about the cause, and the
+harness now settles it by computing both: the geometry is identical, and the entire difference
+is **which bottom frame is used** — the `segment_reps`-re-cut scored window versus the full
+labeled window. Measured on both populations:
+
+| Control | scored window | full window |
+|---|---|---|
+| Cross-camera "which knee is more flexed" disagreement | **58/156 = 0.372** | **52/156 = 0.333** |
+| cam17 premise, image plane only | **24/169 = 0.142** | **29/169 = 0.172** |
+| cam17 premise, all three coordinates | 105/169 = 0.621 | 101/169 = 0.598 |
+| cam18 premise, image plane only | 96/161 = 0.596 | 92/161 = 0.571 |
+| cam18 premise, all three coordinates | 78/161 = 0.484 | 77/161 = 0.478 |
+
+The scored-window cross-camera figure reproduces the earlier 37% exactly; the scored-window
+image-plane figure lands one rep from the earlier 14.8% (24/169 vs 25/169). So the frame
+population, not the implementation, accounts for the discrepancy — verified, not inferred.
+
+**The full-window rows are quoted throughout precisely because they are
+segmentation-independent**, which is the property §3.1's argument must not borrow from the
+harness's own windowing. Every conclusion here holds on both populations anyway: the image-plane
+collapse is 0.598→0.172 full-window and 0.621→0.142 scored-window, and the cross-camera
+disagreement is a third of reps either way.
 
 So the supported claim is narrower than "more flexed doesn't identify the lead leg in a lunge",
 and it is deliberately stated as:
@@ -235,6 +263,11 @@ sensitivity and inflates specificity by an amount a reader cannot see unless it 
 So each table gives the counts *and* a **conditional** row restricted to the reps where the rule
 could actually act. Where the two diverge, the conditional row is the one that means something.
 
+**The two silence categories overlap and must never be added.** A view-gated rep can also have
+too short a masked phase. Every count below is therefore given as *view-gated* OR
+*could-not-fire*, with the overlap and the **union** stated, and the union is what the
+actionable count complements: `n_actionable = n − union`, never `n − (a + b)`.
+
 ### 4.1 `lunge_knee_past_toes` — cam18, spec threshold 0.10
 
 | Cut | Per-subject median AUC (range) | n scored | **Lead-oracle** median (range) | n | Fired | Sens / Spec |
@@ -243,9 +276,10 @@ could actually act. Where the two diverge, the conditional row is the one that m
 | `front` → cam18 `side` (88) | **0.171** (0.000–0.800), 7/8 subj | 80 | **0.833** (0.444–1.000) | 86 | 53 | 0.449 / 0.205 |
 | `half-profile` (86) | 0.850 (0.000–1.000), 6/8 subj | 70 | 0.845 (0.550–0.900) | 73 | 0 | 0.000 / 1.000 |
 
-Structural silence in the all-174 table: **86 view-gated** (every `half-profile` rep) and **32
-could-not-fire** (22 of them an unresolved lead side). **Conditional on the 76 reps where the
-rule could act: tp 22 / fp 31 / tn 5 / fn 18 → sensitivity 0.550, specificity 0.139.**
+Structural silence in the all-174 table: **98 reps** — 86 view-gated (every `half-profile` rep)
+OR 32 could-not-fire (22 of them an unresolved lead side), **overlapping on 20, so the union is
+98, not 118**. **Conditional on the remaining 76 reps where the rule could act: tp 22 / fp 31 /
+tn 5 / fn 18 → sensitivity 0.550, specificity 0.139.**
 
 **As shipped, on the only stratum where the cue is validly observable — the 88 genuinely
 sagittal cam18 reps — the metric orders CORRECT reps above incorrect ones** (per-subject median
@@ -280,9 +314,9 @@ stratum, so the fire decision cannot differ.
 | `front` → cam18 `side` (88) | 0.792 (0.600–1.000), 7/8 subj | 80 | **0.320** (0.080–0.889) | 86 | 5 | 0.020 / 0.897 |
 | `half-profile` (86) | 0.183 (0.000–0.750), 6/8 subj | 68 | 0.260 (0.024–0.850) | 71 | 1 | 0.000 / 0.974 |
 
-Structural silence in the all-174 table: 0 view-gated (this rule has no hard gate) but **48
-could-not-fire** — 22 unresolved lead side, the other 26 windows whose `bottom` phase is shorter
-than the 6-frame floor. **Conditional on the 126 reps where the rule could act: tp 1 / fp 5 /
+Structural silence in the all-174 table: **48 reps** — 0 view-gated (this rule has no hard gate),
+so the union is just the 48 could-not-fire: 22 an unresolved lead side, the other 26 windows whose
+`bottom` phase is shorter than the 6-frame floor. **Conditional on the 126 reps where the rule could act: tp 1 / fp 5 /
 tn 54 / fn 66 → sensitivity 0.015, specificity 0.915.**
 
 **This is the rule where the lead-oracle column reverses the apparent result, and the reversal
@@ -316,8 +350,8 @@ documented case — a cited cut sitting in the tail of the distribution. **It do
 | `half-profile` (86) | 0.600 (0.200–1.000), 7/8 subj | 79 | 0.760 (0.400–1.000) | 86 | **71 (83%)** | 0.915 / 0.282 | **6.3** |
 | extra-person-clean (134) | 0.629 (0.139–0.917), 7/8 subj | 112 | 0.639 (0.133–0.810) | 124 | 75 (56%) | 0.676 / 0.583 | 24.1 |
 
-Structural silence in the all-174 table: 0 view-gated, **32 could-not-fire** (20 unresolved lead
-side). **Conditional on the 142 reps where the rule could act: tp 64 / fp 35 / tn 25 / fn 18 →
+Structural silence in the all-174 table: **32 reps** — 0 view-gated, so the union is just the 32
+could-not-fire (20 an unresolved lead side). **Conditional on the 142 reps where the rule could act: tp 64 / fp 35 / tn 25 / fn 18 →
 sensitivity 0.780, specificity 0.417** — so the unconditional 0.667 / 0.551 was understating how
 freely this rule fires, not overstating it.
 
@@ -365,6 +399,10 @@ it.** The threshold does not move, and the docstring's limitation stands as writ
 | **Oracle**, all 174 | same metric, same AUC | 149 | 0.467 | 164 | **41** | 0.240 / 0.769 | 0.284 / 0.700 (n=141) | 54.4 |
 | Oracle, `half-profile` (86) | 0.500 | 79 | 0.333 | 86 | **31** | 0.404 / 0.692 | 0.452 / 0.667 (n=78) | 45.6 |
 
+Structural silence in the production all-174 table: **111 reps** — 84 view-gated OR 33
+could-not-fire, **overlapping on 6, so the union is 111, not 117**, leaving the 63 actionable
+reps the conditional column is computed over.
+
 **Read specificity first, as the spec's §6.5 requires — but read the RIGHT specificity.** The
 predicted failure mode was *false positives on deep, correctly-performed reps* from split-stance
 foreshortening.
@@ -374,9 +412,12 @@ The unconditional figures do not test that prediction:
 - **The half-profile stratum's 1.000 is vacuous.** The rule fired zero times there because the
   view estimator's `side` mislabel gated it off on all 39 correct reps. A specificity for a
   silenced rule is not a measurement of anything.
-- **The 0.923 counts 54 of its 78 correct reps as true negatives when 37 were view-gated and 18
-  could not fire.** On the **24 correct reps where the rule could actually act, it false-fired on
-  6 — specificity 0.750, a 25% false-positive rate.**
+- **The 0.923 counts 54 of its 78 correct reps as true negatives on reps where the rule was
+  structurally silent.** 37 of those were view-gated and 18 could not fire; **the two sets
+  overlap on 1, so the union is 54, not 55** — throughout this note the two components are
+  reported alongside their union because they are not disjoint and must not be added. On the
+  **24 correct reps where the rule could actually act, it false-fired on 6 — specificity 0.750,
+  a 25% false-positive rate.**
 
 **So the evidence is consistent with §6.5's prediction materializing, not with its refutation.**
 An earlier draft of this note recorded the opposite; that was the wrong number, and this is the
@@ -441,10 +482,11 @@ verdict has good *sensitivity* and poor *specificity*. The same mislabeling sile
    part of their silence is structural, not evidential.** Six and ten fires respectively across
    174 reps, and chance-level or below separation on the clean read. But **48 of 174 reps could
    not have fired `lunge_insufficient_depth` at any knee angle** (window too short or lead
-   unresolved), and **117 of 174 could not have fired `lunge_pelvic_drop`** (84 view-gated, 33
-   could-not-fire), so the raw fire counts are partly statements about window length and view
-   labeling. The conditional tables — 1 fire in 126 actionable reps, 10 in 63 — do not rescue
-   either. That is still not evidence the rules are wrong. Both faults may be entirely real and
+   unresolved), and **111 of 174 could not have fired `lunge_pelvic_drop`** — 84 view-gated and
+   33 could-not-fire, **overlapping on 6**, so the union is 111 and the two counts must not be
+   added. That leaves 126 and 63 actionable reps respectively, so the raw fire counts are partly
+   statements about window length and view labeling. The conditional tables — 1 fire in 126
+   actionable reps, 10 in 63 — do not rescue either. That is still not evidence the rules are wrong. Both faults may be entirely real and
    simply absent from, or invisible in, REHAB24-6's instructed lunge errors. **Neither threshold
    moves**; a threshold tuned to make a fire rate look better would no longer be the cited
    number, and its citation would become a false provenance claim.
