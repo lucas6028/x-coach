@@ -1931,7 +1931,47 @@ segments, calling `run_detector`) in the `src/` module, not the script.
 For each Ex5 segment and each of the two cameras:
 
 1. Load that camera's pose JSON, `slice_rep` the labeled window.
-2. Estimate the view for the **whole clip** (not the window) via `estimate_view_for_pose`.
+2. Estimate the view **per rep window**, NOT per clip.
+
+   **Corrected 2026-07-31, measured — the original instruction here said "whole clip" and was
+   wrong.** Every Ex5 video contains BOTH `front` and `half-profile` repetitions, roughly 50/50
+   (`PM_021` 10/10, `PM_028` 11/10, `PM_042` 13/12, `PM_112` 12/13, …): the subject reorients
+   partway through each recording. A whole-clip view estimate would therefore be derived from a
+   mixture of two orientations and be wrong for about half the reps in every video — and the
+   production pass exists precisely to report the view label a rule would really receive.
+
+   `estimate_view_for_pose` only takes a path, but its aggregation is reproducible from two
+   public functions with no production change. Mirror it over the window's frames:
+
+```python
+from src.pose.view_estimation import frame_view_signals, mean_finite, score_view
+
+def estimate_view_for_window(window_frames: list[dict]) -> tuple[str, float]:
+    """The view label a rule would really receive for THIS repetition.
+
+    Mirrors `estimate_view_for_pose`'s aggregation (view_estimation.py:390-414) over a rep
+    window instead of a whole file, including its `allow_front=False` production default and
+    its deliberate NaN — not 0.0 — default for `torso_width_ratio`, which exists because a 0.0
+    ratio reads as "maximally narrow" and manufactures a high-confidence `side` verdict from
+    clips carrying no width evidence at all.
+    """
+    signals = [frame_view_signals(f) for f in window_frames]
+    valid = [s for s in signals if s is not None]
+    total = len(window_frames)
+    valid_frame_ratio = len(valid) / total if total else 0.0
+    view_type, confidence, *_ = score_view(
+        orientation_score=mean_finite([s["orientation_score"] for s in valid], default=0.0),
+        face_visibility=mean_finite([s["face_visibility"] for s in valid], default=0.0),
+        torso_width_ratio=mean_finite([s["torso_width_ratio"] for s in valid], default=np.nan),
+        z_asymmetry_value=mean_finite([s["z_asymmetry"] for s in valid], default=0.0),
+        valid_frame_ratio=valid_frame_ratio,
+        allow_front=False,
+    )
+    return view_type, confidence
+```
+
+   Put this in `src/rehab24/lunge_rule_validation.py` (it is pure — it takes frames, not a
+   path) and unit-test it against a synthetic window.
 3. **Production pass:** `run_detector(LUNGE_DETECTOR, window, 30.0, estimated_view, estimated_conf)`.
 4. **Oracle pass:** the same call with the dataset's orientation substituted. The mapping is
    **fixed here, not chosen at implementation time** — put it in `lunge_rule_validation.py` as
