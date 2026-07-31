@@ -7,15 +7,23 @@ rule firing on an incorrect rep is not evidence it found that rep's actual error
 here therefore measures whether a rule's signal CARRIES INFORMATION ABOUT REP CORRECTNESS --
 not per-fault precision.
 
-Nothing in this module touches the filesystem, so it is fully testable in CI while the pose
-corpus under `data/` stays gitignored.
+TWO SECTIONS, and the split is load-bearing. Everything above the ORCHESTRATION banner is
+pure -- it takes frames, records and numbers, never a path -- and is unit-tested in CI while
+the pose corpus under `data/` stays gitignored. Everything below the banner reads pose JSON
+off disk and is therefore exercised only when the corpus is present; it is kept as thin as
+possible for exactly that reason, delegating every decision worth testing upward.
 """
 
 from __future__ import annotations
 
+import json
 import math
-from collections import defaultdict
+from collections import Counter, defaultdict
+from pathlib import Path
+from statistics import median
 from typing import Callable, Iterable, Sequence, TypeVar
+
+import numpy as np
 
 # Which camera affords each rule's required view. Segmentation.txt documents that a rep filmed
 # `front` in cam17 is `side` in cam18 (the cameras are orthogonal and simultaneous), so the
@@ -132,3 +140,715 @@ def per_subject(
     for record in records:
         groups[key_fn(record)].append(record)
     return {key: value_fn(group) for key, group in groups.items()}
+
+
+def estimate_view_for_window(window_frames: list[dict]) -> tuple[str, float]:
+    """The view label a rule would really receive for THIS repetition.
+
+    Mirrors `estimate_view_for_pose`'s aggregation (view_estimation.py:390-414) over a rep
+    window instead of a whole file, including its `allow_front=False` production default and
+    its deliberate NaN -- not 0.0 -- default for `torso_width_ratio`, which exists because a 0.0
+    ratio reads as "maximally narrow" and manufactures a high-confidence `side` verdict from
+    clips carrying no width evidence at all.
+
+    PER WINDOW, NEVER PER FILE, and that is a measured requirement rather than a preference:
+    every Ex5 recording mixes `front` and `half-profile` repetitions roughly 50/50 because the
+    subject reorients partway through (notes/lunge-view-reconnaissance.md). A whole-clip
+    estimate would therefore be derived from a mixture of two orientations and be wrong for
+    about half the reps in every video.
+    """
+    from src.pose.view_estimation import frame_view_signals, mean_finite, score_view
+
+    signals = [frame_view_signals(f) for f in window_frames]
+    valid = [s for s in signals if s is not None]
+    total = len(window_frames)
+    valid_frame_ratio = len(valid) / total if total else 0.0
+    view_type, confidence, *_ = score_view(
+        orientation_score=mean_finite([s["orientation_score"] for s in valid], default=0.0),
+        face_visibility=mean_finite([s["face_visibility"] for s in valid], default=0.0),
+        torso_width_ratio=mean_finite([s["torso_width_ratio"] for s in valid], default=np.nan),
+        z_asymmetry_value=mean_finite([s["z_asymmetry"] for s in valid], default=0.0),
+        valid_frame_ratio=valid_frame_ratio,
+        allow_front=False,
+    )
+    return view_type, confidence
+
+
+# The fire threshold each rule's continuous score is compared against, imported from the rule
+# module rather than restated so the writeup's "where does the cited cut sit in the observed
+# distribution" percentile can never quote a number the detector does not actually use.
+def fault_thresholds() -> dict[str, float]:
+    from src.pose.movements.lunge import (
+        LUNGE_DEPTH_MILD_DEG, LUNGE_PELVIC_TILT_MILD_DEG, LUNGE_VALGUS_MILD,
+    )
+    from src.pose.pose_rule_detector import KNEE_FORWARD_MILD
+
+    return {
+        "lunge_knee_past_toes": KNEE_FORWARD_MILD,
+        "lunge_knee_valgus": LUNGE_VALGUS_MILD,
+        "lunge_insufficient_depth": LUNGE_DEPTH_MILD_DEG,
+        "lunge_pelvic_drop": LUNGE_PELVIC_TILT_MILD_DEG,
+    }
+
+
+def score_spec(fault_id: str, lead: str) -> tuple[str, frozenset[str], float]:
+    """(metric key, phases the rule masks on, sign) for one rule's continuous score.
+
+    Restates each rule's own mask so an AUC can be computed for EVERY rep, not only the ones
+    that fired -- a fired-only score set would be censored at the threshold and its AUC would
+    measure nothing. It is a restatement and therefore a drift risk, which
+    `test_score_spec_matches_each_rule_mask` pins against the rule module's own constants.
+
+    The sign carries `rule_pelvic_drop`'s contralateral convention: `pelvis_tilt_signed_deg` is
+    positive when the RIGHT hip is lower, so a LEFT-lead rep's contralateral drop is positive
+    and a RIGHT-lead rep's is negative. Reading the magnitude instead would score an
+    ipsilateral drop -- a different fault -- as Trendelenburg.
+    """
+    from src.pose.movements.lunge import LUNGE_ACTIVE_PHASES, PELVIC_DROP_PHASES
+
+    if fault_id == "lunge_knee_past_toes":
+        return f"{lead}_knee_forward_ratio", frozenset(LUNGE_ACTIVE_PHASES), 1.0
+    if fault_id == "lunge_knee_valgus":
+        return f"{lead}_knee_medial_offset_ratio", frozenset(LUNGE_ACTIVE_PHASES), 1.0
+    if fault_id == "lunge_insufficient_depth":
+        return f"{lead}_knee_angle", frozenset({"bottom"}), 1.0
+    if fault_id == "lunge_pelvic_drop":
+        return "pelvis_tilt_signed_deg", frozenset(PELVIC_DROP_PHASES), (1.0 if lead == "left" else -1.0)
+    raise ValueError(f"unknown lunge fault id: {fault_id}")
+
+
+def rules_window(result) -> list:
+    """The frames the rules ACTUALLY saw, which is not always the whole labeled window.
+
+    `run_detector` scores `core[rep.start:rep.end + 1]` for each selected rep when its own
+    segmentation succeeds, and the whole clip only on a fallback path. Taking the continuous
+    score over the full labeled window regardless would manufacture rows reading "the metric
+    reached 0.35 and the rule stayed silent" on reps where the rule simply never saw the frame
+    that produced the 0.35 -- which corrupts the exact distinction the production/oracle split
+    exists to draw. Score support must equal rule support.
+    """
+    if result.fallback is None and result.analyzed:
+        frames: list = []
+        for rep in result.analyzed:
+            frames.extend(result.core[rep.start : rep.end + 1])
+        return frames
+    return list(result.core)
+
+
+def phase_frame_count(window: Sequence, phases: Iterable[str]) -> int:
+    """Valid frames in `window` carrying one of `phases`.
+
+    Compared against `run_detector`'s `min_frames` to separate "the rule did not fire" from
+    "the rule COULD NOT fire": `contiguous_true_segments` needs `min_frames` consecutive
+    above-threshold frames, so a window whose masked phases are shorter than that is
+    structurally silent whatever the metric did. At 30 fps `min_frames` is 6, and
+    `lunge_assign_phases` labels the deepest 30% `bottom` -- so a 15-frame rep has ~5 `bottom`
+    frames and `rule_insufficient_depth` cannot emit on it at any knee angle. Counting these
+    keeps "not exercised by this dataset" from being written where "could not fire by
+    construction" is the truth.
+    """
+    wanted = set(phases)
+    return sum(1 for frame in window if frame.valid and frame.phase in wanted)
+
+
+def metric_extreme(window: Sequence, metric_key: str, phases: Iterable[str], sign: float) -> float:
+    """Max of `sign * metric` over the valid, in-phase frames; NaN when there are none.
+
+    NaN rather than a sentinel: `rank_auc` drops non-finite scores, so an unmeasurable rep is
+    excluded from the AUC's denominator instead of being scored as "not faulty", which would
+    quietly credit the rule for a rep it never read.
+    """
+    wanted = set(phases)
+    values = [
+        sign * frame.m(metric_key)
+        for frame in window
+        if frame.valid and frame.phase in wanted and math.isfinite(frame.m(metric_key))
+    ]
+    return max(values) if values else math.nan
+
+
+def spearman_rho(x: Sequence[float], y: Sequence[float]) -> float:
+    """Rank correlation over the pairs where both values are finite; NaN below 3 pairs.
+
+    Rank, not Pearson: the valgus proxy is a hip-width-normalised ratio with a heavy tail, and
+    the question it answers here ("does firing track step depth rather than correctness") is
+    about monotone association, not linear fit.
+    """
+    pairs = [(a, b) for a, b in zip(x, y) if math.isfinite(a) and math.isfinite(b)]
+    if len(pairs) < 3:
+        return math.nan
+    ranks_x = _average_ranks([a for a, _ in pairs])
+    ranks_y = _average_ranks([b for _, b in pairs])
+    n = len(pairs)
+    mean_x = sum(ranks_x) / n
+    mean_y = sum(ranks_y) / n
+    dx = [r - mean_x for r in ranks_x]
+    dy = [r - mean_y for r in ranks_y]
+    denom = math.sqrt(sum(v * v for v in dx) * sum(v * v for v in dy))
+    if denom <= 0.0:
+        return math.nan
+    return sum(a * b for a, b in zip(dx, dy)) / denom
+
+
+def _average_ranks(values: Sequence[float]) -> list[float]:
+    order = sorted(range(len(values)), key=lambda i: values[i])
+    ranks = [0.0] * len(values)
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
+            j += 1
+        shared = (i + j) / 2.0 + 1.0
+        for k in range(i, j + 1):
+            ranks[order[k]] = shared
+        i = j + 1
+    return ranks
+
+
+def percentile_of(value: float, samples: Sequence[float]) -> float:
+    """Fraction of finite `samples` strictly below `value`, as a percent; NaN when empty."""
+    finite = [s for s in samples if math.isfinite(s)]
+    if not finite:
+        return math.nan
+    return 100.0 * sum(1 for s in finite if s < value) / len(finite)
+
+
+def median_and_range(values: Iterable[float]) -> tuple[float, float, float, int]:
+    """(median, min, max, n) over the finite values; NaNs everywhere when none are finite.
+
+    `n` is returned alongside and must be quoted with the median wherever it appears: a
+    per-subject AUC is NaN for any subject whose reps are all one class, so the median's
+    denominator is the number of subjects that produced a number, not the number of subjects.
+    """
+    finite = [float(v) for v in values if math.isfinite(v)]
+    if not finite:
+        return math.nan, math.nan, math.nan, 0
+    return float(median(finite)), min(finite), max(finite), len(finite)
+
+
+# =======================================================================================
+# ORCHESTRATION -- everything below this banner reads pose JSON off disk.
+# =======================================================================================
+
+EX5_EXERCISE_ID = "5"
+EX5_FPS = 30.0
+
+# Pinned from Segmentation.csv itself, checked before any rule is run. An input that disagrees
+# means the dataset, the exercise filter or the correctness polarity has moved, and every
+# number downstream would be silently wrong -- so this raises rather than warns.
+EX5_EXPECTED = {
+    "reps": 174,
+    "incorrect": 96,
+    "correct": 78,
+    "front": 88,
+    "half_profile": 86,
+    "subjects": 8,
+}
+
+POSE_FILE_SUFFIX = {
+    "cam17": "-Camera17-30fps.json",
+    "cam18": "-Camera18-30fps-transposed.json",
+}
+
+# `exercise_subtype` -> the lead side `resolve_lead_side` should return, for the lead-leg
+# accuracy check. MediaPipe's landmark names are anatomical (LEFT_KNEE is the subject's left),
+# so the mapping is the identity on the leg word and carries no camera-facing correction.
+SUBTYPE_LEAD_SIDE = {
+    "front leg left": "left",
+    "front leg right": "right",
+}
+
+
+def assert_dataset_shape(segments: Sequence) -> None:
+    """Raise unless the loaded Ex5 segments match the pinned counts.
+
+    Includes the int->bool correctness conversion, which is where a polarity inversion would
+    enter: `Segment.correctness` is 1 for a CORRECT rep, and `contingency` takes True == correct.
+    Asserting 78 correct / 96 incorrect here means an inverted conversion cannot reach the
+    writeup as a plausible-looking sensitivity/specificity swap.
+    """
+    counts = {
+        "reps": len(segments),
+        "incorrect": sum(1 for s in segments if not is_correct(s)),
+        "correct": sum(1 for s in segments if is_correct(s)),
+        "front": sum(1 for s in segments if s.cam17_orientation == "front"),
+        "half_profile": sum(1 for s in segments if s.cam17_orientation == "half-profile"),
+        "subjects": len({s.person_id for s in segments}),
+    }
+    if counts != EX5_EXPECTED:
+        raise SystemExit(f"Ex5 shape changed: expected {EX5_EXPECTED}, loaded {counts}. STOP.")
+    profile = sum(1 for s in segments if s.cam17_orientation == "profile")
+    if profile:
+        raise SystemExit(f"Ex5 gained {profile} `profile` reps; Phase 0 measured zero. STOP.")
+
+
+def is_correct(segment) -> bool:
+    """`Segment.correctness` as a bool. 1 == performed CORRECTLY, 0 == incorrect."""
+    return int(segment.correctness) == 1
+
+
+def load_pose_frames(path: Path) -> list[dict]:
+    """Frames from a pose JSON, after asserting they are zero-origin and contiguous.
+
+    `slice_rep` indexes by LIST POSITION, and `Segmentation.csv`'s bounds are frame numbers.
+    Those agree only if `frames[i]["frame_index"] == i` throughout. If they ever diverge, every
+    rep window is silently misaligned and every number in the writeup is wrong -- so this is
+    checked once per file rather than assumed.
+    """
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    frames = payload.get("frames") or []
+    for position, frame in enumerate(frames):
+        if int(frame.get("frame_index", -1)) != position:
+            raise SystemExit(
+                f"{path.name}: frame_index {frame.get('frame_index')!r} at list position "
+                f"{position} -- frames are not zero-origin contiguous, so slice_rep would "
+                "misalign every rep window. STOP."
+            )
+    return frames
+
+
+def _scores_for_lead(window, lead: str | None, min_frames: int) -> tuple[dict, dict]:
+    scores: dict[str, float | None] = {}
+    structural: dict[str, bool] = {}
+    for fault_id in RULE_CAMERAS:
+        if lead is None:
+            scores[fault_id] = None
+            structural[fault_id] = True
+            continue
+        metric_key, phases, sign = score_spec(fault_id, lead)
+        value = metric_extreme(window, metric_key, phases, sign)
+        scores[fault_id] = None if not math.isfinite(value) else round(float(value), 6)
+        structural[fault_id] = phase_frame_count(window, phases) < min_frames
+    return scores, structural
+
+
+def _pass_record(result, window, lead: str | None, min_frames: int, truth_lead: str | None) -> dict:
+    """One pass's outcome, plus a LEAD-ORACLE score set alongside the real one.
+
+    `scores_lead_oracle` reads each rule's own metric off the leg `exercise_subtype` says led,
+    instead of the leg `resolve_lead_side` picked. It is an AUC-ONLY diagnostic and cannot be a
+    fire/no-fire result: the rules resolve the lead side internally, so no substitution outside
+    them changes what they emit. Its purpose is to separate "this cue carries no information
+    about correctness" from "this cue was read off the wrong leg" -- exactly the split the
+    production/oracle VIEW passes draw for the view gate. No threshold moves either way.
+    """
+    fired = {
+        detection.fault_id: {
+            "severity": round(float(detection.severity), 4),
+            "confidence": round(float(detection.confidence), 4),
+            "observability": detection.observability,
+            "primary_value": detection.evidence.get("primary_value"),
+        }
+        for detection in result.detections
+    }
+    scores, structural = _scores_for_lead(window, lead, min_frames)
+    oracle_scores, _ = _scores_for_lead(window, truth_lead, min_frames)
+    return {
+        "fallback": result.fallback,
+        "analyzed_reps": len(result.analyzed),
+        "lead_side": lead,
+        "fired": fired,
+        "scores": scores,
+        "scores_lead_oracle": oracle_scores,
+        "cannot_fire": structural,
+    }
+
+
+def evaluate_rep(frames: list[dict], segment, camera: str) -> dict | None:
+    """Replay one labeled repetition through the lunge rules, twice.
+
+    Returns None when the labeled window starts past the end of the clip (reported as a
+    skipped rep, never silently dropped).
+    """
+    from src.pose.movements.base import run_detector
+    from src.pose.movements.lunge import LUNGE_DETECTOR, resolve_lead_side
+    from src.rehab24.dataset import camera_orientation
+
+    window_frames = slice_rep(frames, segment.first_frame, segment.last_frame)
+    if not window_frames:
+        return None
+
+    estimated_view, estimated_conf = estimate_view_for_window(window_frames)
+    orientation = camera_orientation(segment, camera)
+    oracle_view = ORACLE_VIEWS.get(orientation, "unknown")
+    min_frames = max(3, int(math.ceil(max(EX5_FPS, 1.0) * 0.20)))
+
+    record = {
+        "video_id": segment.video_id,
+        "repetition_number": segment.repetition_number,
+        "person_id": segment.person_id,
+        "camera": camera,
+        "correctness": int(segment.correctness),
+        "correct": is_correct(segment),
+        "exercise_subtype": segment.exercise_subtype,
+        "cam17_orientation": segment.cam17_orientation,
+        "camera_orientation": orientation,
+        "extra_person": (
+            segment.extra_person_in_cam17 if camera == "cam17" else segment.extra_person_in_cam18
+        ),
+        "lights_on": segment.lights_on,
+        "first_frame": segment.first_frame,
+        "last_frame": segment.last_frame,
+        "window_frames": len(window_frames),
+        "truncated": segment.last_frame >= len(frames),
+        "estimated_view": estimated_view,
+        "estimated_confidence": round(float(estimated_conf), 4),
+        "oracle_view": oracle_view,
+        "min_frames": min_frames,
+        "lead_side_truth": SUBTYPE_LEAD_SIDE.get(segment.exercise_subtype),
+    }
+
+    for pass_name, view, confidence in (
+        ("production", estimated_view, float(estimated_conf)),
+        ("oracle", oracle_view, ORACLE_VIEW_CONFIDENCE),
+    ):
+        result = run_detector(LUNGE_DETECTOR, window_frames, EX5_FPS, view, confidence)
+        window = rules_window(result)
+        lead = resolve_lead_side(window)
+        record[pass_name] = _pass_record(
+            result, window, lead, min_frames, record["lead_side_truth"]
+        )
+        if pass_name == "production":
+            record["valid_frame_ratio"] = (
+                round(sum(1 for f in window if f.valid) / len(window), 4) if window else 0.0
+            )
+            record["rules_window_frames"] = len(window)
+            record["lead_min_knee_angle"] = (
+                None
+                if lead is None
+                else _finite_or_none(metric_extreme(window, f"{lead}_knee_angle", _all_phases(window), -1.0))
+            )
+            # Both knee angles at the window's deepest frame, so the report can check
+            # `resolve_lead_side`'s PREMISE ("the lead leg is the more flexed one at the
+            # bottom") against the label directly, separately from the heuristic's accuracy.
+            bottom = _bottom_frame(window)
+            record["bottom_left_knee_angle"] = None if bottom is None else _round_finite(bottom.m("left_knee_angle"))
+            record["bottom_right_knee_angle"] = None if bottom is None else _round_finite(bottom.m("right_knee_angle"))
+    return record
+
+
+def _bottom_frame(window: Sequence):
+    best, best_value = None, math.inf
+    for frame in window:
+        if not frame.valid:
+            continue
+        value = frame.m("min_knee_angle")
+        if math.isfinite(value) and value < best_value:
+            best, best_value = frame, value
+    return best
+
+
+def _round_finite(value: float) -> float | None:
+    return None if not math.isfinite(value) else round(float(value), 3)
+
+
+def _all_phases(window: Sequence) -> set[str]:
+    return {frame.phase for frame in window}
+
+
+def _finite_or_none(value: float) -> float | None:
+    # metric_extreme with sign -1 returns -min, so negate back to report the minimum itself.
+    return None if not math.isfinite(value) else round(-float(value), 4)
+
+
+def evaluate_dataset(pose_dir: Path, segmentation_path: Path) -> dict:
+    from src.rehab24.dataset import read_segmentation
+
+    segments = [
+        s for s in read_segmentation(segmentation_path) if s.exercise_id == EX5_EXERCISE_ID
+    ]
+    assert_dataset_shape(segments)
+
+    records: list[dict] = []
+    skipped: list[dict] = []
+    for camera, suffix in POSE_FILE_SUFFIX.items():
+        for video_id in sorted({s.video_id for s in segments}):
+            frames = load_pose_frames(pose_dir / f"{video_id}{suffix}")
+            for segment in [s for s in segments if s.video_id == video_id]:
+                record = evaluate_rep(frames, segment, camera)
+                if record is None:
+                    skipped.append(
+                        {"video_id": video_id, "camera": camera,
+                         "repetition_number": segment.repetition_number,
+                         "reason": "window starts past the end of the clip"}
+                    )
+                    continue
+                records.append(record)
+    return {
+        "expected": EX5_EXPECTED,
+        "n_segments": len(segments),
+        "records": records,
+        "skipped": skipped,
+    }
+
+
+# ---------------------------------------------------------------------------------------
+# REPORTING -- pure again from here: it reads the payload dict, never the disk. Kept as a
+# separate pass over the saved JSON so a reporting bug costs a re-print, not a re-run.
+# ---------------------------------------------------------------------------------------
+
+PASSES = ("production", "oracle")
+
+
+def _score_of(record: dict, pass_name: str, fault_id: str, score_key: str = "scores") -> float:
+    value = record[pass_name].get(score_key, {}).get(fault_id)
+    return math.nan if value is None else float(value)
+
+
+def subset_stats(
+    records: Sequence[dict], fault_id: str, pass_name: str, score_key: str = "scores"
+) -> dict:
+    """Contingency, sensitivity/specificity, pooled AUC and per-subject AUC for one subset.
+
+    Every count is reported alongside its denominator: `rank_auc` drops reps whose score is
+    non-finite (an unresolved lead side yields no score at all), and a subject whose reps are
+    all one class yields a NaN AUC, so neither "174" nor "8" can be assumed downstream.
+    """
+    fired = [fault_id in r[pass_name]["fired"] for r in records]
+    correct = [bool(r["correct"]) for r in records]
+    scores = [_score_of(r, pass_name, fault_id, score_key) for r in records]
+    positive = [not c for c in correct]
+
+    table = contingency(fired, correct)
+    sens = table["tp"] / (table["tp"] + table["fn"]) if (table["tp"] + table["fn"]) else math.nan
+    spec = table["tn"] / (table["tn"] + table["fp"]) if (table["tn"] + table["fp"]) else math.nan
+
+    per_subject_auc = per_subject(
+        list(range(len(records))),
+        key_fn=lambda i: records[i]["person_id"],
+        value_fn=lambda idx: rank_auc([scores[i] for i in idx], [positive[i] for i in idx]),
+    )
+    med, low, high, n_subj = median_and_range(per_subject_auc.values())
+    scored = [s for s in scores if math.isfinite(s)]
+    return {
+        "n": len(records),
+        "n_incorrect": sum(positive),
+        "n_correct": sum(correct),
+        "fired": sum(fired),
+        "fired_on_incorrect": sum(1 for f, p in zip(fired, positive) if f and p),
+        "fired_on_correct": sum(1 for f, p in zip(fired, positive) if f and not p),
+        "table": table,
+        "sensitivity": sens,
+        "specificity": spec,
+        "pooled_auc": rank_auc(scores, positive),
+        "n_scored": len(scored),
+        "n_scored_incorrect": sum(1 for s, p in zip(scores, positive) if math.isfinite(s) and p),
+        "n_scored_correct": sum(1 for s, p in zip(scores, positive) if math.isfinite(s) and not p),
+        "subject_auc_median": med,
+        "subject_auc_min": low,
+        "subject_auc_max": high,
+        "subject_auc_n": n_subj,
+        "n_subjects": len({r["person_id"] for r in records}),
+        "cannot_fire": sum(1 for r in records if r[pass_name]["cannot_fire"].get(fault_id)),
+        "unresolved_lead": sum(1 for r in records if r[pass_name]["lead_side"] is None),
+        "scores": scores,
+    }
+
+
+def _fmt(value: float, places: int = 3) -> str:
+    return "n/a" if value is None or not math.isfinite(value) else f"{value:.{places}f}"
+
+
+def _stats_lines(label: str, stats: dict, threshold: float) -> list[str]:
+    t = stats["table"]
+    return [
+        f"    {label} (n={stats['n']}: {stats['n_incorrect']} incorrect / {stats['n_correct']} correct)",
+        f"      fired {stats['fired']:>3}  "
+        f"[tp {t['tp']:>3} fp {t['fp']:>3} tn {t['tn']:>3} fn {t['fn']:>3}]  "
+        f"sens {_fmt(stats['sensitivity'])}  spec {_fmt(stats['specificity'])}",
+        f"      pooled AUC {_fmt(stats['pooled_auc'])}  over {stats['n_scored']} scored reps "
+        f"({stats['n_scored_incorrect']} incorrect / {stats['n_scored_correct']} correct)",
+        f"      PER-SUBJECT AUC median {_fmt(stats['subject_auc_median'])}  "
+        f"range [{_fmt(stats['subject_auc_min'])}, {_fmt(stats['subject_auc_max'])}]  "
+        f"over {stats['subject_auc_n']}/{stats['n_subjects']} subjects with both classes",
+        f"      threshold {threshold:g} sits at percentile "
+        f"{_fmt(percentile_of(threshold, stats['scores']), 1)} of the observed scores",
+        f"      could-not-fire (unresolved lead side OR masked phase shorter than min_frames) "
+        f"{stats['cannot_fire']}, of which unresolved lead side {stats['unresolved_lead']}",
+    ]
+
+
+def _lead_oracle_line(stats: dict) -> str:
+    """The same cut's AUC with the metric read off the leg `exercise_subtype` names.
+
+    AUC-only by construction: the rules resolve the lead side internally, so substituting it
+    outside them cannot change what fires. It exists to separate "this cue carries no
+    information about correctness" from "this cue was read off the wrong leg".
+    """
+    return (
+        f"      LEAD-ORACLE (metric off the labeled lead leg; AUC only): "
+        f"pooled {_fmt(stats['pooled_auc'])} over {stats['n_scored']} scored; "
+        f"per-subject median {_fmt(stats['subject_auc_median'])} "
+        f"range [{_fmt(stats['subject_auc_min'])}, {_fmt(stats['subject_auc_max'])}] "
+        f"over {stats['subject_auc_n']}/{stats['n_subjects']} subjects"
+    )
+
+
+def build_report(payload: dict) -> str:
+    records = payload["records"]
+    thresholds = fault_thresholds()
+    lines: list[str] = []
+    add = lines.append
+
+    add("=" * 88)
+    add("LUNGE RULE VALIDATION -- REHAB24-6 Ex5 (leg lunge)")
+    add("=" * 88)
+    add("")
+    add("WHAT THIS MEASURES: whether each rule's signal carries information about whether a")
+    add("repetition was performed CORRECTLY. REHAB24-6 never names which fault occurred, so a")
+    add("rule firing on an incorrect rep is NOT evidence it found that rep's actual error.")
+    add("")
+    add(f"segments loaded: {payload['n_segments']}  records: {len(records)} "
+        f"(= reps x 2 cameras)  skipped: {len(payload['skipped'])}")
+    for entry in payload["skipped"]:
+        add(f"  SKIPPED {entry}")
+    per_person = defaultdict(Counter)
+    for record in records:
+        if record["camera"] == "cam17":
+            per_person[record["person_id"]][record["correct"]] += 1
+    add("  reps per subject (correct/incorrect), cam17 -- a single-class subject yields a NaN "
+        "per-subject AUC and drops out of every median below:")
+    for person_id in sorted(per_person):
+        counts = per_person[person_id]
+        flag = "  <-- SINGLE CLASS" if not (counts[True] and counts[False]) else ""
+        add(f"    person {person_id}: {counts[True]} correct / {counts[False]} incorrect{flag}")
+    add("")
+
+    for camera in ("cam17", "cam18"):
+        subset = [r for r in records if r["camera"] == camera]
+        add(f"{camera}: {len(subset)} records  "
+            f"fallback={dict(Counter(r['production']['fallback'] for r in subset))}  "
+            f"analyzed_reps={dict(Counter(r['production']['analyzed_reps'] for r in subset))}")
+        add(f"  estimated view (production): "
+            f"{dict(Counter((r['camera_orientation'], r['estimated_view']) for r in subset))}")
+        vfr = [r["valid_frame_ratio"] for r in subset]
+        add(f"  frame validity: mean {_fmt(sum(vfr) / len(vfr))} min {_fmt(min(vfr))}; "
+            f"window frames {min(r['window_frames'] for r in subset)}-"
+            f"{max(r['window_frames'] for r in subset)}; "
+            f"truncated {sum(1 for r in subset if r['truncated'])}")
+    add("")
+
+    for fault_id, camera in RULE_CAMERAS.items():
+        threshold = thresholds[fault_id]
+        subset = [r for r in records if r["camera"] == camera]
+        add("-" * 88)
+        add(f"{fault_id}   [{camera}]   spec fire threshold {threshold:g}")
+        add("-" * 88)
+        for pass_name in PASSES:
+            add(f"  {pass_name.upper()} pass")
+            cuts = [("ALL", subset)]
+            for orientation in ("front", "half-profile"):
+                stratum = [r for r in subset if r["cam17_orientation"] == orientation]
+                cuts.append(
+                    (f"stratum cam17={orientation} (cam18={stratum[0]['camera_orientation']})", stratum)
+                )
+            if camera == "cam17":
+                cuts.append(
+                    ("extra-person-clean (levels 0/1 only)",
+                     [r for r in subset if r["extra_person"] not in {"2", "3"}])
+                )
+            for label, cut in cuts:
+                for line in _stats_lines(label, subset_stats(cut, fault_id, pass_name), threshold):
+                    add(line)
+                add(_lead_oracle_line(subset_stats(cut, fault_id, pass_name, "scores_lead_oracle")))
+            add("")
+
+    add("-" * 88)
+    add("LEAD LEG")
+    add("-" * 88)
+    for camera in ("cam17", "cam18"):
+        subset = [r for r in records if r["camera"] == camera]
+        resolved = [r for r in subset if r["production"]["lead_side"] is not None]
+        agree = sum(
+            1 for r in resolved
+            if r["production"]["lead_side"] == SUBTYPE_LEAD_SIDE.get(r["exercise_subtype"])
+        )
+        add(f"  {camera}: resolved {len(resolved)}/{len(subset)} "
+            f"(unresolved {len(subset) - len(resolved)}, "
+            f"{_fmt(100 * (len(subset) - len(resolved)) / len(subset), 1)}%); "
+            f"accuracy vs exercise_subtype {agree}/{len(resolved)} = "
+            f"{_fmt(agree / len(resolved) if resolved else math.nan)}")
+    paired = defaultdict(dict)
+    for r in records:
+        paired[(r["video_id"], r["repetition_number"])][r["camera"]] = r["production"]["lead_side"]
+    both = [v for v in paired.values() if v.get("cam17") and v.get("cam18")]
+    add(f"  cam17-vs-cam18 lead agreement on the same rep: "
+        f"{sum(1 for v in both if v['cam17'] == v['cam18'])}/{len(both)}")
+    add("  PREMISE CHECK -- is the labeled lead leg actually the MORE FLEXED knee at the bottom?")
+    add("  (`resolve_lead_side` substitutes the more-flexed half of the spec's "
+        "\"more flexed / more anterior\" definition; this asks whether that half holds here.)")
+    for camera in ("cam17", "cam18"):
+        subset = [
+            r for r in records
+            if r["camera"] == camera
+            and r.get("bottom_left_knee_angle") is not None
+            and r.get("bottom_right_knee_angle") is not None
+            and r["lead_side_truth"] is not None
+        ]
+        hits = 0
+        gaps: list[float] = []
+        for r in subset:
+            left, right = r["bottom_left_knee_angle"], r["bottom_right_knee_angle"]
+            lead_angle, trail_angle = (left, right) if r["lead_side_truth"] == "left" else (right, left)
+            gaps.append(lead_angle - trail_angle)
+            hits += lead_angle < trail_angle
+        med, _, _, _ = median_and_range([abs(g) for g in gaps])
+        add(f"    {camera}: labeled lead knee is the more flexed one in {hits}/{len(subset)} "
+            f"= {_fmt(hits / len(subset) if subset else math.nan)}; "
+            f"median |left-right| separation at the bottom {_fmt(med, 1)} deg")
+    add("")
+
+    add("-" * 88)
+    add("VALGUS CONTAMINATION DIAGNOSTIC (cam17, production pass)")
+    add("-" * 88)
+    add("  A deep, well-tracked lunge adds ANTERIOR knee travel to the medial-offset proxy in")
+    add("  every view production reaches. Correct reps have no valgus to find, so a strong")
+    add("  NEGATIVE rank correlation between the valgus proxy and the lead knee's bottom-phase")
+    add("  angle (deeper = smaller angle = larger proxy) on the CORRECT reps is the")
+    add("  contamination signature.")
+    add("  Both variants are pooled across subjects -- a diagnostic, never a headline.")
+    for key, described in (
+        ("scores_lead_oracle", "LABELED lead leg (the clean read)"),
+        ("scores", "resolve_lead_side's lead leg (confounded by its own error rate)"),
+    ):
+        for want_correct, class_name in ((True, "CORRECT"), (False, "incorrect, for contrast")):
+            cut = [r for r in records if r["camera"] == "cam17" and r["correct"] is want_correct]
+            proxy = [_score_of(r, "production", "lunge_knee_valgus", key) for r in cut]
+            # The depth read is `lunge_insufficient_depth`'s own quantity: the maximum lead-knee
+            # angle during `bottom`. LARGER = shallower, so contamination shows up NEGATIVE.
+            depth = [_score_of(r, "production", "lunge_insufficient_depth", key) for r in cut]
+            n = sum(1 for p, d in zip(proxy, depth) if math.isfinite(p) and math.isfinite(d))
+            add(f"  {described} / {class_name}: Spearman rho = "
+                f"{_fmt(spearman_rho(proxy, depth))} over {n} reps")
+    add("")
+    return "\n".join(lines)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI body for `scripts/rehab24/validate_lunge_rules.py`."""
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Replay REHAB24-6 Ex5's labeled repetitions through the lunge rules."
+    )
+    parser.add_argument("--pose-dir", type=Path,
+                        default=Path("data/REHAB24-6/processed/lunge_pose_json"))
+    parser.add_argument("--segmentation", type=Path, default=Path("data/REHAB24-6/Segmentation.csv"))
+    parser.add_argument("--out", type=Path,
+                        default=Path("data/REHAB24-6/processed/lunge_rule_validation.json"))
+    parser.add_argument("--report-only", action="store_true",
+                        help="Re-print the report from an existing --out file without re-running.")
+    args = parser.parse_args(argv)
+
+    if args.report_only:
+        with args.out.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    else:
+        payload = evaluate_dataset(args.pose_dir, args.segmentation)
+        args.out.parent.mkdir(parents=True, exist_ok=True)
+        with args.out.open("w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=1)
+        print(f"Wrote {len(payload['records'])} per-rep records to {args.out}")
+    print(build_report(payload))
+    return 0

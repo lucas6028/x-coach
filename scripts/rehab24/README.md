@@ -122,3 +122,23 @@ Export metadata for Colab:
 ```bash
 python scripts/rehab24/export_colab_package.py --include-skeleton-features
 ```
+
+Validate the **Lunge** rule detector against Ex5's 174 labeled repetitions (the only movement
+in this repo checked against human-labeled ground truth). Needs the Ex5 pose corpus under
+`data/REHAB24-6/processed/lunge_pose_json/` first — see
+`notes/lunge-view-reconnaissance.md` for the extraction command:
+
+```bash
+python scripts/rehab24/validate_lunge_rules.py \
+  --pose-dir data/REHAB24-6/processed/lunge_pose_json \
+  --segmentation data/REHAB24-6/Segmentation.csv \
+  --out data/REHAB24-6/processed/lunge_rule_validation.json
+# ~15 min; add --report-only to re-print the report from the saved JSON in ~1 s
+```
+
+Results, method and caveats: `notes/lunge-rule-validation.md`. The rules are replayed one
+labeled repetition at a time, twice — once with the view label the production estimator really
+produces, once with the dataset's ground-truth orientation — so a gate failure can be told
+apart from a rule failure. **The labels are binary (correct/incorrect) and never name the
+fault**, so this measures whether a rule's signal carries information about rep correctness,
+not per-fault precision.
