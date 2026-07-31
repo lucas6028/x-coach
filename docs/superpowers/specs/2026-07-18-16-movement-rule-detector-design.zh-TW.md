@@ -1532,3 +1532,98 @@ RAG 語料庫來源(作者/標題/期刊以 `data/paper_metadata.json` 為權威
 可正常解析。圖上也沒有可以改指過去的相近節點(最接近的過頭推舉節點是 `Near Lockout`、
 `Thoracolumbar Extension`、`Elbow Extensor Torque`),所以這需要補 KG 內容,不是改字串就能解決。
 目前那三條錯誤送到對話層時有引用文獻,但沒有檢索到的依據。
+
+**狀態(2026-07-30)— 弓步偵測器已註冊。** `src/pose/movements/lunge.py` 現已組裝成
+`LUNGE_DETECTOR`,並以 `"Lunge"` 註冊,可透過
+`scripts/pose/run_pose_rule_detection.py --movement "Lunge"` 呼叫。弓步的 **4 條規則全部**
+已實作且皆可觸發:`rule_knee_past_toes`、`rule_knee_valgus`、`rule_insufficient_depth`、
+`rule_pelvic_drop`。與伏地挺身的 `rule_scapular_winging` 不同,沒有任何弓步錯誤是設計上永久
+沉默的。
+
+- **前導腿的替代判定,以及為何它活在「規則層」而非 `lunge_compute_raw`。** 本規格對前導腿的
+  定義是「更彎曲/更前伸的那隻腳」。「更前伸」這一半,恰好是正面視角下會坍縮消失的那個維度,
+  而四條規則裡有兩條就活在正面視角——因此實作(`resolve_lead_side`)只採用「更彎曲」這一半,
+  並在該視窗的最低點影格上判定。這件事無法放進 `lunge_compute_raw`:`run_detector` 是在
+  `segment_reps` 之前,對整支影片呼叫 `compute_raw`,所以在計算指標的當下根本沒有「這一下是
+  哪一條腿在承重」可判定的重複邊界。若逐影格判定,會在 `setup`/`recovery` 階段(此時雙膝都
+  接近伸直、彼此差異只是關鍵點雜訊)反覆閃爍換邊,汙染每一個與前導腿相關的指標,以及
+  `centered_median` 在換邊瞬間的平滑計算。因此 `lunge_compute_raw` 對兩條腿都各自輸出
+  (`left_*`/`right_*`),`resolve_lead_side` 則只在已經有逐下視窗可用時才在兩者間做選擇。
+- **兩個規則層數字,程式碼內都有明確標註,皆非本規格的量值:**
+  `LEAD_SIDE_MIN_SEPARATION_DEG = 5.0`(在判定前導腿之前,最低點左右膝角差至少要多大——本
+  規格沒有訂出這種下限,而這個常數只能造成「沉默」:無法判定的前導腿不會輸出任何判定,而不是
+  猜一個然後歸因到錯的那條腿)以及 `LUNGE_ACTIVE_PHASES = {descent, bottom, ascent}`(本規格
+  只對 `lunge_knee_past_toes` 訂出相位範圍;其餘三條規則套用同一組相位,是延續深蹲偵測器
+  `ACTIVE_PHASES` 的先例,而非規格要求——代價是:只在 `setup`/`recovery` 出現的錯誤會被漏掉)。
+  這四條規則裡其餘所有門檻與嚴重度斜坡,逐字都是本規格自己的數字(下方 Step 1 稽核已重新
+  確認)。
+- **`KNEE_FORWARD_MILD`/`KNEE_FORWARD_SEVERE` 的重用。** `rule_knee_past_toes` 的觸發/斜坡
+  (0.10 → 0.30)與深蹲章節的文字幾乎一字不差,因此實作直接從
+  `src/pose/pose_rule_detector.py` 匯入深蹲既有的常數,而不是重新輸入同樣的字面量,讓兩個
+  動作不會各自漂移。
+- **`rule_pelvic_drop` 的分腿站姿透視偏誤,記錄下來但未修正。** 在正面視角下,分腿站姿的
+  左髖→右髖向量在水平面上被旋轉了,其影像投影會縮短,使得 `atan2(dy, |dx|)` *放大* 了實際
+  的傾斜角——弓步蹲得越深,放大越嚴重。因此可預期的失效模式是**在做對的深弓步上出現偽陽性**,
+  而不是沉默。要修正它需要這條管線並不具備的深度估計,所以第二階段會優先檢驗「正確動作」上
+  的特異度,原因正在於此。
+- **`rule_knee_valgus` 的已知汙染,是鏡像的偏誤。** 在斜角視角下,膝蓋向前的位移與向內的位移
+  會投影到同一條垂直軸上,所以即使追蹤完全準確、動作也完全正確,一個蹲得夠深的弓步在這條
+  管線能到達的每一種視角下都可能被讀成外翻(唯一能乾淨區分兩者的 `front` 正面視角,下游從未
+  真的輸出過)。已由 `tests/test_lunge.py` 中的
+  `test_anterior_knee_travel_contaminates_the_valgus_proxy` 釘住。第二階段會檢查觸發是否只是
+  跟著步幅深度走,而非跟著動作對錯走。
+- **Task 3 的深度範圍修正。** 簡報範例給的知識圖候選字串「Excessive Knee Flexion」(過度屈膝)
+  確實能解析到一個真實節點,但解析到錯的節點——它唯一的邊是
+  `INCREASES_RISK_OF → Achilles Tendon Injury`,方向錯了(本規格自己的 `citation_support` 講的
+  是「屈曲不足」才會導致功能受損)。因此 `LUNGE_DEPTH_KG_QUERY` 改用 `"Decreased Knee Flexion"`
+  (屈膝不足),這個節點的邊(`CAUSED_BY ← Weak Quadriceps`、`INCREASES_RISK_OF → ACL Injury`)
+  才真正對應被引用的那句話。
+- **Step 1 稽核,為了寫這則狀態重新跑過一次,而非沿用舊結論:** 對
+  `data/kg/sports_kg_v3.graphml` 執行 `resolve_nodes`,確認四個 `*_KG_QUERY` 常數依然各自
+  解析到唯一一個 `Lunge:` 範圍節點(`Knee Anterior To Toes`、`Knee Valgus`、
+  `Decreased Knee Flexion`、`Trendelenburg Posture`)——自 Task 3 以來沒有漂移。
+  `src/pose/movements/lunge.py` 裡每一組 `citation`/`citation_support` 字串,都是用程式從一個
+  真的觸發過的 `PoseRuleDetection` 裡取出來(不是用肉眼讀),並確認四條規則的字串都是本規格
+  文字的逐字元子字串。**沒有任何錯誤缺乏可解析的 KG 節點**——與上方過頭推舉五缺三的缺口不同,
+  弓步目前沒有懸而未決的 KG 項目。`tests/test_kg_query_resolution.py::test_every_kg_query_resolves`
+  在本機(圖檔存在於此工作目錄)實際跑過並通過,獨立於稽核本身再次佐證了這個結論。
+- **一項測試基礎設施修正,採取通用化而非特例化。** 與深蹲/伏地挺身/過頭推舉在每個
+  `build_detection` 呼叫處直接寫入字面量字串 `kg_query=` 不同,`lunge.py` 是把 `kg_query=`
+  指向一個模組層級的常數(例如 `kg_query=LUNGE_PAST_TOES_KG_QUERY`)——這是刻意的,為了讓
+  Step 0 附加在每個常數上的出處說明維持單一真相來源,而不必在每個呼叫點重新輸入一次。
+  `tests/test_kg_query_resolution.py` 以 AST 為基礎的 `_kg_queries` 掃描器原本只認得字面量
+  `ast.Constant`,因此在 `lunge.py` 上讀到零筆查詢,其自身的 `test_queries_were_actually_found`
+  閘門因而失敗。修法是讓掃描器也能把 `ast.Name` 參照解析回模組頂層的字串常數指派,這是把
+  輔助函式通用化,而非為弓步模組加一條特例。
+- **註冊後對產品介面的實際影響——經過查證,而非假設。** `backend/app/config.py` 的
+  `DEFAULT_ANALYSIS_MOVEMENT` 沒有變動,依然是 `"Squat"`(其自身註解早已寫明這是「後備動作,
+  不是釘死值」)。但與上方伏地挺身狀態區塊寫下時不同,本規格當時提到的前端常數
+  `ANALYZABLE_MOVEMENTS` **已經不存在**——`frontend/src/lib/movements.ts` 現在完全從
+  `GET /api/movements` 動態取得哪些動作可分析,而該端點又即時由
+  `src/pose/movements/registry.py` 產生(`backend/app/routers/movements.py` 自己的說明文字
+  就寫著這是設計本身:「registering a fourth detector surfaces it in the UI with no backend
+  or frontend edit」)。經讀取 `frontend/src/App.tsx` 確認:它會從網址讀取 `?movement=`、
+  對照抓回來的清單驗證,並把解析後的動作名稱——而不是寫死的 `"Squat"`——傳給分析呼叫。因此
+  在此註冊 `LUNGE_DETECTOR`,會讓 Lunge 出現在 `GET /api/movements`、讓 `/movements` 選單上的
+  弓步卡片從灰色不可點的「即將推出」變成可點,並讓公開的 `/app` 展示頁的任何訪客都能透過
+  `/api/analyze` 與 `/api/analyze/pose` 真正跑一次端到端的弓步分析。這**不是**本任務引入的
+  缺陷,本任務也沒有另外寫程式去把它擋掉(那會是一項新的正式行為政策,牴觸「不要更動」的
+  指示,而且也牴觸該路由本身文件寫明的設計:自動曝光每一個已註冊的偵測器)。可以緩解的事實
+  是:它是以 `validated=False` 曝光,所以前端會標上 Beta 標籤——這與伏地挺身、過頭推舉現在
+  攜帶的是同一個訊號;換句話說,依同樣的機制,伏地挺身與過頭推舉其實**也已經**在正式環境上線
+  (上方它們自己的狀態區塊仍寫著「CLI-only」,那是在 `ANALYZABLE_MOVEMENTS` 前端改版之前寫的,
+  已經過時)。`tests/test_movements_endpoint.py` 裡兩個窮舉式清單斷言已更新為包含
+  Lunge/Beta;沒有新增任何程式碼把它擋在外面。
+- **Task 1 的視角閘門結論——待定,如實陳述,不預設答案。** `lunge_knee_past_toes` 硬性地只在
+  視角被有信心分類為 `side`(側面)時才會啟用(`SIDE_VIEW_CONF_THRESHOLD`),與深蹲的
+  `rule_knees_forward` 做法一致。但一支真正的矢狀面弓步影片,在正式環境中是否真的會被
+  `estimate_view_for_pose` 分類成 `side`,是 Task 1(REHAB24-6 Ex5 姿態抽取 + 視角閘門調查)
+  本應回答、但在本偵測器註冊當下**尚未完成**的問題——18 支 Ex5 影片的抽取仍在背景執行中。
+  目前已知的是:在此儲存庫已有的 45 份真實姿態 JSON 裡,視角估計器只輸出過一次 `side`,而
+  那一次判定是一個已被移除的人造退化案例。這道閘門是否會在真實矢狀面影片上開啟,因此仍是
+  **正在測量中,尚未有定論**——這則狀態區塊不對任一方向下斷言,Task 7/8 的驗證工作才會回答。
+- **弓步的四組門檻目前皆為規格推導、尚未經過標註資料驗證。** `tests/test_lunge.py`
+  證明的是幾何與正負號慣例,以及錯誤歸因的正確性(包括第二階段驗證框架結構上看不到的
+  「交替前導腿多下」回歸測試,因為該框架每支影片只餵一下),而不是真實世界的錯誤偵測準確度。
+  第二階段(REHAB24-6 Ex5)會改變這件事;把 `validated` 翻成 `True` 是後續依據數據做的另一項
+  決定,不屬於本任務範圍。

@@ -36,8 +36,8 @@ python scripts/pose/run_pose_rule_detection.py \
   --output-json results/single_detection.json
 
 # Select the movement detector explicitly (default: Squat; also supports
-# "Overhead Press" and "Push-up").
-# (illustrative paths — no Overhead Press or Push-up dataset is checked in yet)
+# "Overhead Press", "Push-up" and "Lunge").
+# (illustrative paths — no Overhead Press, Push-up or Lunge dataset is checked in yet)
 python scripts/pose/run_pose_rule_detection.py \
   --pose-json path/to/overhead_press_pose.json \
   --output-json results/single_detection.json \
@@ -47,11 +47,17 @@ python scripts/pose/run_pose_rule_detection.py \
   --pose-json path/to/pushup_pose.json \
   --output-json results/single_detection.json \
   --movement "Push-up"
+
+python scripts/pose/run_pose_rule_detection.py \
+  --pose-json path/to/lunge_pose.json \
+  --output-json results/single_detection.json \
+  --movement "Lunge"
 ```
 
 `--movement "<Name>"` picks which registered detector (`src/pose/movements/registry.py`) processes
 the pose JSON; it defaults to `Squat`, and an unregistered name raises `KeyError` rather than
-silently falling back. Currently `Squat`, `Overhead Press` and `Push-up` are registered.
+silently falling back. Currently `Squat`, `Overhead Press`, `Push-up` and `Lunge` are registered
+(only `Squat` is validated against labeled data; the rest, including `Lunge`, surface as Beta).
 
 `--max-reps N` limits how many repetitions are analyzed (default 3, sampled
 first/middle/last rather than the first N — fatigue breakdown shows up in the last
