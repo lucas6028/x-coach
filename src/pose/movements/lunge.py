@@ -59,7 +59,13 @@ from src.pose.geometry import (
     LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility,
-    knee_forward_ratio, distance,
+    knee_forward_ratio, distance, contiguous_true_segments, severity_from_range,
+)
+from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.pose_rule_detector import (
+    VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
+    PoseRuleDetection,
+    build_detection,
 )
 
 # Same generic "lower body" landmark set used across movements for the framework-level
@@ -96,6 +102,85 @@ LUNGE_METRIC_KEYS: tuple[str, ...] = (
 # Below this a length/normalizer is degenerate and the dependent metric is NaN. Same guard
 # value pushup.py and overhead_press.py use; not a tunable threshold.
 _DEGENERATE_LENGTH = 1e-6
+
+# ---------------------------------------------------------------------------------------
+# STEP 0 -- KG QUERY RESOLUTION, recorded before any rule was written (task-3-report.md has
+# the full transcript). Each string below was checked against data/kg/sports_kg_v3.graphml via
+# `src.knowledge.graph_retrieval.resolve_nodes` AND `retrieve_graph_context` (the latter is
+# what production actually calls, and is what OHP's three-blank-queries defect would have
+# been caught by) BEFORE being written here. All four resolve to exactly one `Lunge:`-scoped
+# node with a non-empty causes/risks/evidence bucket -- none of the four faults has a gap to
+# record.
+#
+# THESE ARE NOT THE BRIEF'S EXAMPLE STRINGS VERBATIM for two of the four -- both deviations
+# are deliberate, not typos, and are load-bearing for Tasks 4/5 which import these constants
+# blind:
+#   - Depth: "Excessive Knee Flexion" (the brief's example candidate) resolves to a real node,
+#     but that node's only edge is `INCREASES_RISK_OF -> Achilles Tendon Injury` -- the WRONG
+#     direction of fault (too much flexion, not too little) and the wrong injury. The spec's
+#     own citation_support for `lunge_insufficient_depth` says "reduced knee flexion/extensor
+#     moment marks impaired (non-coper) function" -- i.e. the fault is REDUCED flexion.
+#     "Decreased Knee Flexion" resolves to the one node whose edges actually match that
+#     sentence: `CAUSED_BY <- Weak Quadriceps`, `INCREASES_RISK_OF -> ACL Injury`.
+#   - Pelvic drop: none of the brief's four candidates for this fault ("Anterior Trunk Tilt",
+#     "Poor Dynamic Stability", "Knee Anterior Displacement", "Compensatory Trunk Lean") is the
+#     best match once the graph is actually read. "Trendelenburg Posture" is literally named in
+#     the spec's fault_name, and its citation_support quotes "observed as a Trendelenburg
+#     posture, with the contralateral pelvis dropping" almost verbatim against the node's own
+#     `INDICATED_BY -> Contralateral Pelvis Drop` and `CAUSED_BY -> Weak Hip Abductors` edges.
+#   - Past-toes and valgus: "Knee Anterior To Toes" and "Knee Valgus" both matched a brief
+#     candidate AND carried rich, on-topic buckets (patellar tendon stress / tendinopathy risk;
+#     ACL/cartilage/patellofemoral risk), so no deviation was needed for either.
+LUNGE_PAST_TOES_KG_QUERY = "Knee Anterior To Toes"
+LUNGE_VALGUS_KG_QUERY = "Knee Valgus"
+LUNGE_DEPTH_KG_QUERY = "Decreased Knee Flexion"
+LUNGE_PELVIC_DROP_KG_QUERY = "Trendelenburg Posture"
+
+# Phases in which a lunge is under load. RULE-LEVEL CHOICE, not a spec quantity: the parent
+# spec scopes only `lunge_knee_past_toes` to phases ("during descent/bottom/ascent") and
+# scopes the other three to none. Applying that same set to Tasks 4/5's rules follows the squat
+# detector's ACTIVE_PHASES precedent (src/pose/movements/squat.py) rather than a spec
+# requirement. Cost, stated: a fault that appears only during `setup` or `recovery` is missed.
+#
+# `rule_insufficient_depth` (this task) does NOT use this set -- see its docstring. Its
+# predicate is "the rep's MINIMUM lead-knee angle", a single per-rep number, and masking on
+# `descent`/`ascent` as well as `bottom` would catch the ordinary >100-degree transit every
+# rep makes on the way down and back up, firing on reps that bottom out perfectly deep. That
+# is a real defect this task found empirically (a synthetic 170->85->170 trajectory produced
+# two severity-1.0 detections before the fix) and corrected by narrowing the depth mask to
+# `phase == "bottom"` alone, matching squat.rule_shallow_depth's identical narrowing for the
+# identical reason.
+LUNGE_ACTIVE_PHASES = {"descent", "bottom", "ascent"}
+
+# Minimum left/right knee-angle difference at the bottom before a lead leg is claimed.
+# RULE-LEVEL CHOICE -- the parent spec defines the lead leg ("the more flexed / more anterior
+# foot") but names no separation below which the answer is unsafe. 5 degrees is chosen as the
+# scale at which a landmark-noise-driven difference could flip the answer; below it the two
+# legs are doing the same thing, which is not a lunge. This constant can ONLY SILENCE: an
+# unresolved lead side emits no detections at all, never a guessed one. A coin-flip here would
+# mis-attribute every fault in the rep to the wrong leg, which is worse than saying nothing.
+LEAD_SIDE_MIN_SEPARATION_DEG = 5.0
+
+# Views in which the parent spec rates lunge depth `high` ("high on side / front_oblique;
+# medium head-on"). Defined locally rather than imported from pushup.py: the two modules
+# happen to agree today but answer different spec lines and must be free to diverge.
+DEPTH_OBSERVABLE_VIEWS = {"side", "front_oblique"}
+
+# Views in which the parent spec rates the frontal-plane cues `high`. Matches the set
+# `squat.rule_knees_inward` already uses for the same fault family.
+ALIGNMENT_OBSERVABLE_VIEWS = {"front", "front_oblique", "rear", "rear_oblique"}
+
+# Confidence multiplier applied when a rule fires from a view the spec does not rate `high`.
+# Not a new number: aliases the same constant squat/OHP/push-up already share
+# (`pose_rule_detector.VIEW_UNAVAILABLE_CONFIDENCE_SCALE`, currently 0.65) rather than
+# re-typing its value, so a future change to that shared constant does not silently diverge
+# from this module.
+_OFF_VIEW_CONFIDENCE = VIEW_UNAVAILABLE_CONFIDENCE_SCALE
+
+# FROM THE SPEC: "Flag when the minimum lead-knee angle across the rep > 100 degrees.
+# Severity ramp 100 degrees -> 130 degrees (more extended = worse)."
+LUNGE_DEPTH_MILD_DEG = 100.0
+LUNGE_DEPTH_SEVERE_DEG = 130.0
 
 
 def _medial_offset_ratio(
@@ -272,3 +357,131 @@ def lunge_assign_phases(raw: list[dict]) -> list[str]:
         else:
             phases.append("ascent")
     return phases
+
+
+def resolve_lead_side(window: list[CoreFrame]) -> str | None:
+    """Which leg led this repetition: "left", "right", or None when unresolvable.
+
+    SUBSTITUTION, NOT A RESTATEMENT -- record it as one. The parent spec defines the lead leg
+    as "the more flexed / more anterior foot". `more anterior` is exactly the axis that
+    collapses in a frontal view, which is where two of the four lunge rules live, so the
+    anterior half of that definition is unusable where it is most needed. This uses the
+    more-flexed half only, evaluated at the window's bottom frame.
+
+    WHY THIS LIVES IN THE RULES AND NOT IN `lunge_compute_raw`: `run_detector` calls
+    `compute_raw` over the WHOLE CLIP before `segment_reps`, so at metric time there is no rep
+    boundary and therefore no bottom frame. A per-frame "whichever knee is more flexed right
+    now" flickers through `setup` and `recovery`, where both knees sit near extension within
+    landmark noise of each other; every lead-relative quantity would then swap legs mid-clip
+    and `centered_median` would blend two legs into a number describing neither. Rules receive
+    a per-rep slice (`run_detector` slices `core[rep.start:rep.end + 1]`), which is the first
+    place the question is answerable.
+
+    On a fallback path (`no_reps_detected`, `only_partial_reps`, `segmentation_disabled`) the
+    rules receive the whole clip, so `window` is the whole clip and this resolves once for it.
+    That degrades exactly as everything else on the fallback path does; it is stated, not
+    hidden.
+
+    NOT PHASE-SCOPED: this scans every frame in `window`, including `setup`/`recovery` ones,
+    because it is only choosing which frame is deepest (via `min_knee_angle`) -- setup/recovery
+    frames simply lose that competition to the true bottom in a real rep. Scoping the scan to
+    `LUNGE_ACTIVE_PHASES` would be redundant on a real rep and actively wrong on the fallback
+    whole-clip path, where phase labels are far less reliable across multiple reps.
+    """
+    bottom: CoreFrame | None = None
+    bottom_value = np.inf
+    for frame in window:
+        if not frame.valid:
+            continue
+        value = frame.m("min_knee_angle")
+        if np.isfinite(value) and value < bottom_value:
+            bottom_value, bottom = value, frame
+    if bottom is None:
+        return None
+
+    left = bottom.m("left_knee_angle")
+    right = bottom.m("right_knee_angle")
+    if not np.isfinite(left) or not np.isfinite(right):
+        return None
+    if abs(left - right) < LEAD_SIDE_MIN_SEPARATION_DEG:
+        return None
+    return "left" if left < right else "right"
+
+
+def rule_insufficient_depth(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag a lunge whose lead knee never reaches roughly a right angle.
+
+    THRESHOLD PROVENANCE -- BOTH FROM THE SPEC, unlike every push-up rule. The parent spec's
+    Lunge entry states the fire threshold ("Flag when the minimum lead-knee angle across the
+    rep > 100 degrees") AND the ramp ("Severity ramp 100 degrees -> 130 degrees (more extended
+    = worse)"). Neither number is chosen here.
+
+    The lead side is resolved over THIS window (see `resolve_lead_side`); an unresolved side
+    emits nothing.
+
+    WHY THE MASK IS `phase == "bottom"`, NOT `phase in LUNGE_ACTIVE_PHASES` (unlike every other
+    lunge rule): the spec's predicate is "the MINIMUM lead-knee angle ACROSS THE REP" -- one
+    number per rep, not a per-frame gate. On a real rep the lead knee travels roughly
+    170 -> 85 -> 170, so an `ACTIVE_PHASES` mask (descent/bottom/ascent) would catch the long
+    transit through >100 degrees on BOTH the way down and the way back up, even for a rep that
+    bottoms out at a perfectly good 85 degrees -- `contiguous_true_segments` would then emit
+    two detections at severity 1.0 (max_angle near full extension) for a clean rep. `bottom` is
+    exactly the deepest 30% of the rep (`lunge_assign_phases`), so "the angle is above 100
+    during `bottom`" is the frame-level statement equivalent to "the rep's minimum exceeds
+    100" -- the same substitution `squat.rule_shallow_depth` makes for the identical reason.
+    """
+    lead = resolve_lead_side(core)
+    if lead is None:
+        return []
+    lead_key = f"{lead}_knee_angle"
+    observable = ctx.view_type in DEPTH_OBSERVABLE_VIEWS
+
+    mask = [
+        frame.valid
+        and frame.phase == "bottom"
+        and np.isfinite(frame.m(lead_key))
+        and frame.m(lead_key) > LUNGE_DEPTH_MILD_DEG
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        angles = [frame.m(lead_key) for frame in segment]
+        max_angle = float(np.nanmax(angles))
+        severity = severity_from_range(
+            max_angle, LUNGE_DEPTH_MILD_DEG, LUNGE_DEPTH_SEVERE_DEG, lower_is_worse=False
+        )
+        detections.append(
+            build_detection(
+                fault_id="lunge_insufficient_depth",
+                fault_name="Insufficient Depth",
+                kg_query=LUNGE_DEPTH_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=angles,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable else "medium",
+                evidence={
+                    "lead_side": lead,
+                    "max_lead_knee_angle_deg": round(max_angle, 2),
+                    "threshold": LUNGE_DEPTH_MILD_DEG,
+                    "primary_label": "lead knee angle",
+                    "primary_value": round(max_angle, 2),
+                    "primary_threshold": LUNGE_DEPTH_MILD_DEG,
+                },
+                citation="Alkjær T, et al. \"Forward lunge before and after anterior cruciate "
+                         "ligament reconstruction.\" PLoS One (2020), PMC6980669. Supplemented by "
+                         "Escamilla R, et al. \"Patellofemoral Joint Loading During the "
+                         "Performance of the Forward and Side Lunge with Step Height Variations.\" "
+                         "IJSPT (2022), PMC8805090.",
+                citation_support="PMC6980669 defines the protocol as \"flexing the knee to 90°\" "
+                                 "as the target depth, and reduced knee flexion/extensor moment "
+                                 "marks impaired (non-coper) function. PMC8805090: \"patellofemoral "
+                                 "joint force and stress generally increased progressively as knee "
+                                 "flexion increased during the descent phase\" — i.e., depth is "
+                                 "what produces the loading/strengthening stimulus. Verified in "
+                                 "RAG docs.",
+            )
+        )
+    return detections

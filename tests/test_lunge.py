@@ -290,5 +290,235 @@ class LungePhaseTests(unittest.TestCase):
         self.assertEqual(lunge_assign_phases(raw), ["unknown"] * 10)
 
 
+def _rule_frames(metrics: dict, count: int = 12, phase: str = "bottom") -> list:
+    """A window of `count` identical CoreFrames carrying `metrics`.
+
+    Constant values on purpose: `run_detector`'s median smoothing is a no-op over constants,
+    so an asserted severity is EXACT rather than approximately right.
+    """
+    from src.pose.movements.base import CoreFrame
+
+    return [
+        CoreFrame(
+            frame_index=i,
+            time=i / 30.0,
+            phase=phase,
+            valid=True,
+            lower_body_visibility=0.9,
+            metrics=dict(metrics),
+        )
+        for i in range(count)
+    ]
+
+
+def _ctx(view_type: str = "front_oblique", *, min_frames: int = 6, view_confidence: float = 0.9):
+    """min_frames=6 is what `run_detector` computes at 30 fps -- max(3, ceil(30 * 0.20)) --
+    so a segment-length mutant cannot hide behind an artificially permissive 1."""
+    return RuleContext(fps=30.0, view_type=view_type, view_confidence=view_confidence,
+                       min_frames=min_frames)
+
+
+class LeadSideResolutionTests(unittest.TestCase):
+    def test_resolves_the_more_flexed_leg_at_the_windows_bottom(self) -> None:
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = _rule_frames({"min_knee_angle": 85.0, "left_knee_angle": 85.0,
+                               "right_knee_angle": 165.0})
+        self.assertEqual(resolve_lead_side(window), "left")
+
+    def test_resolves_the_right_leg_when_it_is_the_flexed_one(self) -> None:
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = _rule_frames({"min_knee_angle": 85.0, "left_knee_angle": 165.0,
+                               "right_knee_angle": 85.0})
+        self.assertEqual(resolve_lead_side(window), "right")
+
+    def test_returns_none_when_both_knees_are_within_the_ambiguity_guard(self) -> None:
+        # A near-symmetric bottom is not a lunge. Guessing a side here would mis-attribute
+        # every fault in the rep, so the rules go silent instead.
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = _rule_frames({"min_knee_angle": 100.0, "left_knee_angle": 100.0,
+                               "right_knee_angle": 102.0})
+        self.assertIsNone(resolve_lead_side(window))
+
+    def test_returns_none_when_no_frame_is_valid(self) -> None:
+        from src.pose.movements.base import CoreFrame
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = [
+            CoreFrame(frame_index=i, time=i / 30.0, phase="unknown", valid=False,
+                      lower_body_visibility=0.0, metrics={})
+            for i in range(12)
+        ]
+        self.assertIsNone(resolve_lead_side(window))
+
+    def test_resolution_uses_the_bottom_frame_not_the_first(self) -> None:
+        # The rep opens with the RIGHT knee incidentally more flexed, but the bottom is
+        # unambiguously a LEFT-lead lunge. Resolving on frame 0 would answer "right".
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = _rule_frames({"min_knee_angle": 160.0, "left_knee_angle": 168.0,
+                               "right_knee_angle": 160.0}, count=6)
+        window += _rule_frames({"min_knee_angle": 85.0, "left_knee_angle": 85.0,
+                                "right_knee_angle": 150.0}, count=6)
+        self.assertEqual(resolve_lead_side(window), "left")
+
+    def test_silent_just_inside_the_separation_guard(self) -> None:
+        # LEAD_SIDE_MIN_SEPARATION_DEG = 5.0. A 4.9-degree gap must still read as ambiguous --
+        # a mutant that widens or shrinks the guard to 3.0 or 10.0 would pass the wide-margin
+        # cases above but flip this one.
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = _rule_frames({"min_knee_angle": 100.0, "left_knee_angle": 100.0,
+                               "right_knee_angle": 104.9})
+        self.assertIsNone(resolve_lead_side(window))
+
+    def test_resolves_just_outside_the_separation_guard(self) -> None:
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = _rule_frames({"min_knee_angle": 100.0, "left_knee_angle": 100.0,
+                               "right_knee_angle": 105.1})
+        self.assertEqual(resolve_lead_side(window), "left")
+
+    def test_a_gap_of_exactly_the_guard_value_already_resolves(self) -> None:
+        # Pins the guard as a strict `<` comparison: a gap of EXACTLY 5.0 degrees is already
+        # "separated enough" (only gaps strictly below 5.0 are ambiguous), which distinguishes
+        # this from a mutant that flipped the comparison to `<=`.
+        from src.pose.movements.lunge import resolve_lead_side
+
+        window = _rule_frames({"min_knee_angle": 100.0, "left_knee_angle": 100.0,
+                               "right_knee_angle": 105.0})
+        self.assertEqual(resolve_lead_side(window), "left")
+
+
+class LungeDepthRuleTests(unittest.TestCase):
+    def _window(self, lead_angle: float, view: str = "side", phase: str = "bottom", **kwargs):
+        from src.pose.movements.lunge import rule_insufficient_depth
+
+        window = _rule_frames({"min_knee_angle": lead_angle, "left_knee_angle": lead_angle,
+                               "right_knee_angle": 170.0}, phase=phase)
+        return rule_insufficient_depth(window, _ctx(view, **kwargs))
+
+    def test_fires_on_a_shallow_lunge(self) -> None:
+        detections = self._window(120.0)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "lunge_insufficient_depth")
+
+    def test_silent_on_a_deep_lunge(self) -> None:
+        self.assertEqual(self._window(88.0), [])
+
+    def test_silent_just_inside_the_threshold(self) -> None:
+        self.assertEqual(self._window(99.0), [])
+
+    def test_fires_just_outside_the_threshold(self) -> None:
+        self.assertEqual(len(self._window(101.0)), 1)
+
+    def test_severity_is_exact_at_the_ramp_midpoint(self) -> None:
+        # ramp 100 -> 130, so 115 is exactly half way.
+        self.assertAlmostEqual(self._window(115.0)[0].severity, 0.5, places=3)
+
+    def test_severity_saturates_at_the_ramp_end(self) -> None:
+        self.assertAlmostEqual(self._window(130.0)[0].severity, 1.0, places=3)
+
+    def test_off_view_is_downgraded_not_silenced(self) -> None:
+        detections = self._window(120.0, view="rear")
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].observability, "medium")
+        self.assertAlmostEqual(
+            detections[0].confidence, round(detections[0].severity * 0.65, 4), places=3
+        )
+
+    def test_silent_when_the_lead_side_is_unresolvable(self) -> None:
+        from src.pose.movements.lunge import rule_insufficient_depth
+
+        window = _rule_frames({"min_knee_angle": 120.0, "left_knee_angle": 120.0,
+                               "right_knee_angle": 121.0})
+        self.assertEqual(rule_insufficient_depth(window, _ctx()), [])
+
+    def test_silent_outside_the_active_phases(self) -> None:
+        from src.pose.movements.lunge import rule_insufficient_depth
+
+        window = _rule_frames({"min_knee_angle": 120.0, "left_knee_angle": 120.0,
+                               "right_knee_angle": 170.0}, phase="setup")
+        self.assertEqual(rule_insufficient_depth(window, _ctx()), [])
+
+    def test_still_silent_during_descent_and_ascent(self) -> None:
+        # The mask is `phase == "bottom"` ONLY, unlike every other lunge rule -- a mutant that
+        # widened it back to `phase in LUNGE_ACTIVE_PHASES` would pass every constant-valued
+        # fixture in this class (they all default to phase="bottom") while re-introducing the
+        # real defect this task found: firing on the ordinary >100-degree transit every rep
+        # makes on the way down/up, even a deep one. This constant-valued check pins the mask
+        # shape directly; the trajectory tests below pin the CONSEQUENCE on a real rep.
+        detections = self._window(120.0, phase="descent")
+        self.assertEqual(detections, [])
+        detections = self._window(120.0, phase="ascent")
+        self.assertEqual(detections, [])
+
+    def _trajectory(self, bottom_angle: float, per_leg: int = 30, margin: float = 8.0):
+        """A real rep: lead knee travels 170 -> `bottom_angle` -> 170 over `2 * per_leg`
+        frames. Every frame above the 100-degree fire threshold during descent/ascent is on
+        purpose -- this is what a genuine rep's transit looks like, unlike the constant-valued
+        fixtures elsewhere in this class. `phase` is assigned the same way `lunge_assign_phases`
+        would: the `margin`-degree-wide slice around `bottom_angle` is "bottom", everything
+        before it "descent", everything after "ascent". `per_leg=30, margin=8.0` are tuned (not
+        arbitrary) so the "bottom" phase run is >= `min_frames=6` for BOTH trajectories used
+        below -- verified directly against `rule_insufficient_depth` before this test was
+        written, not assumed.
+        """
+        from src.pose.movements.base import CoreFrame
+
+        angles = list(np.linspace(170.0, bottom_angle, per_leg)) + list(
+            np.linspace(bottom_angle, 170.0, per_leg)
+        )
+        bottom_cutoff = bottom_angle + margin
+        frames = []
+        past_bottom = False
+        for i, angle in enumerate(angles):
+            if angle <= bottom_cutoff:
+                phase = "bottom"
+                past_bottom = True
+            elif not past_bottom:
+                phase = "descent"
+            else:
+                phase = "ascent"
+            frames.append(
+                CoreFrame(
+                    frame_index=i,
+                    time=i / 30.0,
+                    phase=phase,
+                    valid=True,
+                    lower_body_visibility=0.9,
+                    metrics={
+                        "min_knee_angle": float(angle),
+                        "left_knee_angle": float(angle),
+                        "right_knee_angle": 170.0,
+                    },
+                )
+            )
+        return frames
+
+    def test_silent_on_a_deep_rep_that_transits_through_the_threshold(self) -> None:
+        # THE DEFECT THIS TEST PINS: a rep that bottoms at a clean 85 degrees still spends many
+        # frames above the 100-degree threshold on the way down and back up. Before the mask
+        # was narrowed to `phase == "bottom"`, this fired twice at severity 1.0 (verified
+        # empirically against the pre-fix code: two detections, max_lead_knee_angle_deg=170.0).
+        from src.pose.movements.lunge import rule_insufficient_depth
+
+        detections = rule_insufficient_depth(self._trajectory(85.0), _ctx("side"))
+        self.assertEqual(detections, [])
+
+    def test_fires_once_on_a_shallow_rep_with_severity_from_the_bottom_not_the_transit(self) -> None:
+        from src.pose.movements.lunge import rule_insufficient_depth
+
+        detections = rule_insufficient_depth(self._trajectory(118.0), _ctx("side"))
+        self.assertEqual(len(detections), 1)
+        # Severity must come from the ~118-degree bottom, not the ~170-degree transit through
+        # descent/ascent that a wider mask would have included.
+        self.assertLess(detections[0].evidence["max_lead_knee_angle_deg"], 130.0)
+        self.assertGreater(detections[0].severity, 0.0)
+        self.assertLess(detections[0].severity, 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
