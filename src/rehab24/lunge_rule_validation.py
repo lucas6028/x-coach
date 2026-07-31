@@ -217,6 +217,54 @@ def score_spec(fault_id: str, lead: str) -> tuple[str, frozenset[str], float]:
     raise ValueError(f"unknown lunge fault id: {fault_id}")
 
 
+def gate_open(fault_id: str, view_type: str, view_confidence: float) -> bool:
+    """Whether this rule's VIEW GATE lets it emit anything at all under `view_type`.
+
+    A restatement of the only two HARD gates in `lunge.py` -- `rule_knee_past_toes` requires a
+    confident `side`, `rule_pelvic_drop` returns `[]` on `side`. The other two rules downgrade
+    observability off-view but never go silent, so they are always open. Pinned against the rule
+    module by `test_gate_open_matches_each_rule_hard_gate`.
+
+    WHY A CONTINGENCY TABLE NEEDS THIS. Without it a rep the VIEW silenced is counted as a true
+    negative, which inflates specificity and reports a rule as well-behaved on reps where it
+    never ran. `rule_pelvic_drop`'s 1.000 specificity on the half-profile stratum is exactly
+    that artifact: the estimator called those reps `side` and the rule was gated off on all 39
+    correct ones. A specificity for a silenced rule is not a measurement.
+    """
+    from src.pose.pose_rule_detector import SIDE_VIEW_CONF_THRESHOLD
+
+    if fault_id == "lunge_knee_past_toes":
+        return view_type == "side" and view_confidence >= SIDE_VIEW_CONF_THRESHOLD
+    if fault_id == "lunge_pelvic_drop":
+        return view_type != "side"
+    if fault_id in RULE_CAMERAS:
+        return True
+    raise ValueError(f"unknown lunge fault id: {fault_id}")
+
+
+def angle_2d(points, a: int, b: int, c: int) -> float:
+    """The a-b-c angle in the IMAGE PLANE only, dropping MediaPipe's pseudo-depth `z`.
+
+    `geometry.angle_degrees` uses all three coordinates, so a production knee angle is partly a
+    function of a learned depth channel rather than of anything visible. Recomputing the same
+    angle without `z` says how much of a knee-flexion result that channel is carrying -- which
+    is the difference between "this cue is wrong about lunges" and "this cue is unmeasurable
+    from this pipeline's projection".
+    """
+    from src.pose.geometry import visible_point
+
+    pa, pb, pc = (visible_point(points, i, dims=2) for i in (a, b, c))
+    if pa is None or pb is None or pc is None:
+        return math.nan
+    ba = np.asarray(pa, dtype=np.float64) - np.asarray(pb, dtype=np.float64)
+    bc = np.asarray(pc, dtype=np.float64) - np.asarray(pb, dtype=np.float64)
+    denominator = float(np.linalg.norm(ba) * np.linalg.norm(bc))
+    if denominator <= 1e-8:
+        return math.nan
+    cosine = float(np.clip(float(np.dot(ba, bc)) / denominator, -1.0, 1.0))
+    return float(np.degrees(np.arccos(cosine)))
+
+
 def rules_window(result) -> list:
     """The frames the rules ACTUALLY saw, which is not always the whole labeled window.
 
@@ -423,7 +471,53 @@ def _scores_for_lead(window, lead: str | None, min_frames: int) -> tuple[dict, d
     return scores, structural
 
 
-def _pass_record(result, window, lead: str | None, min_frames: int, truth_lead: str | None) -> dict:
+def full_window_premise(window_frames: list[dict]) -> dict:
+    """`resolve_lead_side`'s premise measured over the FULL labeled window.
+
+    TWO INDEPENDENCE PROPERTIES, both of which the harness's other numbers lack.
+
+    1. NO RE-SEGMENTATION. `run_detector` segments whatever it is handed, and on most reps it
+       re-cut the labeled window and scored a sub-window of it. Anything derived from
+       `rules_window` inherits that cut. This reads the labeled window directly -- raw metrics
+       only, no `centered_median`, no `segment_reps`, no phases -- so the premise finding does
+       not rest on the harness's own windowing.
+    2. AN IMAGE-PLANE CONTROL. It returns each knee angle twice: as `lunge_compute_raw` computes
+       it (all three coordinates, so partly a function of MediaPipe's learned `z`) and in the
+       image plane alone. The gap between the two premise rates is how much of the result the
+       pseudo-depth channel is carrying, and it is the difference between a claim about lunges
+       and a claim about this pipeline's projection.
+    """
+    from src.pose.geometry import (
+        landmarks_to_array, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE, LEFT_ANKLE, RIGHT_ANKLE,
+    )
+    from src.pose.movements.lunge import lunge_compute_raw
+
+    raw = lunge_compute_raw(window_frames, EX5_FPS)
+    best_position, best_value = None, math.inf
+    for position, item in enumerate(raw):
+        if not item.get("valid"):
+            continue
+        value = float(item.get("min_knee_angle", math.nan))
+        if math.isfinite(value) and value < best_value:
+            best_position, best_value = position, value
+    if best_position is None:
+        return {"bottom_position": None}
+
+    points = landmarks_to_array(window_frames[best_position].get("landmarks"))
+    return {
+        "bottom_position": best_position,
+        "valid_frames": sum(1 for item in raw if item.get("valid")),
+        "left_knee_angle": _round_finite(float(raw[best_position]["left_knee_angle"])),
+        "right_knee_angle": _round_finite(float(raw[best_position]["right_knee_angle"])),
+        "left_knee_angle_2d": _round_finite(angle_2d(points, LEFT_HIP, LEFT_KNEE, LEFT_ANKLE)),
+        "right_knee_angle_2d": _round_finite(angle_2d(points, RIGHT_HIP, RIGHT_KNEE, RIGHT_ANKLE)),
+    }
+
+
+def _pass_record(
+    result, window, lead: str | None, min_frames: int, truth_lead: str | None,
+    view_type: str, view_confidence: float,
+) -> dict:
     """One pass's outcome, plus a LEAD-ORACLE score set alongside the real one.
 
     `scores_lead_oracle` reads each rule's own metric off the leg `exercise_subtype` says led,
@@ -452,6 +546,13 @@ def _pass_record(result, window, lead: str | None, min_frames: int, truth_lead: 
         "scores": scores,
         "scores_lead_oracle": oracle_scores,
         "cannot_fire": structural,
+        "gate_open": {f: gate_open(f, view_type, view_confidence) for f in RULE_CAMERAS},
+        # The reps on which the rule could ACTUALLY act: its view gate open AND enough masked
+        # frames to clear min_frames AND a resolved lead side. Every other rep is a structural
+        # silence, and counting those as true negatives is what inflates specificity.
+        "actionable": {
+            f: gate_open(f, view_type, view_confidence) and not structural[f] for f in RULE_CAMERAS
+        },
     }
 
 
@@ -497,6 +598,7 @@ def evaluate_rep(frames: list[dict], segment, camera: str) -> dict | None:
         "oracle_view": oracle_view,
         "min_frames": min_frames,
         "lead_side_truth": SUBTYPE_LEAD_SIDE.get(segment.exercise_subtype),
+        "full_window": full_window_premise(window_frames),
     }
 
     for pass_name, view, confidence in (
@@ -507,7 +609,7 @@ def evaluate_rep(frames: list[dict], segment, camera: str) -> dict | None:
         window = rules_window(result)
         lead = resolve_lead_side(window)
         record[pass_name] = _pass_record(
-            result, window, lead, min_frames, record["lead_side_truth"]
+            result, window, lead, min_frames, record["lead_side_truth"], view, confidence
         )
         if pass_name == "production":
             record["valid_frame_ratio"] = (
@@ -614,6 +716,15 @@ def subset_stats(
     sens = table["tp"] / (table["tp"] + table["fn"]) if (table["tp"] + table["fn"]) else math.nan
     spec = table["tn"] / (table["tn"] + table["fp"]) if (table["tn"] + table["fp"]) else math.nan
 
+    # The same table over ONLY the reps where the rule could act -- view gate open, masked phase
+    # long enough, lead side resolved. The unconditional table above counts every structurally
+    # silent rep as a true negative, which deflates sensitivity and inflates specificity by an
+    # amount the reader cannot see unless it is printed next to it.
+    act_index = [i for i, r in enumerate(records) if r[pass_name].get("actionable", {}).get(fault_id)]
+    act_table = contingency([fired[i] for i in act_index], [correct[i] for i in act_index])
+    act_sens_denominator = act_table["tp"] + act_table["fn"]
+    act_spec_denominator = act_table["tn"] + act_table["fp"]
+
     per_subject_auc = per_subject(
         list(range(len(records))),
         key_fn=lambda i: records[i]["person_id"],
@@ -641,7 +752,18 @@ def subset_stats(
         "subject_auc_n": n_subj,
         "n_subjects": len({r["person_id"] for r in records}),
         "cannot_fire": sum(1 for r in records if r[pass_name]["cannot_fire"].get(fault_id)),
+        "view_gated": sum(
+            1 for r in records if not r[pass_name].get("gate_open", {}).get(fault_id, True)
+        ),
         "unresolved_lead": sum(1 for r in records if r[pass_name]["lead_side"] is None),
+        "n_actionable": len(act_index),
+        "actionable_table": act_table,
+        "actionable_sensitivity": (
+            act_table["tp"] / act_sens_denominator if act_sens_denominator else math.nan
+        ),
+        "actionable_specificity": (
+            act_table["tn"] / act_spec_denominator if act_spec_denominator else math.nan
+        ),
         "scores": scores,
     }
 
@@ -652,11 +774,19 @@ def _fmt(value: float, places: int = 3) -> str:
 
 def _stats_lines(label: str, stats: dict, threshold: float) -> list[str]:
     t = stats["table"]
+    a = stats["actionable_table"]
     return [
         f"    {label} (n={stats['n']}: {stats['n_incorrect']} incorrect / {stats['n_correct']} correct)",
         f"      fired {stats['fired']:>3}  "
         f"[tp {t['tp']:>3} fp {t['fp']:>3} tn {t['tn']:>3} fn {t['fn']:>3}]  "
         f"sens {_fmt(stats['sensitivity'])}  spec {_fmt(stats['specificity'])}",
+        f"      STRUCTURAL SILENCE inside that table: view-gated {stats['view_gated']}, "
+        f"could-not-fire {stats['cannot_fire']} (of which unresolved lead side "
+        f"{stats['unresolved_lead']}) -- all counted above as true negatives / false negatives",
+        f"      CONDITIONAL on the {stats['n_actionable']} reps where the rule could act: "
+        f"[tp {a['tp']:>3} fp {a['fp']:>3} tn {a['tn']:>3} fn {a['fn']:>3}]  "
+        f"sens {_fmt(stats['actionable_sensitivity'])}  "
+        f"spec {_fmt(stats['actionable_specificity'])}",
         f"      pooled AUC {_fmt(stats['pooled_auc'])}  over {stats['n_scored']} scored reps "
         f"({stats['n_scored_incorrect']} incorrect / {stats['n_scored_correct']} correct)",
         f"      PER-SUBJECT AUC median {_fmt(stats['subject_auc_median'])}  "
@@ -664,8 +794,28 @@ def _stats_lines(label: str, stats: dict, threshold: float) -> list[str]:
         f"over {stats['subject_auc_n']}/{stats['n_subjects']} subjects with both classes",
         f"      threshold {threshold:g} sits at percentile "
         f"{_fmt(percentile_of(threshold, stats['scores']), 1)} of the observed scores",
-        f"      could-not-fire (unresolved lead side OR masked phase shorter than min_frames) "
-        f"{stats['cannot_fire']}, of which unresolved lead side {stats['unresolved_lead']}",
+    ]
+
+
+def matched_n_lines(records: Sequence[dict], fault_id: str, pass_name: str) -> list[str]:
+    """Shipped-lead vs labeled-lead AUC over ONLY the reps BOTH score.
+
+    The two score sets have different denominators (an unresolved lead side kills one but not
+    the other), so the headline contrast between them could in principle be a denominator
+    artifact. Restricting both to the same reps removes that reading.
+    """
+    both = [
+        r for r in records
+        if math.isfinite(_score_of(r, pass_name, fault_id))
+        and math.isfinite(_score_of(r, pass_name, fault_id, "scores_lead_oracle"))
+    ]
+    shipped = subset_stats(both, fault_id, pass_name)
+    labeled = subset_stats(both, fault_id, pass_name, "scores_lead_oracle")
+    return [
+        f"      MATCHED n={len(both)} (reps scored by BOTH lead choices): "
+        f"shipped lead per-subject median {_fmt(shipped['subject_auc_median'])} "
+        f"(pooled {_fmt(shipped['pooled_auc'])})  vs  labeled lead per-subject median "
+        f"{_fmt(labeled['subject_auc_median'])} (pooled {_fmt(labeled['pooled_auc'])})",
     ]
 
 
@@ -749,9 +899,12 @@ def build_report(payload: dict) -> str:
                      [r for r in subset if r["extra_person"] not in {"2", "3"}])
                 )
             for label, cut in cuts:
-                for line in _stats_lines(label, subset_stats(cut, fault_id, pass_name), threshold):
+                stats = subset_stats(cut, fault_id, pass_name)
+                for line in _stats_lines(label, stats, threshold):
                     add(line)
                 add(_lead_oracle_line(subset_stats(cut, fault_id, pass_name, "scores_lead_oracle")))
+                for line in matched_n_lines(cut, fault_id, pass_name):
+                    add(line)
             add("")
 
     add("-" * 88)
@@ -776,27 +929,55 @@ def build_report(payload: dict) -> str:
     add(f"  cam17-vs-cam18 lead agreement on the same rep: "
         f"{sum(1 for v in both if v['cam17'] == v['cam18'])}/{len(both)}")
     add("  PREMISE CHECK -- is the labeled lead leg actually the MORE FLEXED knee at the bottom?")
-    add("  (`resolve_lead_side` substitutes the more-flexed half of the spec's "
-        "\"more flexed / more anterior\" definition; this asks whether that half holds here.)")
+    add("  (`resolve_lead_side` substitutes the more-flexed half of the spec's")
+    add("  \"more flexed / more anterior\" definition; this asks whether that half holds here.)")
+    add("  Three variants, because the answer depends on how the angle is measured:")
+    add("    [scored window] from the frames the rules saw (re-cut by segment_reps on most reps)")
+    add("    [full window]   from the whole labeled window, no segmentation, no smoothing")
+    add("    [image plane]   the same full-window angle with MediaPipe's pseudo-depth z dropped")
     for camera in ("cam17", "cam18"):
-        subset = [
-            r for r in records
-            if r["camera"] == camera
-            and r.get("bottom_left_knee_angle") is not None
-            and r.get("bottom_right_knee_angle") is not None
-            and r["lead_side_truth"] is not None
-        ]
-        hits = 0
-        gaps: list[float] = []
-        for r in subset:
-            left, right = r["bottom_left_knee_angle"], r["bottom_right_knee_angle"]
-            lead_angle, trail_angle = (left, right) if r["lead_side_truth"] == "left" else (right, left)
-            gaps.append(lead_angle - trail_angle)
-            hits += lead_angle < trail_angle
-        med, _, _, _ = median_and_range([abs(g) for g in gaps])
-        add(f"    {camera}: labeled lead knee is the more flexed one in {hits}/{len(subset)} "
-            f"= {_fmt(hits / len(subset) if subset else math.nan)}; "
-            f"median |left-right| separation at the bottom {_fmt(med, 1)} deg")
+        for variant, left_key, right_key, source in (
+            ("scored window", "bottom_left_knee_angle", "bottom_right_knee_angle", None),
+            ("full window", "left_knee_angle", "right_knee_angle", "full_window"),
+            ("image plane", "left_knee_angle_2d", "right_knee_angle_2d", "full_window"),
+        ):
+            hits, gaps, misses = 0, [], []
+            for record in records:
+                if record["camera"] != camera or record["lead_side_truth"] is None:
+                    continue
+                holder = record if source is None else record.get(source) or {}
+                left, right = holder.get(left_key), holder.get(right_key)
+                if left is None or right is None:
+                    continue
+                lead_angle, trail_angle = (
+                    (left, right) if record["lead_side_truth"] == "left" else (right, left)
+                )
+                gaps.append(abs(lead_angle - trail_angle))
+                if lead_angle < trail_angle:
+                    hits += 1
+                else:
+                    misses.append(abs(lead_angle - trail_angle))
+            total = len(gaps)
+            med, _, _, _ = median_and_range(gaps)
+            miss_med, _, _, _ = median_and_range(misses)
+            add(f"    {camera} [{variant:>13}]: {hits}/{total} = "
+                f"{_fmt(hits / total if total else math.nan)}; median |L-R| separation "
+                f"{_fmt(med, 1)} deg overall, {_fmt(miss_med, 1)} deg ON THE REPS IT GETS WRONG")
+    paired_flex: dict[tuple[str, str], dict[str, str]] = defaultdict(dict)
+    for record in records:
+        window = record.get("full_window") or {}
+        left, right = window.get("left_knee_angle"), window.get("right_knee_angle")
+        if left is None or right is None:
+            continue
+        paired_flex[(record["video_id"], record["repetition_number"])][record["camera"]] = (
+            "left" if left < right else "right"
+        )
+    pairs = [v for v in paired_flex.values() if "cam17" in v and "cam18" in v]
+    disagree = sum(1 for v in pairs if v["cam17"] != v["cam18"])
+    add("  CROSS-CAMERA CONTROL -- the two cameras film the SAME body at the SAME instant, so")
+    add("  any disagreement about which knee is more flexed is measurement error, not anatomy:")
+    add(f"    they disagree on {disagree}/{len(pairs)} = "
+        f"{_fmt(disagree / len(pairs) if pairs else math.nan)} of reps")
     add("")
 
     add("-" * 88)
