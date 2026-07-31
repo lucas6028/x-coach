@@ -49,11 +49,25 @@ class ContingencyTests(unittest.TestCase):
                             correct=[False, True, True, False])
         self.assertEqual(table, {"tp": 1, "fp": 1, "tn": 1, "fn": 1})
 
+    def test_the_positive_convention_is_not_symmetric_under_a_swap(self) -> None:
+        # Asymmetric counts on purpose. The four-cells-at-one case above cannot catch a
+        # `positive = is_correct` inversion: that swap permutes the cells without changing any
+        # count. Here a swapped implementation would report {"tp":1,"fp":2,...} instead.
+        from src.rehab24.lunge_rule_validation import contingency
+
+        table = contingency(fired=[True, True, True], correct=[False, False, True])
+        self.assertEqual(table, {"tp": 2, "fp": 1, "tn": 0, "fn": 0})
+
     def test_rejects_mismatched_lengths(self) -> None:
         from src.rehab24.lunge_rule_validation import contingency
 
         with self.assertRaises(ValueError):
             contingency(fired=[True], correct=[True, False])
+
+    def test_empty_inputs_yield_an_all_zero_table(self) -> None:
+        from src.rehab24.lunge_rule_validation import contingency
+
+        self.assertEqual(contingency(fired=[], correct=[]), {"tp": 0, "fp": 0, "tn": 0, "fn": 0})
 
 
 class RankAucTests(unittest.TestCase):
@@ -161,6 +175,12 @@ class PerSubjectTests(unittest.TestCase):
         records = [{"person_id": "1"}] * 100 + [{"person_id": "2"}] * 1
         result = per_subject(records, key_fn=lambda r: r["person_id"], value_fn=len)
         self.assertEqual(result, {"1": 100, "2": 1})
+
+    def test_empty_records_yields_an_empty_dict(self) -> None:
+        from src.rehab24.lunge_rule_validation import per_subject
+
+        result = per_subject([], key_fn=lambda r: r["person_id"], value_fn=len)
+        self.assertEqual(result, {})
 
 
 if __name__ == "__main__":
