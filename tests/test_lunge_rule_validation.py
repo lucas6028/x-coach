@@ -346,34 +346,111 @@ class ScoreSpecTests(unittest.TestCase):
             score_spec("lunge_not_a_rule", "left")
 
 
+ALL_VIEW_LABELS = ("side", "front", "front_oblique", "rear", "rear_oblique", "unknown")
+
+
+def _firing_window(count: int = 12):
+    """A window every lunge rule WOULD fire on, were its view gate open.
+
+    Constant metrics: `run_detector`'s median smoothing is a no-op over constants, and the rules
+    are handed this directly anyway. The values clear each rule's spec threshold with room to
+    spare, so what the assertions below vary is the VIEW and nothing else.
+      - left 80 deg vs right 140 deg at the bottom: lead resolves `left`, 60 deg apart, far
+        outside LEAD_SIDE_MIN_SEPARATION_DEG.
+      - left_knee_forward_ratio 0.50 > KNEE_FORWARD_MILD (0.10).
+      - left_knee_medial_offset_ratio 0.40 > LUNGE_VALGUS_MILD (0.10).
+      - left_knee_angle 140 would exceed LUNGE_DEPTH_MILD_DEG (100) -- but the LEAD knee is the
+        left one at 80, so depth deliberately does not fire here; its gate is unconditional and
+        is asserted through the two rules that do.
+      - pelvis_tilt_signed_deg +15: left lead makes a positive tilt contralateral, > 8 deg.
+    """
+    from src.pose.movements.base import CoreFrame
+
+    metrics = {
+        "min_knee_angle": 80.0,
+        "left_knee_angle": 80.0,
+        "right_knee_angle": 140.0,
+        "left_knee_forward_ratio": 0.50,
+        "right_knee_forward_ratio": 0.50,
+        "left_knee_medial_offset_ratio": 0.40,
+        "right_knee_medial_offset_ratio": 0.40,
+        "pelvis_tilt_signed_deg": 15.0,
+        "trunk_lateral_lean_deg": 0.0,
+        "hip_width": 0.12,
+    }
+    return [
+        CoreFrame(frame_index=i, time=i / 30.0, phase="bottom", valid=True,
+                  lower_body_visibility=0.9, metrics=dict(metrics))
+        for i in range(count)
+    ]
+
+
 class GateOpenTests(unittest.TestCase):
-    def test_matches_each_rule_hard_gate(self) -> None:
-        # Pins the restatement against the rules themselves: only two of the four gate on view.
+    def test_agrees_with_what_the_rules_actually_emit_across_every_view_label(self) -> None:
+        """CALLS THE RULES. The point of this test, and why the weaker version it replaces was
+        not worth having: `gate_open` is a hand-written restatement of two hard gates in
+        `lunge.py`, and every conditional contingency table in
+        `notes/lunge-rule-validation.md` depends on it being right. Re-asserting the same
+        hand-written logic proves nothing -- a future gate change would silently invalidate the
+        writeup while the suite stayed green. So this drives each rule with a window it WOULD
+        fire on and compares emit/silence against `gate_open`, view label by view label.
+        """
+        from src.pose.movements.base import RuleContext
         from src.pose.movements.lunge import (
-            LUNGE_DETECTOR, rule_knee_past_toes, rule_pelvic_drop,
+            LUNGE_DETECTOR, rule_knee_past_toes, rule_knee_valgus,
+            rule_insufficient_depth, rule_pelvic_drop,
         )
+        from src.rehab24.lunge_rule_validation import gate_open
+
+        rules = {
+            "lunge_knee_past_toes": rule_knee_past_toes,
+            "lunge_knee_valgus": rule_knee_valgus,
+            "lunge_pelvic_drop": rule_pelvic_drop,
+        }
+        for rule in (*rules.values(), rule_insufficient_depth):
+            self.assertIn(rule, LUNGE_DETECTOR.rules)
+
+        window = _firing_window()
+        for view in ALL_VIEW_LABELS:
+            ctx = RuleContext(fps=30.0, view_type=view, view_confidence=0.9, min_frames=6)
+            for fault_id, rule in rules.items():
+                emitted = bool(rule(window, ctx))
+                self.assertEqual(
+                    emitted, gate_open(fault_id, view, 0.9),
+                    f"{fault_id} emitted={emitted} but gate_open said "
+                    f"{gate_open(fault_id, view, 0.9)} for view={view!r}",
+                )
+
+    def test_agrees_with_the_side_rule_across_the_confidence_floor(self) -> None:
+        # The floor is squat's shared SIDE_VIEW_CONF_THRESHOLD, not a number invented here, and
+        # the rule is what decides -- so drive the rule across it rather than restating it.
+        from src.pose.movements.base import RuleContext
+        from src.pose.movements.lunge import rule_knee_past_toes
         from src.pose.pose_rule_detector import SIDE_VIEW_CONF_THRESHOLD
         from src.rehab24.lunge_rule_validation import gate_open
 
-        self.assertIn(rule_knee_past_toes, LUNGE_DETECTOR.rules)
-        self.assertIn(rule_pelvic_drop, LUNGE_DETECTOR.rules)
-        for view in ("side", "front", "front_oblique", "rear", "rear_oblique", "unknown"):
+        window = _firing_window()
+        for confidence in (SIDE_VIEW_CONF_THRESHOLD - 0.01, SIDE_VIEW_CONF_THRESHOLD, 0.99):
+            ctx = RuleContext(fps=30.0, view_type="side", view_confidence=confidence, min_frames=6)
             self.assertEqual(
-                gate_open("lunge_knee_past_toes", view, 1.0), view == "side",
-                f"knee_past_toes gate wrong for {view}",
+                bool(rule_knee_past_toes(window, ctx)),
+                gate_open("lunge_knee_past_toes", "side", confidence),
+                f"disagreement at view_confidence={confidence}",
             )
-            self.assertEqual(
-                gate_open("lunge_pelvic_drop", view, 1.0), view != "side",
-                f"pelvic_drop gate wrong for {view}",
-            )
-            # The other two downgrade observability off-view but never go silent.
-            self.assertTrue(gate_open("lunge_knee_valgus", view, 1.0))
-            self.assertTrue(gate_open("lunge_insufficient_depth", view, 1.0))
-        # The side gate carries squat's shared confidence floor, not a new number.
-        self.assertFalse(
-            gate_open("lunge_knee_past_toes", "side", SIDE_VIEW_CONF_THRESHOLD - 0.01)
-        )
-        self.assertTrue(gate_open("lunge_knee_past_toes", "side", SIDE_VIEW_CONF_THRESHOLD))
+
+    def test_the_ungated_rules_emit_from_every_view(self) -> None:
+        # `gate_open` returns True unconditionally for these two; that is only honest if they
+        # really do emit off-view (they downgrade observability instead of going silent).
+        from src.pose.movements.base import RuleContext
+        from src.pose.movements.lunge import rule_knee_valgus
+        from src.rehab24.lunge_rule_validation import gate_open
+
+        window = _firing_window()
+        for view in ALL_VIEW_LABELS:
+            ctx = RuleContext(fps=30.0, view_type=view, view_confidence=0.9, min_frames=6)
+            self.assertTrue(rule_knee_valgus(window, ctx), f"valgus went silent on {view}")
+            self.assertTrue(gate_open("lunge_knee_valgus", view, 0.9))
+            self.assertTrue(gate_open("lunge_insufficient_depth", view, 0.9))
 
     def test_rejects_an_unknown_fault_id(self) -> None:
         from src.rehab24.lunge_rule_validation import gate_open
