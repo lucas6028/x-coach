@@ -63,6 +63,9 @@ from src.pose.geometry import (
 )
 from src.pose.movements.base import CoreFrame, RuleContext
 from src.pose.pose_rule_detector import (
+    KNEE_FORWARD_MILD,
+    KNEE_FORWARD_SEVERE,
+    SIDE_VIEW_CONF_THRESHOLD,
     VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
     PoseRuleDetection,
     build_detection,
@@ -482,6 +485,165 @@ def rule_insufficient_depth(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
                                  "flexion increased during the descent phase\" — i.e., depth is "
                                  "what produces the loading/strengthening stimulus. Verified in "
                                  "RAG docs.",
+            )
+        )
+    return detections
+
+
+def rule_knee_past_toes(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag the lead knee translating well in front of the toes.
+
+    THRESHOLD PROVENANCE: the parent spec's Lunge entry says "Flag when > 0.10 during
+    descent/bottom/ascent; severe >= 0.30" -- word-for-word the Squat entry's wording, which
+    this repo already reads as a 0.10 -> 0.30 ramp via KNEE_FORWARD_MILD / KNEE_FORWARD_SEVERE
+    in src/pose/pose_rule_detector.py. Those constants are IMPORTED here rather than restated,
+    so the two movements cannot drift apart. No new number is introduced.
+
+    HARD VIEW GATE, not a downgrade. The spec rates this `high` on `side` and `low` head-on
+    ("sagittal knee travel not resolvable"). `squat.rule_knees_forward` sets the precedent:
+    outside a confidently-classified `side` view the rule emits NOTHING rather than a
+    low-confidence claim, because the projection that produces the number is the thing that
+    has failed. SIDE_VIEW_CONF_THRESHOLD is the same 0.20 floor squat already applies.
+    """
+    lead = resolve_lead_side(core)
+    if lead is None:
+        return []
+    observable_side = (
+        ctx.view_type == "side" and ctx.view_confidence >= SIDE_VIEW_CONF_THRESHOLD
+    )
+    lead_key = f"{lead}_knee_forward_ratio"
+
+    mask = [
+        frame.valid
+        and frame.phase in LUNGE_ACTIVE_PHASES
+        and observable_side
+        and np.isfinite(frame.m(lead_key))
+        and frame.m(lead_key) > KNEE_FORWARD_MILD
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        ratios = [frame.m(lead_key) for frame in segment]
+        max_ratio = float(np.nanmax(ratios))
+        severity = severity_from_range(
+            max_ratio, KNEE_FORWARD_MILD, KNEE_FORWARD_SEVERE, lower_is_worse=False
+        )
+        detections.append(
+            build_detection(
+                fault_id="lunge_knee_past_toes",
+                fault_name="Lead Knee Past Toes / Anterior Knee Translation",
+                kg_query=LUNGE_PAST_TOES_KG_QUERY,   # resolved in Task 3 Step 0
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=ratios,
+                severity=severity,
+                confidence=severity,
+                observability="high",
+                evidence={
+                    "lead_side": lead,
+                    "max_knee_forward_ratio": round(max_ratio, 4),
+                    "threshold": KNEE_FORWARD_MILD,
+                    "primary_label": "lead knee past toes",
+                    "primary_value": round(max_ratio, 4),
+                    "primary_threshold": KNEE_FORWARD_MILD,
+                },
+                citation="Zellmer M, et al. \"Patellar tendon stress between two variations of "
+                         "the forward step lunge.\" J Sport Health Sci (2019). PMC6523035.",
+                citation_support="Knee-in-front-of-toes lunges (FSL-FT) vs knee-behind-toes "
+                                 "(FSL-BT) gave \"peak patellar tendon stress … 11.1% greater,\" "
+                                 "stress impulse \"18.8% greater,\" peak quadriceps force 12.6% "
+                                 "greater, peak knee-extension moment 25.8% greater, and peak "
+                                 "knee flexion 110.2°→124.7° (all p<0.001; Table 1). Verified in "
+                                 "RAG doc.",
+            )
+        )
+    return detections
+
+
+# FROM THE SPEC: "Flag when medial offset > ~0.10 * hip_width toward the midline;
+# ramp 0.10 -> 0.25."
+LUNGE_VALGUS_MILD = 0.10
+LUNGE_VALGUS_SEVERE = 0.25
+
+
+def rule_knee_valgus(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag the lead knee caving medially relative to its own hip-ankle line.
+
+    THRESHOLD PROVENANCE: both numbers FROM THE SPEC (fire > 0.10 of hip width, ramp
+    0.10 -> 0.25). This is a frontal-plane knee-abduction PROXY; monocular pose yields no true
+    3-D abduction angle and none is claimed.
+
+    OBSERVABILITY DOWNGRADE, NOT A GATE -- and deliberately not gated on `front`. The
+    production path calls estimate_view_for_pose(allow_front=False), so `front` and
+    `front_oblique` are never emitted downstream; a rule gated positively on them would be
+    PERMANENTLY SILENT, which is what happened to `pushup_elbow_flare`. This rule does not need
+    them: `_medial_offset_ratio` defines medial as "toward the mid-hip", and the mid-hip is
+    the midline from in front of the subject or behind. So `rear`/`rear_oblique` -- the labels
+    production actually reaches -- earn the same `high` rating, matching
+    `squat.rule_knees_inward`, which resolves the same fault family the same way.
+
+    KNOWN CONTAMINATION, NOT CORRECTED HERE -- carried over verbatim from the projection facts
+    in tests/test_lunge.py::lunge_frame, and it does not let the `high` rating above be read as
+    a claim of cleanliness. A knee's perpendicular displacement from its hip-ankle line is the
+    sum of its MEDIAL travel and its ANTERIOR travel projected into the image. In a true
+    frontal view the anterior component projects onto the leg line and vanishes, leaving the
+    proxy clean -- but `front` is exactly the label production can never emit. In the oblique
+    views it does reach, a deep, perfectly-tracked lunge produces a positive reading with no
+    valgus present (pinned by test_anterior_knee_travel_contaminates_the_valgus_proxy).
+    Separating the two needs a depth estimate this pipeline does not have, so the limitation is
+    documented rather than corrected, and Phase 2 checks whether firing tracks step depth
+    rather than correctness.
+    """
+    lead = resolve_lead_side(core)
+    if lead is None:
+        return []
+    observable = ctx.view_type in ALIGNMENT_OBSERVABLE_VIEWS
+    lead_key = f"{lead}_knee_medial_offset_ratio"
+
+    mask = [
+        frame.valid
+        and frame.phase in LUNGE_ACTIVE_PHASES
+        and np.isfinite(frame.m(lead_key))
+        and frame.m(lead_key) > LUNGE_VALGUS_MILD
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        offsets = [frame.m(lead_key) for frame in segment]
+        max_offset = float(np.nanmax(offsets))
+        severity = severity_from_range(
+            max_offset, LUNGE_VALGUS_MILD, LUNGE_VALGUS_SEVERE, lower_is_worse=False
+        )
+        detections.append(
+            build_detection(
+                fault_id="lunge_knee_valgus",
+                fault_name="Lead Knee Valgus / Medial Collapse",
+                kg_query=LUNGE_VALGUS_KG_QUERY,   # resolved in Task 3 Step 0
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=offsets,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable else "medium",
+                evidence={
+                    "lead_side": lead,
+                    "max_medial_offset_ratio": round(max_offset, 4),
+                    "threshold": LUNGE_VALGUS_MILD,
+                    "primary_label": "lead knee medial offset",
+                    "primary_value": round(max_offset, 4),
+                    "primary_threshold": LUNGE_VALGUS_MILD,
+                },
+                citation="Ford KR, et al. \"An evidence-based review of hip-focused "
+                         "neuromuscular exercise interventions to address dynamic lower "
+                         "extremity valgus.\" PMC4556293 (2015).",
+                citation_support="\"knee abduction moment … was a significant predictor for "
+                                 "future ACL injury risk with 73% sensitivity and 78% "
+                                 "specificity\"; \"the inability to eccentrically control hip "
+                                 "adduction and internal rotation may lead to greater dynamic "
+                                 "lower extremity valgus commonly seen during landing, "
+                                 "squatting, and running.\" Verified in RAG doc.",
             )
         )
     return detections

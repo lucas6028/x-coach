@@ -520,5 +520,95 @@ class LungeDepthRuleTests(unittest.TestCase):
         self.assertLess(detections[0].severity, 1.0)
 
 
+class LungeKneePastToesRuleTests(unittest.TestCase):
+    def _fire(self, ratio: float, view: str = "side", conf: float = 0.9):
+        from src.pose.movements.lunge import rule_knee_past_toes
+
+        window = _rule_frames({"min_knee_angle": 90.0, "left_knee_angle": 90.0,
+                               "right_knee_angle": 170.0, "left_knee_forward_ratio": ratio,
+                               "right_knee_forward_ratio": 0.0})
+        return rule_knee_past_toes(window, _ctx(view, view_confidence=conf))
+
+    def test_fires_when_the_lead_knee_travels_past_the_toes(self) -> None:
+        detections = self._fire(0.20)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "lunge_knee_past_toes")
+        self.assertEqual(detections[0].evidence["lead_side"], "left")
+
+    def test_silent_when_the_knee_stays_behind_the_toes(self) -> None:
+        self.assertEqual(self._fire(0.02), [])
+
+    def test_silent_just_inside_the_threshold(self) -> None:
+        self.assertEqual(self._fire(0.09), [])
+
+    def test_fires_just_outside_the_threshold(self) -> None:
+        self.assertEqual(len(self._fire(0.11)), 1)
+
+    def test_severity_is_exact_at_the_ramp_midpoint(self) -> None:
+        self.assertAlmostEqual(self._fire(0.20)[0].severity, 0.5, places=3)
+
+    def test_hard_gated_to_silence_off_the_sagittal_view(self) -> None:
+        # Not a downgrade: sagittal knee travel is not resolvable head-on, and the squat's
+        # rule_knees_forward sets the precedent of silence rather than a low-confidence claim.
+        self.assertEqual(self._fire(0.20, view="rear_oblique"), [])
+
+    def test_hard_gated_to_silence_on_a_weakly_classified_side_view(self) -> None:
+        self.assertEqual(self._fire(0.20, view="side", conf=0.10), [])
+
+    def test_reads_the_lead_legs_ratio_not_the_trailing_legs(self) -> None:
+        # Trailing leg way past its toes, lead leg fine -> nothing fires. The whole point of
+        # per-window lead resolution.
+        from src.pose.movements.lunge import rule_knee_past_toes
+
+        window = _rule_frames({"min_knee_angle": 90.0, "left_knee_angle": 90.0,
+                               "right_knee_angle": 170.0, "left_knee_forward_ratio": 0.01,
+                               "right_knee_forward_ratio": 0.90})
+        self.assertEqual(rule_knee_past_toes(window, _ctx("side")), [])
+
+
+class LungeKneeValgusRuleTests(unittest.TestCase):
+    def _fire(self, offset: float, view: str = "front_oblique"):
+        from src.pose.movements.lunge import rule_knee_valgus
+
+        window = _rule_frames({"min_knee_angle": 90.0, "left_knee_angle": 90.0,
+                               "right_knee_angle": 170.0,
+                               "left_knee_medial_offset_ratio": offset,
+                               "right_knee_medial_offset_ratio": 0.0})
+        return rule_knee_valgus(window, _ctx(view))
+
+    def test_fires_when_the_lead_knee_caves_medially(self) -> None:
+        detections = self._fire(0.18)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "lunge_knee_valgus")
+
+    def test_silent_when_the_knee_tracks_over_the_foot(self) -> None:
+        self.assertEqual(self._fire(0.01), [])
+
+    def test_silent_when_the_knee_tracks_laterally(self) -> None:
+        # A NEGATIVE offset is the knee bowing outward -- the opposite fault, not this one.
+        self.assertEqual(self._fire(-0.30), [])
+
+    def test_silent_just_inside_the_threshold(self) -> None:
+        self.assertEqual(self._fire(0.09), [])
+
+    def test_fires_just_outside_the_threshold(self) -> None:
+        self.assertEqual(len(self._fire(0.11)), 1)
+
+    def test_severity_is_exact_at_the_ramp_midpoint(self) -> None:
+        # ramp 0.10 -> 0.25, midpoint 0.175
+        self.assertAlmostEqual(self._fire(0.175)[0].severity, 0.5, places=2)
+
+    def test_off_view_is_downgraded_not_silenced(self) -> None:
+        detections = self._fire(0.18, view="side")
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].observability, "medium")
+
+    def test_fires_from_a_rear_view_at_full_observability(self) -> None:
+        # `front` is unreachable in production (allow_front=False), so a rule that only rated
+        # `front` highly would be permanently downgraded. Medial-vs-midline reads the same
+        # from behind, so `rear` earns the same rating -- matching squat.rule_knees_inward.
+        self.assertEqual(self._fire(0.18, view="rear")[0].observability, "high")
+
+
 if __name__ == "__main__":
     unittest.main()
