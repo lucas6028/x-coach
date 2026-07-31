@@ -1758,11 +1758,15 @@ against labeled ground truth" and is the user's decision with these numbers in h
   **77/161 = 47.8%** (cam18) of reps, measured over the **full labeled window** with
   `segment_reps` and smoothing out of the picture. On the reps it gets wrong the left-right
   separation is a median 19.4°/25.4°, far outside the 5° band
-  `LEAD_SIDE_MIN_SEPARATION_DEG` refuses on, so that guard cannot catch it.
+  `LEAD_SIDE_MIN_SEPARATION_DEG` refuses on, so that guard cannot catch it. The guard is also
+  quieter than the unresolved rate implies: decomposed by `lead_unresolved_reason`, only
+  **15/174 = 8.6%** (cam17) and **9/174 = 5.2%** (cam18) of reps are the 5° guard proper; the
+  rest is missing data (no valid frame carrying a finite `min_knee_angle`: 5 and 13; a bottom
+  frame with a non-finite knee angle: 0 and 0).
   **But the failure is one of MEASUREMENT before it is one of anatomy, and the writeup is
   deliberately narrower than "more flexed does not identify a lunge's lead leg".** Three controls
   say so: the two SIMULTANEOUS cameras disagree about which knee is more flexed on **33%** of
-  reps (an independent re-derivation got 37%) — that is measurement error, not anatomy; the two
+  reps — that is measurement error, not anatomy; the two
   premise rates disagree by 12 points across those same views; and recomputing the identical
   angle in the image plane alone, dropping MediaPipe's pseudo-depth `z`, swings cam17 from
   **59.8% to 17.2%** while moving cam18 the other way. (Both controls are reported on two frame
@@ -1790,9 +1794,14 @@ against labeled ground truth" and is the user's decision with these numbers in h
   levied on it. The gate is not the problem: the estimator returns `side` on all 88, matching Phase
   0's 88/88, and the production and oracle passes are byte-identical here because neither yields
   `side` off that stratum.
-- **`lunge_knee_valgus` — weak but genuine separation, and the least lead-side-sensitive of the
-  four.** Per-subject median AUC **0.590** (0.629 excluding the 40 level-2/3 extra-person reps;
-  0.620 under the lead-oracle). The predicted step-depth contamination is **present but weaker
+- **`lunge_knee_valgus` — weak, MEDIAN-above-chance separation, and the least
+  lead-side-sensitive of the four. Not a validation.** Per-subject median AUC **0.590** (0.629
+  excluding the 40 level-2/3 extra-person reps; 0.620 under the lead-oracle) — but the seven
+  per-subject values are 0.263, 0.374, 0.486, 0.590, 0.629, 0.810, 0.852, so **only 4 of 7
+  subjects are above 0.5**, one inverts substantially, and **no null was tested** (this harness
+  computes no permutation null, CI or significance test, and p-values are declined on these reps
+  for independence reasons). The claim is "the median is above chance on 4 of 7 subjects", not
+  that chance has been excluded. The predicted step-depth contamination is **present but weaker
   than predicted**: Spearman ρ = **−0.325** between the valgus proxy and bottom-phase lead-knee
   angle within the *correct* reps only (vs −0.211 on incorrect) — the predicted sign and shape,
   but a weak association, so step depth explains part of the firing, not most of it. On the 86

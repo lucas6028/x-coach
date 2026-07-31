@@ -459,6 +459,80 @@ class GateOpenTests(unittest.TestCase):
             gate_open("lunge_not_a_rule", "side", 1.0)
 
 
+class LeadUnresolvedReasonTests(unittest.TestCase):
+    @staticmethod
+    def _window(left: float, right: float, valid: bool = True, count: int = 8):
+        from src.pose.movements.base import CoreFrame
+
+        # `min_knee_angle` over the FINITE angles only, exactly as `lunge_compute_raw` builds it.
+        # A plain `min(left, right)` would return NaN whenever either side is NaN, which makes
+        # the `non_finite_knee_angle` branch unreachable in the fixture -- and that branch IS
+        # reachable in the real pipeline, where one dropped knee still leaves a finite
+        # `min_knee_angle` from the other. Getting this wrong would have silently turned the
+        # decomposition below into a two-bucket claim.
+        finite = [v for v in (left, right) if math.isfinite(v)]
+        return [
+            CoreFrame(
+                frame_index=i, time=i / 30.0, phase="bottom", valid=valid,
+                lower_body_visibility=0.9,
+                metrics={"min_knee_angle": min(finite) if finite else float("nan"),
+                         "left_knee_angle": left, "right_knee_angle": right},
+            )
+            for i in range(count)
+        ]
+
+    def test_agrees_with_resolve_lead_side_on_every_branch(self) -> None:
+        """RUNS BOTH. `lead_unresolved_reason` mirrors `resolve_lead_side`'s branch structure, so
+        it could drift into reporting a reason for a window that actually resolved. Driving both
+        over the same windows is what makes the decomposition in the writeup trustworthy."""
+        from src.pose.movements.lunge import resolve_lead_side
+        from src.rehab24.lunge_rule_validation import lead_unresolved_reason
+
+        nan = float("nan")
+        windows = [
+            self._window(80.0, 140.0),            # resolves left
+            self._window(140.0, 80.0),            # resolves right
+            self._window(100.0, 102.0),           # within the guard
+            self._window(80.0, 140.0, valid=False),  # no valid frame
+            self._window(nan, 140.0),             # non-finite angle
+            [],                                   # empty window
+        ]
+        for window in windows:
+            resolved = resolve_lead_side(window)
+            reason = lead_unresolved_reason(window)
+            self.assertEqual(
+                resolved is None, reason is not None,
+                f"resolve_lead_side={resolved!r} but reason={reason!r}",
+            )
+
+    def test_names_the_three_causes_apart(self) -> None:
+        from src.rehab24.lunge_rule_validation import lead_unresolved_reason
+
+        self.assertIsNone(lead_unresolved_reason(self._window(80.0, 140.0)))
+        self.assertEqual(lead_unresolved_reason(self._window(100.0, 102.0)), "below_min_separation")
+        self.assertEqual(
+            lead_unresolved_reason(self._window(80.0, 140.0, valid=False)), "no_valid_bottom_frame"
+        )
+        self.assertEqual(
+            lead_unresolved_reason(self._window(float("nan"), 140.0)), "non_finite_knee_angle"
+        )
+
+    def test_the_guard_boundary_is_the_rule_modules_constant(self) -> None:
+        # Not a number retyped here: exactly at the constant the guard releases, just below it
+        # holds. Pinned against `lunge.py` so a change to the constant fails this test.
+        from src.pose.movements.lunge import LEAD_SIDE_MIN_SEPARATION_DEG
+        from src.rehab24.lunge_rule_validation import lead_unresolved_reason
+
+        base = 100.0
+        self.assertEqual(
+            lead_unresolved_reason(self._window(base, base + LEAD_SIDE_MIN_SEPARATION_DEG - 0.01)),
+            "below_min_separation",
+        )
+        self.assertIsNone(
+            lead_unresolved_reason(self._window(base, base + LEAD_SIDE_MIN_SEPARATION_DEG))
+        )
+
+
 class Angle2dTests(unittest.TestCase):
     @staticmethod
     def _points(overrides):
