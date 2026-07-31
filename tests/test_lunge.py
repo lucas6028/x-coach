@@ -610,5 +610,81 @@ class LungeKneeValgusRuleTests(unittest.TestCase):
         self.assertEqual(self._fire(0.18, view="rear")[0].observability, "high")
 
 
+class LungePelvicDropRuleTests(unittest.TestCase):
+    def _fire(self, tilt: float, lead: str = "left", view: str = "front_oblique",
+              phase: str = "bottom"):
+        from src.pose.movements.lunge import rule_pelvic_drop
+
+        angles = ({"left_knee_angle": 90.0, "right_knee_angle": 170.0} if lead == "left"
+                  else {"left_knee_angle": 170.0, "right_knee_angle": 90.0})
+        window = _rule_frames(
+            {"min_knee_angle": 90.0, "pelvis_tilt_signed_deg": tilt, **angles}, phase=phase
+        )
+        return rule_pelvic_drop(window, _ctx(view))
+
+    def test_fires_when_the_contralateral_hip_drops_on_a_left_lead(self) -> None:
+        # Left lead -> contralateral is the RIGHT hip -> positive tilt is the fault.
+        detections = self._fire(14.0, lead="left")
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "lunge_pelvic_drop")
+
+    def test_fires_when_the_contralateral_hip_drops_on_a_right_lead(self) -> None:
+        # Right lead -> contralateral is the LEFT hip -> NEGATIVE tilt is the fault.
+        self.assertEqual(len(self._fire(-14.0, lead="right")), 1)
+
+    def test_silent_when_the_LEAD_side_hip_drops(self) -> None:
+        # This is the sign error the rule exists to avoid: an ipsilateral drop is not
+        # Trendelenburg, and reporting it would invert the coaching cue.
+        self.assertEqual(self._fire(-14.0, lead="left"), [])
+
+    def test_silent_on_a_level_pelvis(self) -> None:
+        self.assertEqual(self._fire(1.0), [])
+
+    def test_silent_just_inside_the_threshold(self) -> None:
+        self.assertEqual(self._fire(7.0), [])
+
+    def test_fires_just_outside_the_threshold(self) -> None:
+        self.assertEqual(len(self._fire(9.0)), 1)
+
+    def test_severity_is_exact_at_the_ramp_midpoint(self) -> None:
+        # ramp 8 -> 20, midpoint 14
+        self.assertAlmostEqual(self._fire(14.0)[0].severity, 0.5, places=3)
+
+    def test_silent_from_a_pure_side_view(self) -> None:
+        # The parent spec: "not observable from a pure side view". A frontal-plane tilt has no
+        # meaning in the sagittal projection, so this is silence, not a downgrade.
+        self.assertEqual(self._fire(14.0, view="side"), [])
+
+    def test_silent_when_the_drop_is_confined_to_descent(self) -> None:
+        # OVERRIDE 1 (spec vs. brief): the spec scopes this fault to "sustained through
+        # bottom/ascent" only, unlike LUNGE_ACTIVE_PHASES (which includes descent and is what
+        # every other lunge rule uses). A drop that only ever occurs during descent must not
+        # fire -- pins PELVIC_DROP_PHASES as its own set, not an alias of LUNGE_ACTIVE_PHASES.
+        self.assertEqual(self._fire(14.0, phase="descent"), [])
+
+    def test_medium_observability_on_front(self) -> None:
+        # OVERRIDE 2 (spec vs. brief): the spec rates this fault `medium` on front/rear -- its
+        # TOP tier, never `high`.
+        detections = self._fire(14.0, view="front")
+        self.assertEqual(detections[0].observability, "medium")
+        self.assertAlmostEqual(detections[0].confidence, detections[0].severity, places=3)
+
+    def test_medium_observability_on_rear(self) -> None:
+        detections = self._fire(14.0, view="rear")
+        self.assertEqual(detections[0].observability, "medium")
+
+    def test_low_observability_off_view(self) -> None:
+        # OVERRIDE 2: off the alignment-observable views (and not `side`, which is silenced
+        # separately) the rule downgrades to `low` -- a RULE-LEVEL rating, not a number the
+        # spec names for this case -- which also demotes the detection behind every other one
+        # via `run_detector`'s sort key `(observability == "low", -severity, start_frame)`.
+        detections = self._fire(14.0, view="unknown")
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].observability, "low")
+        self.assertAlmostEqual(
+            detections[0].confidence, round(detections[0].severity * 0.65, 4), places=3
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

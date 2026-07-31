@@ -647,3 +647,114 @@ def rule_knee_valgus(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDe
             )
         )
     return detections
+
+
+# FROM THE SPEC, unlike the other three rules' scopes: the pelvic-drop entry says the tilt is
+# flagged "sustained through bottom/ascent". `descent` is deliberately excluded -- this is the
+# spec's own scoping, not the rule-level call that LUNGE_ACTIVE_PHASES represents.
+PELVIC_DROP_PHASES = {"bottom", "ascent"}
+
+# FROM THE SPEC: "Flag when pelvis_tilt_deg > 8 degrees (contralateral hip lower) sustained
+# through bottom/ascent; ramp 8 -> 20."
+LUNGE_PELVIC_TILT_MILD_DEG = 8.0
+LUNGE_PELVIC_TILT_SEVERE_DEG = 20.0
+
+
+def rule_pelvic_drop(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag the NON-lead-side pelvis dropping -- the Trendelenburg signature of hip-abductor
+    insufficiency on the lead leg.
+
+    THRESHOLD PROVENANCE: both numbers FROM THE SPEC (fire > 8 degrees, ramp 8 -> 20).
+
+    PHASE SCOPE, FROM THE SPEC, NOT LUNGE_ACTIVE_PHASES. The spec's own words are "sustained
+    through bottom/ascent" -- `descent` is not in that list, unlike every other lunge rule,
+    which uses the rule-level `LUNGE_ACTIVE_PHASES` (descent/bottom/ascent). `PELVIC_DROP_PHASES`
+    is defined next to it as its own set so the two cannot silently drift together.
+
+    SIGN, and why it takes two facts to get right. `pelvis_tilt_signed_deg` is positive when
+    the RIGHT hip is lower, in a fixed convention that does not depend on which way the
+    subject faces (it is built on |dx|, never signed dx). "Contralateral" then depends on the
+    lead leg: a LEFT-lead lunge drops the RIGHT hip (positive), a RIGHT-lead lunge drops the
+    LEFT hip (negative). Reading the magnitude alone would report an IPSILATERAL drop -- a
+    different postural fault -- as Trendelenburg and invert the coaching cue.
+
+    OBSERVABILITY CEILING IS `medium`, NEVER `high` -- FROM THE SPEC ("observability: medium on
+    front/rear"). This differs from `rule_insufficient_depth` and `rule_knee_valgus`, whose
+    ceiling is `high`; this fault's spec entry names no rating above `medium` at all, so
+    `observable` selects `medium` rather than `high`. Off the alignment-observable views the
+    rule downgrades further to `low` -- a RULE-LEVEL rating, not a number the spec names for
+    that case (the spec states no rating below `medium`, only that the fault is unavailable
+    off-axis) -- mirroring `squat.rule_heel_rise`'s precedent of a rule-level `low` where the
+    spec is silent on the off-view number. `low` is also the sort key `run_detector` demotes
+    behind every other observability via `(observability == "low", -severity, start_frame)`;
+    that demotion is the intended consequence of choosing `low` here, not a side effect.
+
+    SILENT FROM `side`: the spec rates this "not observable from a pure side view". A
+    frontal-plane tilt has no meaning in the sagittal projection, so this is silence rather
+    than a discounted claim, following `rule_knee_past_toes`'s reasoning in the mirror image.
+
+    KNOWN MEASUREMENT BIAS, NOT CORRECTED HERE. In a frontal view of a SPLIT STANCE the
+    L_hip -> R_hip vector is rotated in the transverse plane, so its image projection shortens
+    and atan2(dy, |dx|) INFLATES the apparent tilt -- the deeper the lunge, the worse. The
+    expected failure mode is therefore FALSE POSITIVES on deep, correctly-performed reps, not
+    silence. Correcting it would require a depth estimate this pipeline does not have, so it
+    is documented rather than papered over; Phase 2 reads specificity on correct reps first
+    for exactly this reason.
+    """
+    lead = resolve_lead_side(core)
+    if lead is None:
+        return []
+    if ctx.view_type == "side":
+        return []
+    observable = ctx.view_type in ALIGNMENT_OBSERVABLE_VIEWS
+    # Left lead -> the contralateral (right) hip dropping is a POSITIVE tilt; right lead -> negative.
+    sign = 1.0 if lead == "left" else -1.0
+
+    mask = [
+        frame.valid
+        and frame.phase in PELVIC_DROP_PHASES
+        and np.isfinite(frame.m("pelvis_tilt_signed_deg"))
+        and sign * frame.m("pelvis_tilt_signed_deg") > LUNGE_PELVIC_TILT_MILD_DEG
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        drops = [sign * frame.m("pelvis_tilt_signed_deg") for frame in segment]
+        max_drop = float(np.nanmax(drops))
+        severity = severity_from_range(
+            max_drop, LUNGE_PELVIC_TILT_MILD_DEG, LUNGE_PELVIC_TILT_SEVERE_DEG, lower_is_worse=False
+        )
+        detections.append(
+            build_detection(
+                fault_id="lunge_pelvic_drop",
+                fault_name="Pelvic Drop / Contralateral Trunk Lean (Trendelenburg)",
+                kg_query=LUNGE_PELVIC_DROP_KG_QUERY,   # resolved in Task 3 Step 0
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=drops,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="medium" if observable else "low",
+                evidence={
+                    "lead_side": lead,
+                    "max_contralateral_drop_deg": round(max_drop, 2),
+                    "threshold": LUNGE_PELVIC_TILT_MILD_DEG,
+                    "primary_label": "contralateral pelvic drop",
+                    "primary_value": round(max_drop, 2),
+                    "primary_threshold": LUNGE_PELVIC_TILT_MILD_DEG,
+                },
+                citation="Ford KR, et al. PMC4556293 (2015). Cross-support: Alkjær T, et al. "
+                         "PMC6980669 (2020).",
+                citation_support="PMC4556293: \"Failure to produce the abduction force is "
+                                 "observed as a Trendelenburg posture, with the contralateral "
+                                 "pelvis dropping,\" and hip-focused training reduced "
+                                 "\"ipsilateral trunk inclination, and contralateral pelvis "
+                                 "depression during a single leg squat.\" PMC6980669 found "
+                                 "gluteus medius EMG \"significantly higher for the ACL injured "
+                                 "participants … possibly a compensatory mechanism to control "
+                                 "the trunk and pelvis in the frontal plane.\" Verified in RAG "
+                                 "docs.",
+            )
+        )
+    return detections
