@@ -629,8 +629,15 @@ class LungePelvicDropRuleTests(unittest.TestCase):
         self.assertEqual(detections[0].fault_id, "lunge_pelvic_drop")
 
     def test_fires_when_the_contralateral_hip_drops_on_a_right_lead(self) -> None:
-        # Right lead -> contralateral is the LEFT hip -> NEGATIVE tilt is the fault.
-        self.assertEqual(len(self._fire(-14.0, lead="right")), 1)
+        # Right lead -> contralateral is the LEFT hip -> NEGATIVE tilt is the fault. Checks the
+        # REPORTED magnitude and severity, not just the count: a mutant that drops the `sign *`
+        # from the `drops` list (while leaving it in the mask) would still fire once here but
+        # report -14.0 and clamp severity to 0.0 -- `len == 1` alone would miss that.
+        detections = self._fire(-14.0, lead="right")
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["lead_side"], "right")
+        self.assertAlmostEqual(detections[0].evidence["max_contralateral_drop_deg"], 14.0, places=2)
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
 
     def test_silent_when_the_LEAD_side_hip_drops(self) -> None:
         # This is the sign error the rule exists to avoid: an ipsilateral drop is not
@@ -661,6 +668,22 @@ class LungePelvicDropRuleTests(unittest.TestCase):
         # every other lunge rule uses). A drop that only ever occurs during descent must not
         # fire -- pins PELVIC_DROP_PHASES as its own set, not an alias of LUNGE_ACTIVE_PHASES.
         self.assertEqual(self._fire(14.0, phase="descent"), [])
+
+    def test_fires_when_the_drop_is_sustained_through_ascent(self) -> None:
+        # `ascent` is the other half of the spec's "bottom/ascent" scope. Every other fixture in
+        # this class defaults to phase="bottom", so without this test a mutant that narrowed
+        # PELVIC_DROP_PHASES to {"bottom"} alone would pass the whole suite.
+        self.assertEqual(len(self._fire(14.0, phase="ascent")), 1)
+
+    def test_silent_when_the_lead_side_is_unresolvable(self) -> None:
+        # Deleting the `lead is None` guard would not crash -- `None == "left"` is False, so
+        # `sign` would silently become -1.0 and the rule would emit a garbage-attributed
+        # detection instead of staying silent. Mirrors LungeDepthRuleTests' equivalent test.
+        from src.pose.movements.lunge import rule_pelvic_drop
+
+        window = _rule_frames({"min_knee_angle": 90.0, "pelvis_tilt_signed_deg": 14.0,
+                               "left_knee_angle": 90.0, "right_knee_angle": 91.0})
+        self.assertEqual(rule_pelvic_drop(window, _ctx()), [])
 
     def test_medium_observability_on_front(self) -> None:
         # OVERRIDE 2 (spec vs. brief): the spec rates this fault `medium` on front/rear -- its
