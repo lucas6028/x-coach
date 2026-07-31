@@ -125,7 +125,32 @@ level-2/3 extra-person contamination (cam18 is level 0 throughout).
   dropped landmark silences every lunge rule for that frame. Measured: **74.0% of frames valid
   on cam17, 58.4% on cam18** (minimum 0.000 — some rep windows have no usable frame at all).
   The sagittal camera is the worse of the two, exactly as `pushup.py`'s equivalent note
-  predicts: a side view is where far-side landmarks are most often occluded.
+  predicts: a side view is where far-side landmarks are most often occluded. The per-landmark
+  failure rates confirm the mechanism is self-occlusion rather than general detector noise:
+  the losses are **one-sided** on each camera — cam17 drops `L_ankle` 11.2% / `L_knee` 9.6%
+  against 0.1–2.4% on the right; cam18 drops `R_knee` 33.4% / `R_ankle` 19.8% against 4–6% on
+  the left.
+- **The judgment frame specifically.** Window-average validity understates the problem in one
+  direction and overstates it in another, because `resolve_lead_side` reads exactly **one**
+  frame per rep — the deepest **valid** one. Measured against the deepest frame at which either
+  leg's hip/knee/ankle are visible at all (a per-leg gate, which can see frames the ten-landmark
+  gate rejects), **the true deepest frame fails the gate on 64/174 cam17 reps and 62/174 cam18
+  reps — 36% on both.** The lead leg is then resolved at a shallower substitute: on cam17 the
+  rejected frame sits at a median 66.0° of knee flexion angle and the accepted one at 100.3°, so
+  the judgment is made roughly **34° short of the bottom**; 40/169 cam17 reps lose more than 15°.
+  Two consequences worth stating separately. First, this is **not** a cam18 effect — cam18 is
+  marginally *better* at the judgment frame (0.644 vs 0.632) despite far worse window-average
+  validity, so occlusion does **not** explain §3's cam17/cam18 lead-accuracy split (0.623 vs
+  0.474); that gap remains unexplained. Second, **relaxing the all-or-nothing gate would recover
+  none of it**: on 0/64 cam17 and 0/62 cam18 of these reps were the missing landmarks confined
+  to feet and shoulders — every single rejected bottom frame is missing a hip, knee or ankle
+  (cam17 `L_ankle` 0.73, cam18 `R_knee` 0.61 of rejections), and the foot index drops with the
+  ankle rather than independently. The cam18 substitutions also fail a plausibility check that
+  cam17's pass: 31% of cam18's gate-rejected "deeper" frames read below 40° of knee angle, which
+  a lunge cannot reach, so part of cam18's apparent lost depth is a hallucinated landmark on the
+  occluded leg, not depth. Measured by a throwaway script, not committed; reproduce by taking
+  each labeled window's per-frame ten-landmark validity alongside a per-leg `visible_point`
+  gate and comparing the two argmins of knee angle.
 - **The harness does NOT bypass rep segmentation, contrary to the design spec's §4.2.** That
   section claims "ground-truth rep boundaries mean `segment_reps` is bypassed entirely, which
   isolates rule quality from segmentation quality". It does not: `run_detector` runs its own
@@ -557,7 +582,12 @@ verdict has good *sensitivity* and poor *specificity*. The same mislabeling sile
   full-window variant in `full_window_premise`, but the §4 per-rule numbers are measured on
   re-cut sub-windows for 152/174 cam17 reps and 91/174 cam18 reps.
 - **Better frame validity.** 26% of cam17 frames and 42% of cam18 frames carry no metrics at
-  all under the all-or-nothing landmark gate. That is a ceiling on everything above.
+  all under the all-or-nothing landmark gate. That is a ceiling on everything above. Note what
+  this does **not** mean: per the judgment-frame measurement above, splitting the gate per rule
+  so that a rule only requires the landmarks it uses would recover **zero** of the 126 reps
+  whose deepest frame is currently rejected, because every one of them is missing a hip, knee
+  or ankle. The ceiling is on the pose estimate, not on the gate — lifting it needs a better
+  estimator or a view where the legs occlude each other less, not a looser threshold.
 
 ---
 
