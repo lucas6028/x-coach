@@ -273,6 +273,45 @@ def angle_2d(points, a: int, b: int, c: int) -> float:
     return float(np.degrees(np.arccos(cosine)))
 
 
+def lead_unresolved_reason(window: Sequence) -> str | None:
+    """WHY `resolve_lead_side` declined on this window, or None when it resolved.
+
+    Three causes, and conflating them misattributes the detector's behaviour. Only the third is
+    `LEAD_SIDE_MIN_SEPARATION_DEG` doing its job; the other two are missing data, and quoting the
+    combined unresolved rate as "the guard fires this often" overstates the guard's activity --
+    which the writeup did in an earlier draft, in the direction that made its own argument HARDER
+    to make.
+
+      "no_valid_bottom_frame"  -- no valid frame carried a finite `min_knee_angle`, so there was
+                                  no bottom to evaluate at all.
+      "non_finite_knee_angle"  -- a bottom frame existed but one of its knee angles was NaN.
+      "below_min_separation"   -- the guard proper: the two knees were within
+                                  LEAD_SIDE_MIN_SEPARATION_DEG of each other.
+
+    Mirrors `resolve_lead_side`'s branch structure, and
+    `LeadUnresolvedReasonTests.test_agrees_with_resolve_lead_side_on_every_branch` pins the
+    correspondence by running BOTH over the same windows -- so this cannot drift into reporting a
+    reason for a window that actually resolved, or vice versa.
+    """
+    from src.pose.movements.lunge import LEAD_SIDE_MIN_SEPARATION_DEG
+
+    bottom, bottom_value = None, math.inf
+    for frame in window:
+        if not frame.valid:
+            continue
+        value = frame.m("min_knee_angle")
+        if math.isfinite(value) and value < bottom_value:
+            bottom, bottom_value = frame, value
+    if bottom is None:
+        return "no_valid_bottom_frame"
+    left, right = bottom.m("left_knee_angle"), bottom.m("right_knee_angle")
+    if not math.isfinite(left) or not math.isfinite(right):
+        return "non_finite_knee_angle"
+    if abs(left - right) < LEAD_SIDE_MIN_SEPARATION_DEG:
+        return "below_min_separation"
+    return None
+
+
 def rules_window(result) -> list:
     """The frames the rules ACTUALLY saw, which is not always the whole labeled window.
 
@@ -550,6 +589,7 @@ def _pass_record(
         "fallback": result.fallback,
         "analyzed_reps": len(result.analyzed),
         "lead_side": lead,
+        "lead_unresolved_reason": lead_unresolved_reason(window),
         "fired": fired,
         "scores": scores,
         "scores_lead_oracle": oracle_scores,
@@ -952,6 +992,22 @@ def build_report(payload: dict) -> str:
     add("-" * 88)
     add("LEAD LEG")
     add("-" * 88)
+    add("  WHY it declined, decomposed -- only the third bucket is the 5-degree guard proper.")
+    add("  Quoting the whole unresolved rate as the guard's fire rate overstates it.")
+    for camera in ("cam17", "cam18"):
+        subset = [r for r in records if r["camera"] == camera]
+        reasons = Counter(
+            r["production"].get("lead_unresolved_reason")
+            for r in subset
+            if r["production"]["lead_side"] is None
+        )
+        guard = reasons.get("below_min_separation", 0)
+        add(f"    {camera}: unresolved {sum(reasons.values())}/{len(subset)} = "
+            f"{_fmt(sum(reasons.values()) / len(subset), 3)}; of those "
+            f"no_valid_bottom_frame {reasons.get('no_valid_bottom_frame', 0)}, "
+            f"non_finite_knee_angle {reasons.get('non_finite_knee_angle', 0)}, "
+            f"BELOW_MIN_SEPARATION (the guard) {guard} = "
+            f"{_fmt(guard / len(subset), 3)} of all reps")
     for camera in ("cam17", "cam18"):
         subset = [r for r in records if r["camera"] == camera]
         resolved = [r for r in subset if r["production"]["lead_side"] is not None]

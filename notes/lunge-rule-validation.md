@@ -231,9 +231,24 @@ depth-robust lead cue, not a different cue.** §5 conclusion 1 is written accord
 **The existing guard cannot help either way.** `LEAD_SIDE_MIN_SEPARATION_DEG = 5.0` refuses an
 answer when the two knees are within landmark noise of each other. On the reps the cue gets
 **wrong**, the median left-right separation is **19.4°** (cam17) and **25.4°** (cam18) — far
-outside a 5° band, so the guard passes them straight through. It fires on only ~12% of reps.
-(The 23–28° overall median separation quoted in earlier drafts of this note was computed over
-all reps and did not establish this; the wrong-reps figure does.)
+outside a 5° band, so the guard passes them straight through.
+
+And it fires less often than the unresolved rate suggests, because that rate has three causes and
+only one of them is the guard (`lead_unresolved_reason` separates them):
+
+| Cause of an unresolved lead side | cam17 | cam18 |
+|---|---|---|
+| No valid frame carrying a finite `min_knee_angle` | 5 | 13 |
+| A bottom frame with a non-finite knee angle | 0 | 0 |
+| **`below_min_separation` — the 5° guard proper** | **15 = 8.6%** | **9 = 5.2%** |
+| Total unresolved | 20 = 11.5% | 22 = 12.6% |
+
+So the guard itself acts on **8.6% of cam17 reps and 5.2% of cam18 reps**; the remainder is
+missing data, not the guard. An earlier draft of this note quoted the combined ~12% as the
+guard's fire rate, which overstated it — in the direction that made this paragraph's own
+argument *harder* to make, not easier. (The 23–28° overall median separation quoted in earlier
+drafts was likewise computed over all reps and did not establish what it was used for; the
+wrong-reps figure does.)
 
 The design spec's §7 risk table predicted this — *"Lead-leg heuristic inaccurate → Measured
 directly against `exercise_subtype`; if poor, every rule inherits it and the writeup says so"*.
@@ -360,9 +375,15 @@ n=149, 0.590 vs 0.614) — and the reason is a projection fact already documente
 in a frontal view a knee's in-image flexion and its medial offset are the same degree of freedom,
 so the proxy reads similarly whichever leg is selected.
 
-**Weak but non-null separation, at ~0.59–0.63 per-subject median**, stable across the
-extra-person split (excluding the 40 level-2/3 reps moves it 0.590 → 0.629, so MediaPipe
-person-locking is not driving it).
+**Weak, median-above-chance separation, at ~0.59–0.63 per-subject median** — and the subject
+split is what that median hides: the seven per-subject AUCs are **0.263, 0.374, 0.486, 0.590,
+0.629, 0.810, 0.852**, so **only 4 of 7 subjects are above 0.5** and one inverts substantially.
+The median moves the right way and is stable across the extra-person split (excluding the 40
+level-2/3 reps takes it 0.590 → 0.629, so MediaPipe person-locking is not driving it), but
+**no null was tested** — this harness computes no permutation null, no confidence interval and
+no significance test, and §1 declines p-values on these reps for independence reasons that apply
+equally here. So "the median is above chance on 4 of 7 subjects" is the whole claim. It is not a
+claim that chance has been excluded.
 
 **The `half-profile` stratum's sensitivity 0.915 must not be read as a result.** The rule fires
 on **83% of reps in that stratum** — 43 of 47 incorrect and 28 of 39 correct. The spec threshold
@@ -472,12 +493,14 @@ verdict has good *sensitivity* and poor *specificity*. The same mislabeling sile
    inverted — with the shipped lead-side resolution; **0.850 vs 0.171 at matched n=80**, so the
    contrast is not a denominator artifact. This is the strongest single result in the run, and it
    is a result about the *metric*, conditional on fixing item 1.
-3. **`lunge_knee_valgus` separates weakly but genuinely** (per-subject median 0.590; 0.629
-   excluding contaminated reps), and is the least sensitive of the four to the lead-side
-   failure. Its firing is partly explained by step depth (ρ = −0.325 on correct reps) — real
-   contamination, weaker than predicted. **Validated only in the narrow sense that its signal
-   carries some information about rep correctness on this dataset**, which is a lab recording
-   with fixed cameras and instructed errors.
+3. **`lunge_knee_valgus` shows weak, median-above-chance separation — and no more than that.**
+   Per-subject median 0.590 (0.629 excluding contaminated reps), but **only 4 of the 7 subjects
+   are above 0.5** (0.263, 0.374, 0.486, 0.590, 0.629, 0.810, 0.852) and **no null was tested**;
+   nothing here excludes chance. It is the least sensitive of the four to the lead-side failure.
+   Its firing is partly explained by step depth (ρ = −0.325 on correct reps) — real
+   contamination, weaker than predicted. **The most that can be said is that its signal may
+   carry some information about rep correctness on this dataset**, a lab recording with fixed
+   cameras and instructed errors. That is not a validation.
 4. **`lunge_insufficient_depth` and `lunge_pelvic_drop` are not exercised by this dataset — and
    part of their silence is structural, not evidential.** Six and ten fires respectively across
    174 reps, and chance-level or below separation on the clean read. But **48 of 174 reps could
@@ -501,8 +524,17 @@ verdict has good *sensitivity* and poor *specificity*. The same mislabeling sile
    response.
 7. **`LUNGE_DETECTOR.validated` stays `False`.** That flag drives the Beta badge and its meaning
    ("checked against labeled ground truth") is a product claim. Nothing measured here supports
-   flipping it: one rule's metric is informative only under an oracle lead leg, one separates
-   weakly, and two are unexercised.
+   flipping it: one rule's metric is reachable only under an oracle lead leg, one is
+   median-above-chance on 4 of 7 subjects with no null tested, and two are unexercised.
+
+   **What bounds the user-facing harm of conclusion 1 in the meantime** — checked by reading the
+   frontend, not assumed: `evidence["lead_side"]` reaches **neither the UI nor the LLM**.
+   `frontend/src/lib/retrieval.ts:keyEvidence` renders only `primary_label`, `primary_value` and
+   `primary_threshold`, and `frontend/src/lib/grounding.ts:buildChatContext` passes that
+   formatted string on as `evidence`, never the raw dict. So a wrong lead side degrades a
+   *number* behind a label reading "lead knee …", but never names a side to the user or to the
+   coach. That, plus `validated=False` and the Beta tag, is why leaving the defect recorded
+   rather than patched is an adequate interim position — not because the defect is small.
 
 ## 6. What would be needed to go further
 
