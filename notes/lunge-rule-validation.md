@@ -13,6 +13,12 @@ and UNVALIDATED"; §8.4 of the parent spec has been outstanding since 2026-07-18
 **No threshold was changed in response to anything below.** Every cited number is exactly what
 the literature and the parent spec state. `LUNGE_DETECTOR.validated` remains `False`.
 
+**§3.2 was added after the first pass** and is the most consequential section here: REHAB24-6
+ships marker-based 3-D alongside the video, which the original run never used. It converts §3.1's
+deliberately hedged finding into a verdict — the shipped lead-leg cue is **false in three
+dimensions**, not merely lost in projection — and it measures the replacement, which is the
+other half of the parent spec's own definition and scores 0.959/0.894 from monocular 2-D.
+
 Reproduce:
 
 ```
@@ -141,7 +147,8 @@ level-2/3 extra-person contamination (cam18 is level 0 throughout).
   Two consequences worth stating separately. First, this is **not** a cam18 effect — cam18 is
   marginally *better* at the judgment frame (0.644 vs 0.632) despite far worse window-average
   validity, so occlusion does **not** explain §3's cam17/cam18 lead-accuracy split (0.623 vs
-  0.474); that gap remains unexplained. Second, **relaxing the all-or-nothing gate would recover
+  0.474) — §3.2 shows the marker data explains it instead, and in the opposite direction from
+  the obvious reading. Second, **relaxing the all-or-nothing gate would recover
   none of it**: on 0/64 cam17 and 0/62 cam18 of these reps were the missing landmarks confined
   to feet and shoulders — every single rejected bottom frame is missing a hip, knee or ankle
   (cam17 `L_ankle` 0.73, cam18 `R_knee` 0.61 of rejections), and the foot index drops with the
@@ -285,6 +292,76 @@ under a broken input**, not clean measurements of the rules. To separate the two
 additionally scored with the lead leg taken from `exercise_subtype` — the **lead-oracle**
 column. It is an **AUC-only** diagnostic: the rules resolve the lead side internally, so
 substituting it outside them cannot change what fires. No threshold moves in either variant.
+
+### 3.2 Marker-based 3-D settles it: the cue is wrong, not the projection
+
+§3.1 stops one step short of a verdict on purpose — with only two monocular views it cannot tell
+a broken cue from a correctly-cued quantity that this projection destroys. REHAB24-6 answers that
+directly and was simply not consulted: each Ex5 clip ships marker-based 3-D alongside the video
+(`data/REHAB24-6/Ex5/{video_id}-30fps.npy`, 26 joints per `joints_names.txt`, frame-aligned to
+the 30 fps stream within ±1 frame on 5 of 9 clips). It is trustworthy as an angle source, checked
+rather than assumed: every thigh and shank length is constant to machine precision
+(std ≈ 5×10⁻¹⁷ of the mean), so the coordinates are a rigid skeleton and not a per-axis
+normalisation that would distort angles. MediaPipe's left/right also verifiably tracks the
+markers' left/right (same-side error is lower than crossed on both cameras), so no limb swap is
+hiding in the comparison.
+
+Evaluating `resolve_lead_side`'s premise **on the markers**, at each labeled rep's true bottom —
+no camera, no projection, no pose estimator anywhere in the path:
+
+> **The labeled lead knee is the more flexed knee at the bottom on 85/174 = 48.9% of reps. On
+> the 138 reps where the two knees differ by at least the shipped 5° guard, 65/138 = 47.1%.**
+
+Chance. **The premise is false in three dimensions**, so §3.1's hedge resolves against the cue:
+this is not a projection artifact and no depth-robust reformulation of knee flexion can repair
+it. §3.1's closing sentence — *"if the premise holds in 3-D and is merely unrecoverable from this
+projection, the repair is a depth-robust lead cue"* — states a conditional whose antecedent is now
+measured false.
+
+**This also inverts the cam17-vs-cam18 reading.** Against the markers, MediaPipe agrees about
+which knee is more flexed on **75.1% of cam17 bottom frames and 83.2% of cam18's** — the sagittal
+camera is the *more* accurate of the two on the ordering, despite its far worse landmark
+availability. And cam18's premise rate (47.8%) sits essentially on the marker rate of 48.9%, while
+cam17's 59.8% sits *above* it. So cam17 was never the better camera here; it agreed with the label
+more often than the truth does, which is error that happened to align, not signal. Nothing in §4
+should be read as cam17 measuring this cue better.
+
+**MediaPipe's accuracy is a separate, real limitation, and it is worth stating separately so the
+two are not conflated.** Knee-angle error against the markers is **mean 12.6° / median 10.9° /
+p90 24.9° on cam17** and **mean 22.9° / median 16.0° / p90 54.7° on cam18**, over frames the
+pipeline considers valid. That is large next to the 100°/130° depth ramp and it independently
+limits `lunge_insufficient_depth`. It is *not* what broke the lead-leg resolution.
+
+**What the markers say the fix is.** The parent spec defines the lead leg as "the more flexed /
+**more anterior** foot", and `resolve_lead_side` discarded the anterior half because it collapses
+in a frontal view. Scoring the discarded half on the markers — facing taken from the mean
+ankle→toe vector, so no hip-based canonicaliser leaks bilateral information into a bilateral
+question, and each ankle projected onto it relative to mid-hip:
+
+| Criterion, scored on marker 3-D at the true bottom | Agreement with the label (n=174) |
+|---|---|
+| **more anterior foot** (the discarded half) | **174/174 = 1.000** |
+| more flexed knee (the shipped half) | 85/174 = 0.489 |
+| both criteria wrong on the same rep | 0/174 = 0.000 |
+
+The substitution, not the measurement, is the defect. And the reason it was made does not hold up
+either — repeating the identical construction in the **image plane only**, at the bottom frame the
+shipped code itself picks, on monocular MediaPipe landmarks with no depth channel:
+
+| Criterion, monocular 2-D at MediaPipe's own chosen bottom | cam17 (frontal) | cam18 (sagittal) |
+|---|---|---|
+| **more anterior foot** | **162/169 = 0.959** | **144/161 = 0.894** |
+| more flexed knee — *what ships today* | 101/169 = 0.598 | 77/161 = 0.478 |
+
+So the anterior cue survives monocular projection on **both** cameras, including the frontal one
+whose collapse motivated abandoning it. Per the standing no-tuning policy this changes nothing in
+the shipped detector and no threshold moved to produce these numbers; it is recorded as the
+measured repair path, and §6 carries it.
+
+Measured by a throwaway script, not committed. Reproduce by loading `{video_id}-30fps.npy`, taking
+joints 16/17/18 (left hip/knee/ankle) and 21/22/23 (right) for flexion and 18→19 / 23→24 for the
+foot vectors, and comparing both criteria at `argmin(min(left, right))` within each
+`Segmentation.csv` window against `SUBTYPE_LEAD_SIDE`.
 
 ---
 
@@ -510,9 +587,15 @@ verdict has good *sensitivity* and poor *specificity*. The same mislabeling sile
    and dropping MediaPipe's pseudo-depth swings cam17 from 59.8% to 17.2%. So the supported
    statement is that **the more-flexed cue, as measured here, does not identify the labeled lead
    leg from either available view** — not that it fails to identify it in lunges generally.
-   **Consequently the indicated fix is a depth-robust lead cue, not necessarily a different
-   cue**: this data cannot distinguish "the premise is wrong" from "the premise is unrecoverable
-   from this projection". Recorded, not patched.
+   **§3.2 then removes that hedge using the dataset's own marker-based 3-D**, which this run had
+   simply not consulted: on the markers the premise holds on **85/174 = 48.9%** of reps, i.e. at
+   chance, with no camera or estimator in the path. So the premise is false outright, not merely
+   unrecoverable, and a depth-robust reformulation of knee flexion cannot repair it. The markers
+   also identify the repair: the **anterior** half of the spec's own definition, which
+   `resolve_lead_side` discarded, agrees with the label on **174/174 = 1.000** in 3-D and still
+   on **0.959 (cam17) / 0.894 (cam18)** from monocular 2-D at the frame the shipped code already
+   picks. Recorded, not patched — per the standing no-tuning policy, changing the cue is a design
+   decision, not a validation outcome.
 2. **`lunge_knee_past_toes`'s cue is informative; the rule as shipped cannot reach it.**
    Lead-oracle per-subject median AUC **0.833** on the sagittal stratum, versus **0.171** —
    inverted — with the shipped lead-side resolution; **0.850 vs 0.171 at matched n=80**, so the
@@ -566,14 +649,23 @@ verdict has good *sensitivity* and poor *specificity*. The same mislabeling sile
 - **Per-fault labels.** The single largest limitation. Until a dataset says *which* fault a rep
   contained, no rule's precision can be measured — only whether its signal tracks a binary
   correct/incorrect verdict.
-- **A DEPTH-ROBUST lead-leg cue.** Item 1 above bounds all four rules, and §3.1's controls say
-  the shipped cue's failure is a projection problem before it is a biomechanical one — dropping
-  one coordinate moves its accuracy by 43 points. So the first thing to try is the same
-  more-flexed cue computed from a depth estimate that is actually a depth estimate (this repo has
-  measured NLF/MeTRAbs recovering true depth where MediaPipe's `z` does not), before abandoning
-  the cue itself. Other candidates, none implemented here: foot-index separation along the body
-  axis, ankle-velocity asymmetry during the descent, a learned per-rep classifier. Each is a
-  change to the detector and belongs to its own task with its own validation.
+- **Replace the lead-leg cue with the anterior one — the single highest-value change, and the
+  only one here that is already measured rather than merely proposed.** Item 1 bounds all four
+  rules. §3.2 scores the candidate on the dataset's markers (1.000) and, more to the point, on
+  monocular MediaPipe landmarks at the frame the shipped code already chooses: **0.959 on cam17
+  and 0.894 on cam18, against 0.598/0.478 for what ships**. The construction is in §3.2 and needs
+  no new model, no depth estimate and no new data — mean ankle→foot-index for facing, each ankle
+  projected onto it relative to mid-hip, evaluated at the same bottom frame `resolve_lead_side`
+  already picks. What it does need is its own task: a `LEAD_SIDE_MIN_SEPARATION` analogue in
+  normalised distance rather than degrees, a decision about the two rules whose view gate differs
+  from the cue's, and re-running §4 end to end, since every per-rule number above is measured
+  through the broken input.
+  An earlier version of this note proposed a *depth-robust* version of the more-flexed cue
+  instead, on the strength of §3.1's image-plane collapse. §3.2 supersedes that: the premise is
+  false on the markers, so better depth would sharpen a cue that is measuring the wrong thing.
+  Improving MediaPipe's accuracy is still worth doing for §3.2's separate reason (12.6°/22.9°
+  mean knee-angle error against the markers, which limits `lunge_insufficient_depth` directly),
+  but it is not the lead-leg fix.
 - **A second dataset, ideally in-the-wild.** REHAB24-6 is a lab recording. Any claim above is
   scoped to it.
 - **A harness that genuinely bypasses `segment_reps`** (`replace(LUNGE_DETECTOR,
