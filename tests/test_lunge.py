@@ -732,27 +732,98 @@ class LungeAlternatingLeadTests(unittest.TestCase):
     The Phase 2 validation harness feeds ONE REP PER CLIP, so a clip-level lead side is
     per-rep by construction there and this defect would be invisible to it. Lunges are
     normally performed alternating legs, so production sees exactly this shape.
+
+    TWO LAYERS, BOTH REQUIRED, per a reviewer's finding against this class's first draft. That
+    draft asserted only on `result.detections` -- the output of `run_detector`'s
+    `merge_by_fault` (src/pose/movements/base.py), which collapses every rep that fires a given
+    `fault_id` down to its SINGLE worst occurrence, ties broken by earliest `start_frame`. This
+    fixture originally gave all three reps byte-identical severity (uniform depth, no pelvis
+    tilt), so the tie always resolved to rep 1 -- a real left-lead rep. The reviewer reproduced
+    the failure directly: monkey-patching `resolve_lead_side` to IGNORE its `window` argument
+    and always return `"left"` (exactly the clip-level regression this class exists to catch)
+    still passed the old test with zero failures, because the one detection `result.detections`
+    ever exposed per fault always happened to be rep 1's, and rep 1's true lead genuinely is
+    "left". A guard that cannot fail under the bug it names is worse than no guard -- it
+    advertises coverage that is not there.
+
+    Layer 1 (`test_resolve_lead_side_returns_the_true_lead_for_every_rep`) calls
+    `resolve_lead_side` DIRECTLY on each rep's own window -- the exact slice
+    (`core[rep.start:rep.end+1]`) `run_detector` builds internally -- before `merge_by_fault` can
+    hide anything. This is the test that fails immediately under the monkey-patch.
+
+    Layer 2 (`test_each_rep_attributes_its_fault_to_the_leg_that_actually_led_it`) proves the
+    unit-level correctness of layer 1 actually survives the full `run_detector` pipeline,
+    including the merge. `rule_pelvic_drop`'s sign depends on the resolved lead
+    (`sign = 1.0 if lead == "left" else -1.0`), so distinct, correctly-signed `pelvis_tilt_deg`
+    values per rep give each rep a genuinely different severity: the merged winner is decided on
+    merit, not on `merge_by_fault`'s start_frame tie-break, and here it is rep 2 -- the
+    right-lead rep -- that legitimately wins. `rule_knee_valgus`, which is intentionally left at
+    uniform depth (the excursion the rep segmenter needs to find three separate reps makes
+    varying it awkward), still gives layer 2 a second, independent signal: `occurred_reps` is a
+    UNION over every rep that independently fired the fault, so it must read `(1, 2, 3)` even
+    though the reported (winning) evidence always comes from rep 1 -- a rep resolved against the
+    wrong leg would silently drop out of that union instead of raising anywhere.
     """
 
     def _alternating_clip(self) -> list[dict]:
-        # Three reps: lead left, lead right, lead left. Depth is driven by `lead_anterior`,
-        # which is what bends the lead knee in-image.
+        # Three reps: lead left, lead right, lead left. Depth is driven by `lead_anterior`
+        # (uniform across reps -- see the class docstring), which is what bends the lead knee
+        # in-image. `pelvis_tilt_deg` is DISTINCT and correctly signed per rep -- POSITIVE is the
+        # contralateral-drop fault for a left lead, NEGATIVE for a right lead (rule_pelvic_drop's
+        # `sign` convention) -- chosen so no two reps tie on `rule_pelvic_drop` severity and rep 2
+        # (right lead) legitimately has the largest.
         frames: list[dict] = []
         index = 0
-        for lead in ("left", "right", "left"):
+        specs = [("left", 9.0), ("right", -16.0), ("left", 13.0)]
+        for lead, tilt in specs:
             depths = list(np.linspace(0.0, 0.80, 12)) + list(np.linspace(0.80, 0.0, 12))
             for depth in depths:
                 frames.append(
-                    lunge_frame(lead=lead, lead_anterior=float(depth), frame_index=index)
+                    lunge_frame(
+                        lead=lead, lead_anterior=float(depth), pelvis_tilt_deg=tilt,
+                        frame_index=index,
+                    )
                 )
                 index += 1
         return frames
+
+    def test_resolve_lead_side_returns_the_true_lead_for_every_rep(self) -> None:
+        from src.pose.movements.lunge import LUNGE_DETECTOR, resolve_lead_side
+
+        result = run_detector(LUNGE_DETECTOR, self._alternating_clip(), 30.0, "front_oblique", 0.9)
+        self.assertEqual(len(result.reps), 3, "segmentation did not find the reps")
+        self.assertEqual(len(result.analyzed), 3)
+        expected = ["left", "right", "left"]
+        for rep, want in zip(result.analyzed, expected):
+            window = result.core[rep.start : rep.end + 1]
+            self.assertEqual(
+                resolve_lead_side(window),
+                want,
+                f"rep {rep.index} (frames {rep.start}:{rep.end}) resolved to the wrong lead leg",
+            )
 
     def test_each_rep_attributes_its_fault_to_the_leg_that_actually_led_it(self) -> None:
         from src.pose.movements.lunge import LUNGE_DETECTOR
 
         result = run_detector(LUNGE_DETECTOR, self._alternating_clip(), 30.0, "front_oblique", 0.9)
-        self.assertGreaterEqual(len(result.reps), 2, "segmentation did not find the reps")
+        self.assertEqual(len(result.reps), 3, "segmentation did not find the reps")
+
+        by_fault = {d.fault_id: d for d in result.detections}
+
+        # UNIFORM depth across reps -> `rule_knee_valgus` fires on all three independently, and
+        # `occurred_reps` (a union, not the winner's own rep) must name all three. A rep resolved
+        # against the wrong leg's metric would fail to fire at all and silently drop out here.
+        valgus = by_fault["lunge_knee_valgus"]
+        self.assertEqual(valgus.occurred_reps, (1, 2, 3))
+
+        # DISTINCT, correctly-signed tilts -> rep 2 (right lead, severity 0.667) legitimately
+        # outranks reps 1 and 3, so the WINNING (reported) detection is rep 2's, not rep 1's --
+        # the tie-break that let the old version of this test pass under the monkey-patched
+        # regression cannot fire here. Its evidence must therefore name the RIGHT leg.
+        pelvic = by_fault["lunge_pelvic_drop"]
+        self.assertEqual(pelvic.occurred_reps, (1, 2, 3))
+        self.assertEqual(pelvic.evidence["lead_side"], "right")
+
         # Whatever fires, no detection may name a lead side whose knee was the EXTENDED one:
         # that is the signature of a lead side resolved over the wrong window.
         for detection in result.detections:
