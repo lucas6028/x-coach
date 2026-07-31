@@ -59,7 +59,8 @@ class _Result:
 
 
 def _record(person_id: str, correct: bool, fired: bool, score, camera: str = "cam17",
-            orientation: str = "front", pass_name: str = "production") -> dict:
+            orientation: str = "front", pass_name: str = "production",
+            actionable: bool = True) -> dict:
     return {
         "person_id": person_id,
         "correct": correct,
@@ -68,7 +69,9 @@ def _record(person_id: str, correct: bool, fired: bool, score, camera: str = "ca
         pass_name: {
             "fired": {"lunge_knee_valgus": {"severity": 1.0}} if fired else {},
             "scores": {"lunge_knee_valgus": score},
-            "cannot_fire": {"lunge_knee_valgus": False},
+            "cannot_fire": {"lunge_knee_valgus": not actionable},
+            "gate_open": {"lunge_knee_valgus": True},
+            "actionable": {"lunge_knee_valgus": actionable},
             "lead_side": "left",
         },
     }
@@ -341,6 +344,80 @@ class ScoreSpecTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             score_spec("lunge_not_a_rule", "left")
+
+
+class GateOpenTests(unittest.TestCase):
+    def test_matches_each_rule_hard_gate(self) -> None:
+        # Pins the restatement against the rules themselves: only two of the four gate on view.
+        from src.pose.movements.lunge import (
+            LUNGE_DETECTOR, rule_knee_past_toes, rule_pelvic_drop,
+        )
+        from src.pose.pose_rule_detector import SIDE_VIEW_CONF_THRESHOLD
+        from src.rehab24.lunge_rule_validation import gate_open
+
+        self.assertIn(rule_knee_past_toes, LUNGE_DETECTOR.rules)
+        self.assertIn(rule_pelvic_drop, LUNGE_DETECTOR.rules)
+        for view in ("side", "front", "front_oblique", "rear", "rear_oblique", "unknown"):
+            self.assertEqual(
+                gate_open("lunge_knee_past_toes", view, 1.0), view == "side",
+                f"knee_past_toes gate wrong for {view}",
+            )
+            self.assertEqual(
+                gate_open("lunge_pelvic_drop", view, 1.0), view != "side",
+                f"pelvic_drop gate wrong for {view}",
+            )
+            # The other two downgrade observability off-view but never go silent.
+            self.assertTrue(gate_open("lunge_knee_valgus", view, 1.0))
+            self.assertTrue(gate_open("lunge_insufficient_depth", view, 1.0))
+        # The side gate carries squat's shared confidence floor, not a new number.
+        self.assertFalse(
+            gate_open("lunge_knee_past_toes", "side", SIDE_VIEW_CONF_THRESHOLD - 0.01)
+        )
+        self.assertTrue(gate_open("lunge_knee_past_toes", "side", SIDE_VIEW_CONF_THRESHOLD))
+
+    def test_rejects_an_unknown_fault_id(self) -> None:
+        from src.rehab24.lunge_rule_validation import gate_open
+
+        with self.assertRaises(ValueError):
+            gate_open("lunge_not_a_rule", "side", 1.0)
+
+
+class Angle2dTests(unittest.TestCase):
+    @staticmethod
+    def _points(overrides):
+        from src.pose.geometry import landmarks_to_array
+
+        lm = [_landmark(0.5, 0.5) for _ in range(33)]
+        for index, (x, y, z) in overrides.items():
+            lm[index] = {"x": x, "y": y, "z": z, "visibility": 0.95}
+        return landmarks_to_array(lm)
+
+    def test_a_right_angle_in_the_image_plane_reads_ninety(self) -> None:
+        from src.rehab24.lunge_rule_validation import angle_2d
+
+        points = self._points({23: (0.0, 0.0, 0.0), 25: (0.0, 1.0, 0.0), 27: (1.0, 1.0, 0.0)})
+        self.assertAlmostEqual(angle_2d(points, 23, 25, 27), 90.0, places=4)
+
+    def test_ignores_the_pseudo_depth_channel(self) -> None:
+        # The whole point: geometry.angle_degrees uses z, this must not. Same x/y, wildly
+        # different z, identical answer.
+        from src.pose.geometry import angle_degrees
+        from src.rehab24.lunge_rule_validation import angle_2d
+
+        flat = self._points({23: (0.0, 0.0, 0.0), 25: (0.0, 1.0, 0.0), 27: (1.0, 1.0, 0.0)})
+        deep = self._points({23: (0.0, 0.0, 0.9), 25: (0.0, 1.0, -0.4), 27: (1.0, 1.0, 0.7)})
+        self.assertAlmostEqual(angle_2d(flat, 23, 25, 27), angle_2d(deep, 23, 25, 27), places=4)
+        self.assertNotAlmostEqual(
+            angle_degrees(flat, 23, 25, 27), angle_degrees(deep, 23, 25, 27), places=1
+        )
+
+    def test_is_nan_when_a_landmark_is_not_visible(self) -> None:
+        from src.pose.geometry import landmarks_to_array
+        from src.rehab24.lunge_rule_validation import angle_2d
+
+        lm = [_landmark(0.5, 0.5) for _ in range(33)]
+        lm[25] = {"x": 0.5, "y": 0.5, "z": 0.0, "visibility": 0.1}
+        self.assertTrue(math.isnan(angle_2d(landmarks_to_array(lm), 23, 25, 27)))
 
 
 class FaultThresholdsTests(unittest.TestCase):
@@ -623,6 +700,60 @@ class SubsetStatsTests(unittest.TestCase):
         stats = subset_stats(records, "lunge_knee_valgus", "production")
         self.assertEqual(stats["n"], 3)
         self.assertEqual(stats["n_scored"], 2)
+
+    def test_a_structurally_silent_rep_inflates_the_unconditional_specificity(self) -> None:
+        # THE defect this conditional table exists to expose: a rep the rule could never fire on
+        # counts as a true negative, so the unconditional specificity reads 1.000 while the
+        # conditional one reads 0.500 on the reps where the rule actually ran.
+        from src.rehab24.lunge_rule_validation import subset_stats
+
+        records = [
+            _record("1", correct=True, fired=False, score=0.1, actionable=True),
+            _record("1", correct=True, fired=True, score=0.9, actionable=True),
+            _record("1", correct=True, fired=False, score=None, actionable=False),
+            _record("1", correct=True, fired=False, score=None, actionable=False),
+            _record("1", correct=False, fired=True, score=0.9, actionable=True),
+        ]
+        stats = subset_stats(records, "lunge_knee_valgus", "production")
+        self.assertAlmostEqual(stats["specificity"], 3 / 4)
+        self.assertEqual(stats["n_actionable"], 3)
+        self.assertAlmostEqual(stats["actionable_specificity"], 0.5)
+
+    def test_conditional_and_unconditional_agree_when_nothing_is_silenced(self) -> None:
+        from src.rehab24.lunge_rule_validation import subset_stats
+
+        records = [
+            _record("1", correct=True, fired=False, score=0.1),
+            _record("1", correct=False, fired=True, score=0.9),
+        ]
+        stats = subset_stats(records, "lunge_knee_valgus", "production")
+        self.assertEqual(stats["table"], stats["actionable_table"])
+        self.assertEqual(stats["n_actionable"], 2)
+
+    def test_view_gated_reps_are_counted_separately_from_short_windows(self) -> None:
+        from src.rehab24.lunge_rule_validation import subset_stats
+
+        records = [_record("1", correct=True, fired=False, score=0.1) for _ in range(2)]
+        records[0]["production"]["gate_open"]["lunge_knee_valgus"] = False
+        records[0]["production"]["actionable"]["lunge_knee_valgus"] = False
+        stats = subset_stats(records, "lunge_knee_valgus", "production")
+        self.assertEqual(stats["view_gated"], 1)
+        self.assertEqual(stats["cannot_fire"], 0)
+        self.assertEqual(stats["n_actionable"], 1)
+
+    def test_matched_n_restricts_both_lead_choices_to_the_reps_both_scored(self) -> None:
+        # Rules out "the two columns differ because their denominators differ".
+        from src.rehab24.lunge_rule_validation import matched_n_lines
+
+        records = [
+            _record("1", correct=False, fired=False, score=0.9),
+            _record("1", correct=True, fired=False, score=0.1),
+            _record("1", correct=True, fired=False, score=None),
+        ]
+        for r in records:
+            r["production"]["scores_lead_oracle"] = {"lunge_knee_valgus": 0.5}
+        line = matched_n_lines(records, "lunge_knee_valgus", "production")[0]
+        self.assertIn("MATCHED n=2", line)
 
     def test_reads_an_alternate_score_key_for_the_lead_oracle_diagnostic(self) -> None:
         # The lead-oracle scores live beside the real ones so the same statistics can be run

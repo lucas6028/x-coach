@@ -1751,21 +1751,38 @@ against labeled ground truth" and is the user's decision with these numbers in h
 - **The lead-side substitution is what failed validation, ahead of any threshold — and it bounds
   all four rules,** since every one of them reads `f"{lead}_..."`. `resolve_lead_side` agrees
   with `exercise_subtype` on **96/154 = 0.623** of resolved cam17 reps and **72/152 = 0.474** of
-  cam18 reps (**below chance**), leaving 11.5%/12.6% unresolved. The failure is in the *premise*,
-  not the code: the labeled lead knee is actually the more flexed knee at the rep's bottom in
-  only **105/169 = 62.1%** (cam17) and **78/161 = 48.4%** (cam18) of reps, at a **median 25°**
-  left-right separation — so `LEAD_SIDE_MIN_SEPARATION_DEG = 5.0` cannot catch it. `resolve_lead_side`'s
-  docstring already records that it substitutes the more-flexed half of this spec's "the more
-  flexed / **more anterior** foot" definition because the anterior axis collapses in a frontal
-  view; dropping that half is what broke it. In a lunge both knees flex to roughly a right angle
-  and the trailing knee often flexes further. §7's risk register predicted this outcome
-  explicitly; it materialized. **Recorded, not patched** — a replacement cue is a detector change
-  with its own validation, not a writeup edit.
+  cam18 reps (**below chance**), leaving 11.5%/12.6% unresolved. The failure is in the *premise*
+  it substitutes for this spec's "the more flexed / **more anterior** foot" definition (the
+  anterior axis collapses in a frontal view, so only the more-flexed half is used): the labeled
+  lead knee is the more flexed knee at the rep's bottom on only **101/169 = 59.8%** (cam17) and
+  **77/161 = 47.8%** (cam18) of reps, measured over the **full labeled window** with
+  `segment_reps` and smoothing out of the picture. On the reps it gets wrong the left-right
+  separation is a median 19.4°/25.4°, far outside the 5° band
+  `LEAD_SIDE_MIN_SEPARATION_DEG` refuses on, so that guard cannot catch it.
+  **But the failure is one of MEASUREMENT before it is one of anatomy, and the writeup is
+  deliberately narrower than "more flexed does not identify a lunge's lead leg".** Three controls
+  say so: the two SIMULTANEOUS cameras disagree about which knee is more flexed on **33%** of
+  reps (an independent re-derivation got 37%) — that is measurement error, not anatomy; the two
+  premise rates disagree by 12 points across those same views; and recomputing the identical
+  angle in the image plane alone, dropping MediaPipe's pseudo-depth `z`, swings cam17 from
+  **59.8% to 17.2%** (independent re-derivation: 14.8%) while moving cam18 the other way. The
+  supported claim is therefore **"the more-flexed-knee cue, as this pipeline measures it, does
+  not identify the labeled lead leg from either view available here"** — which still fully
+  condemns `resolve_lead_side` as shipped and still bounds all four rules. **The distinction
+  drives the fix: this data cannot separate "the premise is wrong" from "the premise is
+  unrecoverable from this projection", so the indicated repair is a DEPTH-ROBUST lead cue before
+  a different cue.** §7's risk register predicted the outcome explicitly; it materialized.
+  **Recorded, not patched** — a replacement cue is a detector change with its own validation.
 - **`lunge_knee_past_toes` — the cue is informative; the rule as shipped cannot reach it.** On
   the 88 genuinely sagittal cam18 reps, the shipped rule's metric **inverts**: per-subject median
   AUC **0.171** (correct reps ordered *above* incorrect). Reading the same metric off the leg
   `exercise_subtype` names, on the same frames, gives per-subject median **0.833** (0.725 over
-  all 174). The gate is not the problem: the estimator returns `side` on all 88, matching Phase
+  all 174) — and **0.171 vs 0.850 restricted to the 80 reps BOTH lead choices score**, so the
+  contrast is not a denominator artifact. (Every AUC in the writeup carries its rep count; the
+  two columns lose different reps to an unresolved lead side.) The `half-profile` stratum's
+  production 0.850 is not a counter-example: its lead-oracle figure is 0.845, i.e. the lead
+  choice barely matters there, so the wrong-leg penalty that inverts the sagittal reps is not
+  levied on it. The gate is not the problem: the estimator returns `side` on all 88, matching Phase
   0's 88/88, and the production and oracle passes are byte-identical here because neither yields
   `side` off that stratum.
 - **`lunge_knee_valgus` — weak but genuine separation, and the least lead-side-sensitive of the
@@ -1780,17 +1797,27 @@ against labeled ground truth" and is the user's decision with these numbers in h
   selection artifact.** It fires **6 times in 174 reps** (threshold 100° sits at percentile 84.5
   of the observed distribution — `rank_auc`'s documented "informative cue, cited cut in the tail"
   case, and the cut does not move). The sagittal stratum's apparent 0.792 per-subject AUC
-  **collapses to 0.320 under the lead-oracle**: `resolve_lead_side` picks the *more flexed* knee
+  **collapses to 0.320 under the lead-oracle** (0.792 vs 0.300 at matched n=80): `resolve_lead_side` picks the *more flexed* knee
   by construction, so "the maximum angle of the selected knee" is a biased statistic of the pair,
   not a measurement of the lead leg. Read off the labeled leg the metric is at or below chance
   (0.390 overall). Not evidence the rule is wrong — evidence the fault is absent from, or
   invisible in, REHAB24-6's instructed errors.
-- **`lunge_pelvic_drop` — not exercised either, and the predicted failure mode did NOT occur.**
-  §6.5 predicted false positives on deep correct reps from split-stance foreshortening. Measured
-  production specificity is **0.923** overall and **1.000** on the half-profile stratum. But it
-  fires **10 times in 174 reps** (4 tp / 6 fp), and under the lead-oracle sits at **0.467 —
-  chance**. Per the plan's own rule, near-zero firing on **both** classes means "not exercised by
-  this dataset", **not** "the rule works".
+- **`lunge_pelvic_drop` — barely exercised, and §6.5's predicted failure mode is NOT refuted.**
+  It fires **10 times in 174 reps** (4 tp / 6 fp) and under the lead-oracle sits at **0.467 —
+  chance**, so per the plan's own rule, near-zero firing on **both** classes means "not exercised
+  by this dataset", **not** "the rule works". On the risk §6.5 raised (false positives on deep
+  correct reps from split-stance foreshortening), the reassuring-looking numbers are artifacts
+  and must not be used to retire it: the half-profile stratum's **1.000 specificity is vacuous**
+  — the rule fired zero times there because the view mislabel below gated it off on all 39
+  correct reps, and a specificity for a silenced rule measures nothing — while the overall
+  **0.923 counts 54 of its 78 correct reps as true negatives when 37 were view-gated and 18 could
+  not fire**. On the **24 correct reps where the rule could actually act it false-fired on 6:
+  specificity 0.750, a 25% false-positive rate**, which is the shape §6.5 predicted rather than
+  its refutation. Excluding the 40 level-2/3 extra-person reps moves that conditional specificity
+  to 0.895 and the per-subject median AUC to 0.679, so person-locking is not the cause. The
+  threshold sits at percentile 54.4 of the observed distribution (64.3 front / 45.6
+  half-profile). **The §6.5 risk stays OPEN**: 6 false fires give no power to confirm the
+  foreshortening mechanism specifically.
 - **The one real production-vs-oracle gap is a GATE failure, and it qualifies Phase 0's
   headline.** `lunge_pelvic_drop` fires 10 in production and 41 in the oracle pass, because the
   view estimator labels **84 of 86 cam17 `half-profile` reps as `side`**, and the rule correctly
@@ -1800,6 +1827,17 @@ against labeled ground truth" and is the user's decision with these numbers in h
   mislabeling silently downgrades `lunge_knee_valgus` there (`side` ∉ `ALIGNMENT_OBSERVABLE_VIEWS`
   → observability `medium`, confidence ×0.65) without changing whether it fires. No gate,
   threshold or confidence floor was changed in response.
+- **Every contingency figure above is quoted with its structural silence, because the raw tables
+  are misleading without it.** A rep can be unable to fire because its **view gate** was shut, its
+  masked phase was shorter than `min_frames` (6 at 30 fps), or its lead side was unresolved —
+  and `contingency` counts every such rep as a true or false NEGATIVE, deflating sensitivity and
+  inflating specificity invisibly. Production counts: `lunge_knee_past_toes` 86 view-gated + 32
+  could-not-fire; `lunge_insufficient_depth` 48 could-not-fire (26 of them windows whose `bottom`
+  phase is shorter than the floor); `lunge_knee_valgus` 32; `lunge_pelvic_drop` 84 view-gated +
+  33. So "6 fires in 174" for depth and "10 in 174" for pelvic drop are partly statements about
+  window length and view labeling, not only about which errors the dataset contains. The
+  conditional tables restricted to the reps where each rule could act are in
+  `notes/lunge-rule-validation.md` §4 and do not rescue either rule.
 - **Two measurement conditions that cap every number above.** (1) **Frame validity**:
   `lunge_compute_raw`'s all-or-nothing landmark gate leaves only **74.0%** of cam17 frames and
   **58.4%** of cam18 frames carrying any metrics — the sagittal camera is worse, exactly as
