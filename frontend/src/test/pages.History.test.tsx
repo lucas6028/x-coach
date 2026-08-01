@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
@@ -233,6 +233,25 @@ describe("History", () => {
     expect(
       screen.queryByText("Couldn't delete this record. Please try again.")
     ).not.toBeInTheDocument();
+  });
+
+  it("names the clicked row in the confirm dialog", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 2,
+      items: [
+        item({ id: "a", created_at: "2026-06-20T12:00:00.000Z" }),
+        item({ id: "b", movement: "Push-up", created_at: "2026-06-20T13:00:00.000Z" }),
+      ],
+    });
+    renderHistory();
+    await screen.findAllByText("2 faults");
+
+    // The dialog is page-level, so the only thing tying it to a row is the echoed label. Click the
+    // SECOND row's trash and the dialog must describe that row, not the first.
+    await userEvent.click(screen.getAllByRole("button", { name: "Delete this record" })[1]);
+    const dialog = await screen.findByRole("dialog", { name: "Delete this record?" });
+    expect(within(dialog).getByText(/Side Push-up ·/)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Side Squat ·/)).not.toBeInTheDocument();
   });
 
   it("cancelling the confirmation calls no API and restores the row", async () => {

@@ -10,6 +10,7 @@ import {
 import { Link } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
 import AppLayout from "../components/AppLayout";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../lib/auth";
 import { movementLabel, useI18n, viewLabel } from "../lib/i18n";
 
@@ -72,6 +73,18 @@ export default function History() {
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString(lang, { timeStyle: "short" });
   };
+
+  // The record the confirm dialog is about. Derived rather than stored, so a row that disappears
+  // (deleted, or a reload that no longer returns it) closes the dialog instead of stranding it.
+  const pendingItem = items.find((it) => it.id === pendingId);
+  const deletingPending = pendingItem !== undefined && deletingId === pendingItem.id;
+
+  // What the dialog echoes back: the same title the row shows, plus its time.
+  const rowLabel = (it: HistoryItem) =>
+    `${t("history.rowTitle", {
+      view: viewLabel(t, it.view_type ?? "unknown"),
+      movement: movementLabel(t, it.movement ?? "Squat"),
+    })} · ${fmtTime(it.created_at)}`;
 
   // Group the (newest-first) rows into day sections, preserving order — so the list reads as a
   // reverse-chronological timeline with a date header separating each day. Rows with an unparseable
@@ -225,7 +238,7 @@ export default function History() {
                           aria-label={t("history.deleteAria")}
                           title={t("history.deleteCta")}
                           onClick={() => {
-                            setPendingId(pendingId === it.id ? null : it.id);
+                            setPendingId(it.id);
                             // Only clear this row's own error, if any -- a different row's
                             // still-unresolved failure must not be silently forgotten just
                             // because the user opened another row's confirm.
@@ -235,33 +248,6 @@ export default function History() {
                         >
                           <Trash size={16} weight="duotone" />
                         </button>
-
-                        {pendingId === it.id && (
-                          <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-xl border border-danger/30 bg-danger/[0.04] px-3 py-2">
-                            <span className="mr-auto text-xs text-muted">
-                              {t("history.deleteDesc")}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setPendingId(null)}
-                              disabled={deletingId === it.id}
-                              className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-content/5 hover:text-content disabled:opacity-60"
-                            >
-                              {t("history.deleteCancel")}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void runDelete(it.id)}
-                              disabled={deletingId === it.id}
-                              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-                            >
-                              <Trash size={14} weight="fill" />
-                              {deletingId === it.id
-                                ? t("history.deleting")
-                                : t("history.deleteConfirm")}
-                            </button>
-                          </div>
-                        )}
 
                         {deleteError?.id === it.id && (
                           <p className="mt-1.5 flex items-center gap-1.5 px-1 text-xs text-danger">
@@ -279,6 +265,20 @@ export default function History() {
         )}
         </main>
       </div>
+
+      {/* One dialog for the whole page, not one per row: `pendingId` says which record it is
+          about, and `detail` echoes that record back so the user can see they picked the right one. */}
+      <ConfirmDialog
+        open={pendingItem !== undefined}
+        title={t("history.deleteTitle")}
+        description={t("history.deleteDesc")}
+        detail={pendingItem && rowLabel(pendingItem)}
+        confirmLabel={deletingPending ? t("history.deleting") : t("history.deleteConfirm")}
+        cancelLabel={t("history.deleteCancel")}
+        busy={deletingPending}
+        onConfirm={() => pendingItem && void runDelete(pendingItem.id)}
+        onCancel={() => setPendingId(null)}
+      />
     </AppLayout>
   );
 }
