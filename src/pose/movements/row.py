@@ -505,3 +505,143 @@ def rule_torso_rising(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleD
             )
         )
     return detections
+
+
+# FROM THE SPEC: "(a) Pull depth: minimum normalized distance from wrist(15/16) to hip(23/24)
+# … flag if `min_wrist_to_torso_dist > 0.12`. (b) Elbow flexion at peak: `elbow_angle … > 100deg`
+# at the top = pull not completed."
+PULL_DEPTH_MILD = 0.12
+PEAK_ELBOW_MILD_DEG = 100.0
+# RULE-LEVEL CHOICE MADE HERE, both of them. The spec states no ramp for this fault.
+#   0.30 is 2.5x the fire threshold -- `pushup.rule_hip_sag`'s convention.
+#   140 deg is NOT re-derived: it is taken verbatim from `pushup.rule_shallow_depth`, whose
+#   ramp is also 100 -> 140 on the very same quantity (an elbow angle whose fire threshold is
+#   100). Copying it keeps the codebase's two elbow-ROM ramps from drifting apart, and inherits
+#   that rule's stated argument: an elbow that never bends past 140 has travelled well under
+#   half the useful range, which is where "maximally incomplete" reasonably saturates. That is
+#   an argument, not a measurement.
+PULL_DEPTH_SEVERE = 0.30
+PEAK_ELBOW_SEVERE_DEG = 140.0
+
+
+def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag a pull that stops short -- the hands never reach the torso, or the elbows never bend.
+
+    THRESHOLD PROVENANCE: fire thresholds 0.12 and 100 deg are FROM THE SPEC; both severity
+    ramps are RULE-LEVEL (see the constants above).
+
+    TWO OR'd CONDITIONS, ONE FAULT, per the spec's own (a)/(b) structure. A frame qualifies if
+    either holds; the segment's severity is the WORSE of the two sub-severities, and
+    `evidence["fired_on"]` records which one(s) drove it, because the coaching cue differs
+    ("pull the bar all the way to the abdomen" vs "finish the elbow bend").
+
+    `score_values` is the per-frame MAXIMUM of the two sub-severities rather than either raw
+    metric, so `build_detection` nominates the frame that was worst OVERALL. Passing one raw
+    series would let a frame that was fine on that metric but terrible on the other be named
+    the peak.
+
+    IT READS `max_elbow_angle`, THE LESS-FLEXED ARM, AND THAT IS A RULE-LEVEL READING OF AN
+    UNDER-SPECIFIED SPEC LINE. The spec's condition (b) names no side. Taking the less-flexed
+    arm is conservative -- a rep is incomplete if EITHER arm fell short -- and is the deliberate
+    opposite of `pushup_shallow_depth`, whose docstring already flags its inherited more-flexed
+    reading as the generous one.
+
+    THE SPEC'S THRESHOLDS ARE IN RAW IMAGE UNITS, WHICH IS CAMERA-DISTANCE DEPENDENT. 0.12
+    carries no stated normalizer, and the same spec says "normalized by shoulder width
+    dist(11,12)" explicitly where it means that (Band Pull Apart), so the absence here is
+    meaningful. Implemented as written; the same rep filmed further away yields a smaller body,
+    smaller distances, and less firing. `wrist_hip_dist_shoulder_norm` is emitted as a
+    SCALE-FREE DIAGNOSTIC that nothing fires on, so a future validation can compare the two
+    readings without any threshold having been moved in the meantime.
+
+    PHASE SCOPE `peak`, from the spec ("at the top"), and the same downgrade-not-gate view
+    handling `rule_torso_rising` documents.
+
+    KNOWN LIMITATION, NOT CORRECTED HERE: `score_values` are CLIPPED severities (`clip01`
+    inside `severity_from_range`), so in a segment that saturates both sub-severities to 1.0
+    on more than one frame, `build_detection`'s `nanargmax` nominates the FIRST such frame as
+    `peak_frame`, not the worst one. `pushup.rule_head_drop` hit exactly this and fixed it with
+    an unclipped ranking series (`_unclipped`, its docstring has the measured example). Not
+    adopted here because this rule's two axes are in different units (a distance and an angle)
+    and are only comparable at all once put on the SAME 0-1 scale by their own ramps -- an
+    unclipped `_worst_axis` would need its own cross-axis calibration this task does not
+    introduce. The blast radius is narrow: severity, confidence, evidence and `fired_on` are
+    all computed independently of this ordering and are unaffected; only which frame's
+    timestamp gets reported as `peak_frame` inside an already-saturated segment can be
+    suboptimal.
+    """
+    observable = ctx.view_type in TRUNK_OBSERVABLE_VIEWS
+
+    def _sub_severities(frame: CoreFrame) -> tuple[float, float]:
+        distance_value = frame.m("mean_wrist_hip_dist")
+        elbow_value = frame.m("max_elbow_angle")
+        distance_severity = (
+            severity_from_range(distance_value, PULL_DEPTH_MILD, PULL_DEPTH_SEVERE, lower_is_worse=False)
+            if np.isfinite(distance_value) and distance_value > PULL_DEPTH_MILD
+            else 0.0
+        )
+        elbow_severity = (
+            severity_from_range(elbow_value, PEAK_ELBOW_MILD_DEG, PEAK_ELBOW_SEVERE_DEG, lower_is_worse=False)
+            if np.isfinite(elbow_value) and elbow_value > PEAK_ELBOW_MILD_DEG
+            else 0.0
+        )
+        return distance_severity, elbow_severity
+
+    mask = [
+        frame.valid and frame.phase == "peak" and max(_sub_severities(frame)) > 0.0
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        pairs = [_sub_severities(frame) for frame in segment]
+        scores = [max(pair) for pair in pairs]
+        severity = float(np.nanmax(scores))
+        distance_fired = any(pair[0] > 0.0 for pair in pairs)
+        elbow_fired = any(pair[1] > 0.0 for pair in pairs)
+        fired_on = (
+            "both" if distance_fired and elbow_fired else "pull_distance" if distance_fired else "elbow_angle"
+        )
+        max_distance = float(np.nanmax([frame.m("mean_wrist_hip_dist") for frame in segment]))
+        max_elbow = float(np.nanmax([frame.m("max_elbow_angle") for frame in segment]))
+        detections.append(
+            build_detection(
+                fault_id="row_incomplete_rom",
+                fault_name="Incomplete ROM (Pull Not Completed)",
+                kg_query=ROW_INCOMPLETE_ROM_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=scores,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable else "medium",
+                evidence={
+                    "fired_on": fired_on,
+                    "max_wrist_hip_dist": round(max_distance, 4),
+                    "max_peak_elbow_angle_deg": round(max_elbow, 2),
+                    "wrist_hip_dist_shoulder_norm": round(
+                        float(np.nanmax([frame.m("wrist_hip_dist_shoulder_norm") for frame in segment])), 4
+                    ),
+                    "distance_threshold": PULL_DEPTH_MILD,
+                    "elbow_threshold": PEAK_ELBOW_MILD_DEG,
+                    "primary_label": "wrist-to-hip distance at peak"
+                    if fired_on != "elbow_angle"
+                    else "elbow angle at peak",
+                    "primary_value": round(max_distance, 4) if fired_on != "elbow_angle" else round(max_elbow, 2),
+                    "primary_threshold": PULL_DEPTH_MILD if fired_on != "elbow_angle" else PEAK_ELBOW_MILD_DEG,
+                },
+                citation="Fischer J, et al. J Electromyogr Kinesiol (2025), PMID 40513198. "
+                         "Supplemented by Padovan R, et al. J Funct Morphol Kinesiol (2025), "
+                         "PMC12821611.",
+                citation_support="Fischer (prone barbell row, 3 ROMs): \"The LD showed "
+                                 "significantly higher mean muscle excitation in the upper-half "
+                                 "ROM compared to both the lower-half ROM (p < 0.001) and full "
+                                 "ROM (p < 0.001)\" — the top of the pull drives peak lat "
+                                 "excitation. Padovan: the row is driven by \"scapular "
+                                 "retraction, external rotation, and posterior tilt [which] "
+                                 "contributes to optimizing glenohumeral alignment and force "
+                                 "transmission,\" with the concentric endpoint \"defined when "
+                                 "the handle reached the abdominal target.\"",
+            )
+        )
+    return detections

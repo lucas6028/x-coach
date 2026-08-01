@@ -638,5 +638,79 @@ class RowSetupBaselineTest(unittest.TestCase):
         self.assertEqual(len(clean_detections), 1)
 
 
+class RowIncompleteRomTest(unittest.TestCase):
+    def test_a_full_pull_does_not_fire(self) -> None:
+        from src.pose.movements.row import rule_incomplete_rom
+
+        clip = _row_clip(peak_wrist_hip=0.05, peak_elbow=70.0)
+        self.assertEqual(_run_rule(rule_incomplete_rom, clip), [])
+
+    def test_just_inside_both_thresholds_does_not_fire(self) -> None:
+        from src.pose.movements.row import rule_incomplete_rom
+
+        clip = _row_clip(peak_wrist_hip=0.119, peak_elbow=99.0)
+        self.assertEqual(_run_rule(rule_incomplete_rom, clip), [])
+
+    def test_a_short_pull_distance_alone_fires(self) -> None:
+        from src.pose.movements.row import rule_incomplete_rom
+
+        clip = _row_clip(peak_wrist_hip=0.121, peak_elbow=70.0)
+        detections = _run_rule(rule_incomplete_rom, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "row_incomplete_rom")
+        self.assertEqual(detections[0].evidence["fired_on"], "pull_distance")
+
+    def test_an_unbent_elbow_alone_fires(self) -> None:
+        from src.pose.movements.row import rule_incomplete_rom
+
+        clip = _row_clip(peak_wrist_hip=0.05, peak_elbow=101.0)
+        detections = _run_rule(rule_incomplete_rom, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["fired_on"], "elbow_angle")
+
+    def test_severity_is_exact_at_the_distance_ramp_midpoint(self) -> None:
+        from src.pose.movements.row import rule_incomplete_rom
+
+        # Ramp 0.12 -> 0.30; 0.21 is exactly half way.
+        clip = _row_clip(peak_wrist_hip=0.21, peak_elbow=70.0)
+        detections = _run_rule(rule_incomplete_rom, clip)
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
+
+    def test_severity_is_exact_at_the_elbow_ramp_midpoint(self) -> None:
+        from src.pose.movements.row import rule_incomplete_rom
+
+        # Ramp 100 -> 140; 120 is exactly half way.
+        clip = _row_clip(peak_wrist_hip=0.05, peak_elbow=120.0)
+        detections = _run_rule(rule_incomplete_rom, clip)
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
+
+    def test_the_worse_of_the_two_conditions_sets_the_severity(self) -> None:
+        from src.pose.movements.row import rule_incomplete_rom
+
+        # distance 0.21 -> 0.5; elbow 130 -> 0.75. The larger must win.
+        clip = _row_clip(peak_wrist_hip=0.21, peak_elbow=130.0)
+        detections = _run_rule(rule_incomplete_rom, clip)
+        self.assertAlmostEqual(detections[0].severity, 0.75, places=3)
+        self.assertEqual(detections[0].evidence["fired_on"], "both")
+
+    def test_it_reads_the_less_flexed_arm(self) -> None:
+        """The conservative reading: a rep is incomplete if EITHER arm fell short."""
+        from src.pose.movements.row import row_compute_raw, rule_incomplete_rom
+
+        # peak_elbow_dy is NEGATIVE here (the brief's draft used +0.06): a positive dy shifts
+        # the perturbed (left) elbow DOWN, which on this geometry DECREASES its angle (more
+        # flexion), driving max_elbow_angle to the unperturbed ~90 and min_elbow_angle to ~73 --
+        # both under 100, which cannot satisfy this test's own assertions. Measured instead:
+        # -0.06 leaves the unperturbed right arm at ~90.0 (min_elbow_angle, < 100) and pushes the
+        # perturbed left arm to ~111.1 (max_elbow_angle, > 100), which is the geometry this test
+        # requires. Only the sign changed; the magnitude (0.06) is untouched.
+        clip = _row_clip(peak_wrist_hip=0.05, peak_elbow=90.0, peak_elbow_dy=-0.06)
+        raw = row_compute_raw(clip, fps=30.0)
+        peak = raw[-1]
+        self.assertGreater(peak["max_elbow_angle"], 100.0)
+        self.assertLess(peak["min_elbow_angle"], 100.0)
+        self.assertEqual(len(_run_rule(rule_incomplete_rom, clip)), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
