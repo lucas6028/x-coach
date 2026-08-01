@@ -394,6 +394,54 @@ joints 16/17/18 (left hip/knee/ankle) and 21/22/23 (right) for flexion and 18→
 foot vectors, and comparing both criteria at `argmin(min(left, right))` within each
 `Segmentation.csv` window against `SUBTYPE_LEAD_SIDE`.
 
+### 3.3 The replacement, specified and measured end to end
+
+"More anterior" is not directly readable from landmarks — *anterior* is relative to which way the
+subject faces, and the image axes know nothing about that. The construction below is the one
+scored above, written out because the choice of facing estimate is the whole difficulty:
+
+1. **Facing** = the mean of the two ankle→foot-index vectors, normalised. Feet point forward, and
+   averaging *both* feet keeps the estimate symmetric between the sides, which matters because
+   the quantity being decided is itself a left/right question.
+   Two alternatives were rejected by construction, not by test. The image x-axis alone is unusable
+   — its sign depends on which way the subject happens to face. A perpendicular to the hip line
+   (`L_HIP − R_HIP`) is worse than unusable here: the pelvis *rotates toward the lead leg* during a
+   lunge, so that axis is partly a function of the answer, which is the same
+   canonicaliser-leaks-bilateral-information trap this repo has already hit once in the Fit3D axial
+   rotation work.
+2. **Score** each ankle by its projection onto that facing axis, relative to mid-hip.
+3. **Decide** per frame: the larger projection is the lead leg.
+4. **Vote** over every valid frame in the rep, majority wins — *not* the bottom frame alone.
+
+Step 4 is not decoration. Evaluated only at the bottom frame the shipped code already picks, the
+cue scores 0.959/0.894; its errors are **not** near-ties that a margin guard could refuse (on
+cam18 the wrong answers run out to 0.983 leg-lengths of margin, and a guard at 0.20 leg-lengths
+moves accuracy from 0.894 only to 0.899). They are single-frame facing inversions, and on
+**16 of 17** wrong cam18 reps the *majority* of frames were right anyway. Voting therefore
+converts a confident-wrong failure into a non-failure:
+
+| Monocular 2-D, per-frame majority over the labeled window | cam17 | cam18 |
+|---|---|---|
+| **anterior** | **169/169 = 1.000** | **160/161 = 0.994** |
+| flexion — *the shipped cue*, same windows, same gate, same vote | 124/169 = 0.734 | 92/161 = 0.571 |
+
+The bottom row is the **control that keeps this from being confounded**: voting alone lifts the
+flexion cue too (0.598→0.734, 0.478→0.571), so without it the improvement could have been
+attributed to frame selection rather than to the cue. Both changes contribute; the cue dominates,
+and flexion remains far below even with the same voting applied.
+
+Note that this contradicts `resolve_lead_side`'s docstring, which argues *against* per-frame
+evaluation — "a per-frame 'whichever knee is more flexed right now' flickers through `setup` and
+`recovery`, where both knees sit near extension within landmark noise of each other". That
+reasoning is **correct for the flexion cue and does not transfer**: the split stance persists
+through the whole rep, so the anterior cue's per-frame answer is stable exactly where flexion's is
+not. A replacement must re-derive that argument rather than inherit it.
+
+Still not implemented, per the no-tuning policy — this is a measured specification, not a change.
+Implementing it needs a separation guard in normalised distance (the 0.084 leg-length minimum
+correct margin on cam17 bounds where it can sit), a decision for the fallback whole-clip path
+where `window` spans multiple reps and a single vote would be wrong, and a full §4 re-run.
+
 ---
 
 ## 4. Per-rule results
