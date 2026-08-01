@@ -111,8 +111,11 @@ excluded from every rule: no rule below has literature backing for a claim about
 | `hip_angle_deg` | `angle(shoulder_mid(11,12), hip_mid(23,24), knee_mid(25,26))` — rep signal + lockout |
 | `knee_angle_deg` | `angle(hip_mid, knee_mid, ankle_mid(27,28))` — lockout |
 | `torso_pitch_deg` | `angle_from_vertical(shoulder_mid → hip_mid)`, image plane |
-| `shoulder_y`, `hip_y` | image-y of the midpoints, for the rise differential |
+| `hip_y` | image-y of the hip midpoint — §4.3's hips-near-stationary term |
 | `torso_len` | `‖shoulder_mid − hip_mid‖`, image plane |
+
+`shoulder_y` is deliberately absent: the only rule that would have consumed it turned out to be
+computing trunk pitch by another route (§4.1).
 
 `DEADLIFT_METRIC_KEYS` must stay a two-way match with what `deadlift_compute_raw` emits — a key
 the tuple omits is dropped by `run_detector` (which builds each `CoreFrame.metrics` **from**
@@ -137,16 +140,41 @@ mask and the module documents the exposure rather than assuming it away.
 
 ### 4.1 `deadlift_hips_shoot_up`
 
-**Criterion.** During `lift_off`/`mid_pull`, flag when the hips out-rise the shoulders **and**
-the trunk is already flat:
+**Criterion.** During `lift_off`/`mid_pull`, flag when the trunk has flattened relative to the
+rep's own setup **and** is flat in absolute terms:
 
 ```
-hip_lead_ratio = ((hip_y₀ − hip_y) − (shoulder_y₀ − shoulder_y)) / torso_len₀   > 0
-torso_pitch_deg > 55°
+torso_pitch_deg > torso_pitch_deg₀            (flattened vs this rep's setup)
+torso_pitch_deg > 55°                         (flat in absolute terms)
 ```
 
-subscript-0 = the rep's `setup` baseline; image-y grows downward, so a rising landmark has
-decreasing y and a positive displacement term. Severity ramps on peak pitch 55° → 75°.
+subscript-0 = the rep's `setup` baseline. Severity ramps on peak pitch 55° → 75°.
+
+**Why this is not written as a hip-vs-shoulder rise differential.** The parent spec phrases the
+signal as "`Δ(hip_y)` rises faster than `Δ(shoulder_y)`," and an earlier draft of this design
+implemented that literally as
+`hip_lead_ratio = ((hip_y₀ − hip_y) − (shoulder_y₀ − shoulder_y)) / torso_len₀ > 0`. That term
+was checked numerically before being written into code, and it is **algebraically identical to a
+trunk-pitch change**. Since `shoulder_y − hip_y = −torso_len·cos(pitch)`, a rigid torso gives
+
+```
+hip_lead_ratio ≡ cos(pitch₀) − cos(pitch_t)
+```
+
+verified to machine precision on a sagittal stick model. It depends **only** on pitch and carries
+no information whatever about how far the hips travelled — two landmarks dressing up a
+single-angle test. Writing it as a differential would have implied the rule corroborates trunk
+pitch with an independent kinematic signal, which is false. The parent spec's own "i.e." linking
+the two phrasings turns out to be exactly right, so stating the rule in terms of pitch is
+faithful to it, not a deviation.
+
+The term does discriminate — on the stick model a good hinge (pitch 60°→0°) gives −0.21/−0.41/
+−0.50 while a hips-shoot-up rep (60°→75°) gives +0.13/+0.24/+0.19 — which is why the
+relative-to-setup clause is kept. It is what separates the *sequencing* fault the spec describes
+from a lifter who merely sets up flat and stays there; the absolute 55° gate alone cannot.
+
+**Consequence for metrics:** `shoulder_y` is not needed and is not emitted. `hip_y` is still
+required by §4.3.
 
 **Thresholds.** 55°/75° are the parent spec's numbers and have **no numeric backing** — neither
 deadlift RAG document reports a trunk-inclination angle in degrees (verified: the only degree
@@ -317,10 +345,21 @@ this pass records it.
   NaN guards.
 - `deadlift_incomplete_lockout`: a segment firing on the hip criterion alone still scores the
   hip ramp (the OHP mis-attribution regression).
+- **`deadlift_incomplete_lockout` fires on a rep that never locks out.** The phase split keys on
+  peak extension, and the fault *is* failing to reach extension — so a rep peaking at, say, 150°
+  must not collapse `lockout` to fewer frames than
+  `min_frames = max(3, ceil(fps·0.2))`, which would make `contiguous_true_segments` return
+  nothing and silence the rule on exactly the reps it exists to catch. Pinned with an explicit
+  shallow-finish fixture. This is the same class as Lunge's discarded-opening-15% finding, which
+  this codebase has already been bitten by once.
 - View handling, both directions: §4.1 and §4.2 emit off-view at ×0.65; §4.3 emits **nothing**
   off-view and nothing below `view_confidence` 0.20.
 - Registry round-trip; `tests/test_movements_endpoint.py` updated for the five-detector list and
-  `validated` map; frontend `LIVE` list and `pages.Movements.test.tsx` updated.
+  `validated` map.
+- Frontend: moving Deadlift out of the inert list changes the DOM shape of its card from a
+  "Soon" tile to a live button, so two existing assertions in `pages.Movements.test.tsx` must be
+  re-checked rather than assumed — the `liveButtons()).toHaveLength(LIVE.length)` count, and the
+  zh-Hant test asserting 硬舉 renders while the canonical `"Deadlift"` string does not.
 
 Gates, per CLAUDE.md: `.venv\Scripts\python.exe -m pytest tests/`,
 `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95`, and
