@@ -46,6 +46,7 @@ def row_frame(
     wrist_shift: float = 0.0,
     frame_index: int = 0,
     visibility: float = 0.95,
+    strict_angle: bool = False,
 ) -> dict:
     """One bent-over row frame, image y growing DOWNWARD, viewed obliquely.
 
@@ -64,15 +65,41 @@ def row_frame(
                          `shoulder_tilt` (the metric) in magnitude.
       wrist_shift     -- moves the RIGHT wrist further from its hip by this amount; equals
                          `wrist_travel_asymmetry`.
+      strict_angle    -- opt-in guard, OFF by default (see CAVEAT). Does not itself change any
+                         landmark.
 
     CAVEAT -- `elbow_angle_deg` is exact only when `shoulder_tilt` and `wrist_shift` are BOTH
     0. Both knobs move a landmark (the shoulder or the wrist) that is also the elbow's own
-    chord endpoint; the elbow itself is now anchored to the UNPERTURBED endpoint (see the
-    comment below), so the perturbed frame's actual, measured elbow angle drifts off the
-    requested value -- by ~1.2 deg at shoulder_tilt=0.03 and by ~10.4 deg at wrist_shift=0.04
-    (both measured at elbow_angle_deg=99). A boundary/ROM fixture in a later task must NOT
-    combine `elbow_angle_deg` with either asymmetry knob; keep them on separate frames.
+    chord endpoint; the elbow itself is anchored to the UNPERTURBED endpoint (see the comment
+    below) so the two asymmetry metrics stay exact, but that means the frame's ACTUAL, measured
+    elbow angle drifts off the requested value once either knob is nonzero -- by ~1.2 deg at
+    shoulder_tilt=0.03 and by ~10.4 deg at wrist_shift=0.04 (both measured at
+    elbow_angle_deg=99).
+
+    This is NOT flagged unconditionally, because plenty of legitimate fixtures pass a nonzero
+    `elbow_angle_deg` together with a nonzero `shoulder_tilt`/`wrist_shift` without caring about
+    the angle's exactness at all -- e.g. a later task's per-frame clip helper that sets
+    `elbow_angle_deg` on every frame just to keep the rep phased correctly, while the frame
+    under test is really asserting on `shoulder_tilt`. Rejecting that combination outright would
+    break those fixtures for a drift they never rely on. Instead this is OPT-IN: pass
+    `strict_angle=True` when a test genuinely asserts on `elbow_angle_deg`/`min_elbow_angle`/
+    `max_elbow_angle` for a frame that ALSO carries a nonzero asymmetry knob, and the loud
+    `ValueError` fires instead of a silently-wrong boundary. Frames that merely set an angle in
+    passing are unaffected.
     """
+    if strict_angle and (shoulder_tilt != 0.0 or wrist_shift != 0.0):
+        raise ValueError(
+            "row_frame(strict_angle=True): elbow_angle_deg was combined with a nonzero "
+            "shoulder_tilt or wrist_shift. Per the CAVEAT in this docstring, the elbow is "
+            "anchored to the UNPERTURBED shoulder/wrist so the two asymmetry metrics stay "
+            "exact, but that means the frame's ACTUAL measured elbow angle drifts off the "
+            "requested elbow_angle_deg (~1.2 deg at shoulder_tilt=0.03, ~10.4 deg at "
+            "wrist_shift=0.04, both measured at elbow_angle_deg=99) -- asserting on the angle "
+            "here would silently check against the wrong number. Put the angle assertion and "
+            "the asymmetry knobs on separate frames, or drop strict_angle=True if this frame "
+            "does not actually assert on the angle."
+        )
+
     hip_mid = (0.60, 0.55)
     trunk_len = 0.30
     theta = math.radians(trunk_angle_deg)
@@ -124,6 +151,34 @@ def row_frame(
     landmarks[23] = _lm(*left_hip, visibility)
     landmarks[24] = _lm(*right_hip, visibility)
     return {"frame_index": frame_index, "landmarks": landmarks}
+
+
+class RowFrameFixtureTest(unittest.TestCase):
+    """Guards on the FIXTURE helper itself, not on `src.pose.movements.row`."""
+
+    def test_strict_angle_combined_with_an_asymmetry_knob_raises(self) -> None:
+        # Each combination independently trips the opt-in guard described in row_frame's
+        # CAVEAT -- strict_angle=True asserts the caller cares about elbow_angle_deg's
+        # exactness, and either asymmetry knob silently drifts the frame's actual elbow angle
+        # off the requested value.
+        with self.assertRaises(ValueError):
+            row_frame(elbow_angle_deg=99.0, shoulder_tilt=0.03, strict_angle=True)
+        with self.assertRaises(ValueError):
+            row_frame(elbow_angle_deg=99.0, wrist_shift=0.04, strict_angle=True)
+        with self.assertRaises(ValueError):
+            row_frame(elbow_angle_deg=99.0, shoulder_tilt=0.03, wrist_shift=0.04, strict_angle=True)
+
+    def test_the_same_call_without_strict_angle_does_not_raise(self) -> None:
+        # Identical knobs, `strict_angle` simply omitted: a fixture that sets an angle in
+        # passing (without asserting on it) must be unaffected by the guard.
+        row_frame(elbow_angle_deg=99.0, shoulder_tilt=0.03)
+        row_frame(elbow_angle_deg=99.0, wrist_shift=0.04)
+        row_frame(elbow_angle_deg=99.0, shoulder_tilt=0.03, wrist_shift=0.04)
+
+    def test_strict_angle_alone_does_not_raise(self) -> None:
+        # strict_angle only fires together with a nonzero asymmetry knob; on its own (no tilt,
+        # no shift) there is nothing to drift the angle, so it is a no-op.
+        row_frame(elbow_angle_deg=99.0, strict_angle=True)
 
 
 class RowMetricsTest(unittest.TestCase):
@@ -230,6 +285,44 @@ class RowDerivativeTest(unittest.TestCase):
         frames = [row_frame(trunk_angle_deg=10.0 + 2.0 * i, frame_index=i) for i in range(5)]
         raw = row_compute_raw(frames, fps=30.0)
         self.assertAlmostEqual(raw[2]["trunk_angle_speed_deg_s"], 60.0, places=3)
+
+    def test_an_interior_invalid_frame_poisons_only_its_derivative_neighbours(self) -> None:
+        """`wrist_accel_norm` is `_derivative` applied TWICE (velocity, then acceleration), so
+        a single-frame hole propagates through two composed central differences with a
+        DERIVED radius, not a guessed one:
+
+        Frame 3 of 7 is made invalid, so `wrist_mid_x`/`wrist_mid_y` carry NaN at index 3.
+        - PASS 1 (velocity): `_derivative`'s central difference at index i reads positions
+          i-1 and i+1, never i itself, so a hole exactly AT index 3 poisons velocity at its
+          two neighbours, indices 2 and 4 -- NOT at index 3, where the velocity estimate
+          skips over the hole and is unaffected. Velocity is therefore NaN at {0 (boundary),
+          2, 4, 6 (boundary)} and finite at {1, 3, 5}.
+        - PASS 2 (acceleration): applying the same rule to the velocity series above, each
+          NaN velocity index poisons acceleration at its own two neighbours. Velocity index 0
+          poisons acceleration index 1; velocity index 2 poisons acceleration indices 1 and 3;
+          velocity index 4 poisons acceleration indices 3 and 5; velocity index 6 poisons
+          acceleration index 5. Acceleration indices 2 and 4 each depend on ONE poisoned and
+          ONE clean velocity value (velocity[1]/velocity[3] and velocity[3]/velocity[5]
+          respectively) plus the always-clean velocity[3] -- so they stay finite.
+
+        Net radius for a hole at frame k=3 (verified numerically before writing this
+        assertion): acceleration is NaN at k-2, k, k+2 -> frames {1, 3, 5}, in addition to the
+        permanent boundary NaNs at {0, 6}; it stays finite at k-1, k+1 -> frames {2, 4}. Frame
+        3 itself has no `wrist_accel_norm` key at all (the whole frame is invalid).
+        """
+        from src.pose.movements.row import row_compute_raw
+
+        frames = [row_frame(wrist_hip_dist=0.05 + 0.01 * i, frame_index=i) for i in range(7)]
+        frames[3]["landmarks"][15] = _lm(0.5, 0.5, 0.10)  # left wrist below VISIBILITY_THRESHOLD
+        raw = row_compute_raw(frames, fps=30.0)
+
+        self.assertFalse(raw[3]["valid"])
+        self.assertNotIn("wrist_accel_norm", raw[3])
+
+        for index in (0, 1, 5, 6):
+            self.assertTrue(math.isnan(raw[index]["wrist_accel_norm"]), f"index {index}")
+        for index in (2, 4):
+            self.assertFalse(math.isnan(raw[index]["wrist_accel_norm"]), f"index {index}")
 
 
 class RowPhaseTest(unittest.TestCase):
