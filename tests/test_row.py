@@ -404,10 +404,19 @@ def _row_clip(
 
 
 def _run_rule(rule, frames: list[dict], view_type: str = "rear_oblique", view_confidence: float = 0.8):
-    """Run ONE rule over a clip, bypassing rep segmentation.
+    """Run ONE rule over a clip, bypassing rep segmentation AND `run_detector`'s smoothing.
 
     Rules receive a per-rep slice from `run_detector`; here the whole clip IS the window, which
     is the `only_partial_reps` fallback shape and is what a single-rep fixture should exercise.
+
+    This also bypasses `run_detector`'s 5-frame median filter over every metric key: `core` is
+    built straight from `row_compute_raw`/`row_assign_phases`, never through `run_detector`
+    itself. `_row_clip`'s docstring justifies its constant-value segments by citing that
+    filter (a held segment makes a median filter a no-op) -- true in the full pipeline, but not
+    the reason boundary fixtures need to be exact ON THIS PATH, since there is no filter here to
+    be a no-op of. Constant segments are still the right fixture shape regardless: an exact
+    input still makes an exact, non-approximate assertion possible, and the assertions stay
+    correct if this helper is ever routed through `run_detector` later.
     """
     from src.pose.movements.base import CoreFrame, RuleContext
     from src.pose.movements.row import ROW_METRIC_KEYS, row_assign_phases, row_compute_raw
@@ -483,6 +492,150 @@ class RowTorsoRisingTest(unittest.TestCase):
         for frame in clip[:6]:
             frame["landmarks"][11] = _lm(0.5, 0.5, 0.10)
         self.assertEqual(_run_rule(rule_torso_rising, clip), [])
+
+
+class RowSetupBaselineTest(unittest.TestCase):
+    """Tests of `_setup_baseline` itself -- the shared helper Tasks 3-5 reuse -- not of any one
+    rule that consumes it.
+    """
+
+    def test_the_baseline_is_the_median_not_the_mean_of_a_non_constant_setup(self) -> None:
+        """Every `_row_clip` fixture holds `setup_trunk` CONSTANT across the whole setup slice,
+        where median and mean coincide -- that is not enough to prove `_setup_baseline` actually
+        calls `np.median` rather than `np.mean` (the same gap Task 1's `_derivative` had, for
+        the same reason: a fixture that cannot distinguish the two implementations passes either
+        way). Four setup frames at the true resting angle (20 deg) plus a fifth outlier at
+        60 deg MEDIAN to 20 (the outlier is out-voted 4-to-1) but would MEAN to 28 -- a
+        mean-based helper fails the `assertAlmostEqual(baseline, 20.0, ...)` below.
+
+        Frame count is chosen, not assumed: `row_assign_phases`'s `setup_cutoff =
+        max(1, int(frame_count * 0.15))` needs to land on EXACTLY 5 for this fixture's 5 crafted
+        values to be the whole setup slice (34 frames -> int(34 * 0.15) == 5). The phase
+        assertions below check that this landed as intended rather than trusting the arithmetic
+        silently.
+        """
+        from src.pose.movements.base import CoreFrame
+        from src.pose.movements.row import (
+            ROW_METRIC_KEYS,
+            _setup_baseline,
+            row_assign_phases,
+            row_compute_raw,
+        )
+
+        setup_trunks = [20.0, 20.0, 20.0, 20.0, 60.0]
+        frames: list[dict] = []
+        index = 0
+        for trunk in setup_trunks:
+            frames.append(
+                row_frame(trunk_angle_deg=trunk, elbow_angle_deg=170.0, wrist_hip_dist=0.30, frame_index=index)
+            )
+            index += 1
+        for _ in range(29):
+            frames.append(
+                row_frame(trunk_angle_deg=20.0, elbow_angle_deg=70.0, wrist_hip_dist=0.05, frame_index=index)
+            )
+            index += 1
+
+        raw = row_compute_raw(frames, fps=30.0)
+        phases = row_assign_phases(raw)
+        # This fixture's phase cutoff must land on EXACTLY these 5 frames -- not 4, not 6 --
+        # or the test below would silently exercise a different setup slice than intended.
+        self.assertEqual(phases[:5], ["setup"] * 5)
+        self.assertNotEqual(phases[5], "setup")
+
+        core = [
+            CoreFrame(
+                frame_index=int(item.get("frame_index", i) or i),
+                time=float(item.get("time", 0.0) or 0.0),
+                phase=phases[i],
+                valid=bool(item.get("valid", False)),
+                lower_body_visibility=float(item.get("lower_body_visibility", 0.0) or 0.0),
+                metrics={key: float(item.get(key, np.nan)) for key in ROW_METRIC_KEYS},
+            )
+            for i, item in enumerate(raw)
+        ]
+        baseline = _setup_baseline(core, "trunk_angle_from_horizontal_deg")
+        self.assertAlmostEqual(baseline, 20.0, places=3)
+        mean_of_the_same_values = (20.0 * 4 + 60.0) / 5
+        # Not asserting the mean's exact value (that would just restate the arithmetic) -- only
+        # that the median result is meaningfully far from what a mean-based helper would have
+        # produced, which is the property a `np.median` -> `np.mean` mutant would violate.
+        self.assertGreater(abs(baseline - mean_of_the_same_values), 5.0)
+
+    def test_a_contaminated_setup_frame_biases_the_baseline_upward_and_can_mask_a_real_rise(self) -> None:
+        """Regression test for `_setup_baseline`'s documented STATED LIMITATION: on a short rep,
+        the setup slice (here 2 of 14 frames -- `row_assign_phases`'s
+        `max(1, int(14 * 0.15)) == 2`) can already contain a risen frame, before the rule has
+        seen a single `peak` frame. This asserts the DIRECTION of the resulting error, not a
+        magic number: the contaminated baseline reads HIGHER than the true resting angle, which
+        makes `peak - baseline` SMALLER than the true rise. Two consequences are checked
+        together, both required by the documented limitation: the bias itself (baseline pulled
+        toward the intruding frame) and its behavioral cost (a genuine ~20-degree rise, well
+        past the 15-degree fire threshold, going completely undetected) -- i.e. the failure mode
+        is a MISSED fault, never a false one.
+        """
+        from src.pose.movements.base import CoreFrame
+        from src.pose.movements.row import (
+            ROW_METRIC_KEYS,
+            _setup_baseline,
+            row_assign_phases,
+            row_compute_raw,
+            rule_torso_rising,
+        )
+
+        # Setup: frame 0 at the true resting angle (20 deg); frame 1 ALREADY risen to 39 deg,
+        # simulating a lifter who starts rising before the setup window closes. Peak: 12 frames
+        # held at 40 deg -- a genuine 20-degree rise over the TRUE baseline, but only a
+        # 10.5-degree rise over the CONTAMINATED one (40 - 29.5), which does not clear 15.
+        contaminated_clip = [
+            row_frame(trunk_angle_deg=20.0, elbow_angle_deg=170.0, wrist_hip_dist=0.30, frame_index=0),
+            row_frame(trunk_angle_deg=39.0, elbow_angle_deg=170.0, wrist_hip_dist=0.30, frame_index=1),
+        ] + [
+            row_frame(trunk_angle_deg=40.0, elbow_angle_deg=70.0, wrist_hip_dist=0.05, frame_index=i)
+            for i in range(2, 14)
+        ]
+        self.assertEqual(len(contaminated_clip), 14)  # setup_cutoff = max(1, int(14*0.15)) == 2
+
+        raw = row_compute_raw(contaminated_clip, fps=30.0)
+        phases = row_assign_phases(raw)
+        self.assertEqual(phases[:2], ["setup", "setup"])
+        self.assertNotEqual(phases[2], "setup")
+        core = [
+            CoreFrame(
+                frame_index=int(item.get("frame_index", i) or i),
+                time=float(item.get("time", 0.0) or 0.0),
+                phase=phases[i],
+                valid=bool(item.get("valid", False)),
+                lower_body_visibility=float(item.get("lower_body_visibility", 0.0) or 0.0),
+                metrics={key: float(item.get(key, np.nan)) for key in ROW_METRIC_KEYS},
+            )
+            for i, item in enumerate(raw)
+        ]
+
+        # (1) THE BIAS, DIRECTLY: the contaminated baseline sits strictly between the true
+        # resting angle and the intruding frame's value, and strictly above the true angle.
+        baseline = _setup_baseline(core, "trunk_angle_from_horizontal_deg")
+        self.assertGreater(baseline, 20.0)
+        self.assertLess(baseline, 39.0)
+
+        # (2) THE CONSEQUENCE: the same real ~20-degree rise, run through the actual rule, is
+        # silently missed once contaminated -- never flagged as a false positive, just absent.
+        contaminated_detections = _run_rule(rule_torso_rising, contaminated_clip)
+        self.assertEqual(contaminated_detections, [])
+
+        # CONTROL: an otherwise-identical clip whose setup is clean (both frames at the true
+        # 20-degree angle). Same real 20-degree rise to the same 40-degree peak, no
+        # contamination -- the rule fires as it should, proving the miss above was caused by the
+        # contaminated setup frame and not by some other property of the fixture.
+        clean_clip = [
+            row_frame(trunk_angle_deg=20.0, elbow_angle_deg=170.0, wrist_hip_dist=0.30, frame_index=0),
+            row_frame(trunk_angle_deg=20.0, elbow_angle_deg=170.0, wrist_hip_dist=0.30, frame_index=1),
+        ] + [
+            row_frame(trunk_angle_deg=40.0, elbow_angle_deg=70.0, wrist_hip_dist=0.05, frame_index=i)
+            for i in range(2, 14)
+        ]
+        clean_detections = _run_rule(rule_torso_rising, clean_clip)
+        self.assertEqual(len(clean_detections), 1)
 
 
 if __name__ == "__main__":

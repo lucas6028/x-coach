@@ -388,11 +388,24 @@ def _setup_baseline(core: list[CoreFrame], key: str) -> float:
     MEDIAN, NOT MEAN, so one bad frame in a six-frame setup cannot move the reference every
     later comparison is made against.
 
-    NO BASELINE MEANS SILENCE, never a guessed one: an occluded setup returns NaN and the
-    caller emits nothing. Stated cost of the per-rep scope: a lifter who is ALREADY rounded or
-    rotated at this rep's setup reads as clean. A clip-level baseline would catch that but
-    would make rep N's verdict depend on rep 1's frames, which this architecture deliberately
-    does not do.
+    NEVER A GUESSED BASELINE -- but what a caller does with a NaN one is conditional on the
+    caller's own fire condition, NOT a universal "return []" contract:
+      - A rule whose fire condition depends ONLY on this baseline (e.g. `rule_torso_rising`'s
+        `peak - baseline > threshold`) has nothing left to evaluate once the baseline is NaN,
+        and must return `[]`, same as `rule_torso_rising` does.
+      - A rule whose fire condition is a DISJUNCTION with a non-baseline term (e.g. Task 5's
+        `rule_asymmetric_pull`, which fires on `elbow_height_asymmetry > 0.05` OR
+        `shoulder_tilt - baseline > 0.04`) must NOT return `[]` outright on a NaN baseline --
+        that would silence the elbow-only branch, which the spec states should still fire when
+        the baseline term is unmeasurable. Such a rule drops only the baseline-dependent
+        disjunct (treat that comparison as `False`, which `NaN > threshold` already evaluates
+        to) and keeps evaluating the rest.
+    Both branches serve the same principle: an occluded setup must never be papered over with a
+    guessed number, only either silence the whole rule (when the guess was the only signal) or
+    silently drop just the guessed term (when other signal remains). Stated cost of the per-rep
+    scope either way: a lifter who is ALREADY rounded or rotated at this rep's setup reads as
+    clean on the baseline-dependent term. A clip-level baseline would catch that but would make
+    rep N's verdict depend on rep 1's frames, which this architecture deliberately does not do.
 
     STATED LIMITATION, MEASURED NOT HYPOTHETICAL: `setup` is the first 15% of the REP WINDOW
     (`row_assign_phases`'s `setup_cutoff`), and the window handed to a rule has already been
