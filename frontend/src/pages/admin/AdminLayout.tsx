@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   ArrowLeft,
+  ChatCircleText,
   CircleNotch,
   Gauge,
   List,
@@ -31,6 +32,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: "/admin", end: true, labelKey: "admin.nav.overview", Icon: Gauge },
   { to: "/admin/users", labelKey: "admin.nav.users", Icon: Users },
+  { to: "/admin/line", labelKey: "admin.nav.line", Icon: ChatCircleText },
   { to: "/admin/settings/llm", labelKey: "admin.nav.settingsLlm", Icon: Brain },
   { to: "/admin/settings/rag", labelKey: "admin.nav.settingsRag", Icon: Graph },
   { to: "/admin/settings/analyze", labelKey: "admin.nav.settingsAnalyze", Icon: SlidersHorizontal },

@@ -11,6 +11,7 @@ import {
 } from "../api";
 import AdminLayout from "../pages/admin/AdminLayout";
 import AdminOverviewPage from "../pages/admin/AdminOverview";
+import AdminLinePage from "../pages/admin/AdminLine";
 import AdminUsers from "../pages/admin/AdminUsers";
 import AdminSettingsLlm from "../pages/admin/AdminSettingsLlm";
 import AdminSettingsRag from "../pages/admin/AdminSettingsRag";
@@ -59,6 +60,12 @@ const SAMPLE_LINE_STATUS: LineStatus = {
   channel_id: "2010629653",
   quota: { type: "limited", used: 12, value: 200, remaining: 188 },
   quota_error: null,
+  bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "bot", mark_as_read_mode: "auto" },
+  bot_info_error: null,
+  webhook: { endpoint: "https://x-coach.app/api/line/webhook", active: true },
+  webhook_error: null,
+  delivery: { date: "20260720", reply: 4, push: 3 },
+  delivery_error: null,
 };
 
 // Row "u1" is the signed-in admin (self, cannot self-demote); "u2" is a non-admin togglable user.
@@ -96,6 +103,7 @@ function renderAdmin(path: string) {
         <Routes>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminOverviewPage />} />
+            <Route path="line" element={<AdminLinePage />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="settings/llm" element={<AdminSettingsLlm />} />
             <Route path="settings/rag" element={<AdminSettingsRag />} />
@@ -127,16 +135,20 @@ beforeEach(() => {
   vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
   vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
   vi.spyOn(api, "getLineStatus").mockResolvedValue(SAMPLE_LINE_STATUS);
+  vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+    result: { success: true, status_code: 200, reason: "OK", detail: "200" }, error: null,
+  });
 });
 afterEach(() => vi.restoreAllMocks());
 
 describe("AdminLayout gate", () => {
   it("renders the admin nav for an admin", async () => {
     renderAdmin("/admin");
-    // The nav lists all five admin destinations (plus the back-to-app link). The rail is rendered in
+    // The nav lists all six admin destinations (plus the back-to-app link). The rail is rendered in
     // both the desktop shell and the (off-canvas) mobile drawer, so each link appears more than once.
     expect((await screen.findAllByRole("link", { name: "Users" })).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "LLM chat" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "LINE" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "Back to app" }).length).toBeGreaterThan(0);
     expect(
       screen.queryByText("You don't have access to the admin panel.")
@@ -178,8 +190,27 @@ describe("AdminOverview", () => {
     expect(screen.getByText("1/2 ready")).toBeInTheDocument();
   });
 
-  it("renders the LINE quota cards when messaging is configured with a limit", async () => {
+  it("no longer fetches the LINE status (moved to its own page)", async () => {
     renderAdmin("/admin");
+    await screen.findByText("Total users");
+    expect(api.getLineStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("AdminLine", () => {
+  it("renders the page header", async () => {
+    renderAdmin("/admin/line");
+    expect(await screen.findByRole("heading", { name: "LINE" })).toBeInTheDocument();
+  });
+
+  it("shows a load error when the LINE status fetch fails", async () => {
+    vi.spyOn(api, "getLineStatus").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("Couldn't load the LINE status.")).toBeInTheDocument();
+  });
+
+  it("renders the LINE quota cards when messaging is configured with a limit", async () => {
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Push used this month")).toBeInTheDocument();
     expect(screen.getByText("12 / 200")).toBeInTheDocument();
     expect(screen.getByText("Free remaining")).toBeInTheDocument();
@@ -191,7 +222,7 @@ describe("AdminOverview", () => {
       ...SAMPLE_LINE_STATUS,
       quota: { type: "none", used: 9 },
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("9")).toBeInTheDocument(); // used, no "/ limit"
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(
@@ -205,16 +236,8 @@ describe("AdminOverview", () => {
       quota: null,
       quota_error: "unreachable",
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Couldn't reach LINE for quota.")).toBeInTheDocument();
-  });
-
-  it("does not break the overview when the LINE status fetch fails", async () => {
-    vi.spyOn(api, "getLineStatus").mockRejectedValue(new Error("500 boom"));
-    renderAdmin("/admin");
-    // Main overview still renders; the LINE section simply renders nothing.
-    expect(await screen.findByText("Total users")).toBeInTheDocument();
-    expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
   });
 
   it("shows only the connection-status cards when LINE is not configured", async () => {
@@ -224,14 +247,143 @@ describe("AdminOverview", () => {
       channel_id: "",
       quota: null,
       quota_error: null,
+      bot_info: null,
+      bot_info_error: null,
+      webhook: null,
+      webhook_error: null,
+      delivery: null,
+      delivery_error: null,
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     // The two LINE connection cards render (both "Not configured"), but no quota UI appears.
     expect(await screen.findByText("LINE login bridge")).toBeInTheDocument();
     expect(screen.getByText("LINE bot")).toBeInTheDocument();
     expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
     expect(screen.queryByText("Free remaining")).not.toBeInTheDocument();
     expect(screen.queryByText("Couldn't reach LINE for quota.")).not.toBeInTheDocument();
+    // Unconfigured must NOT masquerade as a failed read: no "couldn't read" notes, no Test button.
+    expect(screen.queryByRole("button", { name: "Test webhook" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't read/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the bot info, webhook, and delivery cards", async () => {
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("x-coach")).toBeInTheDocument();
+    expect(screen.getByText("@xcoach")).toBeInTheDocument();
+    expect(screen.getByText("Webhook")).toBeInTheDocument();
+    expect(screen.getByText("Replies yesterday")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument(); // reply count
+    expect(screen.getByText("3")).toBeInTheDocument(); // push count
+  });
+
+  it("warns when the bot is in chat mode (webhook won't receive events)", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "chat", mark_as_read_mode: "auto" },
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText(/won't receive message events/i)).toBeInTheDocument();
+  });
+
+  it("shows 'not ready yet' when delivery counts are unavailable", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      delivery: { date: "20260720", reply: null, push: null },
+    });
+    renderAdmin("/admin/line");
+    expect((await screen.findAllByText("Not ready yet")).length).toBeGreaterThan(0);
+  });
+
+  it("runs the webhook test and shows a reachable result", async () => {
+    const testFn = vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+      result: { success: true, status_code: 200, reason: "OK", detail: "200" },
+      error: null,
+    });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    await waitFor(() => expect(testFn).toHaveBeenCalled());
+    expect(await screen.findByText(/Reachable \(200\)/i)).toBeInTheDocument();
+  });
+
+  it("shows an error when the webhook test can't reach LINE", async () => {
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error: "unreachable" });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    expect(await screen.findByText("Couldn't reach LINE.")).toBeInTheDocument();
+  });
+
+  it("shows the status code and reason when the webhook test reports success: false", async () => {
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+      result: { success: false, status_code: 500, reason: "ERROR", detail: "500" },
+      error: null,
+    });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    const msg = await screen.findByText(/Failed/i);
+    expect(msg.textContent).toContain("500");
+    expect(msg.textContent).toContain("ERROR");
+  });
+
+  it("never fires the webhook test on page load — only on an explicit click", async () => {
+    renderAdmin("/admin/line");
+    await screen.findByRole("button", { name: "Test webhook" });
+    expect(api.testLineWebhook).not.toHaveBeenCalled();
+  });
+
+  it("renders the delivery date under the reply/push count cards", async () => {
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("Replies yesterday")).toBeInTheDocument();
+    expect(screen.getByText("Counts for 2026-07-20")).toBeInTheDocument();
+  });
+
+  // A failed read must FLAG itself, never erase its own card — otherwise the panel hides the exact
+  // misconfiguration it exists to diagnose, and the admin reads "broken" as "never shipped".
+  it("keeps the webhook card and its Test button when the webhook read failed", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      webhook: null,
+      webhook_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText(/Couldn't read the webhook setting/i)).toBeInTheDocument();
+    // The active probe is the only way left to learn WHY, so it must survive the failed read.
+    expect(screen.getByRole("button", { name: "Test webhook" })).toBeInTheDocument();
+  });
+
+  it("flags a failed bot-info read instead of dropping the card", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      bot_info: null,
+      bot_info_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("Official account")).toBeInTheDocument();
+    expect(screen.getByText(/Couldn't read the official-account info/i)).toBeInTheDocument();
+  });
+
+  it("flags a failed delivery read instead of dropping the counts", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      delivery: null,
+      delivery_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText(/Couldn't read yesterday's delivery counts/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    ["unauthorized" as const, /rejected the channel access token/i],
+    ["rate_limited" as const, /rate-limited/i],
+    ["no_endpoint" as const, /No webhook endpoint is set/i],
+    ["not_configured" as const, /isn't configured on this server/i],
+  ])("names the cause when the webhook test fails with %s", async (error, pattern) => {
+    // Reporting a bad token or a rate limit as "couldn't reach LINE" sends the admin chasing
+    // connectivity — the diagnostics tool would be the source of the misdiagnosis.
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    expect(await screen.findByText(pattern)).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't reach LINE.")).not.toBeInTheDocument();
   });
 });
 

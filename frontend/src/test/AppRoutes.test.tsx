@@ -24,6 +24,7 @@ vi.mock("../pages/LiffDiag", () => ({ default: () => <div>liff diag page</div> }
 vi.mock("../pages/admin/AdminLogin", () => ({ default: () => <div>admin login page</div> }));
 vi.mock("../pages/admin/AdminLayout", () => ({ default: () => <div>admin page</div> }));
 vi.mock("../pages/admin/AdminOverview", () => ({ default: () => <div>admin overview</div> }));
+vi.mock("../pages/admin/AdminLine", () => ({ default: () => <div>admin line</div> }));
 vi.mock("../pages/admin/AdminUsers", () => ({ default: () => <div>admin users</div> }));
 vi.mock("../pages/admin/AdminSettingsLlm", () => ({ default: () => <div>admin llm</div> }));
 vi.mock("../pages/admin/AdminSettingsRag", () => ({ default: () => <div>admin rag</div> }));
