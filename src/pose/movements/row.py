@@ -697,3 +697,154 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
             )
         )
     return detections
+
+
+# FROM THE SPEC: "flag if peak concentric wrist acceleration exceeds ~3x the rep's median
+# concentric acceleration".
+JERK_RATIO_MILD = 3.0
+# RULE-LEVEL CHOICE MADE HERE: 2.5x the fire threshold, `pushup.rule_hip_sag`'s convention.
+JERK_RATIO_SEVERE = 7.5
+
+# RULE-LEVEL MEASURABILITY GUARD -- the third category, the one that can ONLY EVER SILENCE.
+# If the median acceleration over the pull is at or below this floor the wrists barely moved,
+# every ratio divides by ~0, and the rule would emit a confident maximum-severity jerk verdict
+# on a stationary lifter. Refusing is the lesser evil. Not a tuned number and not a fire
+# threshold; it can never cause a detection, only prevent a meaningless one.
+_DEGENERATE_ACCEL = 1e-4
+
+
+def rule_momentum_jerk(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag the bar being yanked -- an acceleration transient during the concentric pull.
+
+    THIS RULE BREAKS TWO SHARED CONVENTIONS ON PURPOSE. Both are stated here because a reviewer
+    should see the deviation argued rather than discover it.
+
+    (1) IT DOES NOT USE `ctx.min_frames`. Every other rule in this codebase passes it to
+    `contiguous_true_segments` because every other rule tests a SUSTAINED STATE. A jerk is a
+    TRANSIENT: `min_frames` is max(3, ceil(fps * 0.20)) -- 6 frames at 30 fps -- and a genuine
+    bar-yank spike lasts 1-3. Requiring a fifth of a second of sustained jerk contradicts the
+    fault's definition, so this rule passes 1 and fires as a per-rep EVENT.
+
+    (2) ITS METRIC IS A DERIVATIVE COMPUTED IN `row_compute_raw`, not differenced here.
+    `run_detector` median-filters every key in `metric_keys`; a 5-frame median over a POSITION
+    series erases the transient before any rule sees it. Emitting the acceleration as the
+    metric makes that filter a low-pass on the quantity of interest instead.
+
+    THE THRESHOLD IS SELF-NORMALIZING AND IS EXPECTED TO OVER-FIRE. "3x the rep's median"
+    compares a peak against a median that includes the near-zero accelerations at both ends of
+    the pull, so a controlled rep with an ordinary bell-shaped velocity profile can exceed it.
+    There is no labeled row video anywhere in this repository (the design spec's §2), and
+    threshold tuning is off the table by standing decision, so this ships spec-faithful with
+    its expected failure mode NAMED -- the same treatment `lunge_pelvic_drop`'s split-stance
+    foreshortening bias received. If it ever meets data and fires at similar rates on clean and
+    jerky reps, the honest conclusion is that the self-normalizing threshold does not
+    discriminate, not that rows are universally jerky.
+
+    ON A FALLBACK PATH THE NORMALIZATION SILENTLY CHANGES MEANING: "the rep's median" becomes
+    "the whole clip's median over every `pull` frame" when no rep was segmented. The rule still
+    runs; `evidence["median_over_frames"]` records how many frames the median was taken over so
+    a reader can tell which case they are looking at.
+
+    A STABLE FRAME RATE IS ASSUMED AND NEVER VERIFIED. `ctx.fps` is one scalar and nothing in
+    the pipeline checks inter-frame spacing; every acceleration number inherits that.
+
+    THE SPEC'S SECOND, OR'd CONDITION IS DEGENERATE AND IS NOT IMPLEMENTED AS AN OR. It reads
+    "OR if a simultaneous trunk-angle velocity spike co-occurs WITH THE WRIST SPIKE (heave)" --
+    its own text requires the wrist spike condition one already tests, so it describes a strict
+    SUBSET and can never widen the fire set. It is implemented as EVIDENCE instead: the trunk
+    speed over the fired frames is tested against its own 3x median and recorded in
+    `evidence["trunk_heave"]`, which separates an arms-only yank from a whole-body heave for
+    the coaching cue without changing whether anything fires.
+
+    OBSERVABILITY IS `medium` IN EVERY VIEW, with no discount. The spec rates this "medium --
+    any view with the pulling wrist visible"; no view earns better, so there is no `high` to
+    downgrade FROM and applying the x0.65 off-view scale would be inventing a penalty the spec
+    does not describe.
+    """
+    pull_accels = [
+        frame.m("wrist_accel_norm")
+        for frame in core
+        if frame.valid and frame.phase == "pull" and np.isfinite(frame.m("wrist_accel_norm"))
+    ]
+    if len(pull_accels) < 3:
+        return []
+    median_accel = float(np.median(pull_accels))
+    if median_accel <= _DEGENERATE_ACCEL:
+        return []
+
+    def _ratio(frame: CoreFrame) -> float:
+        value = frame.m("wrist_accel_norm")
+        return value / median_accel if np.isfinite(value) else float(np.nan)
+
+    mask = [
+        frame.valid
+        and frame.phase == "pull"
+        and np.isfinite(_ratio(frame))
+        and _ratio(frame) > JERK_RATIO_MILD
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    # min_frames=1, not ctx.min_frames -- see (1) in the docstring.
+    for start, end in contiguous_true_segments(mask, 1):
+        segment = core[start : end + 1]
+        ratios = [_ratio(frame) for frame in segment]
+        max_ratio = float(np.nanmax(ratios))
+        severity = severity_from_range(
+            max_ratio, JERK_RATIO_MILD, JERK_RATIO_SEVERE, lower_is_worse=False
+        )
+
+        trunk_speeds = [
+            frame.m("trunk_angle_speed_deg_s")
+            for frame in core
+            if frame.valid and frame.phase == "pull" and np.isfinite(frame.m("trunk_angle_speed_deg_s"))
+        ]
+        trunk_median = float(np.median(trunk_speeds)) if trunk_speeds else float(np.nan)
+        segment_trunk = [
+            frame.m("trunk_angle_speed_deg_s")
+            for frame in segment
+            if np.isfinite(frame.m("trunk_angle_speed_deg_s"))
+        ]
+        heave = (
+            np.isfinite(trunk_median)
+            and trunk_median > _DEGENERATE_ACCEL
+            and bool(segment_trunk)
+            and max(segment_trunk) > JERK_RATIO_MILD * trunk_median
+        )
+
+        detections.append(
+            build_detection(
+                fault_id="row_momentum_jerk",
+                fault_name="Momentum / Jerk (Body English)",
+                kg_query=ROW_MOMENTUM_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=ratios,
+                severity=severity,
+                confidence=severity,
+                observability="medium",
+                evidence={
+                    "peak_accel_ratio": round(max_ratio, 3),
+                    "median_pull_accel": round(median_accel, 5),
+                    "median_over_frames": len(pull_accels),
+                    "trunk_heave": "yes" if heave else "no",
+                    "threshold": JERK_RATIO_MILD,
+                    "primary_label": "peak/median pull acceleration",
+                    "primary_value": round(max_ratio, 3),
+                    "primary_threshold": JERK_RATIO_MILD,
+                },
+                citation="Padovan R, et al. J Funct Morphol Kinesiol (2025), PMC12821611. "
+                         "Supplemented, descriptively only, by the bent-over row entry in "
+                         "data/rag/docs/row_wiki.txt.",
+                citation_support="Padovan: \"Accelerating a given load during dynamic "
+                                 "contractions increases force requirements during the "
+                                 "concentric phase, whereas the same load imposes lower "
+                                 "mechanical demands during the eccentric phase\" — momentum "
+                                 "redistributes loading away from the controlled tension the "
+                                 "exercise intends; their protocol standardizes a 2 s "
+                                 "concentric / 2 s eccentric tempo. Wiki (descriptive only): "
+                                 "advises \"a slow tempo and avoiding jerking … prevents "
+                                 "momentum from creating momentary weightlessness or slack in "
+                                 "the muscles during the ascent.\"",
+            )
+        )
+    return detections
