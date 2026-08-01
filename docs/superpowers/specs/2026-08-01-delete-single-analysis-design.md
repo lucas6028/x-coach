@@ -111,10 +111,11 @@ async deleteAnalysis(id: string): Promise<{ deleted: number }>
 | key | en | zh-TW |
 | --- | --- | --- |
 | `history.deleteCta` | Delete | 刪除 |
-| `history.deleteConfirm` | Delete | 確認刪除 |
+| `history.deleteDesc` | Delete this record permanently? | 確定要永久刪除這筆紀錄嗎？ |
+| `history.deleteConfirm` | Delete | 刪除 |
 | `history.deleteCancel` | Cancel | 取消 |
 | `history.deleting` | Deleting… | 刪除中… |
-| `history.deleteError` | Couldn't delete this record. | 無法刪除這筆紀錄。 |
+| `history.deleteError` | Couldn't delete this record. Please try again. | 無法刪除這筆紀錄，請再試一次。 |
 | `history.deleteAria` | Delete this record | 刪除這筆紀錄 |
 
 `history.deleteAria` 用於垃圾桶 icon 鈕的 `aria-label`（純 icon 無文字）。
