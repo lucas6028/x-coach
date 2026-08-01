@@ -218,22 +218,25 @@ class MovementRegistryTests(unittest.TestCase):
         """A detector's rep signal must be one of the metrics it actually emits, or the
         segmenter would read NaN for every frame and silently find zero reps."""
         expected = {
-            "Squat": ("avg_knee_angle", "min"),
-            "Push-up": ("min_elbow_angle", "min"),
-            "Overhead Press": ("avg_elbow_angle", "max"),
-            "Lunge": ("min_knee_angle", "min"),
-            "Row": ("min_elbow_angle", "min"),
+            "Squat": ("avg_knee_angle", "min", "extended"),
+            "Push-up": ("min_elbow_angle", "min", "extended"),
+            "Overhead Press": ("avg_elbow_angle", "max", "extended"),
+            "Lunge": ("min_knee_angle", "min", "extended"),
+            # Deadlift is the one movement that starts flexed (bar on the floor), not extended
+            # -- see base.py:55 and src/pose/movements/deadlift.py's registration comment.
+            "Deadlift": ("hip_angle_deg", "min", "flexed"),
+            "Row": ("min_elbow_angle", "min", "extended"),
         }
-        for name, (signal, polarity) in expected.items():
+        for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
                 detector = registry.get_detector(name)
                 self.assertEqual(detector.rep_signal, signal)
                 self.assertEqual(detector.rep_polarity, polarity)
                 self.assertIn(detector.rep_signal, detector.metric_keys)
-                # The other knobs exist for movements RS-SP1 does not implement (spec §3.4);
-                # these five use the defaults.
+                # `rep_rectify` exists for movements RS-SP1 does not implement (spec §3.4);
+                # all six registered detectors use the default.
                 self.assertFalse(detector.rep_rectify)
-                self.assertEqual(detector.rep_start, "extended")
+                self.assertEqual(detector.rep_start, rep_start)
 
     def test_multi_rep_clip_is_mis_phased_by_the_legacy_path_and_fixed_by_the_new_one(self) -> None:
         """Pins BOTH sides of the fix.
@@ -264,11 +267,11 @@ class TestMovementRegistry(unittest.TestCase):
         from src.pose.movements import registry
 
         names = [d.name for d in registry.list_detectors()]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Row"])
+        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row"])
 
     def test_only_squat_is_validated(self) -> None:
-        """Push-up, Overhead Press, Lunge and Row rules are literature-derived and never checked
-        against ground-truth labels. The UI marks them Beta off this flag."""
+        """Push-up, Overhead Press, Lunge, Deadlift and Row rules are literature-derived and never
+        checked against ground-truth labels. The UI marks them Beta off this flag."""
         from src.pose.movements import registry
 
         validated = {d.name: d.validated for d in registry.list_detectors()}
@@ -279,6 +282,7 @@ class TestMovementRegistry(unittest.TestCase):
                 "Overhead Press": False,
                 "Push-up": False,
                 "Lunge": False,
+                "Deadlift": False,
                 "Row": False,
             },
         )
@@ -297,5 +301,5 @@ class TestMovementRegistry(unittest.TestCase):
 
         self.assertEqual(
             {d.name for d in registry.list_detectors()},
-            {"Squat", "Push-up", "Overhead Press", "Lunge", "Row"},
+            {"Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row"},
         )

@@ -19,7 +19,7 @@ class TestMovementsEndpoint(unittest.TestCase):
         resp = self.client.get("/api/movements")
         self.assertEqual(resp.status_code, 200)
         names = [m["name"] for m in resp.json()["movements"]]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Row"])
+        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row"])
 
     def test_reports_validation_status(self) -> None:
         # Lunge and Row surface with validated=False -- the Beta tag -- because their thresholds
@@ -34,6 +34,9 @@ class TestMovementsEndpoint(unittest.TestCase):
                 "Overhead Press": False,
                 "Push-up": False,
                 "Lunge": False,
+                # Deadlift ships Beta: there is no labeled deadlift data anywhere in this
+                # repository, so its thresholds have never been checked against ground truth.
+                "Deadlift": False,
                 "Row": False,
             },
         )

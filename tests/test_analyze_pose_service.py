@@ -84,8 +84,16 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         detect.assert_called_once()
 
     def test_unknown_movement_returns_coming_soon_without_detector(self) -> None:
+        # THIS EXAMPLE HAS TO BE ROTATED EVERY TIME A DETECTOR IS REGISTERED, and that is the
+        # point of the assertion below rather than a nuisance: the test needs a movement the
+        # frontend lists (frontend/src/lib/movements.ts) that has NO registered detector, so it
+        # necessarily goes stale as the 16-movement programme lands one movement at a time. It
+        # has already moved "Deadlift" -> "Row" -> "Band Pull Apart"; when Band Pull Apart is
+        # implemented, move it again to any still-unimplemented movement. The `assertNotIn` is
+        # what turns that staleness into a loud failure instead of a silently vacuous test.
+        self.assertNotIn("Band Pull Apart", [d.name for d in registry.list_detectors()])
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
-        result = svc.analyze_pose_payload(payload, movement="Deadlift", video_id="v2")
+        result = svc.analyze_pose_payload(payload, movement="Band Pull Apart", video_id="v2")
         self.assertEqual(result["analysis_pending"], True)
         self.assertEqual(result["detections"], [])
         self.assertEqual(result["video_id"], "v2")
