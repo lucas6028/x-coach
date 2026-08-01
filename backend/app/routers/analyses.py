@@ -1,8 +1,9 @@
 """History endpoints: list, fetch, and delete a user's persisted analyses ("我的紀錄").
 
-Both require a valid Supabase JWT (``get_current_user``). Ownership is enforced twice: the
-backend only ever queries as the authenticated user, and Postgres RLS scopes rows to
-``auth.uid()`` — so a fetch for someone else's id simply returns nothing (404), never their data.
+All four endpoints (list, delete-all, get-one, delete-one) require a valid Supabase JWT
+(``get_current_user``). Ownership is enforced twice: the backend only ever queries as the
+authenticated user, and Postgres RLS scopes rows to ``auth.uid()`` — so a fetch for someone
+else's id simply returns nothing (404), never their data.
 """
 
 from __future__ import annotations
@@ -56,11 +57,14 @@ def delete_my_analysis(
     """Delete one of the caller's analyses: ``{"deleted": 1}``, or 404.
 
     A non-UUID path param is rejected here rather than reaching PostgREST, where it would raise
-    ``22P02 invalid input syntax for type uuid`` and surface as a 500. Someone else's id is a 404
-    for the same reason the GET is: under RLS it is indistinguishable from a missing row.
+    ``22P02 invalid input syntax for type uuid`` and surface as a 500. The id is also normalized
+    to its canonical form: ``uuid.UUID`` happily parses variants like a ``urn:uuid:`` prefix, but
+    forwarding the raw string to PostgREST would still hit the same 22P02, defeating the guard.
+    Someone else's id is a 404 for the same reason the GET is: under RLS it is indistinguishable
+    from a missing row.
     """
     try:
-        uuid.UUID(analysis_id)
+        analysis_id = str(uuid.UUID(analysis_id))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=f"No analysis '{analysis_id}'.") from exc
     if not store.delete_analysis(token=user.token, analysis_id=analysis_id, user_id=user.id):

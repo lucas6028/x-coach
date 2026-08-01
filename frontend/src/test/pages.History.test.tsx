@@ -156,7 +156,8 @@ describe("History", () => {
     renderHistory();
     await screen.findByText("2 faults");
 
-    // Each row carries its own delete control; the first row is the newest ("a").
+    // Each row carries its own delete control; rows render in array order (not sorted by
+    // recency here), so the first row in the DOM is "a" regardless of its timestamp.
     await userEvent.click(screen.getAllByRole("button", { name: "Delete this record" })[0]);
     // The icon button's accessible name comes from its aria-label ("Delete this record"), so a
     // full-string match on "Delete" hits only the confirm button.
@@ -191,7 +192,13 @@ describe("History", () => {
         item({ id: "b", fault_count: 0, created_at: "2026-06-20T12:00:00.000Z" }),
       ],
     });
-    vi.spyOn(api, "deleteAnalysis").mockRejectedValue(new Error("500 Internal Server Error"));
+    // Row "b" always fails; row "a" succeeds -- lets the second half of this test confirm A's
+    // delete without touching B's still-unresolved error.
+    vi.spyOn(api, "deleteAnalysis").mockImplementation((id) =>
+      id === "b"
+        ? Promise.reject(new Error("500 Internal Server Error"))
+        : Promise.resolve({ deleted: 1 })
+    );
     renderHistory();
     await screen.findByText("2 faults");
 
@@ -209,6 +216,14 @@ describe("History", () => {
     // Opening a DIFFERENT row's confirm (row A) must not touch row B's still-unresolved error --
     // the user never retried or dismissed it.
     await userEvent.click(trashA);
+    expect(
+      screen.getByText("Couldn't delete this record. Please try again.")
+    ).toBeInTheDocument();
+
+    // Confirming row A's delete (which succeeds) must ALSO not touch row B's still-unresolved
+    // error -- only an action on row B itself may clear row B's error.
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(screen.queryByText("2 faults")).not.toBeInTheDocument());
     expect(
       screen.getByText("Couldn't delete this record. Please try again.")
     ).toBeInTheDocument();

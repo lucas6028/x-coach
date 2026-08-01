@@ -1800,6 +1800,22 @@ class AnalysesRouterTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 404)
         da.assert_not_called()
 
+    def test_delete_one_normalizes_urn_uuid_prefix(self) -> None:
+        """`uuid.UUID` happily parses a `urn:uuid:`-prefixed string, but forwarding the RAW
+        string to PostgREST would still hit 22P02. The id reaching the store must be the
+        canonical, un-prefixed form."""
+        with mock.patch.object(store, "delete_analysis", return_value=True) as da:
+            resp = self.client.delete(
+                "/api/analyses/urn:uuid:3f2a5c1e-0000-4000-8000-000000000001"
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"deleted": 1})
+        da.assert_called_once_with(
+            token="tok",
+            analysis_id="3f2a5c1e-0000-4000-8000-000000000001",
+            user_id="u1",
+        )
+
     def test_delete_one_requires_auth(self) -> None:
         app.dependency_overrides.clear()  # drop the override -> real dependency runs
         resp = self.client.delete("/api/analyses/3f2a5c1e-0000-4000-8000-000000000003")

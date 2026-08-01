@@ -52,7 +52,9 @@ export default function History() {
   // header disappears on its own and deleting the last row falls back to the empty state.
   const runDelete = async (id: string) => {
     setDeletingId(id);
-    setDeleteError(null);
+    // Only clear this row's own error, if any -- a different row's still-unresolved failure
+    // must not be silently forgotten just because this row's delete was confirmed.
+    setDeleteError((prev) => (prev?.id === id ? null : prev));
     try {
       await api.deleteAnalysis(id);
       setItems((prev) => prev.filter((it) => it.id !== id));
