@@ -427,8 +427,21 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
         knee_sev = _lockout_severities(segment, "knee_angle_deg")
         scores = [max(a, b) for a, b in zip(hip_sev, knee_sev)]
         severity = float(max(scores))
-        worst_hip = float(np.nanmin([frame.m("hip_angle_deg") for frame in segment]))
-        worst_knee = float(np.nanmin([frame.m("knee_angle_deg") for frame in segment]))
+        # `_flagged` ORs two independently-finite-checked clauses, so a segment can be flagged
+        # entirely by the knee criterion while every hip reading in it is NaN (or vice versa) --
+        # exactly the occluded-landmark failure mode this module's header describes. An
+        # unguarded `np.nanmin` over an all-NaN slice both warns AND is the same pattern
+        # `overhead_press.rule_incomplete_lockout` (this rule's own docstring cites it as the
+        # model) already guards against for its analogous `peak_worse_elbow`/`max_wrist`. Match
+        # that shape here rather than reintroducing the bug it exists to prevent.
+        hip_values = [frame.m("hip_angle_deg") for frame in segment]
+        knee_values = [frame.m("knee_angle_deg") for frame in segment]
+        worst_hip = (
+            float(np.nanmin(hip_values)) if any(np.isfinite(v) for v in hip_values) else np.nan
+        )
+        worst_knee = (
+            float(np.nanmin(knee_values)) if any(np.isfinite(v) for v in knee_values) else np.nan
+        )
         driver = "hip" if max(hip_sev) >= max(knee_sev) else "knee"
 
         detections.append(
@@ -443,12 +456,21 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
                 confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
                 observability="high" if observable else "medium",
                 evidence={
-                    "min_hip_angle_deg": round(worst_hip, 2),
-                    "min_knee_angle_deg": round(worst_knee, 2),
+                    # Fall back to 0.0, never a bare NaN: `PoseRuleDetection.evidence` is
+                    # serialized via `asdict()` with no NaN sanitizer downstream (unlike
+                    # `json_safe_view_payload`), and postgrest's JSON encoder raises on NaN --
+                    # matching `overhead_press.rule_incomplete_lockout`'s
+                    # `round(x, 2) if np.isfinite(x) else 0.0` for the same evidence shape.
+                    "min_hip_angle_deg": round(worst_hip, 2) if np.isfinite(worst_hip) else 0.0,
+                    "min_knee_angle_deg": round(worst_knee, 2) if np.isfinite(worst_knee) else 0.0,
                     "threshold": DEADLIFT_LOCKOUT_MILD_DEG,
                     "driver": driver,
                     "primary_label": f"minimum {driver} angle at lockout",
-                    "primary_value": round(worst_hip if driver == "hip" else worst_knee, 2),
+                    "primary_value": (
+                        round(worst_hip if driver == "hip" else worst_knee, 2)
+                        if np.isfinite(worst_hip if driver == "hip" else worst_knee)
+                        else 0.0
+                    ),
                     "primary_threshold": DEADLIFT_LOCKOUT_MILD_DEG,
                 },
                 citation="Moreira VM, et al. \"Analysis of Muscle Strength and Electromyographic "

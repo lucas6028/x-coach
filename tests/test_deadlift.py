@@ -363,6 +363,35 @@ class IncompleteLockoutTests(unittest.TestCase):
         )
         self.assertEqual(out, [])
 
+    def test_a_hip_nan_segment_flagged_purely_by_the_knee_criterion_is_evidence_safe(self):
+        """Reachable occluded-landmark case: `_flagged` ORs two independently-finite-checked
+        clauses, so a segment can be flagged ENTIRELY by the knee reading while hip is NaN
+        throughout every frame -- exactly the module header's "one occluded shoulder silently
+        reverts... exactly in the view most likely to trigger it" scenario. An unguarded
+        `np.nanmin` over an all-NaN hip slice both raises `RuntimeWarning: All-NaN slice
+        encountered` and lets a bare `nan` reach `evidence`, which unsanitized `asdict()`
+        serialization (`pose_rule_detector.py:664`) would carry to postgrest's
+        `allow_nan=False` encoder -- a silently swallowed `ValueError` that drops the
+        analysis from the user's history (see `json_safe_view_payload`'s docstring).
+        """
+        out = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": np.nan, "knee_angle_deg": 150.0}), _ctx()
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].evidence["driver"], "knee")
+        self.assertEqual(out[0].evidence["min_hip_angle_deg"], 0.0)
+        self.assertFalse(np.isnan(out[0].evidence["min_hip_angle_deg"]))
+
+    def test_a_knee_nan_segment_flagged_purely_by_the_hip_criterion_is_evidence_safe(self):
+        """Symmetric case: knee NaN throughout every frame, hip alone flags the segment."""
+        out = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 150.0, "knee_angle_deg": np.nan}), _ctx()
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].evidence["driver"], "hip")
+        self.assertEqual(out[0].evidence["min_knee_angle_deg"], 0.0)
+        self.assertFalse(np.isnan(out[0].evidence["min_knee_angle_deg"]))
+
     def test_an_off_view_reading_is_discounted_but_not_suppressed(self):
         soft = {"hip_angle_deg": 150.0, "knee_angle_deg": 178.0}
         on = rule_incomplete_lockout(_frames(soft), _ctx(view="side"))[0]
