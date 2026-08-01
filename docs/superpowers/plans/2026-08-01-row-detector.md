@@ -1591,6 +1591,22 @@ class RowAsymmetricPullTest(unittest.TestCase):
         self.assertEqual(rear[0].observability, "high")
         self.assertLess(side[0].confidence, rear[0].confidence)
 
+    def test_an_unmeasurable_baseline_drops_the_tilt_term_but_not_the_rule(self) -> None:
+        """The disjunction's elbow branch must survive a NaN baseline.
+
+        `rule_torso_rising` early-returns on a NaN baseline because its fire condition IS the
+        baseline comparison. Copying that opener here would silence a fault the spec says
+        still fires on elbow-height asymmetry alone.
+        """
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.0875)
+        for frame in clip[:6]:  # occlude the setup frames -> no baseline
+            frame["landmarks"][11] = _lm(0.5, 0.5, 0.10)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["fired_on"], "elbow_height")
+
     def test_wrist_travel_asymmetry_is_evidence_and_never_fires_alone(self) -> None:
         """The spec's third term has NO threshold, so inventing one would be a fabrication."""
         from src.pose.movements.row import rule_asymmetric_pull
@@ -1662,9 +1678,14 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
 
     PHASE SCOPE `peak`, from the spec's "At peak: compare left vs right elbow height".
     """
+    # A NaN BASELINE DROPS THE TILT TERM, IT DOES NOT SILENCE THE RULE -- and this is the one
+    # place `rule_torso_rising`'s opener must NOT be copied. That rule's fire condition depends
+    # ENTIRELY on the baseline, so `if not np.isfinite(baseline): return []` is right there.
+    # This rule's condition is a DISJUNCTION whose elbow-height branch never touches the
+    # baseline, so early-returning would silence a fault the spec says still fires when only
+    # the elbow term is measurable. `_sub_severities` handles it by yielding 0.0 for the tilt
+    # term on a NaN baseline (`nan > threshold` is False), which is exactly "drop the term".
     baseline_tilt = _setup_baseline(core, "shoulder_tilt")
-    if not np.isfinite(baseline_tilt):
-        return []
     observable = ctx.view_type in ASYMMETRY_OBSERVABLE_VIEWS
 
     def _sub_severities(frame: CoreFrame) -> tuple[float, float]:
@@ -1761,6 +1782,15 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
     return detections
 ```
 
+**Evidence fields must survive a NaN baseline.** With the tilt term dropped (no `setup` frames),
+`baseline_tilt` is `NaN`, so `setup_shoulder_tilt` and `max_shoulder_tilt_rise` as written would
+both round `NaN`, and `np.nanmax` over an all-`NaN` list emits a RuntimeWarning and returns
+`NaN`. A `NaN` in `evidence` is not JSON-serializable and reaches the API payload. Guard both:
+emit `None` (or omit the key) when the baseline is not finite, and never call `np.nanmax` on a
+list you have not first checked has a finite element. Add an assertion to
+`test_an_unmeasurable_baseline_drops_the_tilt_term_but_not_the_rule` that no value in
+`detections[0].evidence` is a float NaN.
+
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_row.py -q`
@@ -1781,7 +1811,10 @@ git commit -m "feat(pose): row asymmetric-pull rule, with the term the spec neve
 - Modify: `src/pose/movements/row.py`
 - Modify: `src/pose/movements/registry.py:20-34`
 - Modify: `tests/test_movement_registry.py:212`, `:254`, `:264`, `:281`
+- Modify: `tests/test_kg_query_resolution.py:29-34` (`MODULE_MOVEMENTS`)
 - Test: `tests/test_row.py`
+
+**Known-failing test this task must fix.** `tests/test_kg_query_resolution.py::TestKgQueryCorpus::test_every_module_is_covered` has been RED since Task 1 created `src/pose/movements/row.py`. That is the gate working as designed — its docstring says "Guard against a new detector module being added and silently skipped by this gate", and it asserts that the set of modules under `src/pose/movements/` (minus `__init__`/`base`/`registry`) equals the keys of `MODULE_MOVEMENTS`. Add `"row.py": "Row"` to that dict. Doing so also switches on `test_every_kg_query_resolves` for Row's four queries — it is `skipUnless` the gitignored graph exists, so it runs locally and skips in CI. Verify locally that all four Row queries resolve before committing; if any does not, that is a real defect in Task 2-5's `kg_query` constants, not a reason to weaken the gate.
 
 **Interfaces:**
 - Consumes: Tasks 1–5.
