@@ -23,6 +23,7 @@
 - **The side-view confidence floor is `SIDE_VIEW_CONF_THRESHOLD`** (0.20), same import. No new number.
 - **Coverage gates:** `... -m pytest tests/` all green, and `... scripts/run_backend_coverage.py --fail-under 95`.
 - **No frontend change.** `frontend/src/lib/movements.ts` already lists Deadlift, and analyzability is derived at runtime from `GET /api/movements`. `pages.Movements.test.tsx` mocks `getMovements` with a hardcoded fixture, so no frontend test is affected.
+- **`kg_query` strings are VERIFIED RETRIEVAL INPUTS — copy them verbatim, never paraphrase.** `pose_rule_detector.py:753` feeds `kg_query` to `retrieve_graph_context` in `kg` mode and to `query_vector_db` in `rag` mode, so the two modes need different *kinds* of string: a node name for `kg`, a natural-language search phrase for `rag`. All three were checked by execution against the real graph and the real vector DB on 2026-08-01, and near-misses were measured, not guessed — node-style phrasing grounded two of these rules in row and leg-abduction papers. Rewording any of them silently changes what the coaching layer cites.
 
 ---
 
@@ -566,7 +567,14 @@ Then append the rule:
 # `Range Of Motion` concept node, which would ground a coaching explanation on an abstraction
 # rather than on an error. Grounding this rule on any of them would retrieve advice for a
 # different problem, so per the lunge Step-0 rule -- "do NOT invent a near-miss" -- it does not.
-DEADLIFT_LOCKOUT_KG_QUERY = "Incomplete Lockout"
+#
+# IN `rag` MODE THIS STRING IS A VECTOR-DB SEARCH PHRASE, NOT A NODE NAME
+# (`pose_rule_detector.py:756` passes it straight to `query_vector_db`), so it is written as
+# one and was verified by running it. The node-style "Incomplete Lockout" retrieves a ROW
+# suspension-EMG paper and a LEG ABDUCTION paper -- the wrong movement entirely. The phrasing
+# below returns PMC12148905, this rule's cross-support citation, at ranks 1 and 3. Verified
+# 2026-08-01; re-run before changing it.
+DEADLIFT_LOCKOUT_KG_QUERY = "deadlift incomplete lockout hip and knee extension"
 
 # Spec-derived, unvalidated. The 180-degree TARGET is measured -- Moreira PMC12225233 recorded
 # the three key positions at lift-off 95 deg, mid-pull 126 deg and lock-out 180 deg, with
@@ -802,7 +810,17 @@ def setup_baseline(core: list[CoreFrame], key: str) -> float:
 # flattening. Its only edge is `AFFECTS_QUALITY -> Hip Hinge` -- no risk, no correction. The
 # other candidates (`Hips Rise Before Shoulders`, `Trunk Over Inclination`, `Anterior Trunk
 # Tilt`, `Excessive Forward Lean`) resolve to nothing or to the bare `Hip` anatomy node.
-DEADLIFT_HIPS_KG_QUERY = "Hips Rise Before Shoulders"
+#
+# IN `rag` MODE THIS STRING IS A VECTOR-DB SEARCH PHRASE, NOT A NODE NAME, and it was chosen by
+# running candidates rather than by writing something plausible. The corpus holds only 2
+# deadlift documents among 85, so semantic search drifts badly: "Hips Rise Before Shoulders"
+# returns a row EMG paper, and four different mechanism-keyword phrasings ("...erector spinae
+# trunk flexion barbell shear force", "...lever arm lower back barbell", and two more) each
+# returned 0/3 deadlift documents, mostly Overhead Press. The phrasing below returns
+# PMC12225233 -- this rule's primary citation -- at ranks 1, 2 AND 3. Verified 2026-08-01;
+# re-run before changing it, because near-miss phrasings silently ground this fault in the
+# wrong movement's literature.
+DEADLIFT_HIPS_KG_QUERY = "deadlift trunk position electromyographic activity lift-off mid-pull lockout"
 
 # Spec-derived, UNVALIDATED AND UNSOURCED. Neither deadlift RAG document reports a trunk
 # inclination in degrees -- the only degree value in PMC12148905 is an unrelated 8 deg knee
