@@ -20,13 +20,15 @@
 #      subtend exactly 180 degrees on every frame of every video. The metric is a constant.
 #   2. "alternatively track shoulder->hip line vs a straight setup reference" -- this one is
 #      NOT degenerate; comparing the current shoulder->hip line against a setup-frame
-#      reference line is perfectly computable and nonzero. But it measures TRUNK PITCH PLUS
-#      WHOLE-BODY TRANSLATION relative to an earlier frame, not spinal shape -- it is
-#      `row_torso_rising`'s own signal (trunk_angle_from_horizontal_deg compared against its
-#      setup baseline) with an added camera-distance confound, shipped under a spine-rounding
-#      label. Attaching the rounding citation (Saeterbakken PMID 26134664, an erector-spinae
-#      EMG MAGNITUDE result) to this quantity would cite that result for a claim it says
-#      nothing about.
+#      reference line is perfectly computable and nonzero. `row_torso_rising`'s own metric,
+#      trunk_angle_from_horizontal_deg = arctan2(|dy|, |dx|) between hip_mid and shoulder_mid
+#      (see `row_compute_raw` below), is a pure ANGLE -- invariant to whole-body translation
+#      and to camera-distance scaling, so NEITHER confound applies to it (verified directly
+#      against this module's own metric, not assumed). The construction is rejected on
+#      narrower grounds: comparing that same pitch against its own setup baseline IS
+#      `row_torso_rising`'s signal, just relabeled as spinal shape. Attaching the rounding
+#      citation (Saeterbakken PMID 26134664, an erector-spinae EMG MAGNITUDE result) to it
+#      would cite that result for a claim it says nothing about.
 #   3. "Flag flexion if the shoulder-midpoint drops below the straight shoulder-hip line by a
 #      normalized sag > 0.04" -- shoulder_mid is an ENDPOINT of that line. Its distance to a
 #      line passing through itself is identically zero. The threshold can never be crossed.
@@ -342,16 +344,27 @@ def row_assign_phases(raw: list[dict]) -> list[str]:
 #   Trunk Extension            -> Row:Trunk Extension (Fault)
 #                                 phases; corrections=[Maintain Neutral Spine];
 #                                 quality_impacts=[Core Stability]
-#   Scapular Protraction       -> Row:Scapular Protraction (Fault)
+#   Scapular Protraction       -> TWO seeds: generic `Scapular Protraction` (QualityDimension,
+#                                 sorts first) and Row:Scapular Protraction (Fault)
 #                                 evidence=[Anterior Translation Of Scapulae]; related_actions
+#                                 -- both buckets are the Row-scoped seed's, not the generic
+#                                 node's
 #   Loss Of Neutral Body       -> Row:Loss Of Neutral Body Position (Fault)
 #     Position                    phases; evidence=[Head/Trunk/Hip Not Aligned ...];
 #                                 corrections; quality_impacts; related_actions
 #   Asymmetry                  -> Row:Asymmetry (Fault)
 #                                 phases; risks=[Shoulder Injury, Injury Risk]; related_actions
 #
-# TWO DELIBERATE DEVIATIONS from the obvious name, load-bearing for later tasks that import
+# THREE DELIBERATE DEVIATIONS from the obvious name, load-bearing for later tasks that import
 # these constants blind:
+#   - Scapular Protraction: `retrieve_graph_context("Scapular Protraction", movement="Row")`
+#     resolves to TWO seeds, not one -- a generic (non-Row) `Scapular Protraction`
+#     QualityDimension node, which sorts first in `matched_nodes`, and `Row:Scapular
+#     Protraction` (Fault). Verified directly (not assumed): `matched_nodes ==
+#     ["Scapular Protraction", "Row:Scapular Protraction"]`. Harmless in production --
+#     `frontend/src/lib/retrieval.ts` unions every resolved seed's buckets rather than reading
+#     only the first one -- but the buckets recorded above belong to the Row-scoped seed, not
+#     the generic one.
 #   - Momentum: "Compensatory Movements" is a real `Row:`-scoped Fault node whose buckets are
 #     ENTIRELY EMPTY -- precisely the OHP failure mode. "Loss Of Neutral Body Position" is the
 #     richest on-topic node, and its three evidence signals ("Head Not Aligned With Trunk And

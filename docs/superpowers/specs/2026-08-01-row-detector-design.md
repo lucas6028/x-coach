@@ -83,12 +83,15 @@ curvature:
   subtend exactly 180° on every frame of every video. The metric carries no information at all.
 - *"alternatively track shoulder→hip line vs a straight setup reference"* — this one is **not**
   degenerate: comparing the current shoulder→hip line against a setup-frame reference line is
-  perfectly computable and nonzero. But it measures **trunk pitch plus whole-body translation**
-  relative to an earlier frame, not spinal shape — it is `row_torso_rising`'s own signal
-  (`trunk_angle_from_horizontal_deg` compared against its setup baseline) with an added
-  camera-distance confound, shipped under a spine-rounding label. Attaching the rounding
-  citation (Saeterbakken PMID 26134664, an erector-spinae EMG magnitude result) to this
-  quantity would cite that result for a claim it says nothing about.
+  perfectly computable and nonzero. `row_torso_rising`'s own metric,
+  `trunk_angle_from_horizontal_deg = arctan2(|dy|, |dx|)` between hip_mid and shoulder_mid, is a
+  pure **angle** — invariant to whole-body translation and to camera-distance scaling, so
+  neither rider applies to it (verified directly against `row_compute_raw`, not assumed). The
+  construction is rejected on narrower grounds: comparing that same pitch against its own setup
+  baseline **is** `row_torso_rising`'s signal, just relabeled — it measures trunk pitch, not
+  spinal shape, and attaching the rounding citation (Saeterbakken PMID 26134664, an
+  erector-spinae EMG magnitude result) to it would cite that result for a claim it says nothing
+  about.
 - *"Flag flexion if the shoulder-midpoint drops below the straight shoulder–hip line by a
   normalized sag > 0.04"* — `shoulder_mid` is an **endpoint** of that line. Its distance to a
   line through itself is identically zero. The threshold can never be crossed.

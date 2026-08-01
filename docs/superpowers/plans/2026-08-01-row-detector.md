@@ -321,6 +321,13 @@ The module docstring carries three things the design spec requires be recorded i
 #      normalized sag > 0.04" -- shoulder_mid is an ENDPOINT of that line. Its distance to a
 #      line passing through itself is identically zero. The threshold can never be crossed.
 #
+# [Corrected 2026-08-01 -- this plan's original draft omitted the heuristic's second
+# construction ("alternatively track shoulder->hip line vs a straight setup reference"), so
+# "BOTH constructions" above undercounts. That construction is NOT degenerate, but it duplicates
+# `row_torso_rising`'s own trunk-pitch-vs-baseline signal under a spine-rounding label. The
+# version actually shipped in row.py's module docstring, the design spec §3, and the parent
+# spec documents all THREE constructions the spec offers; see there for the corrected proof.]
+#
 # The root cause is not a wording slip: MediaPipe Pose has NO thoracic or lumbar landmark, so
 # there is no measured point anywhere between the shoulders and the hips, and no sag,
 # curvature or three-point spinal angle is computable from this detection model by any
@@ -1992,6 +1999,12 @@ from src.pose.movements import registry
 # `test_the_fifth_spec_rule_is_absent_by_design` pins the absence so a future reader cannot
 # mistake it for an oversight.
 #
+# [Corrected 2026-08-01 -- "both constructions" is this plan's original count. The shipped
+# row.py docstring and the design spec §3 document THREE constructions: a third, computable
+# but off-quantity construction ("track shoulder->hip line vs a straight setup reference") was
+# also considered and rejected during implementation, not for being degenerate but for
+# duplicating `row_torso_rising`'s own signal. See there for the corrected proof.]
+#
 # `ROW_METRIC_KEYS` must stay a two-way match with what `row_compute_raw` emits (pinned by
 # `test_metric_keys_match_the_emitted_metrics_exactly`): a key the tuple omits is dropped by
 # `run_detector`, which builds each CoreFrame's metrics dict FROM this tuple, and read back as
@@ -2079,6 +2092,14 @@ Append to §7 of the parent spec, as its own bullet:
   `fault_id` and an explicitly-invented threshold. The KG target `Row:Trunk Flexion` exists and
   is non-empty, so the gap is the metric, not the knowledge.
 ```
+> **[Corrected 2026-08-01]** This block's original text said "Both constructions its
+> `detection_heuristic` offers are degenerate," naming only two. The parent spec's §7, the
+> design spec §3, and `row.py`'s module docstring document THREE constructions: a second,
+> non-degenerate one ("alternatively track shoulder->hip line vs a straight setup reference")
+> was also considered and rejected -- not for being degenerate, but for measuring
+> `row_torso_rising`'s own trunk-pitch-vs-baseline signal under a spine-rounding label, which
+> would misattach the Saeterbakken EMG citation to a quantity it says nothing about. The
+> version actually written into those three places is the corrected one.
 
 - [ ] **Step 2: Add the Row status line to §8**
 

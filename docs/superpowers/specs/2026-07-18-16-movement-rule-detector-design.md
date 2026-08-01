@@ -1389,11 +1389,14 @@ These are stated rather than papered over, per the spec's honesty requirement:
   sag alternative measures the distance from `shoulder_mid` to a line of which `shoulder_mid` is
   an endpoint, which is identically zero — also a constant. The third, "alternatively track
   shoulder→hip line vs a straight setup reference," is **not** degenerate — it is perfectly
-  computable and nonzero — but it measures trunk pitch plus whole-body translation relative to
-  an earlier frame, not spinal shape: it is `row_torso_rising`'s own signal with an added
-  camera-distance confound, shipped under a spine-rounding label, which would attach this rule's
-  citation (Saeterbakken PMID 26134664, an EMG magnitude result) to a quantity that citation
-  says nothing about. All three constructions fail for the same root cause: MediaPipe Pose (§3)
+  computable and nonzero. `row_torso_rising`'s own metric,
+  `trunk_angle_from_horizontal_deg = arctan2(|dy|, |dx|)` between hip_mid and shoulder_mid, is a
+  pure angle — invariant to whole-body translation and to camera-distance scaling — so neither
+  confound applies here. The construction is rejected on narrower grounds: it is
+  `row_torso_rising`'s own signal (that same pitch, compared against the same setup baseline),
+  relabeled as spinal shape, which would attach this rule's citation (Saeterbakken PMID
+  26134664, an EMG magnitude result) to a quantity that citation says nothing about. All three
+  constructions fail for the same root cause: MediaPipe Pose (§3)
   has no thoracic or lumbar landmark, so no point exists between the shoulders and the hips, and
   nothing between them can be measured — two of the three routes collapse to constants and the
   third measures a different quantity than the one the rule names. Found during the Row
@@ -1911,10 +1914,28 @@ against labeled ground truth" and is the user's decision with these numbers in h
   against Fit3D, neither of which is blocked on nonexistent data. All four severity ramps are
   rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
   self-normalizing 3×-median threshold is expected to over-fire. **A fifth limitation is
-  measured, not invented:** `row_torso_rising`'s effective fire threshold is inflated by
-  setup-baseline contamination, because `segment_reps` trims the rep window to the excursion
-  and leaves a 2-frame `setup` slice of which one frame is already loaded. Measured end-to-end:
-  with an abrupt setup→peak transition the effective threshold is **30°, exactly 2× the spec's
-  15°** (invariant to clip length — 8, 20 and 40 setup frames all give the same result); with a
-  realistic 6-frame concentric ramp it relaxes to **~17–18°**. Direction is always toward
-  MISSED faults, never false ones.
+  measured, and now derived, not just observed:** `row_torso_rising`'s effective fire threshold
+  is inflated by setup-baseline contamination, because on the **segmented** path `segment_reps`
+  trims the rep window to the excursion and leaves a 2-frame `setup` slice, of which one frame
+  is clean and the other is already loaded on an abrupt setup→peak transition. The median of two
+  values is their mean, so the baseline lands exactly halfway between the true resting angle and
+  the loaded peak value, and the measured rise (`peak − baseline`) is exactly **half** the true
+  rise: for a true rise `R`, `peak − baseline = (base + R) − (base + R/2) = R/2`, so the 15° fire
+  threshold requires `R > 30°` of real fault — **exactly 2×, derived from the trimming
+  mechanism, not an empirical curiosity** — and this is invariant to how many extension frames
+  precede the rep because `segment_reps` trims them off either way (measured at both 8 and 20
+  setup frames; 40 was not tested and is not claimed). Measured end-to-end through
+  `run_detector`, sweeping the true rise in 0.5° steps: an abrupt setup→peak transition fires at
+  **30.5°** (the smallest step past the derived 30° boundary, 2.03×, matching the algebra above);
+  a realistic 6-frame concentric ramp relaxes it to **19.5°** (1.30×) and a 3-frame ramp to
+  **20.5°** (1.37×) — smaller than the abrupt case because a ramp spreads the loaded value across
+  more of the setup slice instead of concentrating it in one frame.
+
+  **The inflation applies to the segmented path only.** On the whole-clip fallback
+  (`no_reps_detected` / `only_partial_reps` / `segmentation_disabled`) there is no window
+  trimming — `setup` is the clip's first 15% by position, not by excursion — and the effective
+  threshold measures at **15.5°**, the nominal 15° (the extra 0.5° is the sweep's step size, not
+  inflation). The counterintuitive consequence: **the same clip can have a stricter effective
+  threshold when rep segmentation *succeeds* than when it *fails*** — a torso-rising fault a
+  lifter actually committed can go undetected specifically because the pipeline segmented their
+  rep correctly. Direction is always toward MISSED faults, never false ones.

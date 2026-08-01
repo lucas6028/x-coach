@@ -1358,5 +1358,99 @@ class RowPerRepBaselineTest(unittest.TestCase):
         self.assertEqual(rising, [])
 
 
+class RowTorsoRisingSpecInflationDerivationTest(unittest.TestCase):
+    """Pins the parent spec's §8 Row status entry: on an ABRUPT setup->peak transition,
+    `row_torso_rising`'s effective fire threshold is exactly double the spec's stated 15 deg,
+    and this is DERIVABLE, not merely something re-measured by eye each time.
+
+    MECHANISM: on the segmented path, `segment_reps` trims the rep window to the excursion,
+    leaving a 2-frame `setup` slice (`row_assign_phases`'s
+    `setup_cutoff = max(1, int(window_len * 0.15))`). On an abrupt transition, one of those two
+    frames is still at the true resting angle and the other is already loaded to the peak value.
+    The median of two values is their mean, so the baseline lands exactly halfway between the
+    resting and loaded values. Algebraically, for a true rise `R` from a resting angle `base`,
+    peak == base + R and baseline == median(base, base + R) == base + R/2, so the measured rise
+    `peak - baseline` == R/2 exactly. The 15 deg fire threshold therefore requires `R > 30`
+    deg of real fault -- exactly 2x -- independent of how many extension frames precede the rep,
+    because `segment_reps` trims those off either way (this fixture uses 8; the parent spec's
+    §8 entry records the same 30.5 deg boundary at both 8 and 20 extension frames).
+
+    MEASURED through the real `run_detector` path (not `row_compute_raw`/`row_assign_phases`
+    called directly, as `RowSetupBaselineTest` above does, which never exercises
+    `segment_reps`'s window trimming): a 29 deg true rise (< the derived 30 deg boundary) stays
+    SILENT; a 32 deg true rise (> the boundary) FIRES. Both verified empirically below, not
+    assumed from the algebra alone.
+    """
+
+    @staticmethod
+    def _abrupt_clip(
+        rise: float, n_ext: int = 8, n_peak: int = 14, n_return: int = 6, base: float = 20.0
+    ) -> list[dict]:
+        frames: list[dict] = []
+        index = 0
+        for _ in range(n_ext):
+            frames.append(
+                row_frame(trunk_angle_deg=base, elbow_angle_deg=170.0,
+                          wrist_hip_dist=0.30, frame_index=index)
+            )
+            index += 1
+        for _ in range(n_peak):
+            frames.append(
+                row_frame(trunk_angle_deg=base + rise, elbow_angle_deg=60.0,
+                          wrist_hip_dist=0.05, frame_index=index)
+            )
+            index += 1
+        for _ in range(n_return):
+            frames.append(
+                row_frame(trunk_angle_deg=base, elbow_angle_deg=170.0,
+                          wrist_hip_dist=0.30, frame_index=index)
+            )
+            index += 1
+        return frames
+
+    def test_29_degree_rise_stays_silent_and_32_degree_rise_fires(self) -> None:
+        from src.pose.movements.base import run_detector
+        from src.pose.movements.row import ROW_DETECTOR
+
+        silent_clip = self._abrupt_clip(rise=29.0)
+        silent_result = run_detector(
+            ROW_DETECTOR, silent_clip, fps=30.0, view_type="rear_oblique",
+            view_confidence=0.8, max_reps=None,
+        )
+        self.assertEqual(len(silent_result.reps), 1)
+        silent_rising = [
+            d for d in silent_result.detections if d.fault_id == "row_torso_rising"
+        ]
+        self.assertEqual(
+            silent_rising, [],
+            "a 29 deg real rise (below the derived 30 deg halving boundary) must stay silent",
+        )
+
+        firing_clip = self._abrupt_clip(rise=32.0)
+        firing_result = run_detector(
+            ROW_DETECTOR, firing_clip, fps=30.0, view_type="rear_oblique",
+            view_confidence=0.8, max_reps=None,
+        )
+        self.assertEqual(len(firing_result.reps), 1)
+        firing_rising = [
+            d for d in firing_result.detections if d.fault_id == "row_torso_rising"
+        ]
+        self.assertEqual(
+            len(firing_rising), 1,
+            "a 32 deg real rise (above the derived 30 deg halving boundary) must fire",
+        )
+        # THE HALVING MECHANISM, DIRECTLY: the reported baseline (36.0) sits exactly halfway
+        # between the true resting angle (20) and the loaded peak value (52 == 20 + 32),
+        # because segment_reps' 2-frame setup slice held one clean frame and one already-loaded
+        # frame, and the median of two values is their mean. The reported rise (16.0) is
+        # therefore R/2 (32/2 == 16), not the true 32 deg rise.
+        self.assertAlmostEqual(
+            firing_rising[0].evidence["setup_trunk_angle_deg"], 36.0, places=1
+        )
+        self.assertAlmostEqual(
+            firing_rising[0].evidence["max_trunk_rise_deg"], 16.0, places=1
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
