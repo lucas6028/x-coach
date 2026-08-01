@@ -16,7 +16,7 @@ satisfy the two corroborating criteria that made Lunge an easy pick:
 |---|---|---|
 | Next in parent-spec order | yes | **yes** |
 | Labeled ground truth in-repo | 174 reps (REHAB24-6 `Ex5`) | **none** |
-| KG flagship coverage | 665 `Lunge:` nodes | **13 `Deadlift:` nodes (stub)** |
+| KG flagship coverage | 168 `Lunge:` nodes | **5 `Deadlift:` nodes (stub)** |
 | RAG documents | 8 | 2 |
 
 REHAB24-6 covers arm abduction, arm VW, push-up, leg abduction, lunge and squat. There is no

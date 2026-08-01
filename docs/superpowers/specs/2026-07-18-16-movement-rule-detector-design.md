@@ -1394,8 +1394,9 @@ These are stated rather than papered over, per the spec's honesty requirement:
   document reports a trunk inclination in degrees, so 55°/75° rest on the spec alone. The
   mechanism and direction are cited; the numbers are not.
 - **Two of three Deadlift rules have no KG node** (2026-08-01) and take the `rag` fallback. The
-  13-node `Deadlift:` stub was authored independently of this rule catalog and does not agree
-  with it: it carries nodes for two faults the catalog has no rule for (`Hyperextension At
+  5-node `Deadlift:` stub (9 nodes counting its shared 1-hop neighbours, e.g.
+  `Lumbar Spine Injury`, `Hip Hinge`) was authored independently of this rule catalog and does
+  not agree with it: it carries nodes for two faults the catalog has no rule for (`Hyperextension At
   Lockout`, `Insufficient Hip Hinge`), lacks nodes for `deadlift_hips_shoot_up` and
   `deadlift_incomplete_lockout`, and its one exactly-matching fault node (`Bar Drift From Body`)
   belongs to the rule withdrawn above. Only `Deadlift:Lumbar Flexion` grounds a shipped rule.

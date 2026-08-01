@@ -356,7 +356,7 @@ def rule_lumbar_flexion(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
 # latter is what production calls, and is what OHP's three-blank-queries defect would have
 # been caught by).
 #
-# NO KG NODE EXISTS FOR THIS FAULT, so it takes the `rag` fallback. The 13-node Deadlift stub
+# NO KG NODE EXISTS FOR THIS FAULT, so it takes the `rag` fallback. The 5-node Deadlift stub
 # carries exactly one lockout node -- `Deadlift:Hyperextension At Lockout` -- which is the
 # LITERAL OPPOSITE fault: too much extension, not too little. `Incomplete Lockout` resolves to
 # nothing and `Incomplete Range Of Motion` resolves only to the generic shared-layer

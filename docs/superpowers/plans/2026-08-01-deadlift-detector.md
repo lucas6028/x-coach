@@ -581,7 +581,7 @@ Then append the rule:
 # latter is what production calls, and is what OHP's three-blank-queries defect would have
 # been caught by).
 #
-# NO KG NODE EXISTS FOR THIS FAULT, so it takes the `rag` fallback. The 13-node Deadlift stub
+# NO KG NODE EXISTS FOR THIS FAULT, so it takes the `rag` fallback. The 5-node Deadlift stub
 # carries exactly one lockout node -- `Deadlift:Hyperextension At Lockout` -- which is the
 # LITERAL OPPOSITE fault: too much extension, not too little. `Incomplete Lockout` resolves to
 # nothing and `Incomplete Range Of Motion` resolves only to the generic shared-layer
@@ -1393,8 +1393,9 @@ In `## 7. Honest limitations & gaps`, after the existing `**Deadlift lumbar flex
   document reports a trunk inclination in degrees, so 55°/75° rest on the spec alone. The
   mechanism and direction are cited; the numbers are not.
 - **Two of three Deadlift rules have no KG node** (2026-08-01) and take the `rag` fallback. The
-  13-node `Deadlift:` stub was authored independently of this rule catalog and does not agree
-  with it: it carries nodes for two faults the catalog has no rule for (`Hyperextension At
+  5-node `Deadlift:` stub (9 nodes counting its shared 1-hop neighbours, e.g.
+  `Lumbar Spine Injury`, `Hip Hinge`) was authored independently of this rule catalog and does
+  not agree with it: it carries nodes for two faults the catalog has no rule for (`Hyperextension At
   Lockout`, `Insufficient Hip Hinge`), lacks nodes for `deadlift_hips_shoot_up` and
   `deadlift_incomplete_lockout`, and its one exactly-matching fault node (`Bar Drift From Body`)
   belongs to the rule withdrawn above. Only `Deadlift:Lumbar Flexion` grounds a shipped rule.
