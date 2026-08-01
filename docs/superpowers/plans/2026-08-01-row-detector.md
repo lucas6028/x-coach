@@ -1752,19 +1752,14 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
                     "setup_shoulder_tilt": round(baseline_tilt, 4),
                     "elbow_threshold": ELBOW_ASYMMETRY_MILD,
                     "tilt_threshold": SHOULDER_TILT_RISE_MILD,
-                    "primary_label": "elbow-height asymmetry"
-                    if fired_on != "shoulder_tilt"
-                    else "shoulder-tilt increase vs setup",
-                    "primary_value": round(
-                        float(np.nanmax([frame.m("elbow_height_asymmetry") for frame in segment])), 4
-                    )
-                    if fired_on != "shoulder_tilt"
-                    else round(
-                        float(np.nanmax([frame.m("shoulder_tilt") - baseline_tilt for frame in segment])), 4
-                    ),
-                    "primary_threshold": ELBOW_ASYMMETRY_MILD
-                    if fired_on != "shoulder_tilt"
-                    else SHOULDER_TILT_RISE_MILD,
+                    # PRIMARY AXIS IS CHOSEN BY SEVERITY, NEVER BY `fired_on`. Task 3's review
+                    # found the categorical form to be a Critical, user-facing bug: branching on
+                    # `fired_on` reports the distance axis for BOTH "pull_distance" and "both",
+                    # even when the other axis is the worse one, and `keyEvidence()` in
+                    # frontend/src/lib/retrieval.ts renders exactly these three keys as the single
+                    # most informative measured number in the coaching UI. Compare the two
+                    # sub-severities, exactly as `pushup.rule_head_drop` does.
+                    **_primary_evidence(segment, pairs, baseline_tilt),
                 },
                 citation="Saeterbakken A, et al. Int J Sports Med (2015), PMID 26134664. "
                          "Supplemented by Padovan R, et al. J Funct Morphol Kinesiol (2025), "
@@ -1781,6 +1776,15 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
         )
     return detections
 ```
+
+**`_primary_evidence` is yours to write in this task**, as a module-private helper returning the
+three `primary_*` keys. It must pick the axis with the higher sub-severity over the segment —
+NOT branch on `fired_on` — and follow whatever shape Task 3 landed on after its own review
+found the same bug (read `rule_incomplete_rom` as committed and match it; if Task 3 adopted an
+unclipped worst-axis series from `pushup.rule_head_drop`, do the same here rather than
+inventing a second convention). Pin it with two tests: one fixture where the elbow term is the
+worse one and one where the tilt term is, each asserting `primary_label` and `primary_value`
+name the correct axis. One test alone leaves the branch half-pinned.
 
 **Evidence fields must survive a NaN baseline.** With the tilt term dropped (no `setup` frames),
 `baseline_tilt` is `NaN`, so `setup_shoulder_tilt` and `max_shoulder_tilt_rise` as written would
