@@ -239,6 +239,26 @@ between shoulders and hips), so it is marked honestly below.
 - **citation**: Hanen NC, et al. "Biomechanical analysis of conventional and sumo deadlift." Front Bioeng Biotechnol (2025). PMC12148905, DOI 10.3389/fbioe.2025.1597209.
 - **citation_support**: "keeping the barbell closer to the body during the SDL reduces the lever arm stress, thereby decreasing mechanical stress on the lower back"; a more upright posture with reduced trunk inclination is what "facilitated" lower back-loading in the wider-stance pull. Verified in RAG doc.
 
+> **WITHDRAWN — bar drift.** This rule is **withdrawn** (2026-08-01) and is NOT implemented in
+> `src/pose/movements/deadlift.py`, for three reasons:
+>
+> 1. **The citation contains no bar-path measurement.** Hanen PMC12148905 was read in full. Its
+>    only bar-position statement is qualitative — "keeping the barbell closer to the body during
+>    the SDL reduces the lever arm stress." No distance, no threshold, no units. The
+>    `0.5·foot_len` figure above has no source.
+> 2. **The citation explicitly disclaims it.** The paper states: *"Analyzing the bar path would
+>    be valuable to validate this hypothesis."* It did not analyze bar path and says so. A rule
+>    cannot cite a source for a measurement that source declares un-performed.
+> 3. **The mid-foot reference is the construct already forbidden.** The OHP bar-path withdrawal
+>    (above) rejected referencing the bar to mid-foot because it "would require an invented
+>    mid-foot proxy — forbidden by this project's every-threshold-literature-backed premise."
+>    This rule prescribes exactly that construct.
+>
+> **Open spec question:** does the Deadlift rule set want a genuine bar-path fault? It would need
+> (a) a base-of-support reference MediaPipe can resolve and (b) a citation that measures bar
+> displacement with a number. Neither exists today. This is a withdrawal pending a decision, not
+> a silent deletion.
+
 #### Hips Rise Faster Than Shoulders (Stiff-Leg / Segment Split)
 
 - **fault_id**: deadlift_hips_shoot_up
@@ -1363,6 +1383,36 @@ These are stated rather than papered over, per the spec's honesty requirement:
 - **Deadlift lumbar flexion** (`deadlift_lumbar_flexion`) — the clinically most important
   deadlift fault — is **low observability**: MediaPipe has no spine landmarks between shoulders
   and hips, so the heuristic is an explicit proxy, not a true rounded-vs-neutral spine measure.
+- **Deadlift lumbar-flexion detection thresholds are UNSOURCED** (2026-08-01). The implemented
+  proxy — projected torso shortening against the rep's own setup baseline while the hips stay
+  stationary — uses `0.95` / `0.85` ratio endpoints and a `0.10` hip-stationary band. No source
+  gives a segment-shortening-to-lumbar-flexion figure; 0.95 was chosen to sit above landmark
+  jitter *without any measurement of what that jitter is*. The constants carry `UNSOURCED` in
+  their names. The fault is cited; the detection is not. Calibrating against a measured jitter
+  floor is the known upgrade path.
+- **Deadlift `hips_shoot_up` ramp endpoints are unsourced** (2026-08-01): neither deadlift RAG
+  document reports a trunk inclination in degrees, so 55°/75° rest on the spec alone. The
+  mechanism and direction are cited; the numbers are not.
+- **Two of three Deadlift rules have no KG node** (2026-08-01) and take the `rag` fallback. The
+  13-node `Deadlift:` stub was authored independently of this rule catalog and does not agree
+  with it: it carries nodes for two faults the catalog has no rule for (`Hyperextension At
+  Lockout`, `Insufficient Hip Hinge`), lacks nodes for `deadlift_hips_shoot_up` and
+  `deadlift_incomplete_lockout`, and its one exactly-matching fault node (`Bar Drift From Body`)
+  belongs to the rule withdrawn above. Only `Deadlift:Lumbar Flexion` grounds a shipped rule.
+  Near-misses were rejected rather than used: `Insufficient Hip Hinge` describes a
+  knee-dominant pull where `hips_shoot_up` is hip-dominant, and `Hyperextension At Lockout` is
+  the literal opposite of `incomplete_lockout`.
+- **Deadlift and OHP lockout evidence cannot distinguish "not measured" from "fully flexed"**
+  (2026-08-01). When one axis is entirely unmeasurable across a flagged segment,
+  `deadlift_incomplete_lockout` reports `min_hip_angle_deg` / `min_knee_angle_deg` as **0.0**,
+  following `overhead_press.py`'s established `round(x, 2) if np.isfinite(x) else 0.0`
+  convention. 0.0° is a physically meaningful angle — a maximally flexed joint — so a reader of
+  the evidence cannot tell a missing measurement from a catastrophic one. The fallback exists
+  because a bare NaN survives `dataclasses.asdict()` into a postgrest write with
+  `allow_nan=False`, whose `ValueError` this codebase documents as silently swallowed, dropping
+  the analysis from the user's history entirely. Choosing a misleading number over a vanished
+  analysis is the lesser evil, not a good outcome; a `None`-with-explicit-reason evidence shape
+  would fix both movements at once and is not attempted here.
 - **Push-up scapular winging** (`pushup_scapular_winging`) is real and cited but **observability
   none** from monocular pose (no scapular landmarks); listed for completeness, not detection.
 - **Band-pull-apart / row loss of scapular retraction** is **low observability** — scapular
@@ -1867,3 +1917,35 @@ against labeled ground truth" and is the user's decision with these numbers in h
   the rules saw, so score support matches rule support, and the lead-side finding was reproduced
   independently over the full labeled windows — but the isolation the spec promised was not
   achieved. Forcing it needs `replace(LUNGE_DETECTOR, rep_signal=None)`; not done here.
+
+**Status (2026-08-01):** **Deadlift** implemented in `src/pose/movements/deadlift.py` and
+registered as the 5th of 16 — `deadlift_hips_shoot_up`, `deadlift_incomplete_lockout`,
+`deadlift_lumbar_flexion`. `deadlift_bar_drift` is WITHDRAWN (see the boxed note in §Deadlift).
+**Thresholds are spec-derived and UNVALIDATED**: no labeled deadlift data exists in this
+repository, so unlike Lunge there is no validation pass to defer to, and §8.4 remains
+unsatisfied for this movement. Deviations from the heuristics written above, deliberate and
+documented in-code:
+
+- `deadlift_hips_shoot_up` — the spec's "Δ(hip_y) rises faster than Δ(shoulder_y)" is
+  **implemented as a trunk-pitch test**, not a two-landmark differential. The differential was
+  checked numerically first and is algebraically identical to a pitch change: since
+  `shoulder_y − hip_y = −torso_len·cos(pitch)`, a rigid torso gives
+  `hip_lead_ratio ≡ cos(pitch₀) − cos(pitch_t)` exactly. It depends only on pitch and says
+  nothing about hip travel, so writing it as a differential would falsely imply independent
+  corroboration. The spec's own "i.e." equating the two phrasings is correct.
+- Phase cutoffs are **percentiles of each rep's own hip-angle excursion**, not absolute angles.
+  `deadlift_incomplete_lockout` scores the `lockout` phase and the fault *is* failing to reach
+  extension, so an absolute cutoff would delete the phase on exactly the reps the rule exists
+  to catch.
+- `deadlift_lumbar_flexion` is **hard-gated** to sagittal views while the other two rules
+  **degrade** off-view. The asymmetry is deliberate: an angle magnitude under-reads head-on
+  (failure mode = silence), whereas the torso-shortening proxy is corrupted by trunk pitch
+  head-on (failure mode = a false positive). Gate where a wrong claim is possible, discount
+  where only a missed one is — the OHP `ohp_forward_head` precedent.
+- `deadlift_incomplete_lockout` scores **both** the hip and knee ramps unconditionally and takes
+  the worse, rather than selecting a ramp by which reading is finite — the mis-attribution bug
+  §8's 2026-07-25 block records against `ohp_incomplete_lockout`. Because
+  `max(scores) == max(max(hip_sev), max(knee_sev))`, the reported `driver` axis cannot disagree
+  with the reported severity. Its `nanmin` over each axis is guarded for the all-NaN case
+  (`overhead_press.py`'s shape), which is reachable here precisely because the firing mask ORs
+  two independently finite-checked clauses.
