@@ -296,10 +296,21 @@ Three limitations, stated up front:
    nothing in the pipeline checks inter-frame spacing. Every acceleration number inherits that
    assumption.
 
-The spec's second, OR'd condition — "a simultaneous trunk-angle velocity spike co-occurs with
-the wrist spike (heave)" — is implemented as a co-occurrence *within the same frame window*
-using `trunk_angle_speed_deg_s` against its own 3× median, and its presence is recorded in
-`evidence["trunk_heave"]`. It widens what fires, per the spec's OR.
+**The spec's second, OR'd condition is degenerate and is not implemented as an OR.** It reads
+"OR if a simultaneous trunk-angle velocity spike co-occurs **with the wrist spike** (heave)" —
+i.e. its own text requires the wrist spike that the first condition already tests, so it
+describes a strict *subset* of what condition one fires on and can never widen the fire set.
+Implementing it as a second disjunct would add a branch that is unreachable by construction.
+It is therefore implemented as **evidence, not as a fire condition**: when the rule fires,
+`trunk_angle_speed_deg_s` is tested against its own 3× median over the same frames and the
+result is recorded as `evidence["trunk_heave"]`, which distinguishes an arms-only yank from a
+whole-body heave for the coaching cue without changing whether anything fires.
+
+One rule-level measurability guard, in the category `pushup.py` documents as
+"can only ever SILENCE": if the median acceleration over the `pull` frames is at or below a
+degenerate floor (a window in which the wrists barely moved), the ratio is meaningless — every
+frame divides by ~0 — and the rule emits nothing rather than a confident maximum-severity
+detection on a stationary lifter.
 
 ### 4.7 View handling: downgrade, never gate
 
