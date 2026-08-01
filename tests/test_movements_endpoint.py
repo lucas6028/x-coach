@@ -19,7 +19,7 @@ class TestMovementsEndpoint(unittest.TestCase):
         resp = self.client.get("/api/movements")
         self.assertEqual(resp.status_code, 200)
         names = [m["name"] for m in resp.json()["movements"]]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge"])
+        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift"])
 
     def test_reports_validation_status(self) -> None:
         # Lunge surfaces with validated=False -- the Beta tag -- because its thresholds are
@@ -29,7 +29,15 @@ class TestMovementsEndpoint(unittest.TestCase):
         flags = {m["name"]: m["validated"] for m in resp.json()["movements"]}
         self.assertEqual(
             flags,
-            {"Squat": True, "Overhead Press": False, "Push-up": False, "Lunge": False},
+            {
+                "Squat": True,
+                "Overhead Press": False,
+                "Push-up": False,
+                "Lunge": False,
+                # Deadlift ships Beta: there is no labeled deadlift data anywhere in this
+                # repository, so its thresholds have never been checked against ground truth.
+                "Deadlift": False,
+            },
         )
 
     def test_is_public(self) -> None:
