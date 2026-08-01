@@ -28,16 +28,32 @@ written, not discovered afterwards.
 
 ---
 
-## 2. There is no ground truth for Row, and that is a hard constraint
+## 2. There is no labeled-correctness ground truth for Row, and that is a hard constraint
 
-REHAB24-6 — the only labeled repetition dataset in this repository — contains six exercises:
-`Ex1` arm abduction, `Ex2` arm VW, `Ex3` table push-ups, `Ex4` leg abduction, `Ex5` leg lunge,
-`Ex6` squats (`notes/dataset-summary.md`). **None is a row.** Fit3D contains no row either.
+REHAB24-6 — the only per-rep correct/incorrect labeled dataset in this repository — contains
+six exercises: `Ex1` arm abduction, `Ex2` arm VW, `Ex3` table push-ups, `Ex4` leg abduction,
+`Ex5` leg lunge, `Ex6` squats (`notes/dataset-summary.md`). **None is a row.**
+
+Fit3D is different: it **does** contain row video — `barbell_row`, `barbell_dead_row` and
+`one_arm_row` (`data/Fit3D/fit3d_info.json`), with 3D mocap ground truth under
+`train/*/joints3d_25/` and rep boundaries in `rep_ann.json`, across all 8 train subjects. What
+Fit3D does **not** carry is a binary correct/incorrect label on any rep — it is 3D truth, not a
+fault judgment. That distinction is the whole point of this section: the *kind* of validation
+each dataset can support differs, and neither supports the Lunge pass's kind for Row.
 
 So the Lunge pass's second half — replay labeled repetitions through the production rules and
-report per-subject AUC — has no analogue here and is not attempted. Building a harness with
-nothing to point it at would produce the *appearance* of validation, which is worse than its
-absence.
+report per-subject AUC against correctness — has no analogue here for either dataset and is not
+attempted. Building a harness with nothing to point it at would produce the *appearance* of
+validation, which is worse than its absence.
+
+What Fit3D's 3D truth **could** support instead — a 2D-cue-vs-3D-truth fidelity comparison, the
+shape this project has already run for other movements (e.g. the Fit3D 2D-vs-3D findings in
+`notes/`) — is possible for Row and is simply **not attempted in this pass**. That is future
+work, not work blocked on absent data, and it is named here so the distinction is not lost:
+"no validation was run" is a scoping decision for Row; "no data exists to validate against" is
+true only for the REHAB24-6-style correctness check, not for a Fit3D-style fidelity check. One
+caveat that bounds even that future work: Fit3D's rig is 4 cameras, all oblique, with no true
+side view, which matters for any Row rule that needs a lateral component.
 
 Consequences, binding on how this work is described:
 
@@ -46,8 +62,10 @@ Consequences, binding on how this work is described:
    in either category has been checked against a row performed by a human being. The in-code
    docstrings must keep those two categories separate the way `pushup.py` does.
 3. The parent spec's §8.4 ("validate thresholds against labeled data per movement before
-   shipping analysis for that movement") is **not** satisfied for Row and cannot be until row
-   video with per-rep labels exists. That is recorded as an open item, not quietly skipped.
+   shipping analysis for that movement") is **not** satisfied for Row. Closing it needs either
+   labeled row video with per-rep correctness labels (REHAB24-6-style, which does not exist for
+   Row), or a fidelity-style pass against Fit3D's existing 3D row data (which exists but was not
+   run here). Recorded as an open item either way, not quietly skipped.
 
 ---
 

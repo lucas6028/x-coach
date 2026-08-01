@@ -1074,9 +1074,14 @@ ROW_DETECTOR = MovementDetector(
     (rule_torso_rising, rule_incomplete_rom, rule_momentum_jerk, rule_asymmetric_pull),
     # `validated` stays at its default False, and for Row that is not a formality: REHAB24-6
     # holds arm abduction, arm VW, table push-ups, leg abduction, lunge and squats, and no row.
-    # Neither does Fit3D. There is NO labeled row repetition anywhere in this repository, so no
-    # threshold here has ever been checked against a row performed by a human being. Beta is the
-    # factual label. Flipping this flag would require data that does not exist yet.
+    # Fit3D DOES have row video with 3D mocap ground truth and rep boundaries (`barbell_row`,
+    # `barbell_dead_row`, `one_arm_row` in data/Fit3D/fit3d_info.json, all 8 train subjects) --
+    # but no binary correct/incorrect label on any rep, so it cannot support a REHAB24-6-style
+    # fire-rate/AUC-against-correctness check. There is NO labeled-CORRECTNESS row repetition
+    # anywhere in this repository, so no threshold here has ever been checked against a row
+    # judged correct or incorrect by a human being. Beta is the factual label. A fidelity-style
+    # check against Fit3D's 3D truth is possible and simply hasn't been run; flipping this flag
+    # needs either that or labeled row video, not data that flatly does not exist.
     rep_signal="min_elbow_angle",
     rep_polarity="min",
     rep_start="extended",

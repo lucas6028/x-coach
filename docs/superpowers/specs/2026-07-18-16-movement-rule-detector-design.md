@@ -1888,8 +1888,19 @@ against labeled ground truth" and is the user's decision with these numbers in h
 
 - **Row — IMPLEMENTED 2026-08-01, UNVALIDATED.** Four of five rules
   (`row_torso_rising`, `row_incomplete_rom`, `row_momentum_jerk`, `row_asymmetric_pull`);
-  the fifth is recorded in §7 as a spec defect. `validated=False`: REHAB24-6 contains no row
-  and neither does Fit3D, so §8.4's "validate thresholds against labeled data per movement"
-  is **not** satisfied and cannot be until labeled row video exists. All four severity ramps
-  are rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
+  the fifth is recorded in §7 as a spec defect. `validated=False`: REHAB24-6 contains no row.
+  Fit3D **does** contain row video (`barbell_row`, `barbell_dead_row`, `one_arm_row` in
+  `data/Fit3D/fit3d_info.json`, 3D mocap ground truth under `train/*/joints3d_25/` and rep
+  boundaries in `rep_ann.json`, across all 8 train subjects) — but, unlike REHAB24-6, it
+  carries no binary correct/incorrect label, so it cannot support the fire-rate/AUC-against-
+  correctness validation §8.4 means and the Lunge pass above ran. What Fit3D's 3D truth
+  *can* support — the 2D-cue-vs-3D-truth fidelity comparison this project has already run
+  elsewhere (`notes/fit3d-2d-vs-3d-finding.md` and related) — is possible for Row and simply
+  was **not done in this pass**; it is future work, not blocked on absent data. (Caveat: Fit3D's
+  rig is 4 cameras, all oblique, with no true side view, which bears on any Row rule needing a
+  lateral component.) So §8.4's "validate thresholds against labeled data per movement" is
+  **not** satisfied for Row — REHAB24-6 has no row at all, and Fit3D's row data has 3D truth but
+  no correctness labels — and closing it needs either labeled row video or a fidelity-style pass
+  against Fit3D, neither of which is blocked on nonexistent data. All four severity ramps are
+  rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
   self-normalizing 3×-median threshold is expected to over-fire.

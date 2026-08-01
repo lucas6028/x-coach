@@ -16,7 +16,10 @@
 - **Every threshold is labeled in-code as exactly one of two categories**, in the style of `src/pose/movements/pushup.py`: **`FROM THE SPEC`** or **`RULE-LEVEL CHOICE MADE HERE`**. Never blur them.
 - **All four severity ramps are RULE-LEVEL.** The parent spec's Row section states no ramp for any fault. Convention taken from `pushup.rule_hip_sag`: ramp endpoint = 2.5× the fire threshold, documented as a display/ranking curve, not a cited quantity. The one exception is the elbow-angle ramp `100 → 140°`, taken verbatim from `pushup.rule_shallow_depth` so the two elbow ramps cannot drift.
 - **No threshold tuning.** Cited numbers stay as the spec states them. Weak behavior is written up, never repaired by moving a number.
-- `ROW_DETECTOR.validated` stays `False`. There is no labeled row data anywhere in this repository.
+- `ROW_DETECTOR.validated` stays `False`. There is no labeled-CORRECTNESS row data anywhere in
+  this repository (Fit3D has row video with 3D truth and rep boundaries but no correct/incorrect
+  label, so it cannot support a REHAB24-6-style check; see the design spec §2, corrected
+  2026-08-01).
 - **Metric layer contains no thresholds.** `row_compute_raw` / `row_assign_phases` emit scale-free per-frame quantities and phase labels only. The sole constant they may define is a division-by-zero guard.
 - Test command: `.venv\Scripts\python.exe -m pytest tests/ -q` (always scoped to `tests/`). Coverage gate: `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95`.
 - Commit after every task. Commit message body explains **why**, in the style of the repository's recent history.
@@ -2001,9 +2004,16 @@ ROW_DETECTOR = MovementDetector(
     (rule_torso_rising, rule_incomplete_rom, rule_momentum_jerk, rule_asymmetric_pull),
     # `validated` stays at its default False, and for Row that is not a formality: REHAB24-6
     # holds arm abduction, arm VW, table push-ups, leg abduction, lunge and squats, and no row.
-    # Neither does Fit3D. There is NO labeled row repetition anywhere in this repository, so no
-    # threshold here has ever been checked against a row performed by a human being. Beta is the
-    # factual label. Flipping this flag would require data that does not exist yet.
+    # Fit3D DOES have row video with 3D mocap ground truth and rep boundaries (`barbell_row`,
+    # `barbell_dead_row`, `one_arm_row` in data/Fit3D/fit3d_info.json, all 8 train subjects) --
+    # but no binary correct/incorrect label on any rep, so it cannot support a REHAB24-6-style
+    # fire-rate/AUC-against-correctness check. There is NO labeled-CORRECTNESS row repetition
+    # anywhere in this repository, so no threshold here has ever been checked against a row
+    # judged correct or incorrect by a human being. Beta is the factual label. A fidelity-style
+    # check against Fit3D's 3D truth is possible and simply hasn't been run; flipping this flag
+    # needs either that or labeled row video, not data that flatly does not exist.
+    # [Corrected 2026-08-01 -- this plan's original wording ("Neither does Fit3D") was false;
+    # see the coordinator's Task 7 REQUEST CHANGES and the design spec §2.]
     rep_signal="min_elbow_angle",
     rep_polarity="min",
     rep_start="extended",
@@ -2077,12 +2087,26 @@ Append to the parent spec's §8 status block:
 ```markdown
 - **Row — IMPLEMENTED 2026-08-01, UNVALIDATED.** Four of five rules
   (`row_torso_rising`, `row_incomplete_rom`, `row_momentum_jerk`, `row_asymmetric_pull`);
-  the fifth is recorded in §7 as a spec defect. `validated=False`: REHAB24-6 contains no row
-  and neither does Fit3D, so §8.4's "validate thresholds against labeled data per movement"
-  is **not** satisfied and cannot be until labeled row video exists. All four severity ramps
-  are rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
-  self-normalizing 3×-median threshold is expected to over-fire.
+  the fifth is recorded in §7 as a spec defect. `validated=False`: REHAB24-6 contains no row.
+  Fit3D **does** contain row video (`barbell_row`, `barbell_dead_row`, `one_arm_row` in
+  `data/Fit3D/fit3d_info.json`, 3D mocap ground truth under `train/*/joints3d_25/` and rep
+  boundaries in `rep_ann.json`, across all 8 train subjects) — but, unlike REHAB24-6, it
+  carries no binary correct/incorrect label, so it cannot support the fire-rate/AUC-against-
+  correctness validation §8.4 means and the Lunge pass above ran. What Fit3D's 3D truth
+  *can* support — the 2D-cue-vs-3D-truth fidelity comparison this project has already run
+  elsewhere — is possible for Row and simply was **not done in this pass**; it is future work,
+  not blocked on absent data. (Caveat: Fit3D's rig is 4 cameras, all oblique, with no true side
+  view, which bears on any Row rule needing a lateral component.) So §8.4's "validate
+  thresholds against labeled data per movement" is **not** satisfied for Row — REHAB24-6 has
+  no row at all, and Fit3D's row data has 3D truth but no correctness labels — and closing it
+  needs either labeled row video or a fidelity-style pass against Fit3D, neither of which is
+  blocked on nonexistent data. All four severity ramps are rule-level display curves (the Row
+  section states none), and `row_momentum_jerk`'s self-normalizing 3×-median threshold is
+  expected to over-fire.
 ```
+> **[Corrected 2026-08-01, post-Task-7-review]** This block's original text asserted "neither
+> does Fit3D" for row data, which is false (see above); the version shown here is the corrected
+> one actually written into the parent spec and `row.py`, not this plan's original draft.
 
 - [ ] **Step 3: Run the full verification set**
 
