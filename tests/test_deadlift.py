@@ -151,14 +151,27 @@ class DeadliftRunDetectorTests(unittest.TestCase):
         self.assertEqual(len(result.reps), 3)
         self.assertEqual(len(result.analyzed), 3)
 
-    def test_each_rep_opens_in_setup_because_it_starts_on_the_floor(self):
+    def test_each_rep_opens_at_the_floor_not_at_lockout(self):
         """A flexed-start rep's opening frames ARE the bar-on-the-floor setup -- the property
-        `setup_baseline` depends on. If the config silently segmented on the wrong extremum,
-        each rep would open at lockout instead."""
+        `setup_baseline` depends on. Checked on the METRIC VALUE, not the phase label:
+        `deadlift_assign_phases` labels the first `max(1, frame_count * 0.10)` frames of ANY
+        per-rep window "setup" POSITIONALLY (see its `setup_cutoff`), without ever inspecting
+        `hip_angle_deg` -- so that label is IDENTICAL whether or not the rep boundary actually
+        landed on the floor, and asserting on it proves nothing about `rep_start`/`rep_polarity`.
+        Verified directly: swapping in `rep_start="extended"` still returns reps whose opening
+        frame is labeled "setup" even though its `hip_angle_deg` is ~179 (lockout), not ~130
+        (floor). Only the value discriminates, which is why this asserts the value: under the
+        fixture's ~130/~180 range, 150.0 sits strictly between the two.
+
+        Also guards against a vacuous pass: an empty `result.reps` would let the loop body below
+        never run and the test pass having checked nothing, which is exactly the failure mode a
+        broken `rep_start`/`rep_polarity` combination produces (silent whole-clip fallback).
+        """
         result = run_detector(DEADLIFT_DETECTOR, _deadlift_reps(3), 30.0, "side", 0.9)
+        self.assertTrue(result.reps, "segmentation found no reps -- nothing below would run")
         for rep in result.reps:
             with self.subTest(rep=rep.index):
-                self.assertEqual(result.core[rep.start].phase, "setup")
+                self.assertLess(result.core[rep.start].m("hip_angle_deg"), 150.0)
 
 
 class DeadliftMetricTests(unittest.TestCase):
