@@ -1,4 +1,5 @@
 import unittest
+import warnings
 
 import numpy as np
 
@@ -373,24 +374,34 @@ class IncompleteLockoutTests(unittest.TestCase):
         serialization (`pose_rule_detector.py:664`) would carry to postgrest's
         `allow_nan=False` encoder -- a silently swallowed `ValueError` that drops the
         analysis from the user's history (see `json_safe_view_payload`'s docstring).
+
+        The RuntimeWarning-to-error promotion is scoped to just this call (not the module or
+        session) so the guard's absence fails THIS test under a plain `pytest tests/` run --
+        without it, `evidence["min_hip_angle_deg"] == 0.0` alone can never catch a removed
+        guard, because the evidence-dict `if np.isfinite(...) else 0.0` fallback converts the
+        NaN to 0.0 regardless of whether the upstream nanmin call was guarded.
         """
-        out = rule_incomplete_lockout(
-            _frames({"hip_angle_deg": np.nan, "knee_angle_deg": 150.0}), _ctx()
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            out = rule_incomplete_lockout(
+                _frames({"hip_angle_deg": np.nan, "knee_angle_deg": 150.0}), _ctx()
+            )
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0].evidence["driver"], "knee")
         self.assertEqual(out[0].evidence["min_hip_angle_deg"], 0.0)
-        self.assertFalse(np.isnan(out[0].evidence["min_hip_angle_deg"]))
 
     def test_a_knee_nan_segment_flagged_purely_by_the_hip_criterion_is_evidence_safe(self):
-        """Symmetric case: knee NaN throughout every frame, hip alone flags the segment."""
-        out = rule_incomplete_lockout(
-            _frames({"hip_angle_deg": 150.0, "knee_angle_deg": np.nan}), _ctx()
-        )
+        """Symmetric case: knee NaN throughout every frame, hip alone flags the segment. See
+        the hip-NaN test above for why the RuntimeWarning-to-error promotion, scoped to this
+        call only, is what makes the guard's absence actually fail this test."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", RuntimeWarning)
+            out = rule_incomplete_lockout(
+                _frames({"hip_angle_deg": 150.0, "knee_angle_deg": np.nan}), _ctx()
+            )
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0].evidence["driver"], "hip")
         self.assertEqual(out[0].evidence["min_knee_angle_deg"], 0.0)
-        self.assertFalse(np.isnan(out[0].evidence["min_knee_angle_deg"]))
 
     def test_an_off_view_reading_is_discounted_but_not_suppressed(self):
         soft = {"hip_angle_deg": 150.0, "knee_angle_deg": 178.0}
