@@ -65,8 +65,12 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         detect.assert_called_once()
 
     def test_unknown_movement_returns_coming_soon_without_detector(self) -> None:
+        # "Row" is a real movement name the frontend lists (frontend/src/lib/movements.ts) but
+        # has no registered detector -- unlike "Deadlift", which this test used before it was
+        # registered in src/pose/movements/registry.py.
+        self.assertNotIn("Row", [d.name for d in registry.list_detectors()])
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
-        result = svc.analyze_pose_payload(payload, movement="Deadlift", video_id="v2")
+        result = svc.analyze_pose_payload(payload, movement="Row", video_id="v2")
         self.assertEqual(result["analysis_pending"], True)
         self.assertEqual(result["detections"], [])
         self.assertEqual(result["video_id"], "v2")

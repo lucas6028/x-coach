@@ -1,9 +1,10 @@
+import math
 import unittest
 import warnings
 
 import numpy as np
 
-from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.movements.base import CoreFrame, RuleContext, run_detector
 from src.pose.movements.deadlift import (
     DEADLIFT_LOCKOUT_MILD_DEG,
     DEADLIFT_METRIC_KEYS,
@@ -14,6 +15,8 @@ from src.pose.movements.deadlift import (
     rule_lumbar_flexion,
     setup_baseline,
 )
+from src.pose.movements import registry
+from src.pose.movements.deadlift import DEADLIFT_DETECTOR
 
 
 def _ctx(view: str = "side", conf: float = 0.9, min_frames: int = 6) -> RuleContext:
@@ -106,6 +109,56 @@ def _landmarks(overrides: dict[int, tuple[float, float]]) -> list[dict]:
 
 def _frame(index: int, overrides: dict[int, tuple[float, float]] | None = None) -> dict:
     return {"frame_index": index, "landmarks": _landmarks(overrides or {})}
+
+
+def _deadlift_reps(n_reps: int, frames_per_rep: int = 30, low_offset: float = 0.30) -> list[dict]:
+    """`n_reps` deadlifts built from landmark frames: the shoulders swing forward of the hips
+    at each rep boundary (a hip hinge -- LOW hip_angle_deg, the floor) and return directly
+    above the hips at the midpoint (upright lockout -- HIGH hip_angle_deg), tracing one
+    hip-EXTENSION excursion per rep that starts and ends flexed.
+
+    Mirrors `squat_reps` in tests/test_run_detector_per_rep.py, but mirrored in polarity: squat
+    starts extended and dips to a bottom, this starts flexed and rises to a peak. That
+    difference is exactly why `DEADLIFT_DETECTOR` needs `rep_start="flexed"` while
+    `rep_polarity` stays "min" -- see `DeadliftRunDetectorTests` below for why this is not just
+    restating the config: `hip_angle_deg` is naturally LOW at the floor and HIGH at lockout, so
+    the floor (the flexed boundary) is already the raw signal's minimum and needs no inversion.
+    """
+    frames: list[dict] = []
+    for index in range(n_reps * frames_per_rep):
+        theta = 2.0 * math.pi * (index % frames_per_rep) / frames_per_rep
+        # Forward lean is maximal at theta=0 (rep boundary, floor) and zero at theta=pi (rep
+        # midpoint, lockout) -- the cosine shape squat_reps' hip_y uses, phase-shifted.
+        offset = low_offset * (0.5 + 0.5 * math.cos(theta))
+        frames.append(_frame(index, {11: (0.50 + offset, 0.30), 12: (0.52 + offset, 0.30)}))
+    return frames
+
+
+class DeadliftRunDetectorTests(unittest.TestCase):
+    """The one design point the parent task calls out: `rep_start="flexed"` with
+    `rep_polarity="min"` is the combination that makes `segment_reps` treat the FLOOR (a low
+    raw `hip_angle_deg`) as the rep boundary, rather than the mid-rep event. Every other test in
+    this module only echoes the config (`DEADLIFT_DETECTOR.rep_start == "flexed"`); none of them
+    exercises `run_detector`, so a config that LOOKED right but found zero reps (silently
+    falling back to whole-clip analysis, which breaks the per-rep setup baseline
+    `rule_hips_shoot_up`/`rule_lumbar_flexion` depend on) would have passed every other test in
+    this file. This one drives the real path end to end and would catch that.
+    """
+
+    def test_three_reps_are_detected_through_the_real_segmentation_path(self):
+        result = run_detector(DEADLIFT_DETECTOR, _deadlift_reps(3), 30.0, "side", 0.9)
+        self.assertIsNone(result.fallback)
+        self.assertEqual(len(result.reps), 3)
+        self.assertEqual(len(result.analyzed), 3)
+
+    def test_each_rep_opens_in_setup_because_it_starts_on_the_floor(self):
+        """A flexed-start rep's opening frames ARE the bar-on-the-floor setup -- the property
+        `setup_baseline` depends on. If the config silently segmented on the wrong extremum,
+        each rep would open at lockout instead."""
+        result = run_detector(DEADLIFT_DETECTOR, _deadlift_reps(3), 30.0, "side", 0.9)
+        for rep in result.reps:
+            with self.subTest(rep=rep.index):
+                self.assertEqual(result.core[rep.start].phase, "setup")
 
 
 class DeadliftMetricTests(unittest.TestCase):
@@ -540,3 +593,32 @@ class HipsShootUpTests(unittest.TestCase):
         # index 0), reporting peak_frame 8 and evidence 58.0 here.
         self.assertEqual(detection.peak_frame, 10)
         self.assertAlmostEqual(detection.evidence["peak_torso_pitch_deg"], 71.0, places=4)
+
+
+class DeadliftDetectorTests(unittest.TestCase):
+    def test_it_is_registered_under_its_canonical_name(self):
+        self.assertIs(registry.get_detector("Deadlift"), DEADLIFT_DETECTOR)
+
+    def test_lookup_is_case_insensitive(self):
+        self.assertIs(registry.get_detector("deadlift"), DEADLIFT_DETECTOR)
+
+    def test_it_ships_unvalidated_because_no_labeled_deadlift_data_exists(self):
+        self.assertFalse(DEADLIFT_DETECTOR.validated)
+
+    def test_the_rep_signal_is_a_declared_metric_key(self):
+        self.assertIn(DEADLIFT_DETECTOR.rep_signal, DEADLIFT_DETECTOR.metric_keys)
+
+    def test_the_rep_starts_flexed_because_the_bar_starts_on_the_floor(self):
+        self.assertEqual(DEADLIFT_DETECTOR.rep_start, "flexed")
+
+    def test_all_three_surviving_rules_are_wired(self):
+        names = {rule.__name__ for rule in DEADLIFT_DETECTOR.rules}
+        self.assertEqual(
+            names,
+            {"rule_hips_shoot_up", "rule_incomplete_lockout", "rule_lumbar_flexion"},
+        )
+
+    def test_bar_drift_is_absent_because_it_was_withdrawn(self):
+        self.assertNotIn(
+            "rule_bar_drift", {rule.__name__ for rule in DEADLIFT_DETECTOR.rules}
+        )

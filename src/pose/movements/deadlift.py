@@ -43,7 +43,8 @@ from src.pose.geometry import (
     landmarks_to_array, visible_point, midpoint, mean_visibility,
     line_angle_from_vertical, contiguous_true_segments, severity_from_range,
 )
-from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
+from src.pose.movements import registry
 from src.pose.pose_rule_detector import (
     SIDE_VIEW_CONF_THRESHOLD,
     VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
@@ -601,3 +602,34 @@ def rule_hips_shoot_up(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRule
             )
         )
     return detections
+
+
+# THREE of the parent spec's FOUR Deadlift rules are listed. `deadlift_bar_drift` is absent
+# because it is WITHDRAWN, not because it was forgotten -- see the boxed note in the parent
+# spec's Deadlift section. Briefly: its citation (Hanen PMC12148905) contains no bar-path
+# measurement and explicitly defers one ("Analyzing the bar path would be valuable to validate
+# this hypothesis"), and its `midfoot_x` reference is the invented construct that the OHP
+# bar-path withdrawal already ruled out. Unlike push-up's `rule_scapular_winging`, it is not
+# registered-but-silent: a silent rule says "real fault, unmeasurable", whereas this one says
+# "no citation supports the rule as written", which is a spec problem, not a sensing problem.
+#
+# `DEADLIFT_METRIC_KEYS` must stay a two-way match with what `deadlift_compute_raw` emits --
+# pinned by `test_metric_keys_match_the_emitted_metrics`.
+DEADLIFT_DETECTOR = MovementDetector(
+    "Deadlift",
+    DEADLIFT_METRIC_KEYS,
+    deadlift_compute_raw,
+    deadlift_assign_phases,
+    (rule_hips_shoot_up, rule_incomplete_lockout, rule_lumbar_flexion),
+    # `validated` stays at its default False. No labeled deadlift data exists anywhere in this
+    # repository, so unlike Lunge there is not even a validation pass to defer to; flipping
+    # this would need evidence that cannot currently be obtained.
+    rep_signal="hip_angle_deg",
+    # The signal bottoms out at the floor and peaks at lockout, so a rep is an excursion in
+    # hip EXTENSION that starts and ends flexed -- `rep_start="flexed"`, the case base.py:55
+    # names deadlift for.
+    rep_polarity="min",
+    rep_start="flexed",
+)
+
+registry.register(DEADLIFT_DETECTOR)
