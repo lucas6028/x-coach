@@ -308,6 +308,8 @@
 - [ ] 各個動作，相機擺放最適合的位置、角度
 - [ ] **（待 per-movement detector 上線後）全面泛化「分析流程」文案**：目前 studio header「Squat Analysis」、上傳提示「Drop a squat video」、「Analyze a squat」CTA、History 列「{view} squat」、chat intro「about your squat」等 ~26 處刻意保留 `squat`（偵測器僅支援深蹲，改掉會誤導使用者上傳非深蹲影片拿到錯結果）。偵測器多動作化後，把這批文案改成多動作用語（en + zhHant 皆需更新；品牌／landing 文案已於 commit `4d64e659` 泛化為 multi-exercise）。使用者 2026-07-17 指定：未來採「完全泛化」而非加註解。
 - [ ] **（待多動作分析上線後）修正 landing showcase 過度宣稱**：`landing.showcase.sub`（「reads the rest of the library, on real footage」）、`landing.showcase.title`（「One pipeline, the whole movement library」）、`Analyzing` 標籤目前暗示 pipeline 能分析全部動作，但 `MovementShowcase.tsx` 的 push-up/high-knee/sit-up clip 只有 MediaPipe pose tracking、無 fault 偵測（只有深蹲有）。分析真正多動作化後對齊；在那之前若要誠實化，改為「16 動作知識庫 + pose 感知，fault 分析從深蹲起步」（en + zhHant）。使用者 2026-07-17 標記為待辦。
+- [ ] 許多動作的錯誤需要脊椎及其他 MediaPipe 無法定義的點，思考其他解決方法。
+- [ ] 許多錯誤沒有對應到 Knowledge Graphe 的節點。
 
 ### P3：感知升級
 
