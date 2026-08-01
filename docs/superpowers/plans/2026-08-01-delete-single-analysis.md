@@ -689,10 +689,16 @@ Expected: 完成（AST-only，無 API 成本）
 
 - [ ] **Step 6: Commit（若有殘留變更）**
 
+`git add -A` **不可用**——工作區有一個與本功能無關的未追蹤檔案
+（`notes/camera-placement-hypothesis.md`），只 add 圖譜輸出：
+
 ```bash
 git status --short
-git add -A && git commit -m "chore: refresh graphify graph after per-record deletion"
+git add graphify-out/
+git commit -m "chore: refresh graphify graph after per-record deletion"
 ```
+
+若 `git status --short` 顯示 `graphify-out/` 無變更，跳過這步。
 
 ---
 
