@@ -79,7 +79,7 @@ describe("AccountMenu", () => {
     expect(screen.queryByText("ada@example.com")).not.toBeInTheDocument();
   });
 
-  it("links to settings and signs out from the menu", async () => {
+  it("offers settings and signs out from the menu", async () => {
     const user = userEvent.setup();
     withUser({ email: "ada@example.com", user_metadata: {} });
     renderMenu();
@@ -88,11 +88,38 @@ describe("AccountMenu", () => {
     await user.click(screen.getByRole("button", { name: /account menu/i }));
 
     expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: /settings/i })).toHaveAttribute("href", "/settings");
+    expect(screen.getByRole("menuitem", { name: /settings/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("menuitem", { name: /sign out/i }));
     expect(signOut).toHaveBeenCalledOnce();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("opens the settings popup in place, without navigating", async () => {
+    const user = userEvent.setup();
+    withUser({ email: "ada@example.com", user_metadata: {} });
+    renderMenuAt("/history");
+
+    await user.click(screen.getByRole("button", { name: /account menu/i }));
+    await user.click(screen.getByRole("menuitem", { name: /settings/i }));
+
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("heading", { name: "Profile" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /close settings/i }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not stack a second popup on the /settings route", async () => {
+    const user = userEvent.setup();
+    withUser({ email: "ada@example.com", user_metadata: {} });
+    renderMenuAt("/settings");
+
+    await user.click(screen.getByRole("button", { name: /account menu/i }));
+    await user.click(screen.getByRole("menuitem", { name: /settings/i }));
+
+    // That route already renders the popup around this menu; opening another would stack overlays.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("redirects to /login after signing out from a normal page", async () => {

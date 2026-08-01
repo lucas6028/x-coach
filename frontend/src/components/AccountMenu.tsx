@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { CaretDown, GearSix, SignOut } from "@phosphor-icons/react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useI18n } from "../lib/i18n";
 import { useAuth } from "../lib/auth";
 import { avatarUrl, displayName, initial } from "../lib/profile";
+import SettingsDialog from "./settings/SettingsDialog";
 
 // Account control as an avatar-triggered dropdown. The trigger shows the user's
-// profile image (or an initial fallback); the menu links to settings and signs out.
+// profile image (or an initial fallback); the menu opens settings and signs out.
 export default function AccountMenu() {
   const { t } = useI18n();
   const { user, signOut } = useAuth();
   const [open, setOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [imgError, setImgError] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
@@ -65,15 +67,19 @@ export default function AccountMenu() {
           role="menu"
           className="absolute right-0 z-50 mt-1.5 min-w-[10rem] overflow-hidden rounded-xl border border-border-dark bg-surface-dark p-1 shadow-lg shadow-black/20"
         >
-          <Link
-            to="/settings"
+          {/* Opens the popup in place, leaving the URL alone — the /settings route renders the
+              same component, so on that route the popup is already up and this is a no-op. */}
+          <button
             role="menuitem"
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              setOpen(false);
+              if (location.pathname !== "/settings") setSettingsOpen(true);
+            }}
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted transition-colors hover:bg-content/5 hover:text-content"
           >
             <GearSix size={18} />
             <span className="flex-1 text-left">{t("account.settings")}</span>
-          </Link>
+          </button>
           <div className="my-1 h-px bg-border-dark" />
           <button
             role="menuitem"
@@ -90,6 +96,7 @@ export default function AccountMenu() {
           </button>
         </div>
       )}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
