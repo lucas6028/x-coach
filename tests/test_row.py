@@ -719,6 +719,55 @@ class RowIncompleteRomTest(unittest.TestCase):
         self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.255, places=3)
         self.assertEqual(detections[0].evidence["primary_threshold"], PULL_DEPTH_MILD)
 
+    def test_peak_frame_is_the_worst_frame_even_when_the_ramp_saturates(self) -> None:
+        """Regression pin for the unclipped `score_values` fix -- previously pinned by NOTHING.
+        Every `_row_clip` peak slice holds a CONSTANT value, so `nanargmax` returns index 0
+        whether `score_values` is clipped or unclipped; reverting `rule_incomplete_rom`'s
+        `scores` to the old clipped `max(severity_from_range(...), severity_from_range(...))`
+        form still passed all 38 tests in this file. `pushup.rule_head_drop`'s own
+        `test_peak_frame_is_the_worst_frame_even_when_the_ramp_saturates` is the precedent this
+        mirrors.
+
+        The fixture needs a NON-constant peak slice, which `row_frame`/`_row_clip`'s geometry
+        cannot produce (every knob controls one metric at one fixed value per call). Built
+        directly as `CoreFrame`s instead, bypassing `row_compute_raw`/`row_assign_phases`
+        entirely -- `_run_rule` does not smooth (see its own docstring), so these are exactly
+        the raw per-frame values `rule_incomplete_rom` sees in production, just without the
+        landmark geometry in between.
+
+        Seven `peak`-phase frames; `mean_wrist_hip_dist` = [0.20, 0.35, 0.28, 0.50, 0.22, 0.20,
+        0.20], `max_elbow_angle` held at a constant 70 (below the 100 fire threshold, so the
+        elbow axis never fires and only the distance axis drives this segment). 0.20/0.28/0.22
+        sit below the 0.30 severe end and are NOT saturated; 0.35 (frame_index 1) and 0.50
+        (frame_index 3) both clip to severity 1.0. Under the CLIPPED formulation `nanargmax`
+        returns the FIRST tied maximum, frame_index 1 -- the wrong answer, since 0.50 is the
+        genuinely worse value. Under the UNCLIPPED formulation the two keep climbing past 1.0
+        (1.278 vs 2.111), so frame_index 3 wins, which is what this test asserts.
+        """
+        from src.pose.movements.base import CoreFrame
+        from src.pose.movements.row import ROW_METRIC_KEYS, rule_incomplete_rom
+
+        distances = [0.20, 0.35, 0.28, 0.50, 0.22, 0.20, 0.20]
+        core = [
+            CoreFrame(
+                frame_index=index,
+                time=index / 30.0,
+                phase="peak",
+                valid=True,
+                lower_body_visibility=1.0,
+                metrics={
+                    **{key: 0.0 for key in ROW_METRIC_KEYS},
+                    "mean_wrist_hip_dist": distance,
+                    "max_elbow_angle": 70.0,
+                },
+            )
+            for index, distance in enumerate(distances)
+        ]
+        ctx = RuleContext(fps=30.0, view_type="rear_oblique", view_confidence=0.8, min_frames=6)
+        detections = rule_incomplete_rom(core, ctx)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].peak_frame, 3)
+
     def test_it_reads_the_less_flexed_arm(self) -> None:
         """The conservative reading: a rep is incomplete if EITHER arm fell short."""
         from src.pose.movements.row import row_compute_raw, rule_incomplete_rom
