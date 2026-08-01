@@ -9,6 +9,7 @@ from src.pose.movements.deadlift import (
     DEADLIFT_METRIC_KEYS,
     deadlift_assign_phases,
     deadlift_compute_raw,
+    rule_hips_shoot_up,
     rule_incomplete_lockout,
     rule_lumbar_flexion,
     setup_baseline,
@@ -448,3 +449,89 @@ class IncompleteLockoutTests(unittest.TestCase):
         # Severity is the WORST frame's score (index 2: (165-143)/(165-140) = 0.88), not the
         # best one. A `severity = min(scores)` mutation would report 0.28 (index 0) instead.
         self.assertAlmostEqual(detection.severity, 0.88, places=4)
+
+
+class HipsShootUpTests(unittest.TestCase):
+    def test_a_trunk_that_flattens_past_the_gate_fires(self):
+        window = _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 65.0})
+        out = rule_hips_shoot_up(window, _ctx())
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].fault_id, "deadlift_hips_shoot_up")
+
+    def test_a_rep_that_stays_flat_without_flattening_further_is_silent(self):
+        """Setting up flat is not the sequencing fault the citation describes."""
+        window = _rep_window({"torso_pitch_deg": 70.0}, {"torso_pitch_deg": 68.0})
+        self.assertEqual(rule_hips_shoot_up(window, _ctx()), [])
+
+    def test_a_trunk_that_flattens_but_stays_upright_is_silent(self):
+        window = _rep_window({"torso_pitch_deg": 20.0}, {"torso_pitch_deg": 40.0})
+        self.assertEqual(rule_hips_shoot_up(window, _ctx()), [])
+
+    def test_a_good_hinge_that_becomes_more_upright_is_silent(self):
+        window = _rep_window({"torso_pitch_deg": 60.0}, {"torso_pitch_deg": 25.0})
+        self.assertEqual(rule_hips_shoot_up(window, _ctx()), [])
+
+    def test_severity_ramps_with_peak_pitch(self):
+        mild = rule_hips_shoot_up(
+            _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 60.0}), _ctx()
+        )[0]
+        worse = rule_hips_shoot_up(
+            _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 72.0}), _ctx()
+        )[0]
+        self.assertGreater(worse.severity, mild.severity)
+
+    def test_severity_saturates_at_the_severe_endpoint(self):
+        out = rule_hips_shoot_up(
+            _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 85.0}), _ctx()
+        )[0]
+        self.assertAlmostEqual(out.severity, 1.0, places=4)
+
+    def test_a_window_without_a_setup_baseline_is_silent(self):
+        window = _frames({"torso_pitch_deg": 80.0}, phase="mid_pull")
+        self.assertEqual(rule_hips_shoot_up(window, _ctx()), [])
+
+    def test_nan_pitch_is_silent(self):
+        window = _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": np.nan})
+        self.assertEqual(rule_hips_shoot_up(window, _ctx()), [])
+
+    def test_lowering_frames_are_never_scored(self):
+        window = (
+            _frames({"torso_pitch_deg": 50.0}, count=8, phase="setup")
+            + _frames({"torso_pitch_deg": 80.0}, count=12, phase="lowering")
+        )
+        self.assertEqual(rule_hips_shoot_up(window, _ctx()), [])
+
+    def test_an_off_view_reading_is_discounted_but_not_suppressed(self):
+        window = _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 65.0})
+        on = rule_hips_shoot_up(window, _ctx(view="side"))[0]
+        off = rule_hips_shoot_up(window, _ctx(view="rear"))[0]
+        self.assertEqual(off.observability, "medium")
+        self.assertLess(off.confidence, on.confidence)
+
+    def test_peak_and_start_frame_pin_the_worst_frame_not_index_zero(self):
+        """Regression tripwire, same shape as the other two rules': `_rep_window` builds
+        IDENTICAL active frames, so every candidate ties for "worst" and `np.nanargmax`
+        (`build_detection`) returns index 0 regardless of a broken `np.nanmax` -> `np.nanmin`
+        swap. This window varies `torso_pitch_deg` frame-to-frame so that mutation produces a
+        wrong, checkable answer.
+
+        Pitches 58, 62, 71, 66, 60, 59 -- all above both the setup baseline (50.0) and the
+        55-degree gate (so the whole 6-frame active block, exactly `min_frames`, stays
+        flagged), with a genuine maximum (worst flattening) at position 2.
+        """
+        pitches = [58.0, 62.0, 71.0, 66.0, 60.0, 59.0]
+        window = _varying_window(
+            {"torso_pitch_deg": 50.0},
+            [{"torso_pitch_deg": p} for p in pitches],
+        )
+        out = rule_hips_shoot_up(window, _ctx())
+        self.assertEqual(len(out), 1)
+        detection = out[0]
+        # setup_n=8 (the `_varying_window` default), so the active block starts at frame_index
+        # 8; every pitch clears both clauses, so the segment spans the full 6-frame run.
+        self.assertEqual(detection.start_frame, 8)
+        # The worst (largest-pitch) frame is active[2], at window frame_index 8 + 2 = 10.
+        # A `np.nanmax` -> `np.nanmin` mutation would instead pick the SMALLEST pitch (58.0,
+        # index 0), reporting peak_frame 8 and evidence 58.0 here.
+        self.assertEqual(detection.peak_frame, 10)
+        self.assertAlmostEqual(detection.evidence["peak_torso_pitch_deg"], 71.0, places=4)
