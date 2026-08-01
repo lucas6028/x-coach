@@ -661,6 +661,36 @@ class IncompleteLockoutTests(unittest.TestCase):
         self.assertAlmostEqual(detection.severity, 0.28, places=4)
 
 
+    def test_the_driver_is_chosen_from_the_two_PEAKS_when_both_axes_vary(self):
+        """Pins the `driver` tie-break under the 2026-08-01 peak aggregate.
+
+        Every other driver assertion in this class uses constant frames, where per-frame and
+        per-peak selection agree and so cannot tell them apart. Here BOTH axes vary and both
+        fail, and the axis with the higher single-frame minimum is the one that must win: hip
+        dips to 150 but PEAKS at 158 (severity 0.28), knee dips to 140 but peaks at 148
+        (severity 0.68). Peak-scoring must name the KNEE. A per-frame aggregate would compare
+        the minima (150 vs 140) and reach the same answer here by luck, so the value assertions
+        below -- 158/148, not 150/140 -- are what actually discriminate.
+        """
+        hips = [150.0, 155.0, 158.0, 156.0, 152.0, 151.0]
+        knees = [140.0, 144.0, 148.0, 146.0, 142.0, 141.0]
+        window = _varying_frames(
+            [{"hip_angle_deg": h, "knee_angle_deg": k} for h, k in zip(hips, knees)]
+        )
+        out = rule_incomplete_lockout(window, _ctx())
+        self.assertEqual(len(out), 1)
+        detection = out[0]
+        self.assertEqual(detection.evidence["driver"], "knee")
+        self.assertAlmostEqual(detection.evidence["peak_hip_angle_deg"], 158.0, places=4)
+        self.assertAlmostEqual(detection.evidence["peak_knee_angle_deg"], 148.0, places=4)
+        self.assertAlmostEqual(detection.evidence["primary_value"], 148.0, places=4)
+        # severity == max(hip_sev, knee_sev) == (165-148)/25, so `driver` cannot disagree with
+        # `severity` -- the invariant the parent spec's section 8 bullet states.
+        self.assertAlmostEqual(detection.severity, 0.68, places=4)
+        # `score_values` follows the DRIVER axis, so the peak frame is the knee's best frame.
+        self.assertEqual(detection.peak_frame, 2)
+
+
 class HipsShootUpTests(unittest.TestCase):
     def test_a_trunk_that_flattens_past_the_gate_fires(self):
         window = _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 65.0})
