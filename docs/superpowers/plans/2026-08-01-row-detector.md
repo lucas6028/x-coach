@@ -1957,7 +1957,9 @@ class RowPerRepBaselineTest(unittest.TestCase):
         self.assertEqual(len(result.reps), 2)
         rising = [d for d in result.detections if d.fault_id == "row_torso_rising"]
         self.assertEqual(len(rising), 1)
-        self.assertEqual(rising[0].occurred_reps, (1,))
+        # `RepWindow.index` is 1-based and chronological (see tests/test_lunge.py, which pins
+        # (1, 2, 3)), so the SECOND rep -- the rising one -- is index 2.
+        self.assertEqual(rising[0].occurred_reps, (2,))
 ```
 
 Also append to `tests/test_movement_registry.py` (mirroring the existing Lunge cases at
@@ -2098,7 +2100,24 @@ below the gate, add tests for the uncovered branches — do **not** lower the ga
 ```
 Expected: `--movement` accepts `Row` (the choices come from `registry.list_detectors()`).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Confirm the USER-VISIBLE consequence of registering Row**
+
+Registering the detector is what puts Row in front of users: `GET /api/movements` is
+registry-driven and the frontend keeps no hand-maintained list. Nothing verified so far touches
+that path with `movement="Row"` — the suite, the coverage gate and `--help` all stop short of it.
+
+Two assertions, added to the existing backend tests rather than to new scaffolding (check
+`tests/test_analyze_pose_service.py` for a movement-parameterized case to extend before writing
+anything new):
+
+1. The analysis path accepts `movement="Row"` and returns a result carrying the unvalidated /
+   Beta flag — not an error, and not silently falling back to Squat.
+2. `backend/app/config.py`'s `DEFAULT_ANALYSIS_MOVEMENT` is still `"Squat"`. Registering a
+   movement must not change what an unspecified request analyzes.
+
+If either fails, that is a real integration defect and this task is not done.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md scripts/pose/README.md
