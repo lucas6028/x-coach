@@ -504,6 +504,50 @@ leg), not the oracle *pass* — the two are different substitutions and §4.4 is
 that tabulates both. For that rule the production and oracle passes share a metric and therefore
 an AUC by construction; they differ in what *fires*, not in what is scored.
 
+#### What the 0.850-vs-0.602 gap actually is, and why it matters more than the gap
+
+Both numbers come from the same 70 scores; only the ranking population differs. Pooled ranks every
+rep against every other; per-subject ranks each person's reps against their own and takes the
+median. Opened up on that row:
+
+```
+subject   n   median CORRECT   median INCORRECT   within-subject AUC   fires (thr 0.10)
+     3   10       (no correct)         -1.026            n/a               0/10
+     4    8          -1.408            -1.318          0.867              0/8
+     5   12          -0.926            -0.218          0.833              1/12
+     6    9          -0.242            -0.401          0.000              0/9
+     7    8          -0.903            +0.221          0.938              3/8
+     8   12          -1.152            -0.843          0.833              0/12
+     9   11          -0.797            +0.323          1.000              4/11
+```
+
+**The metric works within a person and its zero point does not transfer between people.** Six of
+seven subjects order their own incorrect reps above their own correct ones (five of them at
+0.833–1.000; subject 6 is a genuine inversion at 0.000). But subject 4's *incorrect* median
+(−1.318) sits more than a full unit **below** subject 6's *correct* median (−0.242), so any ranking
+that mixes people gets those pairs wrong and cannot recover — hence 0.602. Quantified: the
+between-subject spread of the correct-rep baseline is **1.166 against a median within-subject sd
+of 0.431, a factor of 2.7**. The person-to-person offset is nearly three times the signal it is
+supposed to carry.
+
+**That is a finding about the cited threshold, not just about two summary statistics**, and it is
+the more consequential half. `knee_forward_ratio > 0.10` is a statement about an *absolute* level,
+so it inherits the offset directly. Where the cited cut falls inside each subject's own score
+range:
+
+| subject | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|
+| percentile of 0.10 within their own scores | 100 | 100 | 91.7 | 100 | 62.5 | 100 | 63.6 |
+
+For **four of seven subjects the threshold sits above every score they ever produce** — it is not
+a strict cut for them, it is silence. For two others it sits near their median. A per-subject
+median AUC of 0.850 and a fixed threshold that fires on 0/10 reps for four people are not in
+tension; they are the same fact seen twice. It is also a measured instance of the tension this
+project's paper framing rests on: explainability demands a citable *fixed* threshold, and a fixed
+threshold is exactly what a person-specific offset defeats. Per the no-tuning policy nothing was
+changed in response — but note that the usual repairs (per-subject normalisation, a percentile cut)
+would each dissolve the citation, which is the point rather than an obstacle to it.
+
 **Every contingency table below carries its structural silence.** A rep can be unable to fire
 for three reasons that have nothing to do with the metric: its **view gate** was shut, its
 masked phase was shorter than `min_frames` (6 at 30 fps), or its lead side was unresolved.
