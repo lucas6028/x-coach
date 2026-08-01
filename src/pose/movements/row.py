@@ -60,6 +60,13 @@ from src.pose.geometry import (
     LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility, distance,
+    contiguous_true_segments, severity_from_range,
+)
+from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.pose_rule_detector import (
+    VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
+    PoseRuleDetection,
+    build_detection,
 )
 
 # Defined locally, matching overhead_press.py: geometry.py exports only the lower-body and
@@ -313,3 +320,175 @@ def row_assign_phases(raw: list[dict]) -> list[str]:
         else:
             phases.append("lower")
     return phases
+
+
+# ---------------------------------------------------------------------------------------
+# STEP 0 -- KG QUERY RESOLUTION, recorded before any rule was written. Each string below was
+# checked against data/kg/sports_kg_v3.graphml with `retrieve_graph_context(query,
+# movement="Row")` -- the function PRODUCTION calls, not just `resolve_nodes` -- and returned a
+# `Row:`-scoped seed with at least one NON-EMPTY bucket. OHP shipped three dangling queries
+# because only `resolve_nodes` was checked; this is the check that would have caught them.
+#
+#   Trunk Extension            -> Row:Trunk Extension (Fault)
+#                                 phases; corrections=[Maintain Neutral Spine];
+#                                 quality_impacts=[Core Stability]
+#   Scapular Protraction       -> Row:Scapular Protraction (Fault)
+#                                 evidence=[Anterior Translation Of Scapulae]; related_actions
+#   Loss Of Neutral Body       -> Row:Loss Of Neutral Body Position (Fault)
+#     Position                    phases; evidence=[Head/Trunk/Hip Not Aligned ...];
+#                                 corrections; quality_impacts; related_actions
+#   Asymmetry                  -> Row:Asymmetry (Fault)
+#                                 phases; risks=[Shoulder Injury, Injury Risk]; related_actions
+#
+# TWO DELIBERATE DEVIATIONS from the obvious name, load-bearing for later tasks that import
+# these constants blind:
+#   - Momentum: "Compensatory Movements" is a real `Row:`-scoped Fault node whose buckets are
+#     ENTIRELY EMPTY -- precisely the OHP failure mode. "Loss Of Neutral Body Position" is the
+#     richest on-topic node, and its three evidence signals ("Head Not Aligned With Trunk And
+#     Hip", "Trunk Not Aligned With Head And Hip", "Hip Not Aligned With Head And Trunk") are a
+#     direct description of the whole-body heave this fault is about.
+#   - Asymmetry: "Interlimb Asymmetry" resolves but is scoped to `Unilateral Cable Row`, and
+#     "Muscle Strength Asymmetry" carries only a generic `Injury Risk`. `Row:Asymmetry` is the
+#     one whose buckets name both the phases the fault occurs in and a specific Shoulder Injury
+#     risk.
+ROW_TORSO_RISING_KG_QUERY = "Trunk Extension"
+ROW_INCOMPLETE_ROM_KG_QUERY = "Scapular Protraction"
+ROW_MOMENTUM_KG_QUERY = "Loss Of Neutral Body Position"
+ROW_ASYMMETRY_KG_QUERY = "Asymmetry"
+
+# Confidence multiplier applied when a rule fires from a view the spec does not rate `high`.
+# Not a new number: aliases the shared constant rather than re-typing its value, so a future
+# change to it cannot silently skip this module.
+_OFF_VIEW_CONFIDENCE = VIEW_UNAVAILABLE_CONFIDENCE_SCALE
+
+# Views with a lateral component, in which the parent spec rates trunk pitch and pull depth
+# `high` ("side / front_oblique / rear_oblique ... Low from pure front/rear").
+TRUNK_OBSERVABLE_VIEWS = {"side", "front_oblique", "rear_oblique"}
+
+# FROM THE SPEC: "Flag if `trunk_angle_peak - trunk_angle_setup > 15deg`".
+TRUNK_RISE_MILD_DEG = 15.0
+# RULE-LEVEL CHOICE MADE HERE. The parent spec states NO severity ramp for ANY Row fault (the
+# Lunge section states its ramps explicitly, so the absence is meaningful rather than a
+# formatting quirk). 37.5 is 2.5x the fire threshold, the convention `pushup.rule_hip_sag`
+# already uses for exactly this situation (ramp 0.06 -> 0.15). Treat it as a display/ranking
+# curve, not a cited quantity.
+TRUNK_RISE_SEVERE_DEG = 37.5
+
+
+def _setup_baseline(core: list[CoreFrame], key: str) -> float:
+    """Median of `key` over this window's valid `setup` frames; NaN when there are none.
+
+    WHY THE BASELINE LIVES IN THE RULES AND NOT IN `row_compute_raw` -- the Row analogue of
+    lunge's lead-leg problem. Three of the parent spec's five Row heuristics are deltas from a
+    setup baseline, and a baseline is a PER-REP reduction. `run_detector` calls `compute_raw`
+    over the WHOLE CLIP before `segment_reps`, so at metric time no rep boundary exists and
+    there is no "this rep's setup" to reduce against. Rules receive a per-rep slice, which is
+    the first place the question is answerable.
+
+    MEDIAN, NOT MEAN, so one bad frame in a six-frame setup cannot move the reference every
+    later comparison is made against.
+
+    NO BASELINE MEANS SILENCE, never a guessed one: an occluded setup returns NaN and the
+    caller emits nothing. Stated cost of the per-rep scope: a lifter who is ALREADY rounded or
+    rotated at this rep's setup reads as clean. A clip-level baseline would catch that but
+    would make rep N's verdict depend on rep 1's frames, which this architecture deliberately
+    does not do.
+
+    STATED LIMITATION, MEASURED NOT HYPOTHETICAL: `setup` is the first 15% of the REP WINDOW
+    (`row_assign_phases`'s `setup_cutoff`), and the window handed to a rule has already been
+    trimmed by `segment_reps` to the rep's excursion -- so on a short rep `setup` can be as
+    thin as 1-2 frames. Measured case: a 22-frame rep's 2-frame setup slice already overlapped
+    a loaded peak frame, pulling the baseline to 37.5 degrees when the true resting angle was
+    20 degrees. Because every comparison below is `peak - baseline`, a baseline biased UPWARD
+    by an intruding loaded frame makes the MEASURED rise smaller than the true one -- the
+    failure mode is a missed fault, never a false one. This is not corrected here (there is no
+    principled way to detect "this setup frame is actually already loaded" without a second
+    threshold this spec does not supply); it is simply the accuracy cost of a per-rep baseline
+    on short reps, same category of tradeoff as the "already rounded at setup" cost above.
+    """
+    values = [
+        frame.m(key)
+        for frame in core
+        if frame.valid and frame.phase == "setup" and np.isfinite(frame.m(key))
+    ]
+    if not values:
+        return float(np.nan)
+    return float(np.median(values))
+
+
+def rule_torso_rising(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag the trunk drifting from its hinged setup angle toward upright across the pull.
+
+    THRESHOLD PROVENANCE -- TWO CATEGORIES, DO NOT CONFLATE THEM.
+      FIRE THRESHOLD 15 deg: FROM THE SPEC ("Flag if trunk_angle_peak - trunk_angle_setup >
+      15deg").
+      SEVERITY RAMP 15 -> 37.5 deg: A RULE-LEVEL CHOICE (see TRUNK_RISE_SEVERE_DEG).
+
+    PHASE SCOPE `peak`, FROM THE SPEC's own wording ("at setup baseline and at peak pull") --
+    not a rule-level call and not a shared ACTIVE_PHASES set, of which this module defines
+    none: every Row heuristic names its own phase, so a shared set would be a constant every
+    rule overrides.
+
+    OBSERVABILITY DOWNGRADE, NOT A GATE. The spec rates this `high` on side/oblique and low
+    from pure front/rear, but a hard gate would likely ship this rule SILENT: the production
+    path calls `estimate_view_for_pose(allow_front=False)`, so the reachable labels are
+    {side, rear, rear_oblique, unknown}, and across the 45 real pose JSONs in this repository
+    the estimator emitted `side` exactly ONCE (from a fixture since removed) against 30
+    `rear_oblique` and 13 `rear`. `rear_oblique` supplies the lateral component this rule
+    needs, so it earns the spec's `high`; everything else downgrades to `medium` and takes the
+    x0.65 discount, following `squat.rule_knees_inward` rather than `rule_knees_forward`.
+    """
+    baseline = _setup_baseline(core, "trunk_angle_from_horizontal_deg")
+    if not np.isfinite(baseline):
+        return []
+    observable = ctx.view_type in TRUNK_OBSERVABLE_VIEWS
+
+    mask = [
+        frame.valid
+        and frame.phase == "peak"
+        and np.isfinite(frame.m("trunk_angle_from_horizontal_deg"))
+        and (frame.m("trunk_angle_from_horizontal_deg") - baseline) > TRUNK_RISE_MILD_DEG
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        rises = [frame.m("trunk_angle_from_horizontal_deg") - baseline for frame in segment]
+        max_rise = float(np.nanmax(rises))
+        severity = severity_from_range(
+            max_rise, TRUNK_RISE_MILD_DEG, TRUNK_RISE_SEVERE_DEG, lower_is_worse=False
+        )
+        detections.append(
+            build_detection(
+                fault_id="row_torso_rising",
+                fault_name="Torso Rising (Loss of Hip-Hinge)",
+                kg_query=ROW_TORSO_RISING_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=rises,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable else "medium",
+                evidence={
+                    "setup_trunk_angle_deg": round(baseline, 2),
+                    "max_trunk_rise_deg": round(max_rise, 2),
+                    "threshold": TRUNK_RISE_MILD_DEG,
+                    "primary_label": "torso rise vs setup",
+                    "primary_value": round(max_rise, 2),
+                    "primary_threshold": TRUNK_RISE_MILD_DEG,
+                },
+                citation="Saeterbakken A, et al. Int J Sports Med (2015), PMID 26134664. "
+                         "Supplemented by Owens LP, et al. Int J Sports Phys Ther (2026), "
+                         "PMC13232157.",
+                citation_support="Saeterbakken: the free-weight bent-over row produced greater "
+                                 "erector spinae EMG than the machine row both bilaterally and "
+                                 "unilaterally — the hinged free-weight row imposes a high, "
+                                 "sustained trunk-extensor stabilizing demand that a rising "
+                                 "torso abandons. Owens: breaks in efficient kinetic-chain "
+                                 "sequencing \"require distal segments to increase functional "
+                                 "capacity … described as the 'catch-up' phenomenon,\" and the "
+                                 "protocol uses a trunk-parallel-to-floor position specifically "
+                                 "to control trunk posture during rowing.",
+            )
+        )
+    return detections

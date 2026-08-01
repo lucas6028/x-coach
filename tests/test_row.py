@@ -357,5 +357,133 @@ class RowPhaseTest(unittest.TestCase):
         self.assertEqual(phases[0], "unknown")
 
 
+def _row_clip(
+    pull_frames: int = 10,
+    setup_trunk: float = 20.0,
+    peak_trunk: float = 20.0,
+    setup_tilt: float = 0.0,
+    peak_tilt: float = 0.0,
+    peak_wrist_hip: float = 0.05,
+    peak_elbow: float = 70.0,
+    peak_elbow_dy: float = 0.0,
+) -> list[dict]:
+    """A synthetic single rep: 6 setup frames, then a descent into a held peak.
+
+    CONSTANT-VALUE SEGMENTS ARE THE POINT. `run_detector` median-filters every metric with a
+    5-frame window; a segment held at one value makes that filter a no-op, so an asserted
+    severity is EXACT rather than approximately-whatever-the-filter-left. The OHP review found
+    5 of 10 threshold mutants surviving because every fixture sat at an extreme instead of on
+    a boundary, so boundary fixtures must be exact.
+    """
+    frames: list[dict] = []
+    index = 0
+    for _ in range(6):
+        frames.append(
+            row_frame(
+                trunk_angle_deg=setup_trunk,
+                shoulder_tilt=setup_tilt,
+                elbow_angle_deg=170.0,
+                wrist_hip_dist=0.30,
+                frame_index=index,
+            )
+        )
+        index += 1
+    for _ in range(pull_frames):
+        frames.append(
+            row_frame(
+                trunk_angle_deg=peak_trunk,
+                shoulder_tilt=peak_tilt,
+                elbow_angle_deg=peak_elbow,
+                elbow_dy=peak_elbow_dy,
+                wrist_hip_dist=peak_wrist_hip,
+                frame_index=index,
+            )
+        )
+        index += 1
+    return frames
+
+
+def _run_rule(rule, frames: list[dict], view_type: str = "rear_oblique", view_confidence: float = 0.8):
+    """Run ONE rule over a clip, bypassing rep segmentation.
+
+    Rules receive a per-rep slice from `run_detector`; here the whole clip IS the window, which
+    is the `only_partial_reps` fallback shape and is what a single-rep fixture should exercise.
+    """
+    from src.pose.movements.base import CoreFrame, RuleContext
+    from src.pose.movements.row import ROW_METRIC_KEYS, row_assign_phases, row_compute_raw
+
+    raw = row_compute_raw(frames, fps=30.0)
+    phases = row_assign_phases(raw)
+    core = [
+        CoreFrame(
+            frame_index=int(item.get("frame_index", i) or i),
+            time=float(item.get("time", 0.0) or 0.0),
+            phase=phases[i],
+            valid=bool(item.get("valid", False)),
+            lower_body_visibility=float(item.get("lower_body_visibility", 0.0) or 0.0),
+            metrics={key: float(item.get(key, np.nan)) for key in ROW_METRIC_KEYS},
+        )
+        for i, item in enumerate(raw)
+    ]
+    ctx = RuleContext(fps=30.0, view_type=view_type, view_confidence=view_confidence, min_frames=6)
+    return rule(core, ctx)
+
+
+class RowTorsoRisingTest(unittest.TestCase):
+    def test_a_torso_held_at_the_setup_angle_does_not_fire(self) -> None:
+        from src.pose.movements.row import rule_torso_rising
+
+        self.assertEqual(_run_rule(rule_torso_rising, _row_clip(setup_trunk=20.0, peak_trunk=20.0)), [])
+
+    def test_just_under_fifteen_degrees_of_rise_does_not_fire(self) -> None:
+        from src.pose.movements.row import rule_torso_rising
+
+        clip = _row_clip(setup_trunk=20.0, peak_trunk=34.9)
+        self.assertEqual(_run_rule(rule_torso_rising, clip), [])
+
+    def test_just_over_fifteen_degrees_of_rise_fires(self) -> None:
+        from src.pose.movements.row import rule_torso_rising
+
+        clip = _row_clip(setup_trunk=20.0, peak_trunk=35.1)
+        detections = _run_rule(rule_torso_rising, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "row_torso_rising")
+
+    def test_severity_is_exact_at_the_ramp_midpoint(self) -> None:
+        from src.pose.movements.row import rule_torso_rising
+
+        # Ramp 15 -> 37.5; a 26.25-degree rise is exactly half way.
+        clip = _row_clip(setup_trunk=20.0, peak_trunk=46.25)
+        detections = _run_rule(rule_torso_rising, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
+
+    def test_severity_saturates_at_the_ramp_end(self) -> None:
+        from src.pose.movements.row import rule_torso_rising
+
+        clip = _row_clip(setup_trunk=10.0, peak_trunk=60.0)
+        detections = _run_rule(rule_torso_rising, clip)
+        self.assertAlmostEqual(detections[0].severity, 1.0, places=6)
+
+    def test_an_off_axis_view_downgrades_rather_than_silencing(self) -> None:
+        from src.pose.movements.row import rule_torso_rising
+
+        clip = _row_clip(setup_trunk=20.0, peak_trunk=46.25)
+        front = _run_rule(rule_torso_rising, clip, view_type="front")
+        self.assertEqual(len(front), 1)
+        self.assertEqual(front[0].observability, "medium")
+        oblique = _run_rule(rule_torso_rising, clip, view_type="rear_oblique")
+        self.assertEqual(oblique[0].observability, "high")
+        self.assertLess(front[0].confidence, oblique[0].confidence)
+
+    def test_a_window_with_no_setup_frames_emits_nothing(self) -> None:
+        from src.pose.movements.row import rule_torso_rising
+
+        clip = _row_clip(setup_trunk=20.0, peak_trunk=60.0)
+        for frame in clip[:6]:
+            frame["landmarks"][11] = _lm(0.5, 0.5, 0.10)
+        self.assertEqual(_run_rule(rule_torso_rising, clip), [])
+
+
 if __name__ == "__main__":
     unittest.main()
