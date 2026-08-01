@@ -189,6 +189,36 @@ class RowMetricsTest(unittest.TestCase):
             raw = row_compute_raw([row_frame(trunk_angle_deg=requested)], fps=30.0)
             self.assertAlmostEqual(raw[0]["trunk_angle_from_horizontal_deg"], requested, places=4)
 
+    def test_trunk_angle_is_unchanged_under_a_mirrored_facing(self) -> None:
+        """`trunk_dx = abs(hip_mid.x - shoulder_mid.x)` -- every OTHER fixture in this file
+        places hip_mid.x to the RIGHT of shoulder_mid.x (`row_frame`'s own construction: the
+        shoulder anchor is `hip_mid.x - trunk_len * cos(theta)`), so the `abs()` is never
+        exercised by them and removing it survives the whole suite. Mirroring the facing --
+        reflecting every x-coordinate so hip_mid.x sits LEFT of shoulder_mid.x instead -- must
+        produce the IDENTICAL trunk angle if the `abs()` is doing its job; without it, the
+        reflected frame's raw (negative) `trunk_dx` changes which branch of the `trunk_dx >
+        _DEGENERATE_LENGTH or trunk_dy > _DEGENERATE_LENGTH` guard fires and the angle it
+        computes.
+        """
+        from src.pose.movements.row import row_compute_raw
+
+        frame = row_frame(trunk_angle_deg=35.0, frame_index=0)
+        axis = 1.2
+        mirrored_landmarks = [dict(lm) for lm in frame["landmarks"]]
+        for index in (11, 12, 13, 14, 15, 16, 23, 24):
+            mirrored_landmarks[index]["x"] = axis - mirrored_landmarks[index]["x"]
+        mirrored = {**frame, "landmarks": mirrored_landmarks}
+
+        original_raw = row_compute_raw([frame], fps=30.0)[0]
+        mirrored_raw = row_compute_raw([mirrored], fps=30.0)[0]
+        self.assertTrue(original_raw["valid"])
+        self.assertTrue(mirrored_raw["valid"])
+        self.assertAlmostEqual(
+            mirrored_raw["trunk_angle_from_horizontal_deg"],
+            original_raw["trunk_angle_from_horizontal_deg"],
+            places=4,
+        )
+
     def test_elbow_angles_equal_the_constructed_angle(self) -> None:
         from src.pose.movements.row import row_compute_raw
 
@@ -1067,6 +1097,110 @@ class RowAsymmetricPullTest(unittest.TestCase):
         self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.08, places=3)
         self.assertEqual(detections[0].evidence["primary_threshold"], ELBOW_ASYMMETRY_MILD)
 
+    def test_the_worse_of_the_two_conditions_sets_the_primary_axis_tilt(self) -> None:
+        """Mirror of the test above with the two axes' roles swapped: without this case, the
+        primary-axis branch is only half-pinned -- a version that always reports the elbow
+        axis would still pass the test above only by accident of which axis it favored.
+
+        peak_elbow_dy=0.055 -> elbow severity (0.055-0.05)/0.075 = 0.0667.
+        peak_tilt=0.09 (setup_tilt=0.0) -> tilt severity (0.09-0.04)/0.06 = 0.833.
+        Tilt is strictly worse, so `primary_label`/`primary_value` must name the tilt axis.
+
+        (Moved here from `RowPerRepBaselineTest`, where it was filed by mistake -- it exercises
+        `rule_asymmetric_pull`'s primary-axis branch, not the per-rep baseline guard, and its
+        twin `..._primary_axis_elbow` lives in this class.)
+        """
+        from src.pose.movements.row import SHOULDER_TILT_RISE_MILD, rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.055, setup_tilt=0.0, peak_tilt=0.09)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["fired_on"], "both")
+        self.assertEqual(
+            detections[0].evidence["primary_label"], "shoulder-tilt increase vs setup"
+        )
+        self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.09, places=3)
+        self.assertEqual(detections[0].evidence["primary_threshold"], SHOULDER_TILT_RISE_MILD)
+
+    def test_severity_is_exact_at_the_tilt_ramp_midpoint(self) -> None:
+        """Mirror of `test_severity_is_exact_at_the_elbow_ramp_midpoint` -- the tilt ramp
+        0.04 -> 0.10 had no exact pin, which is why a mutant changing `SHOULDER_TILT_RISE_SEVERE`
+        (0.10 -> 0.12) survived the whole suite: the near-boundary pairs bracket the FIRE
+        threshold, not the ramp's severe end, so nothing previously asserted a severity value
+        that depends on where the severe end actually sits.
+        """
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        # Ramp 0.04 -> 0.10; 0.07 is exactly half way. peak_elbow_dy=0.0 keeps the elbow axis
+        # silent so only the tilt axis drives the severity.
+        clip = _row_clip(peak_elbow_dy=0.0, setup_tilt=0.0, peak_tilt=0.07)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
+
+    def test_peak_frame_is_the_worst_frame_even_when_the_ramp_saturates(self) -> None:
+        """Regression pin for the unclipped `score_values` fix on THIS rule -- mirrors
+        `RowIncompleteRomTest`'s test of the same name. Task 3 fixed the clipped-ranking-series
+        trap for `rule_incomplete_rom` and pinned it with that test; Task 5 copied the fix's
+        30-line justification docstring into `rule_asymmetric_pull` but not the test, so a
+        mutant reverting `_unclipped`/`_worst_axis` back to a clipped `severity_from_range`
+        ranking survived the entire suite here.
+
+        `_row_clip`'s geometry cannot produce a NON-constant peak slice (each knob controls one
+        metric at one fixed value per call), so -- exactly as the incomplete-ROM mirror does --
+        this builds `CoreFrame`s directly, bypassing `row_compute_raw`/`row_assign_phases`
+        entirely.
+
+        The fixture ALSO exercises the TILT axis, not just the elbow one, which kills a THIRD
+        mutant a pure-elbow fixture could not catch: reducing `scores` to the elbow axis only.
+        `elbow_height_asymmetry` is held CONSTANT at 0.08 across every peak frame (unclipped
+        severity 0.4, never the maximum), while `shoulder_tilt` varies -- baseline_tilt is 0.0
+        from a preceding all-zero `setup` slice, so tilt_rise equals shoulder_tilt directly:
+        [0.05, 0.11, 0.08, 0.16, 0.06, 0.05, 0.05] against ramp 0.04 -> 0.10.
+
+        Frames 1 (0.11) and 3 (0.16) both clip to severity 1.0 under the OLD clipped
+        formulation, tying `nanargmax` at the FIRST one, frame 1 -- wrong, since 0.16 is
+        genuinely worse. Unclipped they are (0.11-0.04)/0.06 = 1.167 and (0.16-0.04)/0.06 = 2.0
+        respectively, so frame 3 wins, which is what this test asserts. Under the
+        elbow-axis-only mutant every frame's score collapses to the same constant 0.4 and
+        `nanargmax` would instead nominate frame 0.
+        """
+        from src.pose.movements.base import CoreFrame
+        from src.pose.movements.row import ROW_METRIC_KEYS, rule_asymmetric_pull
+
+        tilts = [0.05, 0.11, 0.08, 0.16, 0.06, 0.05, 0.05]
+        setup = [
+            CoreFrame(
+                frame_index=index,
+                time=index / 30.0,
+                phase="setup",
+                valid=True,
+                lower_body_visibility=1.0,
+                metrics={**{key: 0.0 for key in ROW_METRIC_KEYS}},
+            )
+            for index in range(6)
+        ]
+        peak = [
+            CoreFrame(
+                frame_index=6 + index,
+                time=(6 + index) / 30.0,
+                phase="peak",
+                valid=True,
+                lower_body_visibility=1.0,
+                metrics={
+                    **{key: 0.0 for key in ROW_METRIC_KEYS},
+                    "shoulder_tilt": tilt,
+                    "elbow_height_asymmetry": 0.08,
+                    "elbow_height_delta_signed": 0.08,
+                },
+            )
+            for index, tilt in enumerate(tilts)
+        ]
+        ctx = RuleContext(fps=30.0, view_type="rear_oblique", view_confidence=0.8, min_frames=6)
+        detections = rule_asymmetric_pull(setup + peak, ctx)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].peak_frame, 9)  # 6 setup frames + local index 3
+
 
 class RowDetectorAssemblyTest(unittest.TestCase):
     def test_metric_keys_match_the_emitted_metrics_exactly(self) -> None:
@@ -1222,27 +1356,6 @@ class RowPerRepBaselineTest(unittest.TestCase):
         self.assertEqual(len(result.reps), 2)
         rising = [d for d in result.detections if d.fault_id == "row_torso_rising"]
         self.assertEqual(rising, [])
-
-    def test_the_worse_of_the_two_conditions_sets_the_primary_axis_tilt(self) -> None:
-        """Mirror of the test above with the two axes' roles swapped: without this case, the
-        primary-axis branch is only half-pinned -- a version that always reports the elbow
-        axis would still pass the test above only by accident of which axis it favored.
-
-        peak_elbow_dy=0.055 -> elbow severity (0.055-0.05)/0.075 = 0.0667.
-        peak_tilt=0.09 (setup_tilt=0.0) -> tilt severity (0.09-0.04)/0.06 = 0.833.
-        Tilt is strictly worse, so `primary_label`/`primary_value` must name the tilt axis.
-        """
-        from src.pose.movements.row import SHOULDER_TILT_RISE_MILD, rule_asymmetric_pull
-
-        clip = _row_clip(peak_elbow_dy=0.055, setup_tilt=0.0, peak_tilt=0.09)
-        detections = _run_rule(rule_asymmetric_pull, clip)
-        self.assertEqual(len(detections), 1)
-        self.assertEqual(detections[0].evidence["fired_on"], "both")
-        self.assertEqual(
-            detections[0].evidence["primary_label"], "shoulder-tilt increase vs setup"
-        )
-        self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.09, places=3)
-        self.assertEqual(detections[0].evidence["primary_threshold"], SHOULDER_TILT_RISE_MILD)
 
 
 if __name__ == "__main__":

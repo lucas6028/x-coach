@@ -1382,21 +1382,28 @@ These are stated rather than papered over, per the spec's honesty requirement:
   (Bramah 2018); it is **not** asserted as a direct readout of hip-abductor weakness, which is
   contested (McCarney 2020).
 - **`rounded_thoracolumbar_spine` (Row) is not implementable from this document's own detection
-  model, and was not implemented.** Both constructions its `detection_heuristic` offers are
-  degenerate: the "three-point angle at mid-spine" places its middle point at
-  `0.5·(shoulder_mid + hip_mid)`, which is by construction the midpoint of the segment joining
-  the other two, so the angle is exactly 180° on every frame; and the sag alternative measures
-  the distance from `shoulder_mid` to a line of which `shoulder_mid` is an endpoint, which is
-  identically zero. The root cause is that MediaPipe Pose (§3) has no thoracic or lumbar
-  landmark, so no point exists between the shoulders and the hips to measure spinal curvature
-  with. Found during the Row implementation (2026-08-01,
-  `docs/superpowers/specs/2026-08-01-row-detector-design.md` §3). Row therefore ships **four**
-  rules, not five. Two monocular substitutes were considered and rejected — trunk-length
-  foreshortening and ear-drop relative to the trunk line — because both are confounded by
-  camera distance and by the hinge angle, and neither is what this rule's citation
-  (Saeterbakken PMID 26134664, an EMG magnitude result) supports; either would need its own
-  `fault_id` and an explicitly-invented threshold. The KG target `Row:Trunk Flexion` exists and
-  is non-empty, so the gap is the metric, not the knowledge.
+  model, and was not implemented.** Its `detection_heuristic` offers **three** constructions,
+  and none of them measures spinal curvature. The "three-point angle at mid-spine" places its
+  middle point at `0.5·(shoulder_mid + hip_mid)`, which is by construction the midpoint of the
+  segment joining the other two, so the angle is exactly 180° on every frame — a constant. The
+  sag alternative measures the distance from `shoulder_mid` to a line of which `shoulder_mid` is
+  an endpoint, which is identically zero — also a constant. The third, "alternatively track
+  shoulder→hip line vs a straight setup reference," is **not** degenerate — it is perfectly
+  computable and nonzero — but it measures trunk pitch plus whole-body translation relative to
+  an earlier frame, not spinal shape: it is `row_torso_rising`'s own signal with an added
+  camera-distance confound, shipped under a spine-rounding label, which would attach this rule's
+  citation (Saeterbakken PMID 26134664, an EMG magnitude result) to a quantity that citation
+  says nothing about. All three constructions fail for the same root cause: MediaPipe Pose (§3)
+  has no thoracic or lumbar landmark, so no point exists between the shoulders and the hips, and
+  nothing between them can be measured — two of the three routes collapse to constants and the
+  third measures a different quantity than the one the rule names. Found during the Row
+  implementation (2026-08-01, `docs/superpowers/specs/2026-08-01-row-detector-design.md` §3).
+  Row therefore ships **four** rules, not five. Two further monocular substitutes were
+  considered and rejected — trunk-length foreshortening and ear-drop relative to the trunk line
+  — because both are confounded by camera distance and by the hinge angle, and neither is what
+  this rule's citation supports; either would need its own `fault_id` and an explicitly-invented
+  threshold. The KG target `Row:Trunk Flexion` exists and is non-empty, so the gap is the
+  metric, not the knowledge.
 
 **View-estimation orientation limits (2026-07-25, added when `body_axis_extent` made body-extent
 measurement orientation-aware; see `src/pose/view_estimation.py` module docstring for the
@@ -1895,7 +1902,7 @@ against labeled ground truth" and is the user's decision with these numbers in h
   carries no binary correct/incorrect label, so it cannot support the fire-rate/AUC-against-
   correctness validation §8.4 means and the Lunge pass above ran. What Fit3D's 3D truth
   *can* support — the 2D-cue-vs-3D-truth fidelity comparison this project has already run
-  elsewhere (`notes/fit3d-2d-vs-3d-finding.md` and related) — is possible for Row and simply
+  elsewhere (`notes/fit3d_2d_vs_3d_summary.md` and related) — is possible for Row and simply
   was **not done in this pass**; it is future work, not blocked on absent data. (Caveat: Fit3D's
   rig is 4 cameras, all oblique, with no true side view, which bears on any Row rule needing a
   lateral component.) So §8.4's "validate thresholds against labeled data per movement" is
@@ -1903,4 +1910,11 @@ against labeled ground truth" and is the user's decision with these numbers in h
   no correctness labels — and closing it needs either labeled row video or a fidelity-style pass
   against Fit3D, neither of which is blocked on nonexistent data. All four severity ramps are
   rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
-  self-normalizing 3×-median threshold is expected to over-fire.
+  self-normalizing 3×-median threshold is expected to over-fire. **A fifth limitation is
+  measured, not invented:** `row_torso_rising`'s effective fire threshold is inflated by
+  setup-baseline contamination, because `segment_reps` trims the rep window to the excursion
+  and leaves a 2-frame `setup` slice of which one frame is already loaded. Measured end-to-end:
+  with an abrupt setup→peak transition the effective threshold is **30°, exactly 2× the spec's
+  15°** (invariant to clip length — 8, 20 and 40 setup frames all give the same result); with a
+  realistic 6-frame concentric ramp it relaxes to **~17–18°**. Direction is always toward
+  MISSED faults, never false ones.

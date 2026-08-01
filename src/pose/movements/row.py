@@ -11,21 +11,31 @@
 # ---------------------------------------------------------------------------------------
 # The parent spec (docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md,
 # §Row) lists FIVE faults. Four are implemented here. `rounded_thoracolumbar_spine` is not,
-# because its detection heuristic is geometrically degenerate under BOTH constructions it
-# offers:
+# because its `detection_heuristic` offers THREE constructions and none of them measures
+# spinal curvature:
 #
 #   1. "three-point angle at mid-spine using shoulder-midpoint(11,12), a synthesized mid-trunk
 #      point = 0.5*(shoulder_mid + hip_mid), and hip-midpoint(23,24)" -- the middle point is BY
 #      CONSTRUCTION the midpoint of the segment joining the other two. Three collinear points
 #      subtend exactly 180 degrees on every frame of every video. The metric is a constant.
-#   2. "Flag flexion if the shoulder-midpoint drops below the straight shoulder-hip line by a
+#   2. "alternatively track shoulder->hip line vs a straight setup reference" -- this one is
+#      NOT degenerate; comparing the current shoulder->hip line against a setup-frame
+#      reference line is perfectly computable and nonzero. But it measures TRUNK PITCH PLUS
+#      WHOLE-BODY TRANSLATION relative to an earlier frame, not spinal shape -- it is
+#      `row_torso_rising`'s own signal (trunk_angle_from_horizontal_deg compared against its
+#      setup baseline) with an added camera-distance confound, shipped under a spine-rounding
+#      label. Attaching the rounding citation (Saeterbakken PMID 26134664, an erector-spinae
+#      EMG MAGNITUDE result) to this quantity would cite that result for a claim it says
+#      nothing about.
+#   3. "Flag flexion if the shoulder-midpoint drops below the straight shoulder-hip line by a
 #      normalized sag > 0.04" -- shoulder_mid is an ENDPOINT of that line. Its distance to a
 #      line passing through itself is identically zero. The threshold can never be crossed.
 #
-# The root cause is not a wording slip: MediaPipe Pose has NO thoracic or lumbar landmark, so
-# there is no measured point anywhere between the shoulders and the hips, and no sag,
-# curvature or three-point spinal angle is computable from this detection model by any
-# construction. The spec wrote a proxy requiring a landmark its own detection model (§3) does
+# ALL THREE CONSTRUCTIONS FAIL, and the root cause is the same one: MediaPipe Pose has NO
+# thoracic or lumbar landmark, so there is no measured point anywhere between the shoulders
+# and the hips, and nothing between them can be measured. Constructions 1 and 3 collapse to
+# constants; construction 2 is computable but measures a DIFFERENT quantity than the one the
+# rule names. The spec wrote a proxy requiring a landmark its own detection model (§3) does
 # not provide.
 #
 # NOT SUBSTITUTED, DELIBERATELY. Two monocular signals do carry some trunk-shape information --
@@ -347,7 +357,9 @@ def row_assign_phases(raw: list[dict]) -> list[str]:
 #     richest on-topic node, and its three evidence signals ("Head Not Aligned With Trunk And
 #     Hip", "Trunk Not Aligned With Head And Hip", "Hip Not Aligned With Head And Trunk") are a
 #     direct description of the whole-body heave this fault is about.
-#   - Asymmetry: "Interlimb Asymmetry" resolves but is scoped to `Unilateral Cable Row`, and
+#   - Asymmetry: "Interlimb Asymmetry" resolves to `Row:Interlimb Asymmetry` (Row-scoped, not
+#     generic) but its *related_action* is `Unilateral Cable Row` and its buckets
+#     (`Performance Optimization`/`Injury Prevention`) are weaker than `Row:Asymmetry`'s; and
 #     "Muscle Strength Asymmetry" carries only a generic `Injury Risk`. `Row:Asymmetry` is the
 #     one whose buckets name both the phases the fault occurs in and a specific Shoulder Injury
 #     risk.
@@ -672,9 +684,14 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
                 evidence={
                     "fired_on": fired_on,
                     "max_wrist_hip_dist": round(max_distance, 4),
-                    "max_peak_elbow_angle_deg": round(max_elbow, 2),
-                    "wrist_hip_dist_shoulder_norm": round(
-                        float(np.nanmax([frame.m("wrist_hip_dist_shoulder_norm") for frame in segment])), 4
+                    # `_max_finite_or_none`, not a raw `np.nanmax`, because an all-NaN segment
+                    # is unreachable through production today (a NaN-elbow frame is never
+                    # labelled `peak`) but nothing previously stated that -- this is the same
+                    # guard `rule_asymmetric_pull`'s diagnostic evidence already uses, applied
+                    # here so the concern does not need restating per rule.
+                    "max_peak_elbow_angle_deg": _max_finite_or_none(segment, "max_elbow_angle"),
+                    "wrist_hip_dist_shoulder_norm": _max_finite_or_none(
+                        segment, "wrist_hip_dist_shoulder_norm"
                     ),
                     "distance_threshold": PULL_DEPTH_MILD,
                     "elbow_threshold": PEAK_ELBOW_MILD_DEG,
@@ -1057,10 +1074,11 @@ from src.pose.movements.base import MovementDetector
 from src.pose.movements import registry
 
 # FOUR of the parent spec's FIVE Row rules are listed here. The fifth,
-# `rounded_thoracolumbar_spine`, is absent because it is geometrically degenerate under both
-# constructions the spec offers -- the proof is in this module's docstring, and
-# `test_the_fifth_spec_rule_is_absent_by_design` pins the absence so a future reader cannot
-# mistake it for an oversight.
+# `rounded_thoracolumbar_spine`, is absent because none of the three constructions its spec
+# heuristic offers measures spinal curvature -- two collapse to constants and the third
+# measures a different quantity (trunk pitch plus whole-body translation, not spinal shape)
+# -- the proof is in this module's docstring, and `test_the_fifth_spec_rule_is_absent_by_design`
+# pins the absence so a future reader cannot mistake it for an oversight.
 #
 # `ROW_METRIC_KEYS` must stay a two-way match with what `row_compute_raw` emits (pinned by
 # `test_metric_keys_match_the_emitted_metrics_exactly`): a key the tuple omits is dropped by

@@ -74,20 +74,31 @@ Consequences, binding on how this work is described:
 **This is a defect in the parent spec found during implementation design, and it is the one
 finding here that changes the deliverable: Row ships four rules, not five.**
 
-The parent spec's heuristic offers two constructions, and both collapse to a constant:
+The parent spec's heuristic offers **three** constructions, and none of them measures spinal
+curvature:
 
 - *"three-point angle at mid-spine using shoulder-midpoint(11,12), a synthesized mid-trunk
   point = 0.5·(shoulder_mid + hip_mid), and hip-midpoint(23,24)"* — the middle point is by
   construction the midpoint of the segment joining the other two. Three collinear points
   subtend exactly 180° on every frame of every video. The metric carries no information at all.
+- *"alternatively track shoulder→hip line vs a straight setup reference"* — this one is **not**
+  degenerate: comparing the current shoulder→hip line against a setup-frame reference line is
+  perfectly computable and nonzero. But it measures **trunk pitch plus whole-body translation**
+  relative to an earlier frame, not spinal shape — it is `row_torso_rising`'s own signal
+  (`trunk_angle_from_horizontal_deg` compared against its setup baseline) with an added
+  camera-distance confound, shipped under a spine-rounding label. Attaching the rounding
+  citation (Saeterbakken PMID 26134664, an erector-spinae EMG magnitude result) to this
+  quantity would cite that result for a claim it says nothing about.
 - *"Flag flexion if the shoulder-midpoint drops below the straight shoulder–hip line by a
   normalized sag > 0.04"* — `shoulder_mid` is an **endpoint** of that line. Its distance to a
   line through itself is identically zero. The threshold can never be crossed.
 
-The root cause is not a wording slip. **MediaPipe Pose has no thoracic or lumbar landmark.**
-There is no measured point anywhere between the shoulders and the hips, so no sag, curvature or
-three-point spinal angle can be computed from this detection model, by any construction. The
-spec wrote a proxy that requires a landmark the spec's own §3 detection model does not provide.
+**All three constructions fail**, and the root cause is the same one. **MediaPipe Pose has no
+thoracic or lumbar landmark.** There is no measured point anywhere between the shoulders and the
+hips, so nothing between them can be measured. The first and third constructions collapse to
+constants; the second is computable but measures a different quantity than the one the rule
+names. The spec wrote a proxy that requires a landmark the spec's own §3 detection model does
+not provide.
 
 **Decision (user-approved): document, do not substitute.** No rule with `fault_id`
 `rounded_thoracolumbar_spine` is implemented. The degeneracy proof above goes in `row.py`'s
@@ -160,7 +171,17 @@ metric time no rep boundary exists and there is no "this rep's setup" to reduce 
 **rule** computes its own baseline over its own window, which `run_detector` hands it as a
 per-rep slice: the **median** of the metric over that window's `setup`-phase valid frames
 (median, not mean, so a single bad frame cannot move it). A window with no usable `setup` frame
-yields no baseline and the rule emits **nothing** — silence, never a guessed baseline.
+yields no baseline (`NaN`), and what a rule does with that is conditional on its own fire
+condition, never a universal "return `[]`" contract — a guessed baseline must never be
+substituted, but silencing the whole rule is not always the right response to one either. A
+rule whose fire condition depends **only** on the baseline (`rule_torso_rising`'s
+`peak − baseline > threshold`) has nothing left to evaluate once the baseline is `NaN` and does
+return `[]`. A rule whose fire condition is a **disjunction** with a non-baseline term
+(`rule_asymmetric_pull`'s `elbow_height_asymmetry > 0.05` **or** `shoulder_tilt − baseline >
+0.04`) must not return `[]` outright on a `NaN` baseline — that would silence the elbow-only
+branch the spec says should still fire — so it drops only the baseline-dependent disjunct
+(`NaN > threshold` already evaluates to `False`) and keeps evaluating the rest. `row.py`'s
+`_setup_baseline` docstring carries this corrected conditional contract in full.
 
 Two costs, stated rather than hidden:
 
@@ -302,7 +323,7 @@ Three limitations, stated up front:
 1. **The threshold is self-normalizing and is expected to over-fire.** "3× the rep's median
    concentric acceleration" compares a peak against a median that includes the near-zero
    accelerations at both ends of the pull. A perfectly controlled rep with an ordinary
-   bell-shaped velocity profile can exceed 3×. There is no labeled row data to measure this
+   bell-shaped velocity profile can exceed 3×. There is no labeled-correctness row data to measure this
    against (§2) and threshold tuning is off the table by standing decision, so the rule ships
    spec-faithful with the expected failure mode named — the same treatment
    `lunge_pelvic_drop`'s split-stance foreshortening bias received.
@@ -392,22 +413,29 @@ actually calls). Every string below was checked with
 | rule | `kg_query` | resolved seed | non-empty buckets |
 |---|---|---|---|
 | `row_torso_rising` | `Trunk Extension` | `Row:Trunk Extension` (Fault) | phases, corrections (`Maintain Neutral Spine`), quality_impacts (`Core Stability`) |
-| `row_incomplete_rom` | `Scapular Protraction` | `Row:Scapular Protraction` (Fault) | evidence (`Anterior Translation Of Scapulae`), related_actions |
+| `row_incomplete_rom` | `Scapular Protraction` | **two seeds**: generic `Scapular Protraction` (sorts first) and `Row:Scapular Protraction` (Fault) | evidence (`Anterior Translation Of Scapulae`), related_actions — from the `Row:`-scoped seed |
 | `row_momentum_jerk` | `Loss Of Neutral Body Position` | `Row:Loss Of Neutral Body Position` (Fault) | phases, evidence (×3 alignment signals), corrections, quality_impacts, related_actions |
 | `row_asymmetric_pull` | `Asymmetry` | `Row:Asymmetry` (Fault) | phases, risks (`Shoulder Injury`, `Injury Risk`), related_actions |
 
-Two of these are **deliberate deviations from the most obvious name**, recorded here so the
-in-code Step 0 comment is a restatement rather than a new claim:
+Three of these are **deliberate deviations from the most obvious name or resolution**, recorded
+here so the in-code Step 0 comment is a restatement rather than a new claim:
 
+- `row_incomplete_rom`: `Scapular Protraction` resolves to **two** seeds — a generic
+  (non-Row) `Scapular Protraction` node, which sorts first, and `Row:Scapular Protraction`
+  (Fault). Harmless in production, because the frontend unions all resolved seeds' buckets
+  rather than reading only the first one, but the buckets attributed above are the Row-scoped
+  seed's, not the generic node's.
 - `row_momentum_jerk`: the obvious candidate `Compensatory Movements` resolves to a real
   `Row:`-scoped Fault node whose buckets are **entirely empty** — the exact OHP failure mode.
   `Loss Of Neutral Body Position` is the richest on-topic node, and its evidence signals ("Head
   Not Aligned With Trunk And Hip", "Trunk Not Aligned With Head And Hip", "Hip Not Aligned With
   Head And Trunk") are a direct description of a whole-body heave.
-- `row_asymmetric_pull`: `Interlimb Asymmetry` and `Muscle Strength Asymmetry` both resolve, but
-  the first is scoped to `Unilateral Cable Row` and the second carries only a generic
-  `Injury Risk`. `Row:Asymmetry` is the one whose buckets name the phases the fault occurs in
-  and a specific `Shoulder Injury` risk.
+- `row_asymmetric_pull`: `Interlimb Asymmetry` and `Muscle Strength Asymmetry` both resolve.
+  `Interlimb Asymmetry` resolves to `Row:Interlimb Asymmetry` (Row-scoped, not generic), but
+  its *related_action* is `Unilateral Cable Row` and its buckets (`Performance
+  Optimization`/`Injury Prevention`) are weaker than `Row:Asymmetry`'s; `Muscle Strength
+  Asymmetry` carries only a generic `Injury Risk`. `Row:Asymmetry` is the one whose buckets
+  name the phases the fault occurs in and a specific `Shoulder Injury` risk.
 
 The resolution transcript is reproduced in `row.py`'s Step 0 comment block, following
 `lunge.py`'s precedent, so the reasoning survives without the reader re-running the graph.
