@@ -55,11 +55,18 @@ becomes a live, Beta-tagged card on the Movements page and an accepted `movement
 `/api/analyze` the moment `registry.register(DEADLIFT_DETECTOR)` runs.
 
 This was raised explicitly and the user chose to follow the Lunge precedent: the
-`validated=False` Beta tag is the mechanism built for exactly this situation. Consequence:
-`tests/test_movements_endpoint.py` (which pins the exact list and the validated map) and the
-frontend `LIVE` list in `frontend/src/lib/movements.ts` must be updated in lockstep, and users
-can upload deadlift videos to an unvalidated detector. Recorded here so it is a decision, not
-a side effect.
+`validated=False` Beta tag is the mechanism built for exactly this situation. Users can
+therefore upload deadlift videos to a detector no labeled data has ever checked. Recorded here
+so it is a decision, not a side effect.
+
+**Correction (2026-08-01, found while planning):** an earlier draft of this section also
+required a frontend edit. It does not. `frontend/src/lib/movements.ts` already lists Deadlift
+in `LOWER_BODY`, and the file states outright that analyzability "comes from GET /api/movements
+… so registering a fourth detector surfaces it in the UI with no frontend edit." Nor does any
+frontend test break: `pages.Movements.test.tsx:48` stubs `getMovements` with a hardcoded
+three-entry fixture that was not even updated when Lunge shipped, so the frontend suite is
+decoupled from the registry. **The only test requiring an update is
+`tests/test_movements_endpoint.py`.**
 
 ---
 
@@ -355,11 +362,8 @@ this pass records it.
 - View handling, both directions: §4.1 and §4.2 emit off-view at ×0.65; §4.3 emits **nothing**
   off-view and nothing below `view_confidence` 0.20.
 - Registry round-trip; `tests/test_movements_endpoint.py` updated for the five-detector list and
-  `validated` map.
-- Frontend: moving Deadlift out of the inert list changes the DOM shape of its card from a
-  "Soon" tile to a live button, so two existing assertions in `pages.Movements.test.tsx` must be
-  re-checked rather than assumed — the `liveButtons()).toHaveLength(LIVE.length)` count, and the
-  zh-Hant test asserting 硬舉 renders while the canonical `"Deadlift"` string does not.
+  `validated` map. No frontend test is affected — see the correction in §2.1. `yarn test:coverage`
+  is still run, to confirm that rather than assume it.
 
 Gates, per CLAUDE.md: `.venv\Scripts\python.exe -m pytest tests/`,
 `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95`, and
@@ -372,8 +376,7 @@ Gates, per CLAUDE.md: `.venv\Scripts\python.exe -m pytest tests/`,
 1. `src/pose/movements/deadlift.py` — 3 rules, registered.
 2. `src/pose/movements/registry.py` — side-effect import.
 3. `tests/test_deadlift.py`; updates to `tests/test_movements_endpoint.py`.
-4. `frontend/src/lib/movements.ts` + `pages.Movements.test.tsx` — Deadlift live, Beta-tagged.
-5. Parent-spec amendments: boxed `WITHDRAWN` note on `deadlift_bar_drift`; §7 gains the unsourced
+4. Parent-spec amendments: boxed `WITHDRAWN` note on `deadlift_bar_drift`; §7 gains the unsourced
    `lumbar_flexion` threshold; §6/§7 gain the KG-stub divergence and the two `rag` fallbacks.
 
 **Not delivered, and why:** threshold validation (no labeled data exists), KG expansion (out of
