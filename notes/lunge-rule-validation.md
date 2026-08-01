@@ -358,6 +358,37 @@ whose collapse motivated abandoning it. Per the standing no-tuning policy this c
 the shipped detector and no threshold moved to produce these numbers; it is recorded as the
 measured repair path, and §6 carries it.
 
+**Why the two criteria differ at all**, since the parent spec names them in the same breath as
+though they were interchangeable. Measured on the markers at the same bottom frame, with each rep
+oriented by its label so "front" means the labeled lead leg:
+
+| Signed quantity at the bottom (front − rear) | Distribution over 174 reps |
+|---|---|
+| Knee-flexion gap (rear angle − front angle; > 0 = front knee deeper) | median **−1.5°**, mean **+0.3°**, **sd 17.1°**; front deeper on 85/174 |
+| Fore-aft ankle gap along facing, in leg-lengths | median **+0.64**, **minimum +0.38**, positive on **174/174** |
+
+The flexion gap is **centred on zero with a 17° spread** — it is not a weak signal, and it is not
+an inverted one; it is a large signal whose *sign* is a personal style variable. Split by subject,
+the per-person median runs from **−16.2° to +14.6°** and the front-deeper rate from **0.09 to
+0.88** (subjects 6 and 9 nearly always drop the rear knee deeper; 8 and 3 nearly always flex the
+front knee deeper). Each person is internally consistent; the population is not, so no fixed
+global rule can read it and a per-person calibration would be needed to use it at all.
+
+The fore-aft gap has no such problem because it is not a style choice — a split stance is what
+makes a lunge a lunge. Its worst rep still puts the labeled front ankle **0.38 leg-lengths**
+ahead, so the two classes do not merely separate, they never approach each other. That margin is
+also why the cue survives a frontal projection: foreshortening shrinks the gap but has a long way
+to go before it can reorder it.
+
+**So the design spec's reason for the substitution does not survive.** §3.2 of
+`docs/superpowers/specs/2026-07-30-lunge-detector-design.md` states *"Anterior is exactly the axis
+that collapses in a frontal view, and two of the four rules are frontal, so the anterior half of
+that definition is not usable where it is most needed."* That claim was asserted at design time
+and never measured; it is the origin of every number in §3. Measured, the anterior cue scores
+**0.959 on the frontal camera** — its supposed worst case, and still 36 points above what the
+substitution achieves on its supposed best case. The substitution traded a cue that cannot be
+reordered for one centred on zero, in order to avoid a failure that was not checked.
+
 Measured by a throwaway script, not committed. Reproduce by loading `{video_id}-30fps.npy`, taking
 joints 16/17/18 (left hip/knee/ankle) and 21/22/23 (right) for flexion and 18→19 / 23→24 for the
 foot vectors, and comparing both criteria at `argmin(min(left, right))` within each
