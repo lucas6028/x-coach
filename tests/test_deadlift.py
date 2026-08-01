@@ -39,6 +39,31 @@ def _rep_window(setup: dict, active: dict, setup_n: int = 8, active_n: int = 12)
     )
 
 
+def _varying_window(
+    setup: dict, active_metrics: list[dict], setup_n: int = 8
+) -> list[CoreFrame]:
+    """Like `_rep_window`, but the active block carries a DIFFERENT metrics dict per frame.
+
+    `_frames`/`_rep_window` deliberately build blocks of IDENTICAL frames, which is fine for
+    fire/silence assertions but cannot distinguish which frame within a segment a rule picks
+    as its "worst" one -- every candidate ties, so `np.nanargmax` (`build_detection`) returns
+    index 0 regardless of sign conventions or min/max mistakes. Tests that pin
+    `start_frame`/`end_frame`/`peak_frame` need frame-to-frame variation, which is what this
+    helper provides.
+    """
+    return _frames(setup, count=setup_n, phase="setup") + [
+        CoreFrame(
+            frame_index=setup_n + i,
+            time=(setup_n + i) / 30.0,
+            phase="mid_pull",
+            valid=True,
+            lower_body_visibility=0.9,
+            metrics=dict(metrics),
+        )
+        for i, metrics in enumerate(active_metrics)
+    ]
+
+
 def _landmarks(overrides: dict[int, tuple[float, float]]) -> list[dict]:
     """33 fully-visible landmarks in a plausible standing pose, with overrides applied."""
     base = [{"x": 0.5, "y": 0.5, "z": 0.0, "visibility": 0.99} for _ in range(33)]
@@ -212,3 +237,37 @@ class LumbarFlexionTests(unittest.TestCase):
             _rep_window(self.SETUP, {"torso_len": 0.20, "hip_y": 0.60}), _ctx()
         )[0]
         self.assertAlmostEqual(out.severity, 1.0, places=4)
+
+    def test_peak_and_segment_bounds_pin_the_worst_frame_not_index_zero(self):
+        """Regression tripwire: with IDENTICAL active frames every candidate ties for "worst",
+        so `np.nanargmax` (`build_detection`) returns index 0 regardless of whether
+        `score_values` is correctly negated or whether `worst` uses `nanmin` vs `nanmax`. This
+        uses a window with frame-to-frame variation so a broken sign or a broken min/max both
+        produce a wrong, checkable answer.
+
+        Ratios (torso_len / setup 0.25): 0.92, 0.88, 0.80, 0.84, 0.88, 0.92 -- all below the
+        0.95 mild threshold (so the whole 6-frame active block stays masked in, pinning
+        start_frame at the setup-block offset), with a genuine minimum at position 2.
+        """
+        active = [
+            {"torso_len": 0.230, "hip_y": 0.60},  # ratio 0.92
+            {"torso_len": 0.220, "hip_y": 0.60},  # ratio 0.88
+            {"torso_len": 0.200, "hip_y": 0.60},  # ratio 0.80 -- the worst frame
+            {"torso_len": 0.210, "hip_y": 0.60},  # ratio 0.84
+            {"torso_len": 0.220, "hip_y": 0.60},  # ratio 0.88
+            {"torso_len": 0.230, "hip_y": 0.60},  # ratio 0.92
+        ]
+        window = _varying_window(self.SETUP, active)
+        out = rule_lumbar_flexion(window, _ctx())
+        self.assertEqual(len(out), 1)
+        detection = out[0]
+        # setup_n=8, so the active block starts at frame_index 8 and the segment must span
+        # the full 6 frames (every ratio is below the mild threshold).
+        self.assertEqual(detection.start_frame, 8)
+        self.assertEqual(detection.end_frame, 13)
+        # The worst (smallest-ratio) frame is active[2], at window frame_index 8 + 2 = 10.
+        # A `score_values=ratios` mutation (dropping the negation) would instead pick the
+        # first-occurring MAXIMUM ratio, frame_index 8.
+        self.assertEqual(detection.peak_frame, 10)
+        # A `nanmax` mutation for `worst` would report 0.92 instead of 0.80 here.
+        self.assertAlmostEqual(detection.evidence["min_torso_length_ratio"], 0.80, places=4)
