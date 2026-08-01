@@ -152,7 +152,24 @@ level-2/3 extra-person contamination (cam18 is level 0 throughout).
   none of it**: on 0/64 cam17 and 0/62 cam18 of these reps were the missing landmarks confined
   to feet and shoulders — every single rejected bottom frame is missing a hip, knee or ankle
   (cam17 `L_ankle` 0.73, cam18 `R_knee` 0.61 of rejections), and the foot index drops with the
-  ankle rather than independently. The cam18 substitutions also fail a plausibility check that
+  ankle rather than independently. **The shortfall is a selection effect, not attrition**, which
+  is the only way a gate that drops 21% of cam17 frames can cost 34° of depth: if loss were
+  independent of depth the survivors would sample the trajectory evenly and the deepest survivor
+  would sit near the true minimum. Binning every in-window frame by depth, the cam17 pass rate
+  rises **monotonically with knee angle** — 0.572 at 0–60°, 0.614, 0.676, 0.745, 0.941 at
+  120–140° — so the gate preferentially removes exactly the frames that carry the extremum.
+  `L_ankle`/`L_foot` dominate the rejections at every depth, consistent with a front view losing
+  the rear foot behind the body as the stance deepens. **cam18's profile is different and worth
+  not conflating**: it is worst at *both* ends — 0.568 when deep and **0.433 when standing**
+  (140–200°, where `R_knee` accounts for 1.00 of rejections) — with its best band in the middle
+  at 0.832. That matches the legs-together occlusion signature rather than a depth bias, and it is
+  why cam18's median depth shortfall is ~8° against cam17's 34°. One direction of bias in this
+  measurement is worth stating: a frame whose deeper leg is the occluded one is binned by its
+  *shallower* visible leg, which pushes bad frames into shallow bins and therefore **understates**
+  the cam17 trend rather than manufacturing it. The consequence lands on one rule in particular —
+  the bias runs toward reading reps as shallower than they are, which is the direction that makes
+  `lunge_insufficient_depth` (fires above 100°) false-positive, and the cam17 accepted bottom's
+  median of 100.3° sits directly on that threshold. The cam18 substitutions also fail a plausibility check that
   cam17's pass: 31% of cam18's gate-rejected "deeper" frames read below 40° of knee angle, which
   a lunge cannot reach, so part of cam18's apparent lost depth is a hallucinated landmark on the
   occluded leg, not depth. Measured by a throwaway script, not committed; reproduce by taking
