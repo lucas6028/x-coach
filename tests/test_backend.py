@@ -1339,24 +1339,33 @@ class _FakeTable:
 
     `_fake_client` returns a single query with a single canned response, which can't express a
     multi-step store function (read -> delete -> count). This variant queues one response per
-    execute() and records the eq() filters so a test can assert *what* was deleted.
+    execute() and records the eq() filters *per call* (not merged into one flat list) so a test
+    can assert what a SPECIFIC call -- e.g. the delete, not the surrounding select/count -- was
+    actually scoped by. A flat list would let filters satisfied by one call (say, a select)
+    silently cover an assertion meant to pin a different call (the delete).
     """
 
     def __init__(self, responses: list) -> None:
         self._responses = list(responses)
-        self.calls: list[str] = []          # "select" / "delete", in order
-        self.eq_filters: list[tuple] = []   # (column, value) per eq()
+        self.calls: list[str] = []                 # "select" / "delete", in order
+        self.call_filters: list[list[tuple]] = []  # eq() filters recorded during each call, same
+        self._current_filters: list[tuple] | None = None  # order/indices as `calls`
 
     def select(self, *a, **k):
-        self.calls.append("select")
+        self._start_call("select")
         return self
 
     def delete(self, *a, **k):
-        self.calls.append("delete")
+        self._start_call("delete")
         return self
 
+    def _start_call(self, op: str) -> None:
+        self.calls.append(op)
+        self._current_filters = []
+        self.call_filters.append(self._current_filters)
+
     def eq(self, column, value):
-        self.eq_filters.append((column, value))
+        self._current_filters.append((column, value))
         return self
 
     def limit(self, *a, **k):
@@ -1527,9 +1536,13 @@ class StoreDeleteTests(unittest.TestCase):
         with mock.patch.object(store, "_user_client", return_value=client):
             ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
         self.assertTrue(ok)
-        # The delete is scoped by BOTH the row id and the owner (RLS is the backstop, not the filter).
-        self.assertIn(("id", "a1"), tables["analyses"].eq_filters)
-        self.assertIn(("user_id", "u1"), tables["analyses"].eq_filters)
+        self.assertEqual(tables["analyses"].calls, ["select", "delete", "select"])
+        # Checked on the DELETE call specifically (index 1) -- not merged across the surrounding
+        # select/count calls, which could each satisfy one half of this and let an unscoped
+        # delete slip through unnoticed.
+        delete_filters = tables["analyses"].call_filters[1]
+        self.assertIn(("id", "a1"), delete_filters)
+        self.assertIn(("user_id", "u1"), delete_filters)
 
     def test_delete_one_keeps_video_and_conversation_when_siblings_remain(self) -> None:
         """Re-analysing one clip inserts a second `analyses` row against the same `video_id`, while
@@ -1559,14 +1572,20 @@ class StoreDeleteTests(unittest.TestCase):
             ]
         )
         with mock.patch.object(store, "_user_client", return_value=client):
-            store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertTrue(ok)
+        # Order matters: the sibling count must run AFTER the delete. If it ran first, the row
+        # being deleted would still count itself, the count would never reach zero, and the
+        # cascade below would never fire -- permanently orphaning videos/conversations.
+        self.assertEqual(tables["analyses"].calls, ["select", "delete", "select"])
         touched = _tables_touched(client)
         self.assertIn("videos", touched)
         self.assertIn("conversations", touched)
-        # Both cascades are scoped to the freed video, not to the whole account.
-        self.assertIn(("video_id", "upload_1"), tables["videos"].eq_filters)
-        self.assertIn(("user_id", "u1"), tables["videos"].eq_filters)
-        self.assertIn(("video_id", "upload_1"), tables["conversations"].eq_filters)
+        # Both cascades are scoped to the freed video, not to the whole account. Each of these
+        # tables only sees one call (its delete), so call_filters[0] is that call's filters.
+        self.assertIn(("video_id", "upload_1"), tables["videos"].call_filters[0])
+        self.assertIn(("user_id", "u1"), tables["videos"].call_filters[0])
+        self.assertIn(("video_id", "upload_1"), tables["conversations"].call_filters[0])
 
     def test_delete_one_returns_false_when_absent(self) -> None:
         # RLS makes someone else's id indistinguishable from a missing one: the read comes back empty.
@@ -1575,6 +1594,27 @@ class StoreDeleteTests(unittest.TestCase):
             ok = store.delete_analysis(token="t", analysis_id="ghost", user_id="u1")
         self.assertFalse(ok)
         self.assertNotIn("delete", tables["analyses"].calls)  # nothing was deleted
+
+    def test_delete_one_returns_false_when_delete_removes_nothing(self) -> None:
+        """Concurrent double-click / double-request: the read finds the row, but by the time the
+        delete runs someone else's request has already removed it, so the delete matches zero
+        rows. `delete_analysis` must report failure and stop -- not fall through to the
+        sibling-count/cascade logic, which only makes sense once a row was actually removed.
+        """
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[]),  # delete matched nothing
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertFalse(ok)
+        # No sibling-count query and no cascade followed the empty delete.
+        self.assertEqual(tables["analyses"].calls, ["select", "delete"])
+        touched = _tables_touched(client)
+        self.assertNotIn("videos", touched)
+        self.assertNotIn("conversations", touched)
 
 
 class StoreGetTests(unittest.TestCase):
