@@ -183,6 +183,43 @@ describe("History", () => {
     expect(screen.getByText("2 faults")).toBeInTheDocument(); // row survives, retryable
   });
 
+  it("does not clear a different row's still-unresolved error when another row's trash is clicked", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 2,
+      items: [
+        item({ id: "a", created_at: "2026-06-20T13:00:00.000Z" }),
+        item({ id: "b", fault_count: 0, created_at: "2026-06-20T12:00:00.000Z" }),
+      ],
+    });
+    vi.spyOn(api, "deleteAnalysis").mockRejectedValue(new Error("500 Internal Server Error"));
+    renderHistory();
+    await screen.findByText("2 faults");
+
+    // Newest first: row "a" (2 faults) is first, row "b" (clean) is second.
+    const [trashA, trashB] = screen.getAllByRole("button", { name: "Delete this record" });
+
+    // Fail row B's delete -> its error message appears, and its confirm auto-closes (see the
+    // "keeps the row and shows an error" test above for that behavior).
+    await userEvent.click(trashB);
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(
+      await screen.findByText("Couldn't delete this record. Please try again.")
+    ).toBeInTheDocument();
+
+    // Opening a DIFFERENT row's confirm (row A) must not touch row B's still-unresolved error --
+    // the user never retried or dismissed it.
+    await userEvent.click(trashA);
+    expect(
+      screen.getByText("Couldn't delete this record. Please try again.")
+    ).toBeInTheDocument();
+
+    // Clicking row B's own trash again *does* clear its own error.
+    await userEvent.click(trashB);
+    expect(
+      screen.queryByText("Couldn't delete this record. Please try again.")
+    ).not.toBeInTheDocument();
+  });
+
   it("cancelling the confirmation calls no API and restores the row", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 1, items: [item()] });
     const del = vi.spyOn(api, "deleteAnalysis").mockResolvedValue({ deleted: 1 });

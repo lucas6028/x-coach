@@ -224,7 +224,10 @@ export default function History() {
                           title={t("history.deleteCta")}
                           onClick={() => {
                             setPendingId(pendingId === it.id ? null : it.id);
-                            setDeleteError(null);
+                            // Only clear this row's own error, if any -- a different row's
+                            // still-unresolved failure must not be silently forgotten just
+                            // because the user opened another row's confirm.
+                            setDeleteError((prev) => (prev?.id === it.id ? null : prev));
                           }}
                           className="absolute right-3 top-9 -translate-y-1/2 rounded-lg p-2 text-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                         >
