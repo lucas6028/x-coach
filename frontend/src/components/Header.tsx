@@ -1,23 +1,12 @@
 import { CircleNotch, List, SignIn } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import type { Analysis } from "../api";
-import { useI18n, movementLabel, viewLabel } from "../lib/i18n";
+import { useI18n } from "../lib/i18n";
 import { useAuth } from "../lib/auth";
 import ThemeToggle from "./ThemeToggle";
 import LanguageToggle from "./LanguageToggle";
 import AccountMenu from "./AccountMenu";
 
 interface Props {
-  analysis: Analysis | null;
-  loading: boolean;
-  // A plain page title (History/Settings). When set, the navbar shows just this name and drops the
-  // analysis status line; the studio leaves it unset to show the session + status pill.
-  title?: string;
-  // The studio's currently-selected movement, BEFORE a result exists (there is no `analysis` yet
-  // to read it off of). Used only to keep the pre-result heading honest — "{movement} Analysis"
-  // instead of a hardcoded "Squat Analysis" — for whichever movement the user actually picked.
-  // Falls back to "Squat" when omitted (matches the studio's own default).
-  movement?: string;
   onMenu?: () => void;
   // Desktop sidebar collapse toggle. Rendered only when supplied (i.e. inside AppLayout); a
   // standalone Header omits it so its accessible name can't collide with the mobile menu button.
@@ -25,15 +14,7 @@ interface Props {
   sidebarOpen?: boolean;
 }
 
-export default function Header({
-  analysis,
-  loading,
-  title,
-  movement,
-  onMenu,
-  onToggleSidebar,
-  sidebarOpen = true,
-}: Props) {
+export default function Header({ onMenu, onToggleSidebar, sidebarOpen = true }: Props) {
   const { t } = useI18n();
   const { user, lineAuthenticating } = useAuth();
   return (
@@ -62,41 +43,9 @@ export default function Header({
         <img src="/icon.svg" alt="" className="w-9 h-9 rounded-xl shadow-accent ring-1 ring-black/5" />
         <span className="hidden sm:block font-display font-bold tracking-tight">X-Coach</span>
       </Link>
-      <div className="hidden sm:block h-6 w-px bg-border-dark mx-1 shrink-0" />
-      <div className="flex flex-1 flex-col min-w-0">
-        <h1 className="text-content text-sm lg:text-base font-semibold tracking-tight truncate">
-          {title ??
-            (analysis
-              ? t("header.session", { id: analysis.video_id })
-              : t("header.title", { movement: movementLabel(t, movement ?? "Squat") }))}
-        </h1>
-        {!title && (
-          <div className="flex items-center gap-2 text-[11px] text-muted font-mono">
-            <span
-              className={`inline-block w-2 h-2 rounded-full ${
-                loading ? "bg-yellow-400 animate-pulse" : analysis ? "bg-green-500" : "bg-faint"
-              }`}
-            />
-            {loading
-              ? t("header.processing")
-              : analysis
-                ? t("header.complete")
-                : t("header.awaiting")}
-            {analysis && (
-              <>
-                {/* Which movement's rules produced this verdict — the ONLY UI surface that names it
-                    on the common (fault-detected) result path, so it must not be sm:hidden. */}
-                <span className="text-faint">|</span>
-                <span>{movementLabel(t, analysis.movement ?? "Squat")}</span>
-                <span className="text-faint">|</span>
-                <span>{t("header.view", { type: viewLabel(t, analysis.view.view_type) })}</span>
-                <span className="text-faint hidden sm:inline">|</span>
-                <span className="hidden sm:inline uppercase">{analysis.source}</span>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+      {/* No page title or status line: the sidebar's active pill (bottom tabs under LIFF) is what
+          says which page you're on. This spacer holds the controls at the right edge. */}
+      <div className="flex-1" />
 
       {/* Top-right controls: language, theme, account. */}
       <div className="flex items-center gap-1 shrink-0">

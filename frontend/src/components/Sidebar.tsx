@@ -130,12 +130,6 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
           )}
         </nav>
       </div>
-      {open && (
-        <div className="p-2 border-t border-border-dark px-3 flex flex-col gap-0.5">
-          <p className="text-[10px] text-faint uppercase tracking-wider">{t("sidebar.version")}</p>
-          <p className="text-[10px] text-faint">{t("sidebar.tagline")}</p>
-        </div>
-      )}
     </aside>
   );
 }

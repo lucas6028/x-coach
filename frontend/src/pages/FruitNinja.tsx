@@ -359,7 +359,7 @@ export default function FruitNinja() {
   const showCamera = phase === "playing" || phase === "countdown";
 
   return (
-    <AppLayout title={t("ninja.title")} initialSidebarOpen={false}>
+    <AppLayout initialSidebarOpen={false}>
       {phase === "intro" && (
         <NinjaStartScreen
           leaderboard={leaderboard}

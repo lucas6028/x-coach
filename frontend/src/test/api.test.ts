@@ -261,6 +261,31 @@ describe("api.deleteAnalyses", () => {
   });
 });
 
+describe("api.deleteAnalysis", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("DELETEs the single analysis endpoint and returns the count", async () => {
+    const spy = mockFetch({ deleted: 1 });
+    const result = await api.deleteAnalysis("abc123");
+    expect(result).toEqual({ deleted: 1 });
+    expect(spy.mock.calls[0][0]).toBe("/api/analyses/abc123");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+
+  it("encodes the id into the URL", async () => {
+    const spy = mockFetch({ deleted: 1 });
+    await api.deleteAnalysis("urn:uuid:1/2 3");
+    expect(spy.mock.calls[0][0]).toBe(
+      `/api/analyses/${encodeURIComponent("urn:uuid:1/2 3")}`
+    );
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 404);
+    await expect(api.deleteAnalysis("abc123")).rejects.toThrow("404");
+  });
+});
+
 describe("api.analyzeUpload", () => {
   afterEach(() => vi.restoreAllMocks());
 

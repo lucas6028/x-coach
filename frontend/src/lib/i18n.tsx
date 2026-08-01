@@ -23,8 +23,6 @@ const en: Dict = {
   "nav.hide": "Hide navigation",
   "nav.show": "Show navigation",
   "nav.tabBar": "Primary navigation",
-  "sidebar.version": "Prototype v0.1",
-  "sidebar.tagline": "Pose · Rules · GraphRAG",
 
   // Games hub — the App-Store-style catalog of the pose mini-games
   "games.title": "Games",
@@ -50,12 +48,6 @@ const en: Dict = {
   "game.kcal.note": "estimated",
 
   // Header
-  "header.session": "Session: {id}",
-  "header.title": "{movement} Analysis",
-  "header.processing": "PROCESSING",
-  "header.complete": "ANALYSIS COMPLETE",
-  "header.awaiting": "AWAITING INPUT",
-  "header.view": "{type} view",
 
   // Camera views
   "view.front": "Front",
@@ -481,6 +473,14 @@ const en: Dict = {
   "history.clean": "clean rep",
   "history.faultOne": "1 fault",
   "history.faultMany": "{count} faults",
+  "history.deleteAria": "Delete this record",
+  "history.deleteCta": "Delete",
+  "history.deleteTitle": "Delete this record?",
+  "history.deleteDesc": "This can't be undone.",
+  "history.deleteConfirm": "Delete",
+  "history.deleteCancel": "Cancel",
+  "history.deleting": "Deleting…",
+  "history.deleteError": "Couldn't delete this record. Please try again.",
 
   // Admin panel (P1 shell — role-gated; sections arrive in later phases)
   "admin.nav": "Admin",
@@ -693,8 +693,6 @@ const zhHant: Dict = {
   "nav.hide": "隱藏導覽列",
   "nav.show": "顯示導覽列",
   "nav.tabBar": "主要導覽",
-  "sidebar.version": "原型 v0.1",
-  "sidebar.tagline": "姿態 · 規則 · GraphRAG",
 
   // 小遊戲中心 — App Store 風格的姿態小遊戲總覽
   "games.title": "小遊戲",
@@ -720,12 +718,6 @@ const zhHant: Dict = {
   "game.kcal.note": "估計值",
 
   // Header
-  "header.session": "工作階段：{id}",
-  "header.title": "{movement}分析",
-  "header.processing": "處理中",
-  "header.complete": "分析完成",
-  "header.awaiting": "等待輸入",
-  "header.view": "{type}視角",
 
   // Camera views
   "view.front": "正面",
@@ -1150,6 +1142,14 @@ const zhHant: Dict = {
   "history.clean": "標準動作",
   "history.faultOne": "1 個錯誤",
   "history.faultMany": "{count} 個錯誤",
+  "history.deleteAria": "刪除這筆紀錄",
+  "history.deleteCta": "刪除",
+  "history.deleteTitle": "刪除這筆紀錄？",
+  "history.deleteDesc": "此操作無法復原。",
+  "history.deleteConfirm": "刪除",
+  "history.deleteCancel": "取消",
+  "history.deleting": "刪除中…",
+  "history.deleteError": "無法刪除這筆紀錄，請再試一次。",
 
   // 後台管理面板（P1 空殼——依角色授權；其餘分頁於後續階段推出）
   "admin.nav": "後台管理",

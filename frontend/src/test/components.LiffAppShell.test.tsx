@@ -5,13 +5,13 @@ import { MemoryRouter } from "react-router-dom";
 import LiffAppShell from "../components/LiffAppShell";
 import { I18nProvider } from "../lib/i18n";
 
-const renderAt = (path: string, title?: string, movement?: string) => {
+const renderAt = (path: string) => {
   const onOpenLibrary = vi.fn();
   const onNewAnalysis = vi.fn();
   render(
     <MemoryRouter initialEntries={[path]}>
       <I18nProvider>
-        <LiffAppShell title={title} movement={movement} onOpenLibrary={onOpenLibrary} onNewAnalysis={onNewAnalysis}>
+        <LiffAppShell onOpenLibrary={onOpenLibrary} onNewAnalysis={onNewAnalysis}>
           <p>page body</p>
         </LiffAppShell>
       </I18nProvider>
@@ -56,22 +56,13 @@ describe("LiffAppShell — structure", () => {
 });
 
 describe("LiffAppShell — title", () => {
-  it("shows the page title when given one", () => {
-    renderAt("/history", "My records");
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("My records");
-  });
-
-  it("falls back to the studio title when untitled (the studio passes no title)", () => {
-    renderAt("/app");
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Squat Analysis");
-  });
-
-  // Finding 1 of the 2026-07-25 review: the LINE in-app shell has its own copy of this fallback
-  // title (it renders instead of the web Header, see AppLayout), which must track the studio's
-  // selection just like the web header does — not stay pinned to "Squat" for every movement.
-  it("names the selected movement in the fallback title, not a hardcoded squat", () => {
-    renderAt("/app", undefined, "Overhead Press");
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Overhead Press Analysis");
+  // The shell used to render a page title in its header ("My records", or "{movement} Analysis"
+  // as the studio fallback). Titles were removed app-wide; the active bottom tab is what says
+  // which page you're on. This pins the removal so a title can't creep back into the header.
+  it("renders no page title", () => {
+    renderAt("/history");
+    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Squat Analysis/i)).not.toBeInTheDocument();
   });
 });
 
@@ -93,7 +84,7 @@ describe("LiffAppShell — header actions", () => {
   });
 
   it("offers both header actions on a non-studio page too", () => {
-    renderAt("/history", "My records");
+    renderAt("/history");
     expect(screen.getByRole("button", { name: /New analysis/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Library/i })).toBeInTheDocument();
   });

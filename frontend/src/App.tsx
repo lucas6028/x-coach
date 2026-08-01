@@ -192,9 +192,6 @@ export default function App() {
 
   return (
     <AppLayout
-      analysis={analysis}
-      loading={loading}
-      movement={canonicalMovement}
       onOpenLibrary={() => setPickerOpen(true)}
       onNewAnalysis={newAnalysis}
     >

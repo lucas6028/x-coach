@@ -183,9 +183,6 @@ export default function Login() {
             ))}
           </ul>
         </div>
-        <p className="relative font-mono text-[11px] uppercase tracking-wider text-faint">
-          {t("sidebar.tagline")}
-        </p>
       </aside>
 
       {/* Form panel */}

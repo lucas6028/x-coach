@@ -19,10 +19,12 @@ describe("Sidebar — desktop rail (open)", () => {
     expect(screen.getByText("Library")).toBeInTheDocument();
   });
 
-  it("shows the version and tagline when open", () => {
+  // The footer used to carry a version tag and a tagline ("Prototype v0.1" / "Pose · Rules ·
+  // GraphRAG"). Both were removed; this pins the removal so the footer can't creep back.
+  it("carries no version tag or tagline footer", () => {
     renderRail();
-    expect(screen.getByText("Prototype v0.1")).toBeInTheDocument();
-    expect(screen.getByText("Pose · Rules · GraphRAG")).toBeInTheDocument();
+    expect(screen.queryByText("Prototype v0.1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pose · Rules · GraphRAG")).not.toBeInTheDocument();
   });
 
   it("omits the brand and collapse toggle — those live in the top navbar", () => {
@@ -91,7 +93,7 @@ describe("Sidebar — collapsed rail", () => {
       <Sidebar open={false} width={64} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
     );
     expect(screen.queryByText("Analyse")).not.toBeInTheDocument();
-    expect(screen.queryByText("Prototype v0.1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Library")).not.toBeInTheDocument();
   });
 });
 

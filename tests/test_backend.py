@@ -1334,6 +1334,64 @@ def _fake_client(resp: _Resp) -> tuple[mock.Mock, _FakeQuery]:
     return client, query
 
 
+class _FakeTable:
+    """One table's chained PostgREST calls; execute() pops the next preset response.
+
+    `_fake_client` returns a single query with a single canned response, which can't express a
+    multi-step store function (read -> delete -> count). This variant queues one response per
+    execute() and records the eq() filters *per call* (not merged into one flat list) so a test
+    can assert what a SPECIFIC call -- e.g. the delete, not the surrounding select/count -- was
+    actually scoped by. A flat list would let filters satisfied by one call (say, a select)
+    silently cover an assertion meant to pin a different call (the delete).
+    """
+
+    def __init__(self, responses: list) -> None:
+        self._responses = list(responses)
+        self.calls: list[str] = []                 # "select" / "delete", in order
+        self.call_filters: list[list[tuple]] = []  # eq() filters recorded during each call, same
+        self._current_filters: list[tuple] | None = None  # order/indices as `calls`
+
+    def select(self, *a, **k):
+        self._start_call("select")
+        return self
+
+    def delete(self, *a, **k):
+        self._start_call("delete")
+        return self
+
+    def _start_call(self, op: str) -> None:
+        self.calls.append(op)
+        self._current_filters = []
+        self.call_filters.append(self._current_filters)
+
+    def eq(self, column, value):
+        self._current_filters.append((column, value))
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def execute(self):
+        return self._responses.pop(0) if self._responses else _Resp(data=[])
+
+
+def _fake_tables(**by_table: list) -> tuple[mock.Mock, dict[str, _FakeTable]]:
+    """A client whose .table(name) returns a per-table fake with its own response queue.
+
+    Tables not preset are created on demand, so an unexpected table access doesn't crash the
+    test -- assert on `client.table.call_args_list` to catch it instead.
+    """
+    tables: dict[str, _FakeTable] = {n: _FakeTable(r) for n, r in by_table.items()}
+    client = mock.Mock()
+    client.table.side_effect = lambda name: tables.setdefault(name, _FakeTable([]))
+    return client, tables
+
+
+def _tables_touched(client: mock.Mock) -> list[str]:
+    """Table names passed to client.table(), in call order."""
+    return [c.args[0] for c in client.table.call_args_list]
+
+
 class StoreSummarizeTests(unittest.TestCase):
     def test_summarize_promotes_fields(self) -> None:
         result = {
@@ -1465,6 +1523,98 @@ class StoreDeleteTests(unittest.TestCase):
         client, _ = _fake_client(_Resp(data=None))
         with mock.patch.object(store, "_user_client", return_value=client):
             self.assertEqual(store.delete_all_analyses(token="t", user_id="u1"), 0)
+
+    def test_delete_one_returns_true_and_filters_by_id_and_user(self) -> None:
+        # read video_id -> delete (1 row) -> sibling count 0
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[{"id": "a1"}]),
+                _Resp(data=[], count=0),
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertTrue(ok)
+        self.assertEqual(tables["analyses"].calls, ["select", "delete", "select"])
+        # Checked on the DELETE call specifically (index 1) -- not merged across the surrounding
+        # select/count calls, which could each satisfy one half of this and let an unscoped
+        # delete slip through unnoticed.
+        delete_filters = tables["analyses"].call_filters[1]
+        self.assertIn(("id", "a1"), delete_filters)
+        self.assertIn(("user_id", "u1"), delete_filters)
+
+    def test_delete_one_keeps_video_and_conversation_when_siblings_remain(self) -> None:
+        """Re-analysing one clip inserts a second `analyses` row against the same `video_id`, while
+        `videos`/`conversations` are unique per (user, video_id). Copying delete_all_analyses'
+        unconditional three-table delete would wipe the SIBLING record's chat thread and video row.
+        """
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[{"id": "a1"}]),
+                _Resp(data=[{"id": "a2"}], count=1),  # a sibling still references upload_1
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertTrue(ok)
+        touched = _tables_touched(client)
+        self.assertNotIn("videos", touched)
+        self.assertNotIn("conversations", touched)
+
+    def test_delete_one_drops_video_and_conversation_when_last(self) -> None:
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[{"id": "a1"}]),
+                _Resp(data=[], count=0),  # nothing left referencing upload_1
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertTrue(ok)
+        # Order matters: the sibling count must run AFTER the delete. If it ran first, the row
+        # being deleted would still count itself, the count would never reach zero, and the
+        # cascade below would never fire -- permanently orphaning videos/conversations.
+        self.assertEqual(tables["analyses"].calls, ["select", "delete", "select"])
+        touched = _tables_touched(client)
+        self.assertIn("videos", touched)
+        self.assertIn("conversations", touched)
+        # Both cascades are scoped to the freed video, not to the whole account. Each of these
+        # tables only sees one call (its delete), so call_filters[0] is that call's filters.
+        self.assertIn(("video_id", "upload_1"), tables["videos"].call_filters[0])
+        self.assertIn(("user_id", "u1"), tables["videos"].call_filters[0])
+        self.assertIn(("video_id", "upload_1"), tables["conversations"].call_filters[0])
+
+    def test_delete_one_returns_false_when_absent(self) -> None:
+        # RLS makes someone else's id indistinguishable from a missing one: the read comes back empty.
+        client, tables = _fake_tables(analyses=[_Resp(data=[])])
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="ghost", user_id="u1")
+        self.assertFalse(ok)
+        self.assertNotIn("delete", tables["analyses"].calls)  # nothing was deleted
+
+    def test_delete_one_returns_false_when_delete_removes_nothing(self) -> None:
+        """Concurrent double-click / double-request: the read finds the row, but by the time the
+        delete runs someone else's request has already removed it, so the delete matches zero
+        rows. `delete_analysis` must report failure and stop -- not fall through to the
+        sibling-count/cascade logic, which only makes sense once a row was actually removed.
+        """
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[]),  # delete matched nothing
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertFalse(ok)
+        # No sibling-count query and no cascade followed the empty delete.
+        self.assertEqual(tables["analyses"].calls, ["select", "delete"])
+        touched = _tables_touched(client)
+        self.assertNotIn("videos", touched)
+        self.assertNotIn("conversations", touched)
 
 
 class StoreGetTests(unittest.TestCase):
@@ -1624,6 +1774,51 @@ class AnalysesRouterTests(unittest.TestCase):
     def test_delete_requires_auth(self) -> None:
         app.dependency_overrides.clear()  # drop the override -> real dependency runs
         resp = self.client.delete("/api/analyses")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_delete_one_returns_deleted_count(self) -> None:
+        with mock.patch.object(store, "delete_analysis", return_value=True) as da:
+            resp = self.client.delete("/api/analyses/3f2a5c1e-0000-4000-8000-000000000001")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"deleted": 1})
+        da.assert_called_once_with(
+            token="tok",
+            analysis_id="3f2a5c1e-0000-4000-8000-000000000001",
+            user_id="u1",
+        )
+
+    def test_delete_one_missing_is_404(self) -> None:
+        with mock.patch.object(store, "delete_analysis", return_value=False):
+            resp = self.client.delete("/api/analyses/3f2a5c1e-0000-4000-8000-000000000002")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_one_bad_uuid_is_404(self) -> None:
+        """`.eq("id", "not-a-uuid")` makes Postgres raise 22P02, which would surface as a 500.
+        The id is validated before the store is reached, so a junk path param is a plain 404."""
+        with mock.patch.object(store, "delete_analysis") as da:
+            resp = self.client.delete("/api/analyses/not-a-uuid")
+        self.assertEqual(resp.status_code, 404)
+        da.assert_not_called()
+
+    def test_delete_one_normalizes_urn_uuid_prefix(self) -> None:
+        """`uuid.UUID` happily parses a `urn:uuid:`-prefixed string, but forwarding the RAW
+        string to PostgREST would still hit 22P02. The id reaching the store must be the
+        canonical, un-prefixed form."""
+        with mock.patch.object(store, "delete_analysis", return_value=True) as da:
+            resp = self.client.delete(
+                "/api/analyses/urn:uuid:3f2a5c1e-0000-4000-8000-000000000001"
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"deleted": 1})
+        da.assert_called_once_with(
+            token="tok",
+            analysis_id="3f2a5c1e-0000-4000-8000-000000000001",
+            user_id="u1",
+        )
+
+    def test_delete_one_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.delete("/api/analyses/3f2a5c1e-0000-4000-8000-000000000003")
         self.assertEqual(resp.status_code, 401)
 
     def test_requires_auth(self) -> None:

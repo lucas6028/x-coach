@@ -16,7 +16,7 @@ function renderHeader() {
   return render(
     <MemoryRouter>
       <I18nProvider>
-        <Header analysis={null} loading={false} />
+        <Header />
       </I18nProvider>
     </MemoryRouter>
   );

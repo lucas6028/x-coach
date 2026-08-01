@@ -213,6 +213,59 @@ def delete_all_analyses(*, token: str, user_id: str) -> int:
     return len(resp.data or [])
 
 
+def delete_analysis(*, token: str, analysis_id: str, user_id: str) -> bool:
+    """Delete ONE analysis owned by the caller; return whether a row was actually removed.
+
+    The video row and chat thread are keyed on ``video_id``, not on the analysis: re-analysing one
+    clip inserts a *second* ``analyses`` row against the same ``video_id`` (``persist_analysis``
+    upserts ``videos`` but inserts ``analyses``). So they are dropped only once this was the LAST
+    analysis referencing that video -- never unconditionally the way ``delete_all_analyses`` can,
+    or deleting one record would silently wipe a sibling record's chat thread.
+
+    The uploaded file under ``runtime/uploads/`` is deliberately left on disk, matching the
+    clear-all path; reaping those is a separate change that should cover both.
+    """
+    client = _user_client(token)
+    found = (
+        client.table("analyses")
+        .select("video_id")
+        .eq("id", analysis_id)
+        .limit(1)
+        .execute()
+    )
+    rows = found.data or []
+    if not rows:
+        # Missing, or someone else's -- RLS scopes the read, so the two are indistinguishable.
+        return False
+    video_id = rows[0]["video_id"]
+
+    # RLS already scopes writes to auth.uid() = user_id; the explicit predicate is a second guard.
+    resp = (
+        client.table("analyses")
+        .delete()
+        .eq("id", analysis_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    if not (resp.data or []):
+        return False
+
+    siblings = (
+        client.table("analyses")
+        .select("id", count="exact")
+        .eq("user_id", user_id)
+        .eq("video_id", video_id)
+        .limit(1)
+        .execute()
+    )
+    if (siblings.count or 0) == 0:
+        client.table("videos").delete().eq("user_id", user_id).eq("video_id", video_id).execute()
+        client.table("conversations").delete().eq("user_id", user_id).eq(
+            "video_id", video_id
+        ).execute()
+    return True
+
+
 def get_analysis(*, token: str, analysis_id: str) -> dict[str, Any] | None:
     """Return one analysis row (full ``result`` JSONB) owned by the caller, or ``None``."""
     client = _user_client(token)

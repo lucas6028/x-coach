@@ -3,12 +3,14 @@ import {
   CaretRight,
   FilmSlate,
   PersonSimpleRun,
+  Trash,
   VideoCamera,
   WarningCircle,
 } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
 import AppLayout from "../components/AppLayout";
+import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../lib/auth";
 import { movementLabel, useI18n, viewLabel } from "../lib/i18n";
 
@@ -23,6 +25,12 @@ export default function History() {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState("");
+
+  // Per-row deletion. Only one row can be in the confirm state at a time; `deleteError` is keyed by
+  // row id so the message appears under the row it belongs to, not at the top of the page.
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -41,11 +49,42 @@ export default function History() {
     void load();
   }, [load]);
 
+  // Splice the row out locally rather than refetching: `groups` is derived, so an emptied day
+  // header disappears on its own and deleting the last row falls back to the empty state.
+  const runDelete = async (id: string) => {
+    setDeletingId(id);
+    // Only clear this row's own error, if any -- a different row's still-unresolved failure
+    // must not be silently forgotten just because this row's delete was confirmed.
+    setDeleteError((prev) => (prev?.id === id ? null : prev));
+    try {
+      await api.deleteAnalysis(id);
+      setItems((prev) => prev.filter((it) => it.id !== id));
+      setPendingId(null);
+    } catch (e) {
+      setDeleteError({ id, message: e instanceof Error ? e.message : String(e) });
+      setPendingId(null);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   // The date now lives in the group header, so each row shows only its time.
   const fmtTime = (iso: string) => {
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString(lang, { timeStyle: "short" });
   };
+
+  // The record the confirm dialog is about. Derived rather than stored, so a row that disappears
+  // (deleted, or a reload that no longer returns it) closes the dialog instead of stranding it.
+  const pendingItem = items.find((it) => it.id === pendingId);
+  const deletingPending = pendingItem !== undefined && deletingId === pendingItem.id;
+
+  // What the dialog echoes back: the same title the row shows, plus its time.
+  const rowLabel = (it: HistoryItem) =>
+    `${t("history.rowTitle", {
+      view: viewLabel(t, it.view_type ?? "unknown"),
+      movement: movementLabel(t, it.movement ?? "Squat"),
+    })} · ${fmtTime(it.created_at)}`;
 
   // Group the (newest-first) rows into day sections, preserving order — so the list reads as a
   // reverse-chronological timeline with a date header separating each day. Rows with an unparseable
@@ -73,7 +112,7 @@ export default function History() {
   }, [items, lang]);
 
   return (
-    <AppLayout title={t("history.title")}>
+    <AppLayout>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
           <p className="text-sm text-muted">
@@ -145,10 +184,10 @@ export default function History() {
                   {g.items.map((it) => {
                     const clean = it.fault_count === 0;
                     return (
-                      <li key={it.id}>
+                      <li key={it.id} className="group relative">
                         <Link
                           to={`/app?analysis=${it.id}`}
-                          className="group flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
+                          className="flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 pr-14 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
                         >
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                             <PersonSimpleRun size={22} weight="duotone" />
@@ -190,6 +229,32 @@ export default function History() {
                             className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
                           />
                         </Link>
+
+                        {/* Sibling of the Link, not a child: a <button> inside an <a> is invalid
+                            HTML and its click bubbles into navigation. Hidden until the row is
+                            hovered or the button is focused; always visible on touch. */}
+                        <button
+                          type="button"
+                          aria-label={t("history.deleteAria")}
+                          title={t("history.deleteCta")}
+                          onClick={() => {
+                            setPendingId(it.id);
+                            // Only clear this row's own error, if any -- a different row's
+                            // still-unresolved failure must not be silently forgotten just
+                            // because the user opened another row's confirm.
+                            setDeleteError((prev) => (prev?.id === it.id ? null : prev));
+                          }}
+                          className="absolute right-3 top-9 -translate-y-1/2 rounded-lg p-2 text-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                        >
+                          <Trash size={16} weight="duotone" />
+                        </button>
+
+                        {deleteError?.id === it.id && (
+                          <p className="mt-1.5 flex items-center gap-1.5 px-1 text-xs text-danger">
+                            <WarningCircle size={14} weight="fill" className="shrink-0" />
+                            {t("history.deleteError")}
+                          </p>
+                        )}
                       </li>
                     );
                   })}
@@ -200,6 +265,20 @@ export default function History() {
         )}
         </main>
       </div>
+
+      {/* One dialog for the whole page, not one per row: `pendingId` says which record it is
+          about, and `detail` echoes that record back so the user can see they picked the right one. */}
+      <ConfirmDialog
+        open={pendingItem !== undefined}
+        title={t("history.deleteTitle")}
+        description={t("history.deleteDesc")}
+        detail={pendingItem && rowLabel(pendingItem)}
+        confirmLabel={deletingPending ? t("history.deleting") : t("history.deleteConfirm")}
+        cancelLabel={t("history.deleteCancel")}
+        busy={deletingPending}
+        onConfirm={() => pendingItem && void runDelete(pendingItem.id)}
+        onCancel={() => setPendingId(null)}
+      />
     </AppLayout>
   );
 }
