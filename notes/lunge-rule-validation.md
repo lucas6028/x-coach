@@ -468,6 +468,42 @@ threshold-free — it says whether the metric *orders* incorrect reps above corr
 independently of where the cited cut sits. All four metrics are higher-is-worse, so **an AUC
 below 0.5 is a real inversion and is reported signed, never folded to 1−AUC**.
 
+**The secondary figure, stated rather than merely referred to.** Earlier drafts of this note
+called pooled AUC secondary without printing it anywhere, which left the reader unable to check
+the headline against it. `subset_stats` computes it and `build_report` prints it; it is collected
+here so every AUC the harness produces is in the committed record. Pooled AUC ranks all reps
+together and therefore treats 174 reps from 8 people as independent, which they are not — that is
+exactly why it is not the headline.
+
+| Rule / cut | Per-subject median | **Pooled** | n scored | Lead-oracle per-subject | **Lead-oracle pooled** |
+|---|---|---|---|---|---|
+| **`knee_past_toes`** all 174 | 0.462 | **0.448** | 150 | 0.725 | **0.712** |
+| — `front`→cam18 `side` (88) | **0.171** | **0.348** | 80 | 0.833 | **0.745** |
+| — `half-profile` (86) | **0.850** | **0.602** | 70 | 0.845 | **0.708** |
+| **`insufficient_depth`** all 174 | 0.500 | **0.462** | 148 | 0.390 | **0.376** |
+| — `front`→cam18 `side` (88) | **0.792** | **0.683** | 80 | 0.320 | **0.409** |
+| — `half-profile` (86) | 0.183 | **0.249** | 68 | 0.260 | **0.253** |
+| **`knee_valgus`** all 174 | 0.590 | **0.601** | 149 | 0.620 | **0.581** |
+| — `front` (88) | 0.600 | **0.597** | 70 | 0.650 | **0.540** |
+| — `half-profile` (86) | 0.600 | **0.720** | 79 | 0.760 | **0.658** |
+| — extra-person-clean (134) | 0.629 | **0.667** | 112 | 0.639 | **0.563** |
+| **`pelvic_drop`** all 174 | 0.613 | **0.600** | 149 | 0.467 | **0.386** |
+| — `front` (88) | 0.500 | **0.606** | 70 | 0.500 | **0.421** |
+| — `half-profile` (86) | 0.500 | **0.590** | 79 | 0.333 | **0.328** |
+| — extra-person-clean (134) | 0.679 | **0.626** | 112 | 0.524 | **0.409** |
+
+Two divergences are large enough to change how a row should be read, and both cut against the
+headline where the headline is most quoted. `knee_past_toes` on `half-profile` reads **0.850
+per-subject but 0.602 pooled**, and `insufficient_depth` on the sagittal stratum reads **0.792
+against 0.683** — in both cases the per-subject median is the more optimistic of the two, because
+it lets each subject's scores be ranked only against that subject's own. Neither reverses a
+conclusion in §5, but §5's item 2 quotes 0.850 and should be read next to 0.602.
+
+The last two columns are the **lead-oracle** diagnostic (metric read off `exercise_subtype`'s lead
+leg), not the oracle *pass* — the two are different substitutions and §4.4 is the only section
+that tabulates both. For that rule the production and oracle passes share a metric and therefore
+an AUC by construction; they differ in what *fires*, not in what is scored.
+
 **Every contingency table below carries its structural silence.** A rep can be unable to fire
 for three reasons that have nothing to do with the metric: its **view gate** was shut, its
 masked phase was shorter than `min_frames` (6 at 30 fps), or its lead side was unresolved.
