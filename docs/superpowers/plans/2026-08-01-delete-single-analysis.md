@@ -596,7 +596,9 @@ import {
                           title={t("history.deleteCta")}
                           onClick={() => {
                             setPendingId(pendingId === it.id ? null : it.id);
-                            setDeleteError(null);
+                            // Only this row's error — `deleteError` is one page-level slot, so an
+                            // unconditional clear would silently wipe ANOTHER row's unresolved failure.
+                            setDeleteError((prev) => (prev?.id === it.id ? null : prev));
                           }}
                           className="absolute right-3 top-9 -translate-y-1/2 rounded-lg p-2 text-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                         >
