@@ -1726,17 +1726,53 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
     for start, end in contiguous_true_segments(mask, ctx.min_frames):
         segment = core[start : end + 1]
         pairs = [_sub_severities(frame) for frame in segment]
-        scores = [max(pair) for pair in pairs]
-        severity = float(np.nanmax(scores))
-        elbow_fired = any(pair[0] > 0.0 for pair in pairs)
-        tilt_fired = any(pair[1] > 0.0 for pair in pairs)
+        max_elbow_severity = max(pair[0] for pair in pairs)
+        max_tilt_severity = max(pair[1] for pair in pairs)
+        severity = max(max_elbow_severity, max_tilt_severity)
+        elbow_fired = max_elbow_severity > 0.0
+        tilt_fired = max_tilt_severity > 0.0
         fired_on = (
             "both" if elbow_fired and tilt_fired else "elbow_height" if elbow_fired else "shoulder_tilt"
         )
+        # UNCLIPPED RANKING SERIES, reusing the `_unclipped` / `_worst_axis` helpers Task 3
+        # added to this module (which mirror `pushup.rule_head_drop`). Clipped severities all
+        # tie at 1.0 past the ramp's severe end, which would make `build_detection`'s
+        # `nanargmax` nominate the FIRST saturated frame rather than the genuinely worst one.
+        # The two axes are in different units; each is put on a common scale by its OWN ramp
+        # and only then compared, so no cross-axis calibration is introduced.
+        scores = [
+            _worst_axis(
+                _unclipped(
+                    frame.m("elbow_height_asymmetry"), ELBOW_ASYMMETRY_MILD, ELBOW_ASYMMETRY_SEVERE
+                ),
+                _unclipped(
+                    frame.m("shoulder_tilt") - baseline_tilt,
+                    SHOULDER_TILT_RISE_MILD,
+                    SHOULDER_TILT_RISE_SEVERE,
+                ),
+            )
+            for frame in segment
+        ]
         worst = segment[int(np.nanargmax(scores))]
         # `elbow_height_delta_signed` is left_y - right_y and image y grows DOWNWARD, so a
         # POSITIVE delta means the left elbow is LOWER and the RIGHT one is the high side.
         high_side = "right" if worst.m("elbow_height_delta_signed") > 0.0 else "left"
+
+        max_elbow_asymmetry = max(
+            (frame.m("elbow_height_asymmetry") for frame in segment
+             if np.isfinite(frame.m("elbow_height_asymmetry"))), default=float("nan")
+        )
+        tilt_rises = [
+            frame.m("shoulder_tilt") - baseline_tilt for frame in segment
+            if np.isfinite(frame.m("shoulder_tilt") - baseline_tilt)
+        ]
+        max_tilt_rise = max(tilt_rises) if tilt_rises else None
+        if max_elbow_severity >= max_tilt_severity:
+            primary_label = "elbow-height asymmetry"
+            primary_value, primary_threshold = round(max_elbow_asymmetry, 4), ELBOW_ASYMMETRY_MILD
+        else:
+            primary_label = "shoulder-tilt increase vs setup"
+            primary_value, primary_threshold = round(max_tilt_rise, 4), SHOULDER_TILT_RISE_MILD
         detections.append(
             build_detection(
                 fault_id="row_asymmetric_pull",
@@ -1751,26 +1787,32 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
                 evidence={
                     "fired_on": fired_on,
                     "high_side": high_side,
-                    "max_elbow_height_asymmetry": round(
-                        float(np.nanmax([frame.m("elbow_height_asymmetry") for frame in segment])), 4
+                    # NaN-SAFE, because a dropped tilt term leaves `baseline_tilt` NaN and every
+                    # tilt-derived value with it. A NaN in `evidence` is not JSON-serializable
+                    # and would reach the API payload; `np.nanmax` over an all-NaN list also
+                    # emits a RuntimeWarning and returns NaN rather than raising. Emit None.
+                    "max_elbow_height_asymmetry": (
+                        round(max_elbow_asymmetry, 4) if np.isfinite(max_elbow_asymmetry) else None
                     ),
-                    "max_shoulder_tilt_rise": round(
-                        float(np.nanmax([frame.m("shoulder_tilt") - baseline_tilt for frame in segment])), 4
+                    "max_shoulder_tilt_rise": (
+                        round(max_tilt_rise, 4) if max_tilt_rise is not None else None
                     ),
-                    "wrist_travel_asymmetry": round(
-                        float(np.nanmax([frame.m("wrist_travel_asymmetry") for frame in segment])), 4
+                    "wrist_travel_asymmetry": _max_finite_or_none(segment, "wrist_travel_asymmetry"),
+                    "setup_shoulder_tilt": (
+                        round(baseline_tilt, 4) if np.isfinite(baseline_tilt) else None
                     ),
-                    "setup_shoulder_tilt": round(baseline_tilt, 4),
                     "elbow_threshold": ELBOW_ASYMMETRY_MILD,
                     "tilt_threshold": SHOULDER_TILT_RISE_MILD,
                     # PRIMARY AXIS IS CHOSEN BY SEVERITY, NEVER BY `fired_on`. Task 3's review
                     # found the categorical form to be a Critical, user-facing bug: branching on
-                    # `fired_on` reports the distance axis for BOTH "pull_distance" and "both",
-                    # even when the other axis is the worse one, and `keyEvidence()` in
+                    # `fired_on` reports one axis for BOTH its own case and "both", even when the
+                    # other axis is the worse one, and `keyEvidence()` in
                     # frontend/src/lib/retrieval.ts renders exactly these three keys as the single
                     # most informative measured number in the coaching UI. Compare the two
-                    # sub-severities, exactly as `pushup.rule_head_drop` does.
-                    **_primary_evidence(segment, pairs, baseline_tilt),
+                    # SEGMENT-level sub-severities, exactly as `rule_incomplete_rom` now does.
+                    "primary_label": primary_label,
+                    "primary_value": primary_value,
+                    "primary_threshold": primary_threshold,
                 },
                 citation="Saeterbakken A, et al. Int J Sports Med (2015), PMID 26134664. "
                          "Supplemented by Padovan R, et al. J Funct Morphol Kinesiol (2025), "
@@ -1788,21 +1830,22 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
     return detections
 ```
 
-**`_primary_evidence` is yours to write in this task**, as a module-private helper returning the
-three `primary_*` keys. It must pick the axis with the higher sub-severity over the segment —
-NOT branch on `fired_on` — and follow whatever shape Task 3 landed on after its own review
-found the same bug (read `rule_incomplete_rom` as committed and match it; if Task 3 adopted an
-unclipped worst-axis series from `pushup.rule_head_drop`, do the same here rather than
-inventing a second convention). Pin it with two tests: one fixture where the elbow term is the
-worse one and one where the tilt term is, each asserting `primary_label` and `primary_value`
-name the correct axis. One test alone leaves the branch half-pinned.
+**Two helpers this listing assumes.** `_unclipped(value, mild, severe)` and `_worst_axis(*values)`
+already exist at module level in `src/pose/movements/row.py` — Task 3 added them, mirroring
+`pushup.rule_head_drop`. Reuse them; do not define a second copy. You must write one small new
+helper, `_max_finite_or_none(segment, key) -> float | None`, returning the rounded maximum of a
+metric over the segment or `None` when no frame carries a finite value.
 
-**Evidence fields must survive a NaN baseline.** With the tilt term dropped (no `setup` frames),
-`baseline_tilt` is `NaN`, so `setup_shoulder_tilt` and `max_shoulder_tilt_rise` as written would
-both round `NaN`, and `np.nanmax` over an all-`NaN` list emits a RuntimeWarning and returns
-`NaN`. A `NaN` in `evidence` is not JSON-serializable and reaches the API payload. Guard both:
-emit `None` (or omit the key) when the baseline is not finite, and never call `np.nanmax` on a
-list you have not first checked has a finite element. Add an assertion to
+**Pin BOTH primary-axis branches.** Add one fixture where the elbow term is the worse axis and
+one where the tilt term is, each asserting `primary_label` and `primary_value` name the correct
+axis. One test alone leaves the branch half-pinned — that is exactly how Task 3's identical bug
+survived its first pass.
+
+**Evidence must survive a NaN baseline.** With the tilt term dropped (no `setup` frames),
+`baseline_tilt` is `NaN` and every tilt-derived value with it. A `NaN` in `evidence` is not
+JSON-serializable and reaches the API payload, and `np.nanmax` over an all-`NaN` list emits a
+RuntimeWarning and returns `NaN` rather than raising. The listing above emits `None` for each
+affected key. Add an assertion to
 `test_an_unmeasurable_baseline_drops_the_tilt_term_but_not_the_rule` that no value in
 `detections[0].evidence` is a float NaN.
 
