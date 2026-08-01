@@ -144,6 +144,59 @@ describe("History", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
+  it("deletes a row after confirmation and removes it from the list", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 2,
+      items: [
+        item({ id: "a", created_at: "2026-06-20T12:00:00.000Z" }),
+        item({ id: "b", fault_count: 0, created_at: "2026-06-20T13:00:00.000Z" }),
+      ],
+    });
+    const del = vi.spyOn(api, "deleteAnalysis").mockResolvedValue({ deleted: 1 });
+    renderHistory();
+    await screen.findByText("2 faults");
+
+    // Each row carries its own delete control; the first row is the newest ("a").
+    await userEvent.click(screen.getAllByRole("button", { name: "Delete this record" })[0]);
+    // The icon button's accessible name comes from its aria-label ("Delete this record"), so a
+    // full-string match on "Delete" hits only the confirm button.
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(del).toHaveBeenCalledWith("a"));
+    // The deleted row is spliced out locally; the surviving row stays.
+    await waitFor(() => expect(screen.queryByText("2 faults")).not.toBeInTheDocument());
+    expect(screen.getByText("clean rep")).toBeInTheDocument();
+  });
+
+  it("keeps the row and shows an error when the delete fails", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 1, items: [item()] });
+    vi.spyOn(api, "deleteAnalysis").mockRejectedValue(new Error("500 Internal Server Error"));
+    renderHistory();
+    await screen.findByText("2 faults");
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete this record" }));
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(
+      await screen.findByText("Couldn't delete this record. Please try again.")
+    ).toBeInTheDocument();
+    expect(screen.getByText("2 faults")).toBeInTheDocument(); // row survives, retryable
+  });
+
+  it("cancelling the confirmation calls no API and restores the row", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 1, items: [item()] });
+    const del = vi.spyOn(api, "deleteAnalysis").mockResolvedValue({ deleted: 1 });
+    renderHistory();
+    await screen.findByText("2 faults");
+
+    await userEvent.click(screen.getByRole("button", { name: "Delete this record" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(del).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    expect(screen.getByText("2 faults")).toBeInTheDocument();
+  });
+
   it("signs out from the account menu in the shared navbar", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 0, items: [] });
     renderHistory();

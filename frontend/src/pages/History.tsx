@@ -3,6 +3,7 @@ import {
   CaretRight,
   FilmSlate,
   PersonSimpleRun,
+  Trash,
   VideoCamera,
   WarningCircle,
 } from "@phosphor-icons/react";
@@ -24,6 +25,12 @@ export default function History() {
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState("");
 
+  // Per-row deletion. Only one row can be in the confirm state at a time; `deleteError` is keyed by
+  // row id so the message appears under the row it belongs to, not at the top of the page.
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
+
   const load = useCallback(async () => {
     setStatus("loading");
     setError("");
@@ -40,6 +47,23 @@ export default function History() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Splice the row out locally rather than refetching: `groups` is derived, so an emptied day
+  // header disappears on its own and deleting the last row falls back to the empty state.
+  const runDelete = async (id: string) => {
+    setDeletingId(id);
+    setDeleteError(null);
+    try {
+      await api.deleteAnalysis(id);
+      setItems((prev) => prev.filter((it) => it.id !== id));
+      setPendingId(null);
+    } catch (e) {
+      setDeleteError({ id, message: e instanceof Error ? e.message : String(e) });
+      setPendingId(null);
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   // The date now lives in the group header, so each row shows only its time.
   const fmtTime = (iso: string) => {
@@ -145,10 +169,10 @@ export default function History() {
                   {g.items.map((it) => {
                     const clean = it.fault_count === 0;
                     return (
-                      <li key={it.id}>
+                      <li key={it.id} className="group relative">
                         <Link
                           to={`/app?analysis=${it.id}`}
-                          className="group flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
+                          className="flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 pr-14 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
                         >
                           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                             <PersonSimpleRun size={22} weight="duotone" />
@@ -190,6 +214,56 @@ export default function History() {
                             className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
                           />
                         </Link>
+
+                        {/* Sibling of the Link, not a child: a <button> inside an <a> is invalid
+                            HTML and its click bubbles into navigation. Hidden until the row is
+                            hovered or the button is focused; always visible on touch. */}
+                        <button
+                          type="button"
+                          aria-label={t("history.deleteAria")}
+                          title={t("history.deleteCta")}
+                          onClick={() => {
+                            setPendingId(pendingId === it.id ? null : it.id);
+                            setDeleteError(null);
+                          }}
+                          className="absolute right-3 top-9 -translate-y-1/2 rounded-lg p-2 text-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                        >
+                          <Trash size={16} weight="duotone" />
+                        </button>
+
+                        {pendingId === it.id && (
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded-xl border border-danger/30 bg-danger/[0.04] px-3 py-2">
+                            <span className="mr-auto text-xs text-muted">
+                              {t("history.deleteDesc")}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setPendingId(null)}
+                              disabled={deletingId === it.id}
+                              className="rounded-lg px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:bg-content/5 hover:text-content disabled:opacity-60"
+                            >
+                              {t("history.deleteCancel")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void runDelete(it.id)}
+                              disabled={deletingId === it.id}
+                              className="inline-flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-700 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <Trash size={14} weight="fill" />
+                              {deletingId === it.id
+                                ? t("history.deleting")
+                                : t("history.deleteConfirm")}
+                            </button>
+                          </div>
+                        )}
+
+                        {deleteError?.id === it.id && (
+                          <p className="mt-1.5 flex items-center gap-1.5 px-1 text-xs text-danger">
+                            <WarningCircle size={14} weight="fill" className="shrink-0" />
+                            {t("history.deleteError")}
+                          </p>
+                        )}
                       </li>
                     );
                   })}
