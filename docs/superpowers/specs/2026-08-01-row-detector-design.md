@@ -337,6 +337,27 @@ rule gated positively on an unreachable label is permanently silent, which is wh
 - `row_momentum_jerk` needs only a visible wrist; the spec rates it `medium` in any view and no
   view earns better, so its observability is `medium` unconditionally and no discount applies.
 
+  **Challenged in Task 4's review, and the objection is worth stating rather than burying.** The
+  reviewer's point: `unknown` in production does not mean "a confirmed non-lateral view", it
+  means **the view estimator failed**, and `rule_torso_rising`'s own docstring draws exactly that
+  distinction while this rule does not — so treating `unknown` identically to a confirmed
+  `rear_oblique` conflates "a view where the wrist happens to be visible" with "we do not know
+  what we are looking at."
+
+  **The reason the behavior stands anyway:** this rule's stated precondition — the pulling wrist
+  is visible — is **not** inferred from the view label at all. It is enforced upstream by
+  `row_compute_raw`'s validity gate, which lists BOTH wrists in `required` and marks the frame
+  `valid=False` if either drops below the visibility threshold. Every frame this rule scores
+  therefore has both wrists visible **by construction**, whatever the view estimator did or did
+  not manage to classify. A discount keyed on `unknown` would be penalizing a confidence the rule
+  never depended on.
+
+  What that argument does NOT cover, and what an eventual validation should measure: whether an
+  `unknown` verdict CORRELATES with degraded landmark quality generally, such that accelerations
+  computed on those clips are noisier even with both wrists nominally visible. That is an
+  empirical question about the view estimator, not a geometric one about this rule, and no data
+  in this repository can answer it today.
+
 The `×0.65` multiplier is `pose_rule_detector.VIEW_UNAVAILABLE_CONFIDENCE_SCALE`, **imported**
 rather than re-typed, so a change to the shared constant cannot silently skip this module.
 
