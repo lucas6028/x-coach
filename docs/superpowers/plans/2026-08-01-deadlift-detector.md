@@ -27,6 +27,26 @@
 
 ---
 
+## Execution order — Task 4 runs SECOND
+
+Tasks are executed **1 → 4 → 2 → 3 → 5 → 6**. Numbering below is unchanged; only the order
+differs. Reason, found while executing Task 1:
+
+`tests/test_kg_query_resolution.py` is a pre-existing corpus gate that keys off **file
+existence**. Any `.py` in `src/pose/movements/` must appear in its `MODULE_MOVEMENTS` map (or
+`test_every_module_is_covered` fails) *and* must contain at least one `kg`-mode `kg_query` (or
+`test_queries_were_actually_found` fails). Task 1 creates `deadlift.py` with no rules at all,
+so **no ordering of these six tasks leaves Task 1's commit green** — the gate is unsatisfiable
+until the module's one `kg`-mode rule exists.
+
+`rule_lumbar_flexion` (Task 4) is that rule — the only one of the three grounded in the KG
+rather than RAG. Running it immediately after Task 1 reduces the red window to a single
+commit. That one commit (`cde4d63f`) is knowingly red on
+`test_queries_were_actually_found`; the branch tip is green and CI runs on the PR, not on
+intermediate commits. This is recorded rather than hidden, and the gate is deliberately NOT
+weakened to accommodate the split — it exists because Overhead Press shipped three broken
+queries.
+
 ## File Structure
 
 | File | Responsibility |
