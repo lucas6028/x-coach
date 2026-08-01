@@ -605,6 +605,20 @@ DEADLIFT_LOCKOUT_MILD_DEG = 165.0
 DEADLIFT_LOCKOUT_SEVERE_DEG = 140.0
 
 
+def _worst_angle(segment: list[CoreFrame], key: str) -> float:
+    """Smallest finite value of `key` across the segment; NaN when the axis is wholly missing.
+
+    The guard is not decoration. `rule_incomplete_lockout`'s mask ORs two independently
+    finite-checked clauses, so a segment can be flagged entirely by one axis while the other
+    is NaN on every frame. Bare `np.nanmin` over an all-NaN list warns and returns NaN, and a
+    NaN in `evidence` survives `dataclasses.asdict()` into a postgrest write with
+    `allow_nan=False` -- a ValueError this codebase documents as silently swallowed, dropping
+    the analysis from the user's history. Mirrors `overhead_press.py:321-328`.
+    """
+    values = [frame.m(key) for frame in segment]
+    return float(np.nanmin(values)) if any(np.isfinite(v) for v in values) else float(np.nan)
+
+
 def _lockout_severities(segment: list[CoreFrame], key: str) -> list[float]:
     """Per-frame lockout severity on ONE axis, for every frame in the segment.
 
@@ -653,8 +667,18 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
         knee_sev = _lockout_severities(segment, "knee_angle_deg")
         scores = [max(a, b) for a, b in zip(hip_sev, knee_sev)]
         severity = float(max(scores))
-        worst_hip = float(np.nanmin([frame.m("hip_angle_deg") for frame in segment]))
-        worst_knee = float(np.nanmin([frame.m("knee_angle_deg") for frame in segment]))
+        # CORRECTED 2026-08-01 after the Task 2 review; the first draft of this plan called
+        # bare `np.nanmin(...)` here and that was a drafting error, not a design choice.
+        # `_flagged` ORs two independently finite-checked clauses, so a segment can be flagged
+        # entirely by the knee while `hip_angle_deg` is NaN on every frame -- precisely the
+        # one-occluded-landmark case this module's header warns about. Bare `nanmin` over an
+        # all-NaN list emits a RuntimeWarning and returns NaN, and NaN in `evidence` reaches
+        # `dataclasses.asdict()` and then a postgrest write with `allow_nan=False`, whose
+        # ValueError this codebase already documents as silently swallowed
+        # (`pose_rule_detector.py:569-588`) -- the analysis vanishes from the user's history
+        # with no surfaced error. `overhead_press.py:321-328` guards exactly this; match it.
+        worst_hip = _worst_angle(segment, "hip_angle_deg")
+        worst_knee = _worst_angle(segment, "knee_angle_deg")
         driver = "hip" if max(hip_sev) >= max(knee_sev) else "knee"
 
         detections.append(
