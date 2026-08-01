@@ -348,3 +348,120 @@ def rule_lumbar_flexion(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
             )
         )
     return detections
+
+
+# STEP 0 -- KG QUERY RESOLUTION, recorded before the rule was written. Checked against
+# data/kg/sports_kg_v3.graphml via BOTH `resolve_nodes` and `retrieve_graph_context` (the
+# latter is what production calls, and is what OHP's three-blank-queries defect would have
+# been caught by).
+#
+# NO KG NODE EXISTS FOR THIS FAULT, so it takes the `rag` fallback. The 13-node Deadlift stub
+# carries exactly one lockout node -- `Deadlift:Hyperextension At Lockout` -- which is the
+# LITERAL OPPOSITE fault: too much extension, not too little. `Incomplete Lockout` resolves to
+# nothing and `Incomplete Range Of Motion` resolves only to the generic shared-layer
+# `Range Of Motion` concept node, which would ground a coaching explanation on an abstraction
+# rather than on an error. Grounding this rule on any of them would retrieve advice for a
+# different problem, so per the lunge Step-0 rule -- "do NOT invent a near-miss" -- it does not.
+#
+# IN `rag` MODE THIS STRING IS A VECTOR-DB SEARCH PHRASE, NOT A NODE NAME
+# (`pose_rule_detector.py:756` passes it straight to `query_vector_db`), so it is written as
+# one and was verified by running it. The node-style "Incomplete Lockout" retrieves a ROW
+# suspension-EMG paper and a LEG ABDUCTION paper -- the wrong movement entirely. The phrasing
+# below returns PMC12148905, this rule's cross-support citation, at ranks 1 and 3. Verified
+# 2026-08-01; re-run before changing it.
+DEADLIFT_LOCKOUT_KG_QUERY = "deadlift incomplete lockout hip and knee extension"
+
+# Spec-derived, unvalidated. The 180-degree TARGET is measured -- Moreira PMC12225233 recorded
+# the three key positions at lift-off 95 deg, mid-pull 126 deg and lock-out 180 deg, with
+# "180 degrees ... equivalent to full extension" -- but the 165-degree tolerance below which a
+# rep is called incomplete is the parent spec's number and no source states it.
+DEADLIFT_LOCKOUT_MILD_DEG = 165.0
+DEADLIFT_LOCKOUT_SEVERE_DEG = 140.0
+
+
+def _lockout_severities(segment: list[CoreFrame], key: str) -> list[float]:
+    """Per-frame lockout severity on ONE axis, for every frame in the segment.
+
+    Scored unconditionally on both axes by the caller. `severity_from_range` already returns
+    0.0 for a non-finite value, so a missing reading contributes nothing without needing a
+    guard -- and, critically, without ever SELECTING which ramp is used. Choosing the ramp by
+    "which reading is finite" is the OHP mis-attribution bug this design exists to avoid.
+    """
+    return [
+        severity_from_range(
+            frame.m(key),
+            DEADLIFT_LOCKOUT_MILD_DEG,
+            DEADLIFT_LOCKOUT_SEVERE_DEG,
+            lower_is_worse=True,
+        )
+        for frame in segment
+    ]
+
+
+def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Rep ends without full hip AND knee extension.
+
+    Fires on `hip_angle < 165` OR `knee_angle < 165`, and scores BOTH ramps, taking the worse.
+    Selecting the ramp by "which reading is finite" is the OHP mis-attribution bug recorded in
+    the parent spec's section 8 status note; this scores both unconditionally instead.
+
+    View policy is DEGRADE, not gate. An extension angle seen head-on is foreshortened, so it
+    under-reads -- the off-view failure mode is a missed fault, not a false one. Contrast
+    `rule_lumbar_flexion`, which inverts off-view and is therefore hard-gated.
+    """
+    observable = ctx.view_type in SAGITTAL_VIEWS
+
+    def _flagged(frame: CoreFrame) -> bool:
+        hip = frame.m("hip_angle_deg")
+        knee = frame.m("knee_angle_deg")
+        return (np.isfinite(hip) and hip < DEADLIFT_LOCKOUT_MILD_DEG) or (
+            np.isfinite(knee) and knee < DEADLIFT_LOCKOUT_MILD_DEG
+        )
+
+    mask = [frame.valid and frame.phase == "lockout" and _flagged(frame) for frame in core]
+
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        hip_sev = _lockout_severities(segment, "hip_angle_deg")
+        knee_sev = _lockout_severities(segment, "knee_angle_deg")
+        scores = [max(a, b) for a, b in zip(hip_sev, knee_sev)]
+        severity = float(max(scores))
+        worst_hip = float(np.nanmin([frame.m("hip_angle_deg") for frame in segment]))
+        worst_knee = float(np.nanmin([frame.m("knee_angle_deg") for frame in segment]))
+        driver = "hip" if max(hip_sev) >= max(knee_sev) else "knee"
+
+        detections.append(
+            build_detection(
+                fault_id="deadlift_incomplete_lockout",
+                fault_name="Incomplete Lockout",
+                kg_query=DEADLIFT_LOCKOUT_KG_QUERY,
+                retrieval_mode="rag",
+                segment_metrics=segment,
+                score_values=scores,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable else "medium",
+                evidence={
+                    "min_hip_angle_deg": round(worst_hip, 2),
+                    "min_knee_angle_deg": round(worst_knee, 2),
+                    "threshold": DEADLIFT_LOCKOUT_MILD_DEG,
+                    "driver": driver,
+                    "primary_label": f"minimum {driver} angle at lockout",
+                    "primary_value": round(worst_hip if driver == "hip" else worst_knee, 2),
+                    "primary_threshold": DEADLIFT_LOCKOUT_MILD_DEG,
+                },
+                citation="Moreira VM, et al. \"Analysis of Muscle Strength and Electromyographic "
+                         "Activity during Different Deadlift Positions.\" Muscles (2023). "
+                         "PMC12225233. Cross-support: Hanen NC, et al. PMC12148905 (2025).",
+                citation_support="PMC12225233 measured the three key positions at "
+                                 "\"approximately 95 deg, 126 deg, and 180 deg\" for lift-off, "
+                                 "mid-pull and lock-out, with \"180 deg ... equivalent to full "
+                                 "extension\" -- so full triple extension is a measured target, "
+                                 "not an assumption. PMC12148905: \"lift completion[] is "
+                                 "achieved when the athlete assumes a fully upright position "
+                                 "with extended hips and knees, with scapular retraction.\" "
+                                 "Verified in RAG docs. The 165 deg flag point is spec-derived.",
+            )
+        )
+    return detections
