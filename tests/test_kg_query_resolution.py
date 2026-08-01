@@ -32,6 +32,7 @@ MODULE_MOVEMENTS = {
     "overhead_press.py": "Overhead Press",
     "lunge.py": "Lunge",
     "deadlift.py": "Deadlift",
+    "row.py": "Row",
 }
 
 

@@ -1456,6 +1456,32 @@ These are stated rather than papered over, per the spec's honesty requirement:
 - **Contralateral pelvic drop** (high knee, lunge) is a strong *injury-association* signal
   (Bramah 2018); it is **not** asserted as a direct readout of hip-abductor weakness, which is
   contested (McCarney 2020).
+- **`rounded_thoracolumbar_spine` (Row) is not implementable from this document's own detection
+  model, and was not implemented.** Its `detection_heuristic` offers **three** constructions,
+  and none of them measures spinal curvature. The "three-point angle at mid-spine" places its
+  middle point at `0.5·(shoulder_mid + hip_mid)`, which is by construction the midpoint of the
+  segment joining the other two, so the angle is exactly 180° on every frame — a constant. The
+  sag alternative measures the distance from `shoulder_mid` to a line of which `shoulder_mid` is
+  an endpoint, which is identically zero — also a constant. The third, "alternatively track
+  shoulder→hip line vs a straight setup reference," is **not** degenerate — it is perfectly
+  computable and nonzero. `row_torso_rising`'s own metric,
+  `trunk_angle_from_horizontal_deg = arctan2(|dy|, |dx|)` between hip_mid and shoulder_mid, is a
+  pure angle — invariant to whole-body translation and to camera-distance scaling — so neither
+  confound applies here. The construction is rejected on narrower grounds: it is
+  `row_torso_rising`'s own signal (that same pitch, compared against the same setup baseline),
+  relabeled as spinal shape, which would attach this rule's citation (Saeterbakken PMID
+  26134664, an EMG magnitude result) to a quantity that citation says nothing about. All three
+  constructions fail for the same root cause: MediaPipe Pose (§3)
+  has no thoracic or lumbar landmark, so no point exists between the shoulders and the hips, and
+  nothing between them can be measured — two of the three routes collapse to constants and the
+  third measures a different quantity than the one the rule names. Found during the Row
+  implementation (2026-08-01, `docs/superpowers/specs/2026-08-01-row-detector-design.md` §3).
+  Row therefore ships **four** rules, not five. Two further monocular substitutes were
+  considered and rejected — trunk-length foreshortening and ear-drop relative to the trunk line
+  — because both are confounded by camera distance and by the hinge angle, and neither is what
+  this rule's citation supports; either would need its own `fault_id` and an explicitly-invented
+  threshold. The KG target `Row:Trunk Flexion` exists and is non-empty, so the gap is the
+  metric, not the knowledge.
 
 **View-estimation orientation limits (2026-07-25, added when `body_axis_extent` made body-extent
 measurement orientation-aware; see `src/pose/view_estimation.py` module docstring for the
@@ -1988,3 +2014,49 @@ documented in-code:
   shallow-finishing rep still has a `lockout` phase to score. **General lesson: a percentile
   phase boundary and an absolute per-frame threshold inside that phase do not compose.** Squat,
   lunge and push-up should be checked for the same pairing.
+
+**Status (2026-08-01) — Row detector registered.**
+
+- **Row — IMPLEMENTED 2026-08-01, UNVALIDATED.** Four of five rules
+  (`row_torso_rising`, `row_incomplete_rom`, `row_momentum_jerk`, `row_asymmetric_pull`);
+  the fifth is recorded in §7 as a spec defect. `validated=False`: REHAB24-6 contains no row.
+  Fit3D **does** contain row video (`barbell_row`, `barbell_dead_row`, `one_arm_row` in
+  `data/Fit3D/fit3d_info.json`, 3D mocap ground truth under `train/*/joints3d_25/` and rep
+  boundaries in `rep_ann.json`, across all 8 train subjects) — but, unlike REHAB24-6, it
+  carries no binary correct/incorrect label, so it cannot support the fire-rate/AUC-against-
+  correctness validation §8.4 means and the Lunge pass above ran. What Fit3D's 3D truth
+  *can* support — the 2D-cue-vs-3D-truth fidelity comparison this project has already run
+  elsewhere (`notes/fit3d_2d_vs_3d_summary.md` and related) — is possible for Row and simply
+  was **not done in this pass**; it is future work, not blocked on absent data. (Caveat: Fit3D's
+  rig is 4 cameras, all oblique, with no true side view, which bears on any Row rule needing a
+  lateral component.) So §8.4's "validate thresholds against labeled data per movement" is
+  **not** satisfied for Row — REHAB24-6 has no row at all, and Fit3D's row data has 3D truth but
+  no correctness labels — and closing it needs either labeled row video or a fidelity-style pass
+  against Fit3D, neither of which is blocked on nonexistent data. All four severity ramps are
+  rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
+  self-normalizing 3×-median threshold is expected to over-fire. **A fifth limitation is
+  measured, and now derived, not just observed:** `row_torso_rising`'s effective fire threshold
+  is inflated by setup-baseline contamination, because on the **segmented** path `segment_reps`
+  trims the rep window to the excursion and leaves a 2-frame `setup` slice, of which one frame
+  is clean and the other is already loaded on an abrupt setup→peak transition. The median of two
+  values is their mean, so the baseline lands exactly halfway between the true resting angle and
+  the loaded peak value, and the measured rise (`peak − baseline`) is exactly **half** the true
+  rise: for a true rise `R`, `peak − baseline = (base + R) − (base + R/2) = R/2`, so the 15° fire
+  threshold requires `R > 30°` of real fault — **exactly 2×, derived from the trimming
+  mechanism, not an empirical curiosity** — and this is invariant to how many extension frames
+  precede the rep because `segment_reps` trims them off either way (measured at both 8 and 20
+  setup frames; 40 was not tested and is not claimed). Measured end-to-end through
+  `run_detector`, sweeping the true rise in 0.5° steps: an abrupt setup→peak transition fires at
+  **30.5°** (the smallest step past the derived 30° boundary, 2.03×, matching the algebra above);
+  a realistic 6-frame concentric ramp relaxes it to **19.5°** (1.30×) and a 3-frame ramp to
+  **20.5°** (1.37×) — smaller than the abrupt case because a ramp spreads the loaded value across
+  more of the setup slice instead of concentrating it in one frame.
+
+  **The inflation applies to the segmented path only.** On the whole-clip fallback
+  (`no_reps_detected` / `only_partial_reps` / `segmentation_disabled`) there is no window
+  trimming — `setup` is the clip's first 15% by position, not by excursion — and the effective
+  threshold measures at **15.5°**, the nominal 15° (the extra 0.5° is the sweep's step size, not
+  inflation). The counterintuitive consequence: **the same clip can have a stricter effective
+  threshold when rep segmentation *succeeds* than when it *fails*** — a torso-rising fault a
+  lifter actually committed can go undetected specifically because the pipeline segmented their
+  rep correctly. Direction is always toward MISSED faults, never false ones.

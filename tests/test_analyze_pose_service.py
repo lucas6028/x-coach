@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
+from backend.app import config
 from backend.app.services import analysis as svc
 from src.pose.movements import registry
 
@@ -42,9 +43,11 @@ class AnalyzePosePayloadTests(unittest.TestCase):
     # clip that measured perfectly well. The old test monkeypatched the dict, so it could not have
     # caught a movement missing FROM the dict.
     def test_every_advertised_movement_reaches_a_detector(self) -> None:
-        advertised = [d.name for d in registry.list_detectors()]
+        detectors = registry.list_detectors()
+        advertised = [d.name for d in detectors]
         self.assertIn("Push-up", advertised)  # guards the premise, not just the conclusion
         self.assertIn("Overhead Press", advertised)
+        self.assertIn("Row", advertised)  # Task 6's registration, not just the older two
 
         for movement in advertised:
             with self.subTest(movement=movement):
@@ -52,8 +55,24 @@ class AnalyzePosePayloadTests(unittest.TestCase):
                     detect.return_value = {"detections": [], "video_id": "v"}
                     result = svc.analyze_pose_payload(self._payload(), movement=movement, video_id="v")
                 detect.assert_called_once()
+                # Passed through unchanged -- e.g. "Row", never silently coerced to the "Squat"
+                # fallback `registry.get_detector` applies to a falsy movement.
                 self.assertEqual(detect.call_args.kwargs["movement"], movement)
                 self.assertNotIn("analysis_pending", result)
+
+        # Row's specific consequence of being registered: the analysis path reaches it (above),
+        # and the flag `GET /api/movements` renders as a frontend Beta tag is False, not True or
+        # missing. Squat is the only movement this repo has validated against labeled data
+        # (movement-rule-detector-design.md §8); Row must not silently inherit that status.
+        row_detector = registry.get_detector("Row")
+        self.assertEqual(row_detector.name, "Row")
+        self.assertFalse(row_detector.validated)
+
+    def test_default_analysis_movement_is_still_squat(self) -> None:
+        """Registering a fifth detector (Row, following Lunge/Push-up/Overhead Press) must not
+        move what an unspecified /api/analyze request analyzes -- the registry growing is not
+        license to change the fallback out from under existing callers."""
+        self.assertEqual(config.DEFAULT_ANALYSIS_MOVEMENT, "Squat")
 
     def test_movement_name_is_matched_case_insensitively(self) -> None:
         # The registry keys on a lowercased name, so the dict's exact-match lookup would have
@@ -65,12 +84,16 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         detect.assert_called_once()
 
     def test_unknown_movement_returns_coming_soon_without_detector(self) -> None:
-        # "Row" is a real movement name the frontend lists (frontend/src/lib/movements.ts) but
-        # has no registered detector -- unlike "Deadlift", which this test used before it was
-        # registered in src/pose/movements/registry.py.
-        self.assertNotIn("Row", [d.name for d in registry.list_detectors()])
+        # THIS EXAMPLE HAS TO BE ROTATED EVERY TIME A DETECTOR IS REGISTERED, and that is the
+        # point of the assertion below rather than a nuisance: the test needs a movement the
+        # frontend lists (frontend/src/lib/movements.ts) that has NO registered detector, so it
+        # necessarily goes stale as the 16-movement programme lands one movement at a time. It
+        # has already moved "Deadlift" -> "Row" -> "Band Pull Apart"; when Band Pull Apart is
+        # implemented, move it again to any still-unimplemented movement. The `assertNotIn` is
+        # what turns that staleness into a loud failure instead of a silently vacuous test.
+        self.assertNotIn("Band Pull Apart", [d.name for d in registry.list_detectors()])
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
-        result = svc.analyze_pose_payload(payload, movement="Row", video_id="v2")
+        result = svc.analyze_pose_payload(payload, movement="Band Pull Apart", video_id="v2")
         self.assertEqual(result["analysis_pending"], True)
         self.assertEqual(result["detections"], [])
         self.assertEqual(result["video_id"], "v2")
