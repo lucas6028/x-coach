@@ -890,7 +890,7 @@ def main() -> None:
         "--movement",
         default="Squat",
         help="Canonical movement name to detect (registered: 'Squat', 'Overhead Press', "
-             "'Push-up'). Only Squat is validated against labeled data.",
+             "'Push-up', 'Lunge', 'Row'). Only Squat is validated against labeled data.",
     )
     # Local import, not module-level: `src.pose.movements.base` imports THIS module
     # (`PoseRuleDetection`) at module scope, so importing it back at module scope here would be

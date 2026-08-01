@@ -1381,6 +1381,22 @@ These are stated rather than papered over, per the spec's honesty requirement:
 - **Contralateral pelvic drop** (high knee, lunge) is a strong *injury-association* signal
   (Bramah 2018); it is **not** asserted as a direct readout of hip-abductor weakness, which is
   contested (McCarney 2020).
+- **`rounded_thoracolumbar_spine` (Row) is not implementable from this document's own detection
+  model, and was not implemented.** Both constructions its `detection_heuristic` offers are
+  degenerate: the "three-point angle at mid-spine" places its middle point at
+  `0.5·(shoulder_mid + hip_mid)`, which is by construction the midpoint of the segment joining
+  the other two, so the angle is exactly 180° on every frame; and the sag alternative measures
+  the distance from `shoulder_mid` to a line of which `shoulder_mid` is an endpoint, which is
+  identically zero. The root cause is that MediaPipe Pose (§3) has no thoracic or lumbar
+  landmark, so no point exists between the shoulders and the hips to measure spinal curvature
+  with. Found during the Row implementation (2026-08-01,
+  `docs/superpowers/specs/2026-08-01-row-detector-design.md` §3). Row therefore ships **four**
+  rules, not five. Two monocular substitutes were considered and rejected — trunk-length
+  foreshortening and ear-drop relative to the trunk line — because both are confounded by
+  camera distance and by the hinge angle, and neither is what this rule's citation
+  (Saeterbakken PMID 26134664, an EMG magnitude result) supports; either would need its own
+  `fault_id` and an explicitly-invented threshold. The KG target `Row:Trunk Flexion` exists and
+  is non-empty, so the gap is the metric, not the knowledge.
 
 **View-estimation orientation limits (2026-07-25, added when `body_axis_extent` made body-extent
 measurement orientation-aware; see `src/pose/view_estimation.py` module docstring for the
@@ -1867,3 +1883,13 @@ against labeled ground truth" and is the user's decision with these numbers in h
   the rules saw, so score support matches rule support, and the lead-side finding was reproduced
   independently over the full labeled windows — but the isolation the spec promised was not
   achieved. Forcing it needs `replace(LUNGE_DETECTOR, rep_signal=None)`; not done here.
+
+**Status (2026-08-01) — Row detector registered.**
+
+- **Row — IMPLEMENTED 2026-08-01, UNVALIDATED.** Four of five rules
+  (`row_torso_rising`, `row_incomplete_rom`, `row_momentum_jerk`, `row_asymmetric_pull`);
+  the fifth is recorded in §7 as a spec defect. `validated=False`: REHAB24-6 contains no row
+  and neither does Fit3D, so §8.4's "validate thresholds against labeled data per movement"
+  is **not** satisfied and cannot be until labeled row video exists. All four severity ramps
+  are rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
+  self-normalizing 3×-median threshold is expected to over-fire.

@@ -4,6 +4,7 @@ from __future__ import annotations
 import unittest
 from unittest import mock
 
+from backend.app import config
 from backend.app.services import analysis as svc
 from src.pose.movements import registry
 
@@ -42,9 +43,11 @@ class AnalyzePosePayloadTests(unittest.TestCase):
     # clip that measured perfectly well. The old test monkeypatched the dict, so it could not have
     # caught a movement missing FROM the dict.
     def test_every_advertised_movement_reaches_a_detector(self) -> None:
-        advertised = [d.name for d in registry.list_detectors()]
+        detectors = registry.list_detectors()
+        advertised = [d.name for d in detectors]
         self.assertIn("Push-up", advertised)  # guards the premise, not just the conclusion
         self.assertIn("Overhead Press", advertised)
+        self.assertIn("Row", advertised)  # Task 6's registration, not just the older two
 
         for movement in advertised:
             with self.subTest(movement=movement):
@@ -52,8 +55,24 @@ class AnalyzePosePayloadTests(unittest.TestCase):
                     detect.return_value = {"detections": [], "video_id": "v"}
                     result = svc.analyze_pose_payload(self._payload(), movement=movement, video_id="v")
                 detect.assert_called_once()
+                # Passed through unchanged -- e.g. "Row", never silently coerced to the "Squat"
+                # fallback `registry.get_detector` applies to a falsy movement.
                 self.assertEqual(detect.call_args.kwargs["movement"], movement)
                 self.assertNotIn("analysis_pending", result)
+
+        # Row's specific consequence of being registered: the analysis path reaches it (above),
+        # and the flag `GET /api/movements` renders as a frontend Beta tag is False, not True or
+        # missing. Squat is the only movement this repo has validated against labeled data
+        # (movement-rule-detector-design.md §8); Row must not silently inherit that status.
+        row_detector = registry.get_detector("Row")
+        self.assertEqual(row_detector.name, "Row")
+        self.assertFalse(row_detector.validated)
+
+    def test_default_analysis_movement_is_still_squat(self) -> None:
+        """Registering a fifth detector (Row, following Lunge/Push-up/Overhead Press) must not
+        move what an unspecified /api/analyze request analyzes -- the registry growing is not
+        license to change the fallback out from under existing callers."""
+        self.assertEqual(config.DEFAULT_ANALYSIS_MOVEMENT, "Squat")
 
     def test_movement_name_is_matched_case_insensitively(self) -> None:
         # The registry keys on a lowercased name, so the dict's exact-match lookup would have
