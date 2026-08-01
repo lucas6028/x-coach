@@ -956,5 +956,139 @@ class RowMomentumJerkTest(unittest.TestCase):
         self.assertIn(detections[0].evidence["trunk_heave"], ("yes", "no"))
 
 
+class RowAsymmetricPullTest(unittest.TestCase):
+    def test_a_symmetric_pull_does_not_fire(self) -> None:
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        self.assertEqual(_run_rule(rule_asymmetric_pull, _row_clip()), [])
+
+    def test_just_inside_both_thresholds_does_not_fire(self) -> None:
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.049, setup_tilt=0.0, peak_tilt=0.039)
+        self.assertEqual(_run_rule(rule_asymmetric_pull, clip), [])
+
+    def test_elbow_height_asymmetry_alone_fires(self) -> None:
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.051)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "row_asymmetric_pull")
+        self.assertEqual(detections[0].evidence["fired_on"], "elbow_height")
+
+    def test_a_shoulder_tilt_increase_alone_fires(self) -> None:
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(setup_tilt=0.0, peak_tilt=0.041)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["fired_on"], "shoulder_tilt")
+
+    def test_the_tilt_term_is_a_delta_not_an_absolute(self) -> None:
+        """A lifter tilted the same amount at setup and at peak has not become asymmetric."""
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(setup_tilt=0.06, peak_tilt=0.06)
+        self.assertEqual(_run_rule(rule_asymmetric_pull, clip), [])
+
+    def test_severity_is_exact_at_the_elbow_ramp_midpoint(self) -> None:
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        # Ramp 0.05 -> 0.125; 0.0875 is exactly half way.
+        clip = _row_clip(peak_elbow_dy=0.0875)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
+
+    def test_evidence_names_the_high_side(self) -> None:
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        # elbow_dy is POSITIVE downward, so a positive dy puts the LEFT elbow LOWER.
+        clip = _row_clip(peak_elbow_dy=0.08)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(detections[0].evidence["high_side"], "right")
+
+    def test_a_pure_side_view_downgrades_rather_than_silencing(self) -> None:
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.0875)
+        side = _run_rule(rule_asymmetric_pull, clip, view_type="side")
+        rear = _run_rule(rule_asymmetric_pull, clip, view_type="rear")
+        self.assertEqual(side[0].observability, "medium")
+        self.assertEqual(rear[0].observability, "high")
+        self.assertLess(side[0].confidence, rear[0].confidence)
+
+    def test_an_unmeasurable_baseline_drops_the_tilt_term_but_not_the_rule(self) -> None:
+        """The disjunction's elbow branch must survive a NaN baseline.
+
+        `rule_torso_rising` early-returns on a NaN baseline because its fire condition IS the
+        baseline comparison. Copying that opener here would silence a fault the spec says
+        still fires on elbow-height asymmetry alone.
+        """
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.0875)
+        for frame in clip[:6]:  # occlude the setup frames -> no baseline
+            frame["landmarks"][11] = _lm(0.5, 0.5, 0.10)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["fired_on"], "elbow_height")
+        # NaN is not JSON-serializable and must never reach the API payload: a dropped tilt
+        # term is represented as `None`, never as a float NaN slipping through.
+        for key, value in detections[0].evidence.items():
+            if isinstance(value, float):
+                self.assertFalse(math.isnan(value), f"evidence[{key!r}] is NaN")
+
+    def test_wrist_travel_asymmetry_is_evidence_and_never_fires_alone(self) -> None:
+        """The spec's third term has NO threshold, so inventing one would be a fabrication."""
+        from src.pose.movements.row import rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.0, peak_tilt=0.0)
+        for frame in clip[6:]:
+            frame["landmarks"][16] = _lm(
+                frame["landmarks"][16]["x"], frame["landmarks"][16]["y"] + 0.20, 0.95
+            )
+        self.assertEqual(_run_rule(rule_asymmetric_pull, clip), [])
+
+    def test_the_worse_of_the_two_conditions_sets_the_primary_axis_elbow(self) -> None:
+        """Pin one half of the primary-axis branch: the elbow term is the WORSE axis here.
+
+        peak_elbow_dy=0.08 -> elbow severity (0.08-0.05)/(0.125-0.05) = 0.4.
+        peak_tilt=0.06 (setup_tilt=0.0) -> tilt severity (0.06-0.04)/(0.10-0.04) = 0.333.
+        Elbow (0.4) is strictly worse, so `primary_label`/`primary_value` must name the elbow
+        axis even though both terms fired (`fired_on == "both"`).
+        """
+        from src.pose.movements.row import ELBOW_ASYMMETRY_MILD, rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.08, setup_tilt=0.0, peak_tilt=0.06)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["fired_on"], "both")
+        self.assertEqual(detections[0].evidence["primary_label"], "elbow-height asymmetry")
+        self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.08, places=3)
+        self.assertEqual(detections[0].evidence["primary_threshold"], ELBOW_ASYMMETRY_MILD)
+
+    def test_the_worse_of_the_two_conditions_sets_the_primary_axis_tilt(self) -> None:
+        """Mirror of the test above with the two axes' roles swapped: without this case, the
+        primary-axis branch is only half-pinned -- a version that always reports the elbow
+        axis would still pass the test above only by accident of which axis it favored.
+
+        peak_elbow_dy=0.055 -> elbow severity (0.055-0.05)/0.075 = 0.0667.
+        peak_tilt=0.09 (setup_tilt=0.0) -> tilt severity (0.09-0.04)/0.06 = 0.833.
+        Tilt is strictly worse, so `primary_label`/`primary_value` must name the tilt axis.
+        """
+        from src.pose.movements.row import SHOULDER_TILT_RISE_MILD, rule_asymmetric_pull
+
+        clip = _row_clip(peak_elbow_dy=0.055, setup_tilt=0.0, peak_tilt=0.09)
+        detections = _run_rule(rule_asymmetric_pull, clip)
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["fired_on"], "both")
+        self.assertEqual(
+            detections[0].evidence["primary_label"], "shoulder-tilt increase vs setup"
+        )
+        self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.09, places=3)
+        self.assertEqual(detections[0].evidence["primary_threshold"], SHOULDER_TILT_RISE_MILD)
+
+
 if __name__ == "__main__":
     unittest.main()

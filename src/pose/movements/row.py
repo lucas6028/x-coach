@@ -848,3 +848,206 @@ def rule_momentum_jerk(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRule
             )
         )
     return detections
+
+
+# Views in which the parent spec rates the frontal-plane asymmetry cues `high` ("front / rear
+# (both shoulders and elbows visible); low from pure side view"). Defined locally rather than
+# imported from lunge.py: the two modules happen to agree today but answer different spec lines
+# and must be free to diverge.
+ASYMMETRY_OBSERVABLE_VIEWS = {"front", "front_oblique", "rear", "rear_oblique"}
+
+# FROM THE SPEC: "Flag if elbow-height asymmetry > 0.05 normalized OR shoulder-line tilt
+# increases > 0.04 vs setup."
+ELBOW_ASYMMETRY_MILD = 0.05
+SHOULDER_TILT_RISE_MILD = 0.04
+# RULE-LEVEL CHOICES MADE HERE: each is 2.5x its fire threshold, `pushup.rule_hip_sag`'s
+# convention. The spec states no ramp for this fault.
+ELBOW_ASYMMETRY_SEVERE = 0.125
+SHOULDER_TILT_RISE_SEVERE = 0.10
+
+
+def _max_finite_or_none(segment: list[CoreFrame], key: str) -> float | None:
+    """Rounded maximum of `key` over `segment`, or `None` when no frame carries a finite value.
+
+    `np.nanmax` over an all-NaN list emits a RuntimeWarning and returns NaN, and a NaN in
+    `evidence` is not JSON-serializable and would reach the API payload. `None` is the honest,
+    serializable way to say "unmeasurable" for a diagnostic metric.
+    """
+    values = [frame.m(key) for frame in segment if np.isfinite(frame.m(key))]
+    return round(max(values), 4) if values else None
+
+
+def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag one arm pulling higher or further than the other.
+
+    THRESHOLD PROVENANCE: fire thresholds 0.05 and 0.04 are FROM THE SPEC; both ramps are
+    RULE-LEVEL.
+
+    TWO TERMS, ASYMMETRICALLY DEFINED, AND THAT IS THE SPEC'S OWN CONSTRUCTION: the elbow term
+    is ABSOLUTE ("elbow-height asymmetry > 0.05") while the shoulder term is a DELTA
+    ("shoulder-line tilt INCREASES > 0.04 VS SETUP"). A lifter with a structurally uneven
+    shoulder line is therefore not flagged for standing still, which is the point of the delta.
+    The baseline is this window's own (`_setup_baseline`); no baseline means silence.
+
+    THE SPEC'S THIRD TERM IS EMITTED BUT NEVER FIRED ON. Its heuristic mentions wrist-to-hip
+    travel asymmetry, `|dist(15,23) - dist(16,24)|`, but gives it NO threshold, unlike the other
+    two. Inventing one would be a fabricated fire criterion, so `wrist_travel_asymmetry` is
+    carried in `evidence` as a diagnostic and the firing rests on the two terms the spec
+    actually quantifies. Pinned by
+    `test_wrist_travel_asymmetry_is_evidence_and_never_fires_alone`.
+
+    DIRECTION IS PART OF THE VERDICT, following `pushup_hip_sag`: the coaching cue is
+    side-specific, so `evidence["high_side"]` records which elbow was HIGHER in the image (i.e.
+    smaller y). `score_values` is the per-frame max sub-severity, an absolute quantity, so
+    `build_detection` nominates the genuinely worst frame in either direction.
+
+    FACING-FREE BY CONSTRUCTION, which is what lets this fire from the views production can
+    actually reach. `elbow_height_asymmetry` and `shoulder_tilt` are magnitudes of image-y
+    differences, and image y does not depend on whether the camera is in front of or behind the
+    subject. Since `estimate_view_for_pose(allow_front=False)` means `front`/`front_oblique`
+    are never emitted downstream, a rule gated positively on them would be PERMANENTLY SILENT
+    (what happened to `pushup_elbow_flare`); `rear`/`rear_oblique` earn the spec's `high` here
+    for the same reason `lunge.rule_knee_valgus` argues for its midline-relative proxy. A pure
+    `side` view downgrades to `medium` with the x0.65 discount rather than being silenced.
+
+    PHASE SCOPE `peak`, from the spec's "At peak: compare left vs right elbow height".
+    """
+    # A NaN BASELINE DROPS THE TILT TERM, IT DOES NOT SILENCE THE RULE -- and this is the one
+    # place `rule_torso_rising`'s opener must NOT be copied. That rule's fire condition depends
+    # ENTIRELY on the baseline, so `if not np.isfinite(baseline): return []` is right there.
+    # This rule's condition is a DISJUNCTION whose elbow-height branch never touches the
+    # baseline, so early-returning would silence a fault the spec says still fires when only
+    # the elbow term is measurable. `_sub_severities` handles it by yielding 0.0 for the tilt
+    # term on a NaN baseline (`nan > threshold` is False), which is exactly "drop the term".
+    baseline_tilt = _setup_baseline(core, "shoulder_tilt")
+    observable = ctx.view_type in ASYMMETRY_OBSERVABLE_VIEWS
+
+    def _sub_severities(frame: CoreFrame) -> tuple[float, float]:
+        elbow_value = frame.m("elbow_height_asymmetry")
+        tilt_rise = frame.m("shoulder_tilt") - baseline_tilt
+        elbow_severity = (
+            severity_from_range(
+                elbow_value, ELBOW_ASYMMETRY_MILD, ELBOW_ASYMMETRY_SEVERE, lower_is_worse=False
+            )
+            if np.isfinite(elbow_value) and elbow_value > ELBOW_ASYMMETRY_MILD
+            else 0.0
+        )
+        tilt_severity = (
+            severity_from_range(
+                tilt_rise, SHOULDER_TILT_RISE_MILD, SHOULDER_TILT_RISE_SEVERE, lower_is_worse=False
+            )
+            if np.isfinite(tilt_rise) and tilt_rise > SHOULDER_TILT_RISE_MILD
+            else 0.0
+        )
+        return elbow_severity, tilt_severity
+
+    mask = [
+        frame.valid and frame.phase == "peak" and max(_sub_severities(frame)) > 0.0
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        pairs = [_sub_severities(frame) for frame in segment]
+        max_elbow_severity = max(pair[0] for pair in pairs)
+        max_tilt_severity = max(pair[1] for pair in pairs)
+        severity = max(max_elbow_severity, max_tilt_severity)
+        elbow_fired = max_elbow_severity > 0.0
+        tilt_fired = max_tilt_severity > 0.0
+        fired_on = (
+            "both" if elbow_fired and tilt_fired else "elbow_height" if elbow_fired else "shoulder_tilt"
+        )
+        # UNCLIPPED RANKING SERIES, reusing the `_unclipped` / `_worst_axis` helpers Task 3
+        # added to this module (which mirror `pushup.rule_head_drop`). Clipped severities all
+        # tie at 1.0 past the ramp's severe end, which would make `build_detection`'s
+        # `nanargmax` nominate the FIRST saturated frame rather than the genuinely worst one.
+        # The two axes are in different units; each is put on a common scale by its OWN ramp
+        # and only then compared, so no cross-axis calibration is introduced.
+        scores = [
+            _worst_axis(
+                _unclipped(
+                    frame.m("elbow_height_asymmetry"), ELBOW_ASYMMETRY_MILD, ELBOW_ASYMMETRY_SEVERE
+                ),
+                _unclipped(
+                    frame.m("shoulder_tilt") - baseline_tilt,
+                    SHOULDER_TILT_RISE_MILD,
+                    SHOULDER_TILT_RISE_SEVERE,
+                ),
+            )
+            for frame in segment
+        ]
+        worst = segment[int(np.nanargmax(scores))]
+        # `elbow_height_delta_signed` is left_y - right_y and image y grows DOWNWARD, so a
+        # POSITIVE delta means the left elbow is LOWER and the RIGHT one is the high side.
+        high_side = "right" if worst.m("elbow_height_delta_signed") > 0.0 else "left"
+
+        max_elbow_asymmetry = max(
+            (frame.m("elbow_height_asymmetry") for frame in segment
+             if np.isfinite(frame.m("elbow_height_asymmetry"))), default=float("nan")
+        )
+        tilt_rises = [
+            frame.m("shoulder_tilt") - baseline_tilt for frame in segment
+            if np.isfinite(frame.m("shoulder_tilt") - baseline_tilt)
+        ]
+        max_tilt_rise = max(tilt_rises) if tilt_rises else None
+        if max_elbow_severity >= max_tilt_severity:
+            primary_label = "elbow-height asymmetry"
+            primary_value, primary_threshold = round(max_elbow_asymmetry, 4), ELBOW_ASYMMETRY_MILD
+        else:
+            primary_label = "shoulder-tilt increase vs setup"
+            primary_value, primary_threshold = round(max_tilt_rise, 4), SHOULDER_TILT_RISE_MILD
+        detections.append(
+            build_detection(
+                fault_id="row_asymmetric_pull",
+                fault_name="Asymmetric Pull (One Side Leading)",
+                kg_query=ROW_ASYMMETRY_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=scores,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable else "medium",
+                evidence={
+                    "fired_on": fired_on,
+                    "high_side": high_side,
+                    # NaN-SAFE, because a dropped tilt term leaves `baseline_tilt` NaN and every
+                    # tilt-derived value with it. A NaN in `evidence` is not JSON-serializable
+                    # and would reach the API payload; `np.nanmax` over an all-NaN list also
+                    # emits a RuntimeWarning and returns NaN rather than raising. Emit None.
+                    "max_elbow_height_asymmetry": (
+                        round(max_elbow_asymmetry, 4) if np.isfinite(max_elbow_asymmetry) else None
+                    ),
+                    "max_shoulder_tilt_rise": (
+                        round(max_tilt_rise, 4) if max_tilt_rise is not None else None
+                    ),
+                    "wrist_travel_asymmetry": _max_finite_or_none(segment, "wrist_travel_asymmetry"),
+                    "setup_shoulder_tilt": (
+                        round(baseline_tilt, 4) if np.isfinite(baseline_tilt) else None
+                    ),
+                    "elbow_threshold": ELBOW_ASYMMETRY_MILD,
+                    "tilt_threshold": SHOULDER_TILT_RISE_MILD,
+                    # PRIMARY AXIS IS CHOSEN BY SEVERITY, NEVER BY `fired_on`. Task 3's review
+                    # found the categorical form to be a Critical, user-facing bug: branching on
+                    # `fired_on` reports one axis for BOTH its own case and "both", even when the
+                    # other axis is the worse one, and `keyEvidence()` in
+                    # frontend/src/lib/retrieval.ts renders exactly these three keys as the single
+                    # most informative measured number in the coaching UI. Compare the two
+                    # SEGMENT-level sub-severities, exactly as `rule_incomplete_rom` now does.
+                    "primary_label": primary_label,
+                    "primary_value": primary_value,
+                    "primary_threshold": primary_threshold,
+                },
+                citation="Saeterbakken A, et al. Int J Sports Med (2015), PMID 26134664. "
+                         "Supplemented by Padovan R, et al. J Funct Morphol Kinesiol (2025), "
+                         "PMC12821611.",
+                citation_support="Saeterbakken: \"unilateral performance of exercises activated "
+                                 "the external oblique more than bilateral performance, "
+                                 "regardless of exercise\" — an unintended one-sided pull "
+                                 "imposes the higher anti-rotation/oblique load characteristic "
+                                 "of unilateral rowing. Padovan frames correct rowing as "
+                                 "\"coordinated scapulothoracic motion\" with bilateral "
+                                 "scapular adduction to the abdominal target, which asymmetry "
+                                 "breaks.",
+            )
+        )
+    return detections
