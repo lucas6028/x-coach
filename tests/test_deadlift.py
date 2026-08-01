@@ -820,11 +820,25 @@ class DeadliftSeamTests(unittest.TestCase):
         and the bug hid, which is exactly why a single-duration fixture would not have caught it.
 
         This test asserts BOTH halves, and the first half is what stops it from silently
-        decaying into a tautology: the lockout band genuinely still contains sub-165 frames (so
-        the percentile behaviour that makes shallow-finish detection work is intact and NOT
-        quietly replaced by an absolute cutoff), AND the rule is nevertheless silent, because it
-        now scores the rep's PEAK extension instead of a run of frames.
+        decaying into a tautology: the lockout band genuinely still contains a sub-165 RUN long
+        enough for the old bug to have fired (so the percentile behaviour that makes
+        shallow-finish detection work is intact and NOT quietly replaced by an absolute cutoff),
+        AND the rule is nevertheless silent, because it now scores the rep's PEAK extension
+        instead of a run of frames.
+
+        The guard is on the longest CONTIGUOUS run, not on a count of sub-165 frames. Those two
+        differ by about a factor of two here, because the band dips below 165 on BOTH sides of
+        the peak: measured counts are 12 / 14 / 16 against actual runs of [6, 6] / [7, 7] /
+        [8, 8]. A count would still pass on a fixture that had drifted to runs of 3+3, which no
+        longer poses the hazard at all -- and `contiguous_true_segments` is what the old bug
+        actually depended on. Same correction as the sibling shallow-finish test.
+
+        NOTE FOR ANYONE TIDYING THIS FIXTURE: at n=84 the longest run is exactly 6, equal to
+        `min_frames` at 30 fps, with ZERO margin. That is deliberate -- it is the shortest rep
+        that reproduced the original defect. Shortening the rep, damping the profile, or adding
+        a pause at lockout drops the run below 6 and silently disarms this test.
         """
+        min_frames = 6  # == max(3, ceil(30 fps * 0.20)), the floor `_ctx()` passes
         for n in (84, 90, 120):
             with self.subTest(frames=n):
                 core, phases, out = _seam(
@@ -836,15 +850,17 @@ class DeadliftSeamTests(unittest.TestCase):
                     if phase == "lockout"
                 ]
                 self.assertGreater(max(band), 165.0, "the rep must genuinely reach lockout")
-                # The percentile band still dips below the threshold -- the hazard is real...
-                self.assertTrue(
-                    any(value < DEADLIFT_LOCKOUT_MILD_DEG for value in band),
-                    "fixture no longer poses the hazard: the lockout band is entirely >= 165",
+                # The percentile band still dips below the threshold, for long enough in one
+                # unbroken stretch that the old per-frame rule WOULD have fired here...
+                runs = contiguous_true_segments(
+                    [value < DEADLIFT_LOCKOUT_MILD_DEG for value in band], 1
                 )
+                longest = max((end - start + 1 for start, end in runs), default=0)
                 self.assertGreaterEqual(
-                    sum(value < DEADLIFT_LOCKOUT_MILD_DEG for value in band), 6,
-                    "fewer than min_frames sub-165 lockout frames: the old bug could not fire "
-                    "here either, so this fixture would not prove anything",
+                    longest, min_frames,
+                    f"longest contiguous sub-165 lockout run is {longest} < min_frames "
+                    f"{min_frames}: the old bug could not have fired on this fixture either, "
+                    "so it no longer proves anything",
                 )
                 # ...and the rule is silent anyway, because it scores the PEAK.
                 self.assertEqual(out, [], f"false 'incomplete lockout' on a 178 deg rep (n={n})")
