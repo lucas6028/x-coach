@@ -481,6 +481,13 @@ const en: Dict = {
   "history.clean": "clean rep",
   "history.faultOne": "1 fault",
   "history.faultMany": "{count} faults",
+  "history.deleteAria": "Delete this record",
+  "history.deleteCta": "Delete",
+  "history.deleteDesc": "Delete this record permanently?",
+  "history.deleteConfirm": "Delete",
+  "history.deleteCancel": "Cancel",
+  "history.deleting": "Deleting…",
+  "history.deleteError": "Couldn't delete this record. Please try again.",
 
   // Admin panel (P1 shell — role-gated; sections arrive in later phases)
   "admin.nav": "Admin",
@@ -1150,6 +1157,13 @@ const zhHant: Dict = {
   "history.clean": "標準動作",
   "history.faultOne": "1 個錯誤",
   "history.faultMany": "{count} 個錯誤",
+  "history.deleteAria": "刪除這筆紀錄",
+  "history.deleteCta": "刪除",
+  "history.deleteDesc": "確定要永久刪除這筆紀錄嗎？",
+  "history.deleteConfirm": "刪除",
+  "history.deleteCancel": "取消",
+  "history.deleting": "刪除中…",
+  "history.deleteError": "無法刪除這筆紀錄，請再試一次。",
 
   // 後台管理面板（P1 空殼——依角色授權；其餘分頁於後續階段推出）
   "admin.nav": "後台管理",

@@ -520,6 +520,14 @@ export const api = {
     return (await res.json()) as { deleted: number };
   },
 
+  // Delete ONE saved analysis (requires a session). 404 if it isn't the caller's row.
+  async deleteAnalysis(id: string): Promise<{ deleted: number }> {
+    const path = `/api/analyses/${encodeURIComponent(id)}`;
+    const res = await fetch(path, { method: "DELETE", headers: await authHeader() });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
+    return (await res.json()) as { deleted: number };
+  },
+
   // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
   // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user
   // turn last; `context` is the compact grounding blob from buildChatContext(analysis). Deltas,
