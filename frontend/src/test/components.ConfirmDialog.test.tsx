@@ -30,11 +30,12 @@ describe("ConfirmDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("labels the dialog with its own title", () => {
+  it("labels and describes the dialog with its own title and body", () => {
     setup();
-    // aria-labelledby must resolve to the heading, otherwise a screen reader announces the dialog
-    // as unnamed.
-    expect(screen.getByRole("dialog", { name: "Delete this record?" })).toBeInTheDocument();
+    // aria-labelledby/-describedby must resolve to the heading and the body, otherwise a screen
+    // reader announces the dialog as unnamed and drops the "can't be undone" warning.
+    const dialog = screen.getByRole("dialog", { name: "Delete this record?" });
+    expect(dialog).toHaveAccessibleDescription("This can't be undone.");
     expect(screen.getByText("Side Squat · 10:24")).toBeInTheDocument();
   });
 

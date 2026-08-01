@@ -35,7 +35,6 @@ type ConfirmDialogProps = {
   confirmLabel: string;
   cancelLabel: string;
   busy?: boolean;           // 動作進行中：鈕 disabled，且關不掉
-  busyLabel?: string;       // busy 時確認鈕顯示的字
   onConfirm: () => void;
   onCancel: () => void;
 };
@@ -103,8 +102,8 @@ type ConfirmDialogProps = {
 2. `open` 時 render 標題、說明、detail，且 `role="dialog"` 帶 `aria-modal="true"`。
 3. Escape 觸發 `onCancel`。
 4. 點 backdrop 觸發 `onCancel`；點卡片內部**不**觸發。
-5. `busy` 時：Escape 不觸發 `onCancel`、backdrop 不觸發 `onCancel`、兩顆鈕皆 disabled、
-   確認鈕顯示 `busyLabel`。
+5. `busy` 時：Escape 不觸發 `onCancel`、backdrop 不觸發 `onCancel`、兩顆鈕皆 disabled。
+   （沒有 `busyLabel` prop——「刪除中…」由呼叫端直接切換 `confirmLabel`，少一個 prop。）
 6. 點確認鈕觸發 `onConfirm`。
 7. 開啟時焦點在取消鈕上。
 

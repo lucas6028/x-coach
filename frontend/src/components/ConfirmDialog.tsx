@@ -32,6 +32,7 @@ export default function ConfirmDialog({
   onCancel,
 }: Props) {
   const titleId = useId();
+  const descId = useId();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
@@ -69,6 +70,7 @@ export default function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={descId}
         className="w-full max-w-sm rounded-2xl border border-border-dark bg-surface-dark p-5 shadow-lg"
       >
         <h2 id={titleId} className="flex items-center gap-2 font-semibold text-content">
@@ -76,7 +78,9 @@ export default function ConfirmDialog({
           {title}
         </h2>
         {detail && <p className="mt-2 truncate font-mono text-xs text-muted">{detail}</p>}
-        <p className="mt-2 text-sm text-muted">{description}</p>
+        <p id={descId} className="mt-2 text-sm text-muted">
+          {description}
+        </p>
 
         <div className="mt-5 flex items-center justify-end gap-2">
           <button
