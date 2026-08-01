@@ -874,7 +874,6 @@ class RowMomentumJerkTest(unittest.TestCase):
 
         self.assertEqual(_run_rule(rule_momentum_jerk, _jerk_clip(burst_amplitude=0.0)), [])
 
-    @unittest.skip("ROW_DETECTOR lands in Task 6")
     def test_a_three_frame_spike_survives_the_median_filter_and_fires(self) -> None:
         """The §4.6(b) claim, verified rather than asserted.
 
@@ -1067,6 +1066,89 @@ class RowAsymmetricPullTest(unittest.TestCase):
         self.assertEqual(detections[0].evidence["primary_label"], "elbow-height asymmetry")
         self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.08, places=3)
         self.assertEqual(detections[0].evidence["primary_threshold"], ELBOW_ASYMMETRY_MILD)
+
+
+class RowDetectorAssemblyTest(unittest.TestCase):
+    def test_metric_keys_match_the_emitted_metrics_exactly(self) -> None:
+        """A key the tuple omits is dropped by run_detector and read back as NaN."""
+        from src.pose.movements.row import ROW_METRIC_KEYS, row_compute_raw
+
+        raw = row_compute_raw(_row_clip(), fps=30.0)
+        emitted = set(raw[-1]) - {"frame_index", "time", "valid", "lower_body_visibility"}
+        self.assertEqual(emitted, set(ROW_METRIC_KEYS))
+
+    def test_the_detector_is_registered_and_unvalidated(self) -> None:
+        from src.pose.movements import registry
+
+        self.assertEqual(registry.get_detector("Row").name, "Row")
+        self.assertEqual(registry.get_detector("row").name, "Row")
+        self.assertFalse(registry.get_detector("Row").validated)
+
+    def test_all_four_rules_are_wired_in(self) -> None:
+        from src.pose.movements import registry, row
+
+        rules = registry.get_detector("Row").rules
+        self.assertEqual(
+            [rule.__name__ for rule in rules],
+            [
+                "rule_torso_rising",
+                "rule_incomplete_rom",
+                "rule_momentum_jerk",
+                "rule_asymmetric_pull",
+            ],
+        )
+        self.assertIs(registry.get_detector("Row").compute_raw, row.row_compute_raw)
+        self.assertIs(registry.get_detector("Row").assign_phases, row.row_assign_phases)
+
+    def test_the_fifth_spec_rule_is_absent_by_design(self) -> None:
+        """rounded_thoracolumbar_spine is geometrically degenerate; see row.py's docstring."""
+        from src.pose.movements import registry
+
+        fault_ids = {rule.__name__ for rule in registry.get_detector("Row").rules}
+        self.assertNotIn("rule_rounded_thoracolumbar_spine", fault_ids)
+
+
+class RowPerRepBaselineTest(unittest.TestCase):
+    def test_each_rep_is_scored_against_its_own_setup(self) -> None:
+        """The §4.2 guard: a clean rep 1 followed by a rising rep 2 flags rep 2 only.
+
+        Single-rep fixtures structurally cannot check this -- the whole clip is one window
+        there, so a per-clip baseline would pass every earlier test. This is Row's analogue of
+        Lunge's alternating-lead fixture.
+        """
+        from src.pose.movements.base import run_detector
+        from src.pose.movements.row import ROW_DETECTOR
+
+        frames: list[dict] = []
+        index = 0
+        for rep, peak_trunk in enumerate((20.0, 55.0)):
+            for _ in range(6):  # setup / return to extension
+                frames.append(row_frame(trunk_angle_deg=20.0, elbow_angle_deg=170.0,
+                                        wrist_hip_dist=0.30, frame_index=index))
+                index += 1
+            for _ in range(10):  # peak hold
+                frames.append(row_frame(trunk_angle_deg=peak_trunk, elbow_angle_deg=60.0,
+                                        wrist_hip_dist=0.05, frame_index=index))
+                index += 1
+        for _ in range(6):
+            frames.append(row_frame(trunk_angle_deg=20.0, elbow_angle_deg=170.0,
+                                    wrist_hip_dist=0.30, frame_index=index))
+            index += 1
+
+        result = run_detector(
+            ROW_DETECTOR, frames, fps=30.0, view_type="rear_oblique",
+            view_confidence=0.8, max_reps=None,
+        )
+        self.assertEqual(len(result.reps), 2)
+        rising = [d for d in result.detections if d.fault_id == "row_torso_rising"]
+        self.assertEqual(len(rising), 1)
+        # RepWindow.index is 1-based and assigned in chronological order
+        # (`src/pose/rep_segmentation.py`'s `RepWindow(index=len(windows) + 1, ...)`; pinned
+        # for three sequential reps by `test_lunge.py`'s
+        # `test_each_rep_attributes_its_fault_to_the_leg_that_actually_led_it`, which reads
+        # `(1, 2, 3)`). The rising rep is the SECOND physical rep, so its window index -- and
+        # therefore `occurred_reps` -- is `(2,)`, not `(1,)`.
+        self.assertEqual(rising[0].occurred_reps, (2,))
 
     def test_the_worse_of_the_two_conditions_sets_the_primary_axis_tilt(self) -> None:
         """Mirror of the test above with the two axes' roles swapped: without this case, the

@@ -12,24 +12,30 @@ class TestMovementsEndpoint(unittest.TestCase):
         self.client = TestClient(app)
 
     def test_lists_the_registered_movements(self) -> None:
-        # Lunge appears here as soon as it is registered in src/pose/movements/registry.py --
-        # this router's own docstring states that as the DESIGN ("registering a fourth detector
-        # surfaces it in the UI with no backend or frontend edit"), not an oversight this test
-        # should special-case around.
+        # Lunge and Row appear here as soon as they are registered in
+        # src/pose/movements/registry.py -- this router's own docstring states that as the
+        # DESIGN ("registering a fourth detector surfaces it in the UI with no backend or
+        # frontend edit"), not an oversight this test should special-case around.
         resp = self.client.get("/api/movements")
         self.assertEqual(resp.status_code, 200)
         names = [m["name"] for m in resp.json()["movements"]]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge"])
+        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Row"])
 
     def test_reports_validation_status(self) -> None:
-        # Lunge surfaces with validated=False -- the Beta tag -- because its thresholds are
-        # spec-derived and unchecked against labeled data at registration time (Phase 2 is what
-        # changes that). See src/pose/movements/lunge.py's registration comment.
+        # Lunge and Row surface with validated=False -- the Beta tag -- because their thresholds
+        # are spec-derived and unchecked against labeled data at registration time (Phase 2 is
+        # what changes that). See src/pose/movements/lunge.py and row.py's registration comments.
         resp = self.client.get("/api/movements")
         flags = {m["name"]: m["validated"] for m in resp.json()["movements"]}
         self.assertEqual(
             flags,
-            {"Squat": True, "Overhead Press": False, "Push-up": False, "Lunge": False},
+            {
+                "Squat": True,
+                "Overhead Press": False,
+                "Push-up": False,
+                "Lunge": False,
+                "Row": False,
+            },
         )
 
     def test_is_public(self) -> None:

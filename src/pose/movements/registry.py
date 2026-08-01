@@ -20,9 +20,9 @@ def list_detectors() -> list[MovementDetector]:
     """Every registered detector, in registration order.
 
     Registration order is the import order at the bottom of this module (Squat, Overhead Press,
-    Push-up) -- deterministic, and it puts the validated detector first without encoding a UI
-    preference in the ML layer. Backs GET /api/movements, which is why the frontend needs no
-    hand-maintained list of analyzable movements.
+    Push-up, Lunge, Row) -- deterministic, and it puts the validated detector first without
+    encoding a UI preference in the ML layer. Backs GET /api/movements, which is why the frontend
+    needs no hand-maintained list of analyzable movements.
     """
     return list(_REGISTRY.values())
 
@@ -32,3 +32,4 @@ from src.pose.movements import squat  # noqa: E402,F401
 from src.pose.movements import overhead_press  # noqa: E402,F401
 from src.pose.movements import pushup  # noqa: E402,F401
 from src.pose.movements import lunge  # noqa: E402,F401
+from src.pose.movements import row  # noqa: E402,F401

@@ -1051,3 +1051,35 @@ def rule_asymmetric_pull(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRu
             )
         )
     return detections
+
+
+from src.pose.movements.base import MovementDetector
+from src.pose.movements import registry
+
+# FOUR of the parent spec's FIVE Row rules are listed here. The fifth,
+# `rounded_thoracolumbar_spine`, is absent because it is geometrically degenerate under both
+# constructions the spec offers -- the proof is in this module's docstring, and
+# `test_the_fifth_spec_rule_is_absent_by_design` pins the absence so a future reader cannot
+# mistake it for an oversight.
+#
+# `ROW_METRIC_KEYS` must stay a two-way match with what `row_compute_raw` emits (pinned by
+# `test_metric_keys_match_the_emitted_metrics_exactly`): a key the tuple omits is dropped by
+# `run_detector`, which builds each CoreFrame's metrics dict FROM this tuple, and read back as
+# NaN by every rule.
+ROW_DETECTOR = MovementDetector(
+    "Row",
+    ROW_METRIC_KEYS,
+    row_compute_raw,
+    row_assign_phases,
+    (rule_torso_rising, rule_incomplete_rom, rule_momentum_jerk, rule_asymmetric_pull),
+    # `validated` stays at its default False, and for Row that is not a formality: REHAB24-6
+    # holds arm abduction, arm VW, table push-ups, leg abduction, lunge and squats, and no row.
+    # Neither does Fit3D. There is NO labeled row repetition anywhere in this repository, so no
+    # threshold here has ever been checked against a row performed by a human being. Beta is the
+    # factual label. Flipping this flag would require data that does not exist yet.
+    rep_signal="min_elbow_angle",
+    rep_polarity="min",
+    rep_start="extended",
+)
+
+registry.register(ROW_DETECTOR)

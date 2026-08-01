@@ -31,6 +31,7 @@ MODULE_MOVEMENTS = {
     "pushup.py": "Push-up",
     "overhead_press.py": "Overhead Press",
     "lunge.py": "Lunge",
+    "row.py": "Row",
 }
 
 

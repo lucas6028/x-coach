@@ -69,6 +69,18 @@ class MovementRegistryTests(unittest.TestCase):
 
         self.assertFalse(get_detector("Lunge").validated)
 
+    def test_row_detector_resolves_case_insensitively(self) -> None:
+        from src.pose.movements.registry import get_detector
+
+        self.assertEqual(get_detector("Row").name, "Row")
+        self.assertEqual(get_detector("row").name, "Row")
+
+    def test_row_is_not_marked_validated(self) -> None:
+        # No labeled row repetition exists anywhere in this repository; see row.py's docstring.
+        from src.pose.movements.registry import get_detector
+
+        self.assertFalse(get_detector("Row").validated)
+
     def test_lunge_registers_all_four_spec_rules(self) -> None:
         """All four fire, unlike push-up's permanently-silent `rule_scapular_winging` --
         mirrors `test_pushup_registers_all_five_spec_rules`."""
@@ -210,6 +222,7 @@ class MovementRegistryTests(unittest.TestCase):
             "Push-up": ("min_elbow_angle", "min"),
             "Overhead Press": ("avg_elbow_angle", "max"),
             "Lunge": ("min_knee_angle", "min"),
+            "Row": ("min_elbow_angle", "min"),
         }
         for name, (signal, polarity) in expected.items():
             with self.subTest(movement=name):
@@ -218,7 +231,7 @@ class MovementRegistryTests(unittest.TestCase):
                 self.assertEqual(detector.rep_polarity, polarity)
                 self.assertIn(detector.rep_signal, detector.metric_keys)
                 # The other knobs exist for movements RS-SP1 does not implement (spec §3.4);
-                # these four use the defaults.
+                # these five use the defaults.
                 self.assertFalse(detector.rep_rectify)
                 self.assertEqual(detector.rep_start, "extended")
 
@@ -247,21 +260,27 @@ class MovementRegistryTests(unittest.TestCase):
 
 
 class TestMovementRegistry(unittest.TestCase):
-    def test_lists_all_four_detectors_in_registration_order(self) -> None:
+    def test_lists_all_five_detectors_in_registration_order(self) -> None:
         from src.pose.movements import registry
 
         names = [d.name for d in registry.list_detectors()]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge"])
+        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Row"])
 
     def test_only_squat_is_validated(self) -> None:
-        """Push-up, Overhead Press and Lunge rules are literature-derived and never checked
+        """Push-up, Overhead Press, Lunge and Row rules are literature-derived and never checked
         against ground-truth labels. The UI marks them Beta off this flag."""
         from src.pose.movements import registry
 
         validated = {d.name: d.validated for d in registry.list_detectors()}
         self.assertEqual(
             validated,
-            {"Squat": True, "Overhead Press": False, "Push-up": False, "Lunge": False},
+            {
+                "Squat": True,
+                "Overhead Press": False,
+                "Push-up": False,
+                "Lunge": False,
+                "Row": False,
+            },
         )
 
     def test_validated_defaults_to_false(self) -> None:
@@ -278,5 +297,5 @@ class TestMovementRegistry(unittest.TestCase):
 
         self.assertEqual(
             {d.name for d in registry.list_detectors()},
-            {"Squat", "Push-up", "Overhead Press", "Lunge"},
+            {"Squat", "Push-up", "Overhead Press", "Lunge", "Row"},
         )
