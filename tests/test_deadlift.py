@@ -2,12 +2,41 @@ import unittest
 
 import numpy as np
 
-from src.pose.movements.base import CoreFrame
+from src.pose.movements.base import CoreFrame, RuleContext
 from src.pose.movements.deadlift import (
     DEADLIFT_METRIC_KEYS,
     deadlift_assign_phases,
     deadlift_compute_raw,
+    rule_lumbar_flexion,
+    setup_baseline,
 )
+
+
+def _ctx(view: str = "side", conf: float = 0.9, min_frames: int = 6) -> RuleContext:
+    return RuleContext(fps=30.0, view_type=view, view_confidence=conf, min_frames=min_frames)
+
+
+def _frames(metrics: dict, count: int = 12, phase: str = "lockout") -> list[CoreFrame]:
+    """A window of `count` identical CoreFrames carrying `metrics`."""
+    return [
+        CoreFrame(
+            frame_index=i,
+            time=i / 30.0,
+            phase=phase,
+            valid=True,
+            lower_body_visibility=0.9,
+            metrics=dict(metrics),
+        )
+        for i in range(count)
+    ]
+
+
+def _rep_window(setup: dict, active: dict, setup_n: int = 8, active_n: int = 12):
+    """A window whose opening frames are `setup` phase and whose remainder is `mid_pull`."""
+    return (
+        _frames(setup, count=setup_n, phase="setup")
+        + _frames(active, count=active_n, phase="mid_pull")
+    )
 
 
 def _landmarks(overrides: dict[int, tuple[float, float]]) -> list[dict]:
@@ -117,3 +146,69 @@ class DeadliftPhaseTests(unittest.TestCase):
         for n in (1, 7, 40, 61):
             raw = self._rep(self._pull(n, 60.0, 178.0))
             self.assertEqual(len(deadlift_assign_phases(raw)), n)
+
+
+class SetupBaselineTests(unittest.TestCase):
+    def test_the_baseline_is_the_median_of_the_setup_frames_only(self):
+        window = _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 80.0})
+        self.assertAlmostEqual(setup_baseline(window, "torso_pitch_deg"), 50.0, places=4)
+
+    def test_a_window_with_no_setup_frames_has_no_baseline(self):
+        window = _frames({"torso_pitch_deg": 60.0}, phase="mid_pull")
+        self.assertTrue(np.isnan(setup_baseline(window, "torso_pitch_deg")))
+
+
+class LumbarFlexionTests(unittest.TestCase):
+    SETUP = {"torso_len": 0.25, "hip_y": 0.60}
+
+    def test_a_shortening_torso_over_stationary_hips_fires_at_low_observability(self):
+        window = _rep_window(self.SETUP, {"torso_len": 0.22, "hip_y": 0.60})
+        out = rule_lumbar_flexion(window, _ctx())
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].fault_id, "deadlift_lumbar_flexion")
+        self.assertEqual(out[0].observability, "low")
+
+    def test_a_rigid_torso_is_silent(self):
+        window = _rep_window(self.SETUP, {"torso_len": 0.25, "hip_y": 0.50})
+        self.assertEqual(rule_lumbar_flexion(window, _ctx()), [])
+
+    def test_shortening_while_the_hips_travel_is_silent(self):
+        """Hips moving means the shortening is the lift, not the spine."""
+        window = _rep_window(self.SETUP, {"torso_len": 0.22, "hip_y": 0.40})
+        self.assertEqual(rule_lumbar_flexion(window, _ctx()), [])
+
+    def test_confidence_carries_the_low_observability_discount(self):
+        out = rule_lumbar_flexion(
+            _rep_window(self.SETUP, {"torso_len": 0.22, "hip_y": 0.60}), _ctx()
+        )[0]
+        # Discounted even in its own view: a proxy is never a measurement.
+        self.assertAlmostEqual(out.confidence, out.severity * 0.65, places=4)
+
+    def test_an_off_view_window_emits_nothing_at_all(self):
+        """HARD GATE, unlike the other two rules: off-view, trunk pitch alone shortens the
+        projected segment, so the proxy produces FALSE POSITIVES rather than silence."""
+        window = _rep_window(self.SETUP, {"torso_len": 0.22, "hip_y": 0.60})
+        for view in ("front", "rear", "rear_oblique", "unknown"):
+            self.assertEqual(rule_lumbar_flexion(window, _ctx(view=view)), [], msg=view)
+
+    def test_a_weakly_classified_side_view_emits_nothing(self):
+        window = _rep_window(self.SETUP, {"torso_len": 0.22, "hip_y": 0.60})
+        self.assertEqual(rule_lumbar_flexion(window, _ctx(view="side", conf=0.05)), [])
+
+    def test_a_window_without_a_setup_baseline_is_silent(self):
+        window = _frames({"torso_len": 0.22, "hip_y": 0.60}, phase="mid_pull")
+        self.assertEqual(rule_lumbar_flexion(window, _ctx()), [])
+
+    def test_a_degenerate_setup_torso_length_is_silent_rather_than_dividing_by_zero(self):
+        window = _rep_window({"torso_len": 0.0, "hip_y": 0.60}, {"torso_len": 0.0, "hip_y": 0.60})
+        self.assertEqual(rule_lumbar_flexion(window, _ctx()), [])
+
+    def test_nan_metrics_are_silent(self):
+        window = _rep_window(self.SETUP, {"torso_len": np.nan, "hip_y": np.nan})
+        self.assertEqual(rule_lumbar_flexion(window, _ctx()), [])
+
+    def test_severity_saturates_at_the_severe_endpoint(self):
+        out = rule_lumbar_flexion(
+            _rep_window(self.SETUP, {"torso_len": 0.20, "hip_y": 0.60}), _ctx()
+        )[0]
+        self.assertAlmostEqual(out.severity, 1.0, places=4)
