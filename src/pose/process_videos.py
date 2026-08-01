@@ -9,7 +9,7 @@ from tqdm import tqdm
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 
-def process_video(input_path, output_json_path, output_video_path=None):
+def process_video(input_path, output_json_path, output_video_path=None, model_complexity: int = 2):
     """
     Processes a video using MediaPipe Pose, saving landmarks to JSON and optionally an annotated video.
     """
@@ -47,7 +47,7 @@ def process_video(input_path, output_json_path, output_video_path=None):
 
     with mp_pose.Pose(
         static_image_mode=False,
-        model_complexity=2,
+        model_complexity=model_complexity,
         enable_segmentation=False,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5) as pose:

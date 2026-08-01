@@ -3,7 +3,7 @@ import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import CoachTray from "../components/CoachTray";
 import { renderWithProviders } from "./renderWithProviders";
-import { mockAnalysis, mockCleanAnalysis } from "./fixtures";
+import { mockAnalysis, mockCleanAnalysis, mockUnmeasuredAnalysis } from "./fixtures";
 
 // The grounded coaching feedback (fault cards / clean-rep) is the top of the unified tray and is
 // always visible regardless of auth — only the composer at the foot adapts. These cover the
@@ -50,7 +50,32 @@ describe("CoachTray — coaching feedback", () => {
 
   it("shows the clean-rep message when there are no detections", () => {
     renderWithProviders(<CoachTray analysis={mockCleanAnalysis} currentTime={0} onSeek={vi.fn()} />);
-    expect(screen.getByText(/No biomechanical faults/i)).toBeInTheDocument();
+    // Movement-scoped since 2a5d3e64's mitigation (see components.CoachTray.movement.test.tsx):
+    // mockCleanAnalysis carries no `movement`, so this exercises the "Squat" fallback branch.
+    expect(screen.getByText(/No Squat faults detected/i)).toBeInTheDocument();
+  });
+
+  // An empty `detections` list means BOTH "no faults found" and "no frame was measurable". The
+  // tray co-renders with MetricsCards (App.tsx), so before this gate a knees-up-cropped clip
+  // showed "Faults 0 — not measured" in the HUD and "Clean rep" in the tray, side by side.
+  it("shows the not-measured message, NOT the clean-rep one, when no frame was valid", () => {
+    renderWithProviders(
+      <CoachTray analysis={mockUnmeasuredAnalysis} currentTime={0} onSeek={vi.fn()} />,
+    );
+    expect(screen.getByText(/could be measured/i)).toBeInTheDocument();
+    // Movement-scoped fallback text (see above) — still asserts the clean-rep banner is absent.
+    expect(screen.queryByText(/No Squat faults detected/i)).not.toBeInTheDocument();
+  });
+
+  // An empty `detections` list means BOTH "no faults found" and "no frame was measurable". The
+  // tray co-renders with MetricsCards (App.tsx), so before this gate a knees-up-cropped clip
+  // showed "Faults 0 — not measured" in the HUD and "Clean rep" in the tray, side by side.
+  it("shows the not-measured message, NOT the clean-rep one, when no frame was valid", () => {
+    renderWithProviders(
+      <CoachTray analysis={mockUnmeasuredAnalysis} currentTime={0} onSeek={vi.fn()} />,
+    );
+    expect(screen.getByText(/could be measured/i)).toBeInTheDocument();
+    expect(screen.queryByText(/No biomechanical faults/i)).not.toBeInTheDocument();
   });
 
   it("calls onSeek with the fault's start_time when its card is clicked", async () => {

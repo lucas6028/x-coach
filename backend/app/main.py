@@ -21,13 +21,14 @@ from backend.app.routers import (
     conversations,
     knowledge,
     line_webhook,
+    movements,
     videos,
 )
 from backend.app.settings import chat_models, default_chat_model, get_settings
 
 app = FastAPI(
     title="x-coach API",
-    description="Explainable movement coaching: pose perception + biomechanics rules + KG/RAG retrieval over a 16-movement graph (video analysis is squat-only today).",
+    description="Explainable movement coaching: pose perception + biomechanics rules + KG/RAG retrieval over a 16-movement graph (video analysis covers Squat, Push-up and Overhead Press).",
     version="0.1.0",
 )
 
@@ -43,6 +44,7 @@ app.include_router(analyze.router)
 app.include_router(analyses.router)
 app.include_router(videos.router)
 app.include_router(knowledge.router)
+app.include_router(movements.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
 app.include_router(admin.router)

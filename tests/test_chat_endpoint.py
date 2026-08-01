@@ -51,7 +51,23 @@ _FAULT_CTX = {
         }
     ],
 }
-_CLEAN_CTX = {"view_type": "side", "fault_count": 0, "quality": {}, "faults": []}
+# A GENUINELY clean rep: no faults AND the clip was measurable. `valid_frame_ratio` is load-bearing
+# here, not decoration -- an empty fault list alone no longer earns the CLEAN REP instruction.
+_CLEAN_CTX = {
+    "view_type": "side",
+    "fault_count": 0,
+    "quality": {"valid_frame_ratio": 0.94, "valid_frames": 282, "total_frames": 300},
+    "faults": [],
+}
+
+# The SAME empty fault list, produced instead by a clip no frame of which could be measured (e.g.
+# framed above the ankles, which fails the push-up detector's validity gate on every frame).
+_UNMEASURED_CTX = {
+    "view_type": "side",
+    "fault_count": 0,
+    "quality": {"valid_frame_ratio": 0.0, "valid_frames": 0, "total_frames": 300},
+    "faults": [],
+}
 
 
 def _body(messages, context) -> chat_router.ChatRequest:
@@ -94,10 +110,51 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("Do NOT invent", prompt)  # honesty constraint intact
 
     def test_clean_rep_has_no_fault_list_but_flags_clean(self) -> None:
+        # _CLEAN_CTX carries no `movement`, so `_build_system_prompt` falls back to the pipeline
+        # default (Squat) -- see TestChatPromptMovement for the movement-scoped wording itself.
         prompt = chat_service._build_system_prompt(_CLEAN_CTX)
-        self.assertIn("CLEAN REP", prompt)
+        self.assertIn("CLEAN Squat REP", prompt)
         self.assertNotIn("DETECTED FAULTS", prompt)
         self.assertIn("Faults detected: 0", prompt)
+
+    def test_unmeasured_clip_gets_no_clean_rep_instruction(self) -> None:
+        """An empty fault list means BOTH "no faults" and "nothing was measurable". Telling the
+        model to congratulate the user in the second case fabricates a verdict about form that was
+        never analysed -- the same claim the prompt's honesty constraint forbids everywhere else."""
+        prompt = chat_service._build_system_prompt(_UNMEASURED_CTX)
+        self.assertNotIn("CLEAN REP", prompt)
+        self.assertIn("NOT MEASURED", prompt)
+        self.assertIn("Do NOT congratulate", prompt)
+        self.assertIn("Faults detected: 0", prompt)
+        self.assertNotIn("DETECTED FAULTS", prompt)
+
+    def test_measurable_frame_ratio_is_surfaced_to_the_model(self) -> None:
+        """Shipped by `buildChatContext` and accepted by `ChatContext.quality` all along, but never
+        rendered -- so the model could not tell a clean rep from an unmeasured clip even in
+        principle."""
+        self.assertIn("Measurable frames: 94%", chat_service._build_system_prompt(_CLEAN_CTX))
+        self.assertIn("Measurable frames: 0%", chat_service._build_system_prompt(_UNMEASURED_CTX))
+        # Absent from the payload => no line at all (and see the next test for the verdict).
+        self.assertNotIn("Measurable frames", chat_service._build_system_prompt(_FAULT_CTX))
+
+    def test_absent_valid_frame_ratio_is_treated_as_unmeasured(self) -> None:
+        """"The payload did not say" must not resolve to "everything is fine". The analyze pipeline
+        always emits `valid_frame_ratio`, so its absence is missing information, not evidence of a
+        clean rep. Matches `wasMeasured`'s `?? 0` in frontend/src/lib/quality.ts."""
+        prompt = chat_service._build_system_prompt(
+            {"view_type": "side", "fault_count": 0, "quality": {}, "faults": []}
+        )
+        self.assertNotIn("CLEAN REP", prompt)
+        self.assertIn("NOT MEASURED", prompt)
+
+    def test_faults_win_over_the_measurability_branch(self) -> None:
+        """A clip with detected faults was measurable by construction, so neither no-fault branch
+        may fire even if the quality dict is missing or degenerate."""
+        ctx = dict(_FAULT_CTX, quality={"valid_frame_ratio": 0.0})
+        prompt = chat_service._build_system_prompt(ctx)
+        self.assertNotIn("CLEAN REP", prompt)
+        self.assertNotIn("NOT MEASURED", prompt)
+        self.assertIn("DETECTED FAULTS", prompt)
 
     def test_fmt_list_handles_empty_and_values(self) -> None:
         self.assertEqual(chat_service._fmt_list([]), "—")
@@ -608,6 +665,42 @@ class ResolveChatModelTests(unittest.TestCase):
                 app_settings.resolve_chat_model("some/self-hosted-model"), "some/self-hosted-model"
             )
             self.assertEqual(app_settings.resolve_chat_model(None), "some/self-hosted-model")
+
+
+class TestChatPromptMovement(unittest.TestCase):
+    def _prompt(self, **context) -> str:
+        from backend.app.services.chat import _build_system_prompt
+
+        base = {"quality": {"valid_frame_ratio": 0.9}, "faults": [], "fault_count": 0}
+        base.update(context)
+        return _build_system_prompt(base)
+
+    def test_preamble_names_the_movement(self) -> None:
+        prompt = self._prompt(movement="Push-up")
+        self.assertIn("Push-up coach", prompt)
+        self.assertNotIn("squat coach", prompt.lower())
+
+    def test_clean_rep_branch_names_the_movement(self) -> None:
+        """The spec's section 9 mitigation: a measurable clip measured by the WRONG rules is
+        now reachable, so the clean verdict must be scoped to the movement the user asserted
+        rather than stated bare."""
+        prompt = self._prompt(movement="Overhead Press")
+        self.assertIn("CLEAN Overhead Press REP", prompt)
+
+    def test_unmeasured_branch_is_unchanged_by_movement(self) -> None:
+        """An unmeasured clip must still refuse to congratulate, whatever the movement."""
+        prompt = self._prompt(movement="Push-up", quality={"valid_frame_ratio": 0.0})
+        self.assertIn("NOT MEASURED", prompt)
+        self.assertNotIn("CLEAN", prompt)
+
+    def test_defaults_to_squat_for_an_older_client(self) -> None:
+        """A client that predates ChatContext.movement must still get a coherent prompt."""
+        self.assertIn("Squat coach", self._prompt())
+
+    def test_followup_instruction_names_the_movement(self) -> None:
+        from backend.app.services.chat import _followup_instruction
+
+        self.assertIn("THIS Push-up", _followup_instruction("Push-up"))
 
 
 if __name__ == "__main__":

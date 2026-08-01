@@ -51,7 +51,7 @@ const en: Dict = {
 
   // Header
   "header.session": "Session: {id}",
-  "header.title": "Squat Analysis",
+  "header.title": "{movement} Analysis",
   "header.processing": "PROCESSING",
   "header.complete": "ANALYSIS COMPLETE",
   "header.awaiting": "AWAITING INPUT",
@@ -85,6 +85,9 @@ const en: Dict = {
   "metric.conf": "conf {v}",
   "metric.peakSeverity": "peak severity {v}",
   "metric.cleanRep": "clean rep",
+  // Shown instead of "clean rep" when zero frames were measurable: an empty detection list then
+  // means "never measured", not "nothing wrong". See MetricsCards.
+  "metric.notMeasured": "not measured",
   "metric.landmarkConf": "landmark confidence",
   "metric.framesRatio": "{valid}/{total} frames",
 
@@ -127,7 +130,14 @@ const en: Dict = {
   // Reasoning / coaching feedback
   "feedback.title": "Coaching Feedback",
   "feedback.badge": "rule + GraphRAG",
-  "feedback.noFaults": "No biomechanical faults detected. Clean rep.",
+  // Names the movement because it is USER-ASSERTED: the studio lets the user pick, so a clip can
+  // be measured by rules that do not describe it. Naming it makes the claim true relative to the
+  // user's own assertion and puts that assertion in front of them at the verdict.
+  "feedback.noFaults": "No {movement} faults detected. Clean rep.",
+  // Shown instead of the clean-rep banner when no frame was measurable: an empty fault list then
+  // means "never measured", not "nothing wrong". See lib/quality.ts.
+  "feedback.notMeasured":
+    "No frame in this clip could be measured, so no form verdict was produced. Re-record with your whole body in frame.",
   "feedback.graphragContext": "GraphRAG Context",
   "feedback.likelyCause": "Likely cause:",
   "feedback.injuryRisk": "Injury risk:",
@@ -184,11 +194,23 @@ const en: Dict = {
 
   // Upload dropzone
   "upload.analysing": "Analysing…",
-  "upload.prompt": "Drop a squat video or tap to upload",
+  "upload.prompt": "Drop a {movement} video or tap to upload",
   "upload.hint": "MP4 / MOV · single athlete · side or rear view",
 
+  // Capture studio — input mode + the MediaPipe model-tier picker
+  "capture.upload": "Upload video",
+  "capture.record": "Record live",
+  "capture.progress": "Analysing… {pct}%",
+  "tier.label": "Precision",
+  "tier.aria": "Analysis precision: {name}",
+  "tier.default": "Default",
+  "tier.lite.hint": "Fastest. Agrees with Heavy on only about half of squat verdicts.",
+  "tier.full.hint": "Middle ground between speed and accuracy.",
+  "tier.heavy.hint": "Most accurate — what the fault thresholds were validated against.",
+  "tier.note": "Applies to the analysis only; the live skeleton overlay always runs Lite.",
+
   // Demo onboarding (empty state)
-  "demo.heading": "Analyze a squat in about 20 seconds.",
+  "demo.heading": "Analyze your {movement} in about 20 seconds.",
   "demo.sub": "Upload a clip or open a labeled sample. You get a skeleton overlay, a fault timeline, and coaching feedback x-coach can trace to the cause.",
   "demo.sampleBtn": "Open a sample clip",
   "demo.or": "or",
@@ -200,6 +222,11 @@ const en: Dict = {
   "demo.get3.title": "Knowledge graph",
   "demo.get3.body": "The retrieval path that links each symptom to its cause.",
   "demo.errorTitle": "That clip did not go through",
+
+  // Studio movement selector
+  "studio.movement": "Movement",
+  "studio.movementUnavailable":
+    "\"{movement}\" cannot be analysed yet. Pick one of the available movements.",
 
   // Theme toggle
   "theme.light": "Light",
@@ -224,7 +251,7 @@ const en: Dict = {
   "landing.hero.titleAccent": "trace to the joint",
   "landing.hero.titlePost": ".",
   "landing.hero.sub":
-    "x-coach reads a squat video, locates the fault, traces its cause in a biomechanics knowledge graph spanning 16 movements, and explains the fix.",
+    "x-coach reads a squat, push-up or overhead-press video, locates the fault, traces its cause in a biomechanics knowledge graph spanning 16 movements, and explains the fix.",
   "landing.hero.readMethod": "Read the method",
 
   // Landing — problem
@@ -391,13 +418,16 @@ const en: Dict = {
   // Movements menu
   "movements.title": "Movement library",
   "movements.subtitle":
-    "Every movement the coach knows. Squat analysis is live today; the rest are on the way.",
+    "Every movement the coach knows. Squat, Push-up and Overhead Press analysis are live today; the rest are on the way.",
   "movements.groupLower": "Lower body",
   "movements.groupUpper": "Upper body",
   "movements.groupCore": "Core",
   "movements.groupFullBody": "Full body",
   "movements.analyze": "Analyze a video",
   "movements.soon": "Soon",
+  "movements.beta": "Beta",
+  "movements.betaNote":
+    "Rules for this movement are literature-derived and have not yet been validated against labeled data.",
 
   // Movement display names. Only the ones titleCase() would mangle need an entry here; the rest
   // fall back to their canonical spelling.
@@ -447,7 +477,7 @@ const en: Dict = {
   "history.startCta": "Analyze a squat",
   "history.errorTitle": "Couldn't load your history",
   "history.retry": "Retry",
-  "history.rowTitle": "{view} squat",
+  "history.rowTitle": "{view} {movement}",
   "history.clean": "clean rep",
   "history.faultOne": "1 fault",
   "history.faultMany": "{count} faults",
@@ -691,7 +721,7 @@ const zhHant: Dict = {
 
   // Header
   "header.session": "工作階段：{id}",
-  "header.title": "深蹲分析",
+  "header.title": "{movement}分析",
   "header.processing": "處理中",
   "header.complete": "分析完成",
   "header.awaiting": "等待輸入",
@@ -725,6 +755,7 @@ const zhHant: Dict = {
   "metric.conf": "信心 {v}",
   "metric.peakSeverity": "最高嚴重度 {v}",
   "metric.cleanRep": "標準動作",
+  "metric.notMeasured": "無法判讀",
   "metric.landmarkConf": "關鍵點信心度",
   "metric.framesRatio": "{valid}/{total} 影格",
 
@@ -767,7 +798,9 @@ const zhHant: Dict = {
   // Reasoning / coaching feedback
   "feedback.title": "教練回饋",
   "feedback.badge": "規則 + GraphRAG",
-  "feedback.noFaults": "未偵測到生物力學錯誤，標準動作。",
+  "feedback.noFaults": "未偵測到{movement}的生物力學錯誤，這一下很標準。",
+  "feedback.notMeasured":
+    "這支影片沒有任何一個影格可供判讀，因此沒有產生動作評估結果。請確認全身都在畫面內後重新錄製。",
   "feedback.graphragContext": "GraphRAG 脈絡",
   "feedback.likelyCause": "可能原因：",
   "feedback.injuryRisk": "受傷風險：",
@@ -824,11 +857,23 @@ const zhHant: Dict = {
 
   // Upload dropzone
   "upload.analysing": "分析中…",
-  "upload.prompt": "拖放深蹲影片或點擊上傳",
+  "upload.prompt": "拖放{movement}影片或點擊上傳",
   "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
 
+  // Capture studio — input mode + the MediaPipe model-tier picker
+  "capture.upload": "上傳影片",
+  "capture.record": "即時錄影",
+  "capture.progress": "分析中… {pct}%",
+  "tier.label": "分析精度",
+  "tier.aria": "分析精度：{name}",
+  "tier.default": "預設",
+  "tier.lite.hint": "最快，但深蹲判定僅約半數與 Heavy 一致。",
+  "tier.full.hint": "速度與準確度的折衷。",
+  "tier.heavy.hint": "最準確，錯誤門檻即以此驗證。",
+  "tier.note": "僅影響分析；即時骨架疊圖一律使用 Lite。",
+
   // Demo onboarding (empty state)
-  "demo.heading": "約 20 秒，分析一段深蹲。",
+  "demo.heading": "約 20 秒，分析一段{movement}。",
   "demo.sub": "上傳影片或開啟已標註的範例。你會得到骨架疊圖、錯誤時間軸，以及能追溯成因的教練回饋。",
   "demo.sampleBtn": "開啟範例片段",
   "demo.or": "或",
@@ -840,6 +885,10 @@ const zhHant: Dict = {
   "demo.get3.title": "知識圖譜",
   "demo.get3.body": "連結每個現象到其成因的檢索路徑。",
   "demo.errorTitle": "這段片段沒有成功處理",
+
+  // Studio movement selector
+  "studio.movement": "動作",
+  "studio.movementUnavailable": "「{movement}」尚未支援分析，請選擇其他已開放的動作。",
 
   // Theme toggle
   "theme.light": "淺色",
@@ -864,7 +913,7 @@ const zhHant: Dict = {
   "landing.hero.titleAccent": "追溯到關節",
   "landing.hero.titlePost": "。",
   "landing.hero.sub":
-    "x-coach 讀取深蹲影片，定位動作錯誤，在涵蓋 16 個動作的生物力學知識圖譜中追溯成因，並說明修正方式。",
+    "x-coach 讀取深蹲、伏地挺身或肩上推舉影片，定位動作錯誤，在涵蓋 16 個動作的生物力學知識圖譜中追溯成因，並說明修正方式。",
   "landing.hero.readMethod": "了解方法",
 
   // Landing — problem
@@ -1027,13 +1076,15 @@ const zhHant: Dict = {
 
   // Movements menu
   "movements.title": "動作庫",
-  "movements.subtitle": "教練目前認識的所有動作。深蹲分析已經上線，其餘動作陸續開放。",
+  "movements.subtitle": "教練目前認識的所有動作。深蹲、伏地挺身與肩上推舉分析已經上線，其餘動作陸續開放。",
   "movements.groupLower": "下肢",
   "movements.groupUpper": "上肢",
   "movements.groupCore": "核心",
   "movements.groupFullBody": "全身",
   "movements.analyze": "分析影片",
   "movements.soon": "即將開放",
+  "movements.beta": "Beta",
+  "movements.betaNote": "此動作的規則來自文獻推導，尚未以標註資料驗證。",
 
   // Movement display names.
   "movement.Squat": "深蹲",
@@ -1095,7 +1146,7 @@ const zhHant: Dict = {
   "history.startCta": "分析深蹲",
   "history.errorTitle": "無法載入你的紀錄",
   "history.retry": "重試",
-  "history.rowTitle": "{view}深蹲",
+  "history.rowTitle": "{view} {movement}",
   "history.clean": "標準動作",
   "history.faultOne": "1 個錯誤",
   "history.faultMany": "{count} 個錯誤",
@@ -1302,7 +1353,12 @@ const zhHant: Dict = {
   "ninja.board.you": "你",
 };
 
-const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };
+// Exported so the suite can enforce key-set PARITY between the locales. Both dicts are typed
+// `Record<string, string>`, so TypeScript cannot catch a key added to one locale and forgotten in
+// the other: `t()` falls back to returning the raw key, and the zh UI silently renders
+// "metric.notMeasured" as literal text. That failure is invisible in review and in every
+// English-locale test — see `lib.i18n.test.ts`.
+export const DICTS: Record<Lang, Dict> = { en, "zh-Hant": zhHant };
 
 export const LANGS: { value: Lang; short: string }[] = [
   { value: "en", short: "EN" },

@@ -8,6 +8,7 @@ import {
   viewLabel,
   phaseLabel,
   severityText,
+  DICTS,
   type TFunc,
 } from "../lib/i18n";
 
@@ -18,6 +19,32 @@ function realT(lang: "en" | "zh-Hant" = "en"): TFunc {
   const { result } = renderHook(() => useI18n(), { wrapper: I18nProvider });
   return result.current.t;
 }
+
+// Both dicts are typed `Record<string, string>`, so a key added to one locale and forgotten in the
+// other is a TYPE-CHECK PASS: `t()` falls back to returning the raw key, and the zh UI renders
+// "feedback.notMeasured" as literal text. Nothing else in the suite can see that — English-locale
+// tests pass, review does not catch it. This is the only guard.
+describe("locale key parity", () => {
+  // ONE-DIRECTIONAL ON PURPOSE, and the direction is the one that fails visibly. A key present in
+  // `en` but missing from `zh-Hant` makes the zh UI render the raw key ("feedback.notMeasured") as
+  // literal text. The reverse is a DELIBERATE pattern here, not drift: `dataLabel` falls back to
+  // title-casing the raw value, which is already correct English, so the zh dict carries
+  // `movement.*` / `fault.*` entries that `en` intentionally omits. Asserting strict two-way
+  // equality would encode a rule this codebase does not follow — verified against the real dicts,
+  // where the zh-only set is exactly those data-label families.
+  it("every en key has a zh-Hant translation", () => {
+    const missing = Object.keys(DICTS.en).filter((k) => !(k in DICTS["zh-Hant"]));
+    expect(missing).toEqual([]);
+  });
+
+  it("no translation is an empty string", () => {
+    for (const [lang, dict] of Object.entries(DICTS)) {
+      for (const [key, value] of Object.entries(dict)) {
+        expect(value, `${lang}:${key}`).not.toBe("");
+      }
+    }
+  });
+});
 
 describe("getStoredLang", () => {
   beforeEach(() => localStorage.clear());

@@ -267,7 +267,7 @@ describe("api.analyzeUpload", () => {
   it("POSTs a FormData body and returns the analysis", async () => {
     const spy = mockFetch({ video_id: "upload_1" });
     const file = new File(["video"], "squat.mp4", { type: "video/mp4" });
-    const result = await api.analyzeUpload(file);
+    const result = await api.analyzeUpload(file, "Squat");
     expect(result).toEqual({ video_id: "upload_1" });
     expect(spy.mock.calls[0][0]).toBe("/api/analyze");
     expect((spy.mock.calls[0][1] as RequestInit).method).toBe("POST");
@@ -281,7 +281,7 @@ describe("api.analyzeUpload", () => {
       json: async () => ({ detail: "Invalid video format" }),
     } as Response);
     const file = new File(["data"], "bad.mp4", { type: "video/mp4" });
-    await expect(api.analyzeUpload(file)).rejects.toThrow("Invalid video format");
+    await expect(api.analyzeUpload(file, "Squat")).rejects.toThrow("Invalid video format");
   });
 
   it("falls back to a generic message when backend detail is absent", async () => {
@@ -292,7 +292,7 @@ describe("api.analyzeUpload", () => {
       json: async () => ({}),
     } as Response);
     const file = new File(["data"], "bad.mp4", { type: "video/mp4" });
-    await expect(api.analyzeUpload(file)).rejects.toThrow("Analyze failed (500)");
+    await expect(api.analyzeUpload(file, "Squat")).rejects.toThrow("Analyze failed (500)");
   });
 });
 

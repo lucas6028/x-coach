@@ -96,4 +96,15 @@ describe("buildChatContext", () => {
     const ctx = buildChatContext(make({ quality: undefined as unknown as Analysis["quality"] }));
     expect(ctx.quality).toEqual({});
   });
+
+  it("passes the analysis movement through verbatim, without inventing a default when absent", () => {
+    const withMovement = buildChatContext(make({ movement: "Push-up" }));
+    expect(withMovement.movement).toBe("Push-up");
+
+    // Older stored analyses predate per-movement selection and carry no `movement` at all. The
+    // backend's own fallback (not this file) decides what that means, so the frontend must pass
+    // absence through as absence rather than guessing "Squat" here.
+    const withoutMovement = buildChatContext(make({}));
+    expect(withoutMovement.movement).toBeUndefined();
+  });
 });

@@ -89,6 +89,24 @@ def nlf_world_points(pred_cam_h36m17: np.ndarray, cam_params: dict) -> np.ndarra
     return out
 
 
+def mask_to_stride(points: np.ndarray, stride: int) -> np.ndarray:
+    """NaN out every frame not on ``stride`` (keeping 0, stride, 2*stride, ...).
+
+    Used to put an every-frame model on the same frame grid as a subsampled one. The verdict
+    reduces a rep window to its *extreme* (nanmin/nanmax), which is sample-count biased -- fewer
+    frames can only make an extreme less extreme -- so a dense-vs-sparse verdict comparison is
+    confounded unless both arms see the same frames. Sparse Fit3D predictions start at frame 0
+    (strides: Multi-HMR 6; MeTRAbs/MediaPipe/RTMPose 15), so this reproduces their grid exactly.
+    """
+    if stride <= 1:
+        return points
+    out = np.array(points, dtype=np.float64, copy=True)
+    keep = np.zeros(len(out), dtype=bool)
+    keep[::stride] = True
+    out[~keep] = np.nan
+    return out
+
+
 def collect_records(
     pred_root: Path,
     action: str = "squat",
@@ -97,11 +115,15 @@ def collect_records(
     subjs: list[str] | None = None,
     root: Path = ds.DEFAULT_FIT3D_ROOT,
     min_rep_frames: int = 5,
+    frame_stride: int = 1,
 ) -> tuple[list[dict], list[str]]:
     """Per (subject, rep, camera): the GT / 2D-projection / NLF cue readings at the rep extreme.
 
     One record per (rep, camera); the GT reading repeats across cameras (it is view-invariant)
     -- matching experiment 2's rep x camera pairing.
+
+    ``frame_stride`` > 1 subsamples the **model arm only** (see :func:`mask_to_stride`); GT and
+    the 2D projection stay at full rate, matching how the sparse-model tables were built.
     """
     records: list[dict] = []
     cams_seen: list[str] = []
@@ -122,7 +144,7 @@ def collect_records(
             proj = ds.project_world_to_image(j3d_m, cp)         # 2D arm
             gt_cam = de.gt_in_camera_frame(j3d_mm, cp)
             pred_cam, _info = de.load_prediction_h36m17(npz, gt_cam[:, :17, :], source=source)
-            nlf_world = nlf_world_points(pred_cam, cp)          # NLF arm
+            nlf_world = mask_to_stride(nlf_world_points(pred_cam, cp), frame_stride)  # NLF arm
             n = min(len(j3d_m), len(proj), len(nlf_world))
             if cam not in cams_seen:
                 cams_seen.append(cam)
@@ -259,13 +281,16 @@ def run(
     source: str = "smpl3d",
     subjs: list[str] | None = None,
     root: Path = ds.DEFAULT_FIT3D_ROOT,
+    frame_stride: int = 1,
 ) -> dict:
-    records, cams = collect_records(pred_root, action, split, source, subjs, root)
+    records, cams = collect_records(pred_root, action, split, source, subjs, root,
+                                    frame_stride=frame_stride)
     return {
         "action": action,
         "split": split,
         "source": source,
         "pred_root": str(pred_root),
+        "frame_stride": frame_stride,
         "cameras": cams,
         "n_subjects": len({r["subject"] for r in records}),
         "n_reps": len({(r["subject"], r["rep_index"]) for r in records}),

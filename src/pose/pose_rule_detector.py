@@ -11,27 +11,21 @@ from typing import Any, Iterable, Sequence
 import numpy as np
 
 from src.knowledge.graph_retrieval import DEFAULT_GRAPH_FILE, retrieve_graph_context
-from src.pose.view_estimation import estimate_view_for_pose
+from src.pose.geometry import (
+    LANDMARK_COUNT, VISIBILITY_THRESHOLD,
+    LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
+    LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
+    landmarks_to_array, visible_point, distance, angle_degrees, midpoint,
+    line_angle_from_vertical, mean_visibility, mean_finite, centered_median,
+    knee_forward_ratio, heel_height_delta, clip01, contiguous_true_segments,
+    severity_from_range,
+)
+from src.pose.view_estimation import ViewEstimate, estimate_view_for_pose
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RAG_DB_DIR = REPO_ROOT / "data" / "rag" / "vector_db"
 SPLIT_NAMES = ("train", "val", "test")
-VISIBILITY_THRESHOLD = 0.50
-LANDMARK_COUNT = 33
-
-LEFT_SHOULDER = 11
-RIGHT_SHOULDER = 12
-LEFT_HIP = 23
-RIGHT_HIP = 24
-LEFT_KNEE = 25
-RIGHT_KNEE = 26
-LEFT_ANKLE = 27
-RIGHT_ANKLE = 28
-LEFT_HEEL = 29
-RIGHT_HEEL = 30
-LEFT_FOOT_INDEX = 31
-RIGHT_FOOT_INDEX = 32
 
 LOWER_BODY_LANDMARKS = (
     LEFT_HIP,
@@ -50,6 +44,18 @@ LOWER_BODY_LANDMARKS = (
 KNEE_FORWARD_MILD = 0.10  # ratio above which knee-forward is considered present
 KNEE_FORWARD_SEVERE = 0.30  # ratio at or above which knee-forward is severe
 SIDE_VIEW_CONF_THRESHOLD = 0.20  # min view confidence to treat a 'side' view as reliable
+# Spec convention (design doc §3): "Confidence is scaled down when the required view is
+# unavailable (the coded squat detector multiplies by ~0.65)". Named here so every rule that
+# applies it shares one number instead of re-typing the literal.
+VIEW_UNAVAILABLE_CONFIDENCE_SCALE = 0.65
+# `estimate_view_for_pose` returns "unknown" only when a clip FAILS its evidence floor
+# (valid_frame_ratio < 0.15, or every view score < 0.20) -- i.e. the camera geometry could not
+# be established at all. Rules must treat it as an unavailable view, never as a default-good
+# one: resolving it to a rule's best branch hands the worst clips the most confident verdicts.
+UNKNOWN_VIEW = "unknown"
+# Heel-vs-toe height is a sagittal cue -- "medium on side / oblique ... nearly invisible
+# head-on" (spec, Squat / Heel Rise).
+HEEL_OBSERVABLE_VIEWS = frozenset({"side", "front_oblique", "rear_oblique"})
 
 
 
@@ -90,6 +96,15 @@ class PoseRuleDetection:
     peak_frame: int
     phase: str
     evidence: dict[str, float | int | str]
+    citation: str = ""
+    citation_support: str = ""
+    # Per-rep attribution, populated by `run_detector` when rules ran on a single rep's slice.
+    # All three stay at their zero/empty default on the whole-clip fallback path, where there
+    # are no repetitions to attribute a detection to. `rep_count`/`occurred_reps` are owned by
+    # `merge_by_fault` (a later task); `run_detector` itself only ever sets `rep_count=1`.
+    rep_index: int = 0
+    occurred_reps: tuple[int, ...] = ()
+    rep_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -106,118 +121,6 @@ def load_pose_json(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"Expected a JSON object in {path}, got {type(data).__name__}.")
     return data
-
-
-def landmarks_to_array(landmarks: object) -> np.ndarray | None:
-    if not isinstance(landmarks, list) or len(landmarks) < LANDMARK_COUNT:
-        return None
-
-    array = np.full((LANDMARK_COUNT, 4), np.nan, dtype=np.float32)
-    for index, landmark in enumerate(landmarks[:LANDMARK_COUNT]):
-        if not isinstance(landmark, dict):
-            continue
-        try:
-            array[index, 0] = float(landmark.get("x", np.nan))
-            array[index, 1] = float(landmark.get("y", np.nan))
-            array[index, 2] = float(landmark.get("z", np.nan))
-            array[index, 3] = float(landmark.get("visibility", np.nan))
-        except (TypeError, ValueError):
-            continue
-    return array
-
-
-def visible_point(points: np.ndarray | None, index: int, dims: int = 3) -> np.ndarray | None:
-    if points is None:
-        return None
-    values = points[index, :dims]
-    visibility = points[index, 3]
-    if not np.all(np.isfinite(values)) or not np.isfinite(visibility) or visibility < VISIBILITY_THRESHOLD:
-        return None
-    return values.astype(np.float32, copy=False)
-
-
-def distance(points: np.ndarray | None, a: int, b: int, dims: int = 2) -> float:
-    pa = visible_point(points, a, dims=dims)
-    pb = visible_point(points, b, dims=dims)
-    if pa is None or pb is None:
-        return np.nan
-    return float(np.linalg.norm(pa - pb))
-
-
-def angle_degrees(points: np.ndarray | None, a: int, b: int, c: int) -> float:
-    pa = visible_point(points, a, dims=3)
-    pb = visible_point(points, b, dims=3)
-    pc = visible_point(points, c, dims=3)
-    if pa is None or pb is None or pc is None:
-        return np.nan
-
-    ba = pa - pb
-    bc = pc - pb
-    denominator = float(np.linalg.norm(ba) * np.linalg.norm(bc))
-    if denominator <= 1e-8:
-        return np.nan
-    cosine = float(np.clip(np.dot(ba, bc) / denominator, -1.0, 1.0))
-    return float(np.degrees(np.arccos(cosine)))
-
-
-def midpoint(points: np.ndarray | None, left_index: int, right_index: int, dims: int = 2) -> np.ndarray | None:
-    left = visible_point(points, left_index, dims=dims)
-    right = visible_point(points, right_index, dims=dims)
-    if left is None or right is None:
-        return None
-    return (left + right) / 2.0
-
-
-def line_angle_from_vertical(top: np.ndarray | None, bottom: np.ndarray | None) -> float:
-    if top is None or bottom is None:
-        return np.nan
-    delta = top[:2] - bottom[:2]
-    return float(np.degrees(np.arctan2(abs(delta[0]), abs(delta[1]) + 1e-8)))
-
-
-def mean_visibility(points: np.ndarray | None, indices: Sequence[int]) -> float:
-    if points is None:
-        return 0.0
-    values = points[list(indices), 3]
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        return 0.0
-    return float(np.mean(finite))
-
-
-def mean_finite(values: Sequence[float]) -> float:
-    finite = [value for value in values if np.isfinite(value)]
-    if not finite:
-        return np.nan
-    return float(np.mean(finite))
-
-
-def centered_median(values: Sequence[float], window: int = 5) -> np.ndarray:
-    array = np.asarray(values, dtype=np.float32)
-    if array.size == 0:
-        return array
-    radius = max(0, window // 2)
-    smoothed = np.full(array.shape, np.nan, dtype=np.float32)
-    for index in range(array.size):
-        start = max(0, index - radius)
-        end = min(array.size, index + radius + 1)
-        finite = array[start:end][np.isfinite(array[start:end])]
-        smoothed[index] = float(np.median(finite)) if finite.size else np.nan
-    return smoothed
-
-
-def knee_forward_ratio(points: np.ndarray | None, knee_index: int, ankle_index: int, toe_index: int) -> float:
-    knee = visible_point(points, knee_index, dims=2)
-    ankle = visible_point(points, ankle_index, dims=2)
-    toe = visible_point(points, toe_index, dims=2)
-    if knee is None or ankle is None or toe is None:
-        return np.nan
-    foot_vector = toe - ankle
-    foot_length = float(np.linalg.norm(foot_vector))
-    if foot_length <= 1e-8:
-        return np.nan
-    projection = float(np.dot(knee - ankle, foot_vector / foot_length))
-    return (projection - foot_length) / foot_length
 
 
 def raw_frame_metrics(frame: object, fps: float) -> dict[str, float | int | bool]:
@@ -274,14 +177,6 @@ def raw_frame_metrics(frame: object, fps: float) -> dict[str, float | int | bool
         "torso_lean_deg": line_angle_from_vertical(shoulder_mid, hip_mid),
         "heel_height_delta": mean_finite([heel_delta_left, heel_delta_right]),
     }
-
-
-def heel_height_delta(points: np.ndarray | None, heel_index: int, toe_index: int) -> float:
-    heel = visible_point(points, heel_index, dims=2)
-    toe = visible_point(points, toe_index, dims=2)
-    if heel is None or toe is None:
-        return np.nan
-    return float(heel[1] - toe[1])
 
 
 def assign_phases(raw_metrics: list[dict[str, float | int | bool]]) -> list[str]:
@@ -365,40 +260,11 @@ def compute_frame_metrics(frames: Sequence[object], fps: float) -> list[FrameMet
     return metrics
 
 
-def clip01(value: float) -> float:
-    if not np.isfinite(value):
-        return 0.0
-    return float(np.clip(value, 0.0, 1.0))
-
-
-def contiguous_true_segments(mask: Sequence[bool], min_frames: int) -> list[tuple[int, int]]:
-    segments: list[tuple[int, int]] = []
-    start: int | None = None
-    for index, value in enumerate(mask):
-        if value and start is None:
-            start = index
-        elif not value and start is not None:
-            if index - start >= min_frames:
-                segments.append((start, index - 1))
-            start = None
-    if start is not None and len(mask) - start >= min_frames:
-        segments.append((start, len(mask) - 1))
-    return segments
-
-
 def dominant_phase(metrics: Sequence[FrameMetrics]) -> str:
     counts: dict[str, int] = {}
     for metric in metrics:
         counts[metric.phase] = counts.get(metric.phase, 0) + 1
     return max(counts.items(), key=lambda item: item[1])[0] if counts else "unknown"
-
-
-def severity_from_range(value: float, mild: float, severe: float, *, lower_is_worse: bool) -> float:
-    if not np.isfinite(value):
-        return 0.0
-    if lower_is_worse:
-        return clip01((mild - value) / (mild - severe))
-    return clip01((value - mild) / (severe - mild))
 
 
 def build_detection(
@@ -413,6 +279,8 @@ def build_detection(
     confidence: float,
     observability: str,
     evidence: dict[str, float | int | str],
+    citation: str = "",
+    citation_support: str = "",
 ) -> PoseRuleDetection:
     finite_scores = np.asarray(score_values, dtype=np.float32)
     if finite_scores.size and np.isfinite(finite_scores).any():
@@ -439,6 +307,8 @@ def build_detection(
         peak_frame=peak.frame_index,
         phase=dominant_phase(segment_metrics),
         evidence=evidence,
+        citation=citation,
+        citation_support=citation_support,
     )
 
 
@@ -448,6 +318,8 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
     observable_alignment = view_type in {"rear", "rear_oblique", "front", "front_oblique"}
     observable_side = view_type == "side" and view_confidence >= SIDE_VIEW_CONF_THRESHOLD
     observable_lean = view_type in {"side", "rear_oblique", "front_oblique"}
+    observable_heel = view_type in HEEL_OBSERVABLE_VIEWS
+    view_unavailable = view_type == UNKNOWN_VIEW
 
     active_phases = {"descent", "bottom", "ascent"}
     inward_mask = [
@@ -483,6 +355,11 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": round(min_ratio, 4),
                     "primary_threshold": 0.82,
                 },
+                citation="Ford KR, Nguyen AD, Dischiavi SL, Hegedus EJ, Zuk EF, Taylor JB. (2015). "
+                         "An evidence-based review of hip-focused neuromuscular exercise interventions "
+                         "to address dynamic lower extremity valgus. Open Access J Sports Med. PMC4556293.",
+                citation_support="Knee abduction moment predicted future ACL injury risk with 73% "
+                                 "sensitivity and 78% specificity in young female athletes.",
             )
         )
 
@@ -518,6 +395,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": round(max_ratio, 4),
                     "primary_threshold": KNEE_FORWARD_MILD,
                 },
+                citation="Zellmer M, et al. (2019). Patellar tendon stress between two variations "
+                         "of the forward step lunge. J Sport Health Sci. PMC6523035.",
+                citation_support="Moving the knee in front of the toes increased peak patellar "
+                                 "tendon stress by 11.1% and peak knee extension moment by 25.8% (p<0.001).",
             )
         )
     if not observable_side:
@@ -539,6 +420,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                         "view_type": view_type,
                         "view_confidence": round(view_confidence, 4),
                     },
+                    citation="Zellmer M, et al. (2019). Patellar tendon stress between two variations "
+                             "of the forward step lunge. J Sport Health Sci. PMC6523035.",
+                    citation_support="Moving the knee in front of the toes increased peak patellar "
+                                     "tendon stress by 11.1% and peak knee extension moment by 25.8% (p<0.001).",
                 )
             )
 
@@ -574,8 +459,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                 segment_metrics=segment,
                 score_values=[max(hip_severity, knee_severity) for _ in segment],
                 severity=severity,
-                confidence=severity,
-                observability="medium" if view_type in {"rear", "rear_oblique"} else "high",
+                confidence=severity * (VIEW_UNAVAILABLE_CONFIDENCE_SCALE if view_unavailable else 1.0),
+                observability="medium"
+                if view_unavailable or view_type in {"rear", "rear_oblique"}
+                else "high",
                 evidence={
                     "min_hip_minus_knee_y": round(min_hip_depth, 4),
                     "max_avg_knee_angle": round(max_knee_angle, 2),
@@ -585,6 +472,11 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": primary_value,
                     "primary_threshold": primary_threshold,
                 },
+                citation="Hartmann H, Wirth K, Klusemann M. (2013). Analysis of the load on the knee "
+                         "joint and vertebral column with changes in squatting depth and weight load. "
+                         "Sports Medicine 43(10):993-1008. PMID 23821469.",
+                citation_support="Half and quarter squat training with heavy loads favors long-term "
+                                 "degenerative changes in the knee and spinal joints versus deep squats.",
             )
         )
 
@@ -615,6 +507,10 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                     "primary_value": round(max_lean, 2),
                     "primary_threshold": 35.0,
                 },
+                citation="Moreira VM, et al. (2023). Analysis of Muscle Strength and Electromyographic "
+                         "Activity during Different Deadlift Positions. Muscles. PMC12225233.",
+                citation_support="Leaning the trunk forward raises spinal flexion torque, requiring "
+                                 "higher erector spinae activation and strength to resist trunk flexion.",
             )
         )
 
@@ -646,21 +542,50 @@ def detect_rule_segments(metrics: Sequence[FrameMetrics], fps: float, view_type:
                 segment_metrics=segment,
                 score_values=values,
                 severity=severity,
-                confidence=severity,
-                observability="medium",
+                confidence=severity * (1.0 if observable_heel else VIEW_UNAVAILABLE_CONFIDENCE_SCALE),
+                observability="medium" if observable_heel else "low",
                 evidence={
                     "max_heel_lift_delta": round(max_lift, 4),
                     "setup_baseline": round(baseline, 4),
                     "threshold": 0.015,
+                    "view_type": view_type,
                     "primary_label": "heel lift",
                     "primary_value": round(max_lift, 4),
                     "primary_threshold": 0.015,
                 },
+                citation="Mata AJ, Hayashi H, Moreno PA, Dudley RI, Sorenson EA. (2021). Hip Flexion "
+                         "Angles During Supine Range of Motion and Bodyweight Squats. Int J Exerc Sci "
+                         "14(1):912-918.",
+                citation_support="Heel elevation increased ankle excursion and squat depth (p<0.001); "
+                                 "reduced dorsiflexion mobility can lead to compensatory joint moments "
+                                 "up the kinetic chain, risking injury.",
             )
         )
 
     detections.sort(key=lambda item: (item.observability == "low", -item.severity, item.start_frame))
     return detections
+
+
+def json_safe_view_payload(view: ViewEstimate) -> dict[str, Any]:
+    """Serialize a ViewEstimate for the API/DB boundary, replacing non-finite
+    floats with None.
+
+    torso_width_ratio_mean is NaN whenever a clip carries no measurable-width
+    evidence (e.g. degenerate/empty pose JSON) -- that is deliberate, honest
+    "no evidence" signaling from estimate_view_for_pose, not a bug. But NaN
+    survives dataclasses.asdict() untouched, and postgrest's httpx JSON
+    encoder serializes with allow_nan=False: it raises ValueError before any
+    network call, which the broad except in the analyze route swallows,
+    silently dropping the analysis from the user's history with no error
+    surfaced. None/null is the honest JSON representation of "no evidence";
+    0.0 is not. (The HTTP response path is unaffected -- FastAPI/pydantic
+    already maps NaN to null there.)
+    """
+    payload = asdict(view)
+    for key, value in payload.items():
+        if isinstance(value, float) and not math.isfinite(value):
+            payload[key] = None
+    return payload
 
 
 def detect_pose_rules_from_payload(
@@ -672,6 +597,9 @@ def detect_pose_rules_from_payload(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     movement: str | None = None,
+    # -1 (not None) is the "caller said nothing" sentinel: None is a meaningful value here,
+    # meaning "analyze every rep".
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     metadata = payload.get("metadata", {})
     if not isinstance(metadata, dict):
@@ -681,10 +609,9 @@ def detect_pose_rules_from_payload(
         frames = []
 
     fps = float(metadata.get("fps", 0.0) or 0.0)
-    metrics = compute_frame_metrics(frames, fps=fps if fps > 0 else 30.0)
     if pose_json_path is not None:
         view = estimate_view_for_pose(pose_json_path)
-        view_payload = asdict(view)
+        view_payload = json_safe_view_payload(view)
         view_type = view.view_type
         view_confidence = view.view_confidence
     else:
@@ -692,15 +619,32 @@ def detect_pose_rules_from_payload(
         view_type = "unknown"
         view_confidence = 0.0
 
-    valid_frames = [metric for metric in metrics if metric.valid]
-    detections = detect_rule_segments(
-        metrics,
-        fps=fps if fps > 0 else 30.0,
-        view_type=view_type,
-        view_confidence=view_confidence,
+    from src.pose.movements import registry
+    from src.pose.movements.base import DEFAULT_MAX_REPS, run_detector
+
+    detector = registry.get_detector(movement)
+    effective_max_reps = DEFAULT_MAX_REPS if max_reps == -1 else max_reps
+    run = run_detector(
+        detector,
+        frames,
+        fps if fps > 0 else 30.0,
+        view_type,
+        view_confidence,
+        max_reps=effective_max_reps,
     )
+    core, detections = run.core, run.detections
+
+    analyzed_indices = [rep.index for rep in run.analyzed]
+    analyzed_frames = sum(rep.end - rep.start + 1 for rep in run.analyzed) or len(core)
+    valid_frames = [c for c in core if c.valid]
     result = {
         "video_id": video_id or (pose_json_path.stem if pose_json_path else ""),
+        # The CANONICAL movement name, taken from the resolved detector rather than the caller's
+        # string, so "push-up" normalises to "Push-up". That exact spelling is simultaneously the
+        # KG `movement` scope and the frontend's movement.<Name> i18n key. Echoing it here (not in
+        # the web layer) means the CLI's written JSON carries it too, and a stored analysis records
+        # which rules produced it -- permanently, without depending on a database column.
+        "movement": detector.name,
         "pose_json_path": str(pose_json_path) if pose_json_path else "",
         "metadata": metadata,
         "view": view_payload,
@@ -708,13 +652,59 @@ def detect_pose_rules_from_payload(
             "total_frames": len(frames),
             "valid_frames": len(valid_frames),
             "valid_frame_ratio": round(len(valid_frames) / len(frames), 4) if frames else 0.0,
-            "lower_body_visibility_mean": round(float(np.mean([m.lower_body_visibility for m in metrics])), 4)
-            if metrics
+            "lower_body_visibility_mean": round(float(np.mean([c.lower_body_visibility for c in core])), 4)
+            if core
             else 0.0,
+            # ADDITIVE. The existing denominators above stay whole-clip on purpose -- they are a
+            # compatibility surface for backend/app/services/analysis.py, the frontend, and
+            # src/knowledge/perception_to_graph.py.
+            "analyzed_frames": analyzed_frames if core else 0,
+            "analyzed_frame_ratio": round(analyzed_frames / len(frames), 4) if frames else 0.0,
         },
         "detections": [asdict(detection) for detection in detections],
         "retrievals": [],
-        "frame_metrics": [asdict(metric) for metric in metrics],
+        "frame_metrics": [
+            {
+                "frame_index": c.frame_index,
+                "time": c.time,
+                "phase": c.phase,
+                "valid": c.valid,
+                "lower_body_visibility": c.lower_body_visibility,
+                **c.metrics,
+            }
+            for c in core
+        ],
+        # Which repetitions were found and which were actually scored. `segments` exists so a UI
+        # can show which spans were examined: when whole stretches of a clip are never looked
+        # at, the interface must not imply they were clean.
+        "reps": {
+            "detected": len(run.reps),
+            # Repetition indices scored PER-REPETITION. Empty on any fallback (`run.fallback is
+            # not None`) -- not because nothing was examined, but because on fallback the whole
+            # clip was scored as one unit instead of rep-by-rep. See `segments[].analyzed` below
+            # for whether a given span was actually looked at.
+            "analyzed": analyzed_indices,
+            "max_reps": effective_max_reps,
+            "fallback": run.fallback,
+            "segments": [
+                {
+                    "index": rep.index,
+                    "start_frame": core[rep.start].frame_index,
+                    "end_frame": core[rep.end].frame_index,
+                    "start_time": round(core[rep.start].time, 3),
+                    "end_time": round(core[rep.end].time, 3),
+                    # On a normal (non-fallback) run this mirrors `analyzed_indices`: only the
+                    # sampled reps were scored. On any fallback the whole clip -- including every
+                    # span listed here -- WAS examined, just as one unit rather than rep-by-rep,
+                    # so every segment is genuinely analyzed=true. `reps.analyzed` staying `[]` on
+                    # fallback must not be read as "these spans are unexamined" -- see the comment
+                    # on `reps.analyzed` above.
+                    "analyzed": True if run.fallback is not None else rep.index in set(analyzed_indices),
+                    "partial": rep.partial,
+                }
+                for rep in run.reps
+            ],
+        },
     }
     if include_retrieval:
         result["retrievals"] = retrieve_contexts_for_detections(
@@ -734,6 +724,7 @@ def detect_pose_rules_from_json(
     graph_file: Path = DEFAULT_GRAPH_FILE,
     rag_db_dir: Path = DEFAULT_RAG_DB_DIR,
     movement: str | None = None,
+    max_reps: int | None = -1,
 ) -> dict[str, Any]:
     path = Path(pose_json_path)
     return detect_pose_rules_from_payload(
@@ -744,6 +735,7 @@ def detect_pose_rules_from_json(
         graph_file=graph_file,
         rag_db_dir=rag_db_dir,
         movement=movement,
+        max_reps=max_reps,
     )
 
 
@@ -796,6 +788,19 @@ def parse_split_names(value: str) -> list[str]:
     if invalid:
         raise argparse.ArgumentTypeError(f"Unsupported splits: {', '.join(invalid)}")
     return split_names
+
+
+def parse_max_reps(value: str) -> int | None:
+    """Parse ``--max-reps``. ``all`` and ``0`` both mean every repetition."""
+    text = (value or "").strip().lower()
+    if text == "all":
+        return None
+    if not text.isdigit():
+        raise argparse.ArgumentTypeError(
+            f"--max-reps must be a non-negative integer or 'all', got {value!r}"
+        )
+    count = int(text)
+    return None if count == 0 else count
 
 
 def build_requests(
@@ -881,11 +886,35 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--include-frames", action="store_true")
     parser.add_argument("--no-retrieval", action="store_true", help="Skip KG/RAG retrieval context.")
+    parser.add_argument(
+        "--movement",
+        default="Squat",
+        help="Canonical movement name to detect (registered: 'Squat', 'Overhead Press', "
+             "'Push-up'). Only Squat is validated against labeled data.",
+    )
+    # Local import, not module-level: `src.pose.movements.base` imports THIS module
+    # (`PoseRuleDetection`) at module scope, so importing it back at module scope here would be
+    # circular. `detect_pose_rules_from_payload` already defers the same import for the same
+    # reason (see above). This is the one place `DEFAULT_MAX_REPS` is actually *defined*; the
+    # argparse default below references it rather than repeating the literal `3`.
+    from src.pose.movements.base import DEFAULT_MAX_REPS
+    parser.add_argument(
+        "--max-reps",
+        type=parse_max_reps,
+        default=DEFAULT_MAX_REPS,
+        help="How many repetitions to analyze (first/middle/last are sampled). "
+             "Use 0 or 'all' to analyze every repetition.",
+    )
     args = parser.parse_args()
 
     summary_rows: list[dict[str, Any]] = []
     if args.pose_json is not None:
-        result = detect_pose_rules_from_json(args.pose_json, include_retrieval=not args.no_retrieval)
+        result = detect_pose_rules_from_json(
+            args.pose_json,
+            include_retrieval=not args.no_retrieval,
+            movement=args.movement,
+            max_reps=args.max_reps,
+        )
         output_path = args.output_json or args.output_dir / f"{args.pose_json.stem}.json"
         write_detection_json(output_path, result, include_frames=args.include_frames)
         for detection in result["detections"]:
@@ -901,6 +930,8 @@ def main() -> None:
                 request.pose_json_path,
                 video_id=request.video_id,
                 include_retrieval=not args.no_retrieval,
+                movement=args.movement,
+                max_reps=args.max_reps,
             )
             write_detection_json(request.output_path, result, include_frames=args.include_frames)
             for detection in result["detections"]:

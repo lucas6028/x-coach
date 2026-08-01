@@ -1,15 +1,19 @@
 import { useRef, useState } from "react";
 import { UploadSimple } from "@phosphor-icons/react";
-import { useI18n } from "../lib/i18n";
+import { movementLabel, useI18n } from "../lib/i18n";
 
 interface Props {
   onFile: (file: File) => void;
+  // The studio's currently-selected movement, so the prompt names what will actually be uploaded
+  // ("Drop a Push-up video…") instead of a hardcoded "squat" — this dropzone sits directly beneath
+  // the movement selector, so a mismatched literal here would tell the user to upload the wrong thing.
+  movement: string;
 }
 
 // The idle upload target. The analysis *waiting* state is owned by Lumen (see DemoIntro, which
 // swaps this dropzone for <LumenLoader variant="scan" /> while `loading`), so this component only
 // ever renders the resting prompt — no spinner branch of its own.
-export default function UploadDropzone({ onFile }: Props) {
+export default function UploadDropzone({ onFile, movement }: Props) {
   const { t } = useI18n();
   const inputRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -40,7 +44,9 @@ export default function UploadDropzone({ onFile }: Props) {
       <span className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary transition-transform group-hover:-translate-y-0.5">
         <UploadSimple size={30} />
       </span>
-      <p className="text-content font-medium">{t("upload.prompt")}</p>
+      <p className="text-content font-medium">
+        {t("upload.prompt", { movement: movementLabel(t, movement) })}
+      </p>
       <p className="mt-1.5 font-mono text-[11px] text-muted">{t("upload.hint")}</p>
       <input
         ref={inputRef}

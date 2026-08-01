@@ -7,6 +7,17 @@ import { AuthProvider } from "../lib/auth";
 import App from "../App";
 import { mockAnalysis } from "./fixtures";
 
+// The upload path now extracts pose client-side before hitting the API (CaptureStudio ->
+// runPoseAnalysis -> extractPoseFromBlob -> api.analyzePose). extractPoseFromBlob's real
+// implementation needs a real <video>/WASM pipeline that jsdom can't run — stub it so these tests
+// exercise the new request path (api.analyzePose against the mocked fetch below) instead.
+vi.mock("../lib/poseExtract", () => ({
+  extractPoseFromBlob: vi.fn().mockResolvedValue({
+    metadata: { fps: 30, width: 1, height: 1, total_frames: 0 },
+    frames: [],
+  }),
+}));
+
 function renderApp() {
   return render(
     <MemoryRouter>
@@ -38,10 +49,16 @@ function renderAppWithLocation() {
   );
 }
 
-function uploadAClip() {
-  const input = document.querySelector("input[type=file]") as HTMLInputElement | null;
-  expect(input).not.toBeNull();
-  fireEvent.change(input!, {
+// The studio now gates the dropzone behind the GET /api/movements fetch settling (Task 11):
+// it won't render the file input until movementsLoaded flips true, so callers must wait for it
+// rather than assuming it's present the instant after render.
+async function uploadAClip() {
+  const input = await waitFor(() => {
+    const el = document.querySelector("input[type=file]") as HTMLInputElement | null;
+    expect(el).not.toBeNull();
+    return el!;
+  });
+  fireEvent.change(input, {
     target: { files: [new File(["data"], "squat.mp4", { type: "video/mp4" })] },
   });
 }
@@ -52,7 +69,7 @@ describe("App — initial state", () => {
   it("renders the demo intro (no analysis)", () => {
     renderApp();
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Analyze a squat in about 20 seconds."
+      "Analyze your Squat in about 20 seconds."
     );
   });
 
@@ -131,13 +148,17 @@ describe("App — analysis loaded", () => {
 
     renderApp();
 
-    // The hidden file input drives uploads — assert it exists so this test can't
-    // silently no-op if the dropzone stops rendering it.
-    const input = document.querySelector("input[type=file]") as HTMLInputElement | null;
-    expect(input).not.toBeNull();
+    // The hidden file input drives uploads — assert it exists so this test can't silently no-op
+    // if the dropzone stops rendering it. It only appears once GET /api/movements settles
+    // (Task 11's movementsLoaded gate), so wait for it rather than querying synchronously.
+    const input = await waitFor(() => {
+      const el = document.querySelector("input[type=file]") as HTMLInputElement | null;
+      expect(el).not.toBeNull();
+      return el!;
+    });
 
     const file = new File(["data"], "squat.mp4", { type: "video/mp4" });
-    fireEvent.change(input!, { target: { files: [file] } });
+    fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() =>
       expect(screen.getByText("That clip did not go through")).toBeInTheDocument()
@@ -157,7 +178,7 @@ describe("App — upload reflects the analysis in the URL", () => {
     } as Response);
 
     renderAppWithLocation();
-    uploadAClip();
+    await uploadAClip();
 
     await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
     // The URL now carries the id (shareable + refresh-survivable). Poll it: the router's location
@@ -178,7 +199,7 @@ describe("App — upload reflects the analysis in the URL", () => {
     } as Response);
 
     renderAppWithLocation();
-    uploadAClip();
+    await uploadAClip();
 
     await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
     expect(screen.getByTestId("loc-search").textContent).toBe("");
@@ -195,7 +216,7 @@ describe("App — new analysis reset", () => {
 
     const user = userEvent.setup();
     renderAppWithLocation();
-    uploadAClip();
+    await uploadAClip();
 
     await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
     await waitFor(() =>
@@ -207,7 +228,7 @@ describe("App — new analysis reset", () => {
 
     // Back to the empty studio, and the shareable id is dropped from the URL.
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
-      "Analyze a squat in about 20 seconds."
+      "Analyze your Squat in about 20 seconds."
     );
     await waitFor(() => expect(screen.getByTestId("loc-search").textContent).toBe(""));
   });

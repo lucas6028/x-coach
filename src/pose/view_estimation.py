@@ -1,3 +1,49 @@
+"""Coarse camera-view estimation from MediaPipe pose landmarks.
+
+Orientation support (2026-07-25)
+---------------------------------
+Body extent is now measured along the body's own long axis (`body_axis_extent`), so the
+narrow/broad torso signal that drives the `side` verdict is valid for horizontal subjects
+(push-up, plank) as well as upright ones (see that function's docstring for the axis
+construction). Four limits remain and are NOT fixed by that change:
+
+1. `signed_orientation` is `sign(left.x - right.x)`, an image-space left/right ordering.
+   Its front/rear meaning is validated only for UPRIGHT subjects; for a horizontal body the
+   frontal axis no longer maps onto image x, so the `front`/`rear`/`*_oblique` labels carry
+   no validated meaning there. Do not gate a horizontal-movement rule on them.
+2. `estimate_view_for_pose` is called with `allow_front=False` in the production path
+   (`src/pose/pose_rule_detector.py`), so `front` and `front_oblique` are unreachable there;
+   only `side`, `rear`, `rear_oblique`, and `unknown` are ever emitted downstream.
+3. `_visible_midpoint` requires BOTH left and right landmarks above 0.35 visibility to
+   contribute to the body axis. One occluded shoulder -- or an incomplete ankle AND hip pair
+   -- silently reverts `body_axis_extent` to the vertical fallback instead of the true body
+   axis, with no NaN and no other signal raised. Measured: on a horizontal fixture with
+   landmark 12 (right shoulder) forced to visibility 0.1, the axis extent returned 0.070
+   instead of ~0.60 (8.6x low). This is not a regression -- the fallback is the pre-2026-07-25
+   behavior, correct for upright squats -- but it silently undoes the Task 3 fix exactly when
+   it is most likely to trigger: a sagittal (side) view is precisely the view where the
+   far-side shoulder/hip/ankle landmarks are most often occluded. See also the note on
+   `body_axis_extent` itself.
+4. When a clip carries no orientation evidence at all (`front_score == rear_score == 0.0`,
+   e.g. no finite `orientation_score` in any frame) but still clears the `valid_frame_ratio` /
+   `max(front, rear, side) >= 0.20` floor on torso-width evidence alone, `score_view`'s branch
+   ladder resolves it to `rear_oblique` rather than `unknown`: with `allow_front=False` (the
+   production default), the `front_score >= rear_score` branch is taken on the 0.0 == 0.0 tie
+   and unconditionally assigns `view_type = "rear_oblique"` without consulting `oblique_score`
+   or `OBLIQUE_THRESHOLD` for that choice. `confidence`, however, DOES consult `oblique_score`
+   in this branch (`confidence = max(front_score, side_score, oblique_score) * 0.70`), and it
+   can be the deciding term -- e.g. `torso_width_ratio=0.17, z_asymmetry=0.1` yields
+   `oblique_score=0.582 > side_score=0.570`, so `confidence=0.582*0.70=0.407` is set by
+   `oblique_score`, not `side_score`. Downstream in `src/pose/movements/squat.py`, `rear_oblique` sits inside
+   `rule_knees_inward`'s `observable_alignment` gate (the old `side` verdict did not), and that
+   gate carries no confidence floor -- so an evidence-free clip can score `knees_inward` at
+   confidence 1.000 / observability "high" instead of being excluded. This is a known,
+   measured defect, deliberately NOT fixed here: a confidence floor on that gate would change
+   squat rule output, and `tests/test_movement_registry.py` pins a byte-for-byte comparison
+   against the legacy oracle in `pose_rule_detector.py`, which would need the identical change
+   in lockstep or the gate test fails. Fixing it is a scoped follow-up, not a docs change.
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -153,17 +199,70 @@ def xy_distance(points: np.ndarray | None, left_index: int, right_index: int) ->
     return float(np.linalg.norm(left[:2] - right[:2]))
 
 
-def body_height(points: np.ndarray | None) -> float:
+def _visible_midpoint(
+    points: np.ndarray | None, left_index: int, right_index: int, min_visibility: float = 0.35
+) -> np.ndarray | None:
+    left = visible_point(points, left_index, min_visibility=min_visibility)
+    right = visible_point(points, right_index, min_visibility=min_visibility)
+    if left is None or right is None:
+        return None
+    return (left[:2] + right[:2]) / 2.0
+
+
+def body_axis_extent(points: np.ndarray | None) -> float:
+    """Extent of the visible body-landmark cloud measured ALONG the body's long axis.
+
+    The axis runs shoulder-midpoint -> ankle-midpoint, falling back to the hip
+    midpoint when ankles are not visible and finally to vertical. For an upright
+    subject the axis IS vertical, so this reduces exactly to the y-extent the
+    original implementation used -- verified as 0 verdict flips across the 45-file
+    corpus. For a horizontal subject (push-up, plank) the y-extent measures only the
+    body's thickness off the floor, which inflates torso_width_ratio and pushes a
+    true sagittal view out of the `side` band; measuring along the body's own axis
+    recovers its length instead.
+
+    Known limit (2026-07-25, NOT fixed here): `_visible_midpoint` requires BOTH the left
+    and right landmark of a pair above 0.35 visibility to contribute to the axis. One
+    occluded shoulder -- or an incomplete ankle AND hip pair -- silently reverts the axis
+    to the vertical fallback above instead of the true body axis, with no NaN and no other
+    signal raised. Measured: on a horizontal fixture with landmark 12 (right shoulder)
+    forced to visibility 0.1, this function returned 0.070 instead of ~0.60 (8.6x low).
+    This is most likely to trigger in exactly the sagittal (side) view this function was
+    changed to support, since that is the view where the far-side landmarks are most often
+    occluded. See the module docstring's "Orientation support" note, limit 3.
+    """
     if points is None:
         return np.nan
-    candidates: list[float] = []
+
+    coords: list[np.ndarray] = []
     for index in BODY_LANDMARKS:
         point = visible_point(points, index, min_visibility=0.35)
         if point is not None:
-            candidates.append(float(point[1]))
-    if len(candidates) < 4:
+            coords.append(point[:2])
+    if len(coords) < 4:
         return np.nan
-    return float(max(candidates) - min(candidates))
+
+    shoulder_mid = _visible_midpoint(points, LEFT_SHOULDER, RIGHT_SHOULDER)
+    far_mid = _visible_midpoint(points, LEFT_ANKLE, RIGHT_ANKLE)
+    if far_mid is None:
+        far_mid = _visible_midpoint(points, LEFT_HIP, RIGHT_HIP)
+
+    axis = np.asarray([0.0, 1.0], dtype=np.float64)
+    if shoulder_mid is not None and far_mid is not None:
+        vector = np.asarray(far_mid, dtype=np.float64) - np.asarray(shoulder_mid, dtype=np.float64)
+        norm = float(np.linalg.norm(vector))
+        if norm > 1e-8:
+            axis = vector / norm
+
+    projections = [float(np.dot(np.asarray(point, dtype=np.float64), axis)) for point in coords]
+    return float(max(projections) - min(projections))
+
+
+def body_height(points: np.ndarray | None) -> float:
+    """Backwards-compatible alias. Body "height" is now measured along the body's own
+    axis rather than the image's vertical, so the name is a slight misnomer kept for
+    existing callers; prefer `body_axis_extent` in new code."""
+    return body_axis_extent(points)
 
 
 def signed_orientation(points: np.ndarray | None, left_index: int, right_index: int) -> float:
@@ -296,7 +395,13 @@ def estimate_view_for_pose(
 
     orientation_score = mean_finite([signal["orientation_score"] for signal in valid_signals], default=0.0)
     face_visibility = mean_finite([signal["face_visibility"] for signal in valid_signals], default=0.0)
-    torso_width_ratio = mean_finite([signal["torso_width_ratio"] for signal in valid_signals], default=0.0)
+    # NaN, not 0.0: a 0.0 width ratio reads as "maximally narrow" in
+    # narrow_body_signal and manufactures a high-confidence `side` verdict from
+    # clips that carry no width evidence at all. score_view already treats a
+    # non-finite ratio as "no evidence" (both width signals fall to 0.0).
+    torso_width_ratio = mean_finite(
+        [signal["torso_width_ratio"] for signal in valid_signals], default=np.nan
+    )
     z_asymmetry_value = mean_finite([signal["z_asymmetry"] for signal in valid_signals], default=0.0)
 
     view_type, confidence, front_score, rear_score, side_score, oblique_score = score_view(

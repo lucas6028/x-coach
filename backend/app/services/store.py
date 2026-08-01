@@ -28,12 +28,15 @@ def _user_client(token: str) -> Any:
     return client
 
 
-def _summarize(result: dict[str, Any]) -> tuple[str | None, int, str | None]:
+def _summarize(result: dict[str, Any]) -> tuple[str | None, int, str | None, str | None]:
     """Promote the list-view columns out of the nested analysis document."""
     view_type = (result.get("view") or {}).get("view_type")
     fault_count = len(result.get("detections") or [])
     pipeline_version = result.get("pipeline_version")
-    return view_type, fault_count, pipeline_version
+    # Which detector produced this. Null for rows predating per-movement analysis; the frontend
+    # falls back to result["movement"], then to Squat, rather than guessing here.
+    movement = result.get("movement")
+    return view_type, fault_count, pipeline_version, movement
 
 
 def is_admin(*, token: str, user_id: str) -> bool:
@@ -156,7 +159,7 @@ def persist_analysis(
         on_conflict="user_id,video_id",
     ).execute()
 
-    view_type, fault_count, pipeline_version = _summarize(result)
+    view_type, fault_count, pipeline_version, movement = _summarize(result)
     resp = (
         client.table("analyses")
         .insert(
@@ -167,6 +170,7 @@ def persist_analysis(
                 "view_type": view_type,
                 "fault_count": fault_count,
                 "pipeline_version": pipeline_version,
+                "movement": movement,
                 "result": result,
             }
         )
@@ -184,7 +188,7 @@ def list_analyses(*, token: str, limit: int = 50, offset: int = 0) -> dict[str, 
     resp = (
         client.table("analyses")
         .select(
-            "id, video_id, source, view_type, fault_count, created_at",
+            "id, video_id, source, view_type, fault_count, movement, created_at",
             count="exact",
         )
         .order("created_at", desc=True)

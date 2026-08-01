@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { CaretDown, GearSix, SignOut } from "@phosphor-icons/react";
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useI18n } from "../lib/i18n";
 import { useAuth } from "../lib/auth";
 import { avatarUrl, displayName, initial } from "../lib/profile";
@@ -13,6 +13,8 @@ export default function AccountMenu() {
   const [open, setOpen] = useState(false);
   const [imgError, setImgError] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     if (!open) return;
@@ -77,7 +79,9 @@ export default function AccountMenu() {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              void signOut();
+              void signOut().then(() => {
+                navigate(location.pathname.startsWith("/admin") ? "/admin/login" : "/login");
+              });
             }}
             className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted transition-colors hover:bg-content/5 hover:text-content"
           >

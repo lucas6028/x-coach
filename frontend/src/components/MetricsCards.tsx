@@ -1,6 +1,7 @@
 import { motion, useReducedMotion } from "motion/react";
 import type { Analysis } from "../api";
 import { useI18n, viewLabel } from "../lib/i18n";
+import { wasMeasured } from "../lib/quality";
 
 interface Props {
   analysis: Analysis;
@@ -55,6 +56,12 @@ export default function MetricsCards({ analysis, portrait = false }: Props) {
   const visibility = (q.lower_body_visibility_mean ?? 0) * 100;
   const validRatio = (q.valid_frame_ratio ?? 0) * 100;
   const hasFaults = faults.length > 0;
+  // The detector returns an empty `detections` list for BOTH "no faults found" and "the clip was
+  // never measurable", so `faults.length` alone printed a green "Faults 0 / clean rep" card
+  // directly beside "Valid Frames 0%". `wasMeasured` is the SHARED criterion — CoachTray's
+  // clean-rep banner reads the same helper, and the two co-render on one screen, so they must not
+  // be able to disagree. See src/lib/quality.ts for the full rationale and the stated gap.
+  const measured = wasMeasured(q);
 
   return (
     <motion.div
@@ -76,9 +83,11 @@ export default function MetricsCards({ analysis, portrait = false }: Props) {
         sub={
           hasFaults
             ? t("metric.peakSeverity", { v: topSeverity.toFixed(2) })
-            : t("metric.cleanRep")
+            : measured
+              ? t("metric.cleanRep")
+              : t("metric.notMeasured")
         }
-        tone={hasFaults ? "danger" : "good"}
+        tone={hasFaults ? "danger" : measured ? "good" : "default"}
       />
       <Stat label={t("metric.lowerBodyVis")} value={`${visibility.toFixed(0)}%`} />
       <Stat

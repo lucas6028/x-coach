@@ -46,6 +46,20 @@ class ChatContext(BaseModel):
     """Compact grounding blob built by ``buildChatContext(analysis)`` on the client."""
 
     video_id: str | None = None
+    # Which detector produced this analysis. Optional so a client predating per-movement
+    # analysis still validates; _resolve_movement (chat_service) falls back to the pipeline
+    # default when absent.
+    #
+    # UNVALIDATED, BY DESIGN: this string is interpolated verbatim into the LLM system prompt,
+    # right beside the GROUNDING RULES block (see chat_service._system_preamble /
+    # _resolve_movement). That is acceptable, not an oversight -- every sibling field on this
+    # model (fault_name, evidence, causes, risks, corrections, rag_snippet) already interpolates
+    # unescaped into the same prompt, and ChatMessage.content (the user's own turns) reaches the
+    # same model with only a min_length=1 check, a strictly easier injection channel. Adding
+    # validation to this one field would not close that surface -- it would only misrepresent it
+    # as closed. The endpoint is auth-gated (get_current_user), so anything injected here is
+    # confined to the calling user's own conversation.
+    movement: str | None = None
     view_type: str | None = None
     view_confidence: float | None = None
     fault_count: int = 0

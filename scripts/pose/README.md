@@ -34,7 +34,44 @@ python scripts/pose/run_pose_rule_detection.py \
 python scripts/pose/run_pose_rule_detection.py \
   --pose-json data/Squat/Unlabeled_Dataset/processed_poses/25195_3.json \
   --output-json results/single_detection.json
+
+# Select the movement detector explicitly (default: Squat; also supports
+# "Overhead Press" and "Push-up").
+# (illustrative paths — no Overhead Press or Push-up dataset is checked in yet)
+python scripts/pose/run_pose_rule_detection.py \
+  --pose-json path/to/overhead_press_pose.json \
+  --output-json results/single_detection.json \
+  --movement "Overhead Press"
+
+python scripts/pose/run_pose_rule_detection.py \
+  --pose-json path/to/pushup_pose.json \
+  --output-json results/single_detection.json \
+  --movement "Push-up"
 ```
+
+`--movement "<Name>"` picks which registered detector (`src/pose/movements/registry.py`) processes
+the pose JSON; it defaults to `Squat`, and an unregistered name raises `KeyError` rather than
+silently falling back. Currently `Squat`, `Overhead Press` and `Push-up` are registered.
+
+`--max-reps N` limits how many repetitions are analyzed (default 3, sampled
+first/middle/last rather than the first N — fatigue breakdown shows up in the last
+rep). `--max-reps all` (or `0`) analyzes every repetition. Clips with no detectable
+repetition structure fall back to whole-clip analysis and report why in
+`reps.fallback`.
+
+**Only `Squat` is validated.** Overhead Press and Push-up thresholds are spec-derived and have
+never been checked against labeled data for their movement — the repo contains none (see
+`docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md` §8). Both are therefore
+**CLI-only**: the backend hardcodes `movement="Squat"` (`backend/app/config.py`
+`DEFAULT_ANALYSIS_MOVEMENT`) and the frontend lists only `Squat` in `ANALYZABLE_MOVEMENTS`, so
+neither reaches end users.
+
+Push-up specifics worth knowing before reading its output: 4 of its 5 registered rules can fire
+(`pushup_hip_sag`, `pushup_shallow_depth`, `pushup_head_drop`, `pushup_elbow_flare`) and
+`rule_scapular_winging` is registered but **permanently silent** — MediaPipe has no scapular
+landmarks, so the spec rates the fault unobservable. `pushup_compute_raw` also requires BOTH
+ankles, so a clip framed from the knees up invalidates every frame and silences *all* push-up
+rules at once.
 
 ## Evaluation And Analysis
 

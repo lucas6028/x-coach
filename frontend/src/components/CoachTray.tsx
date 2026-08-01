@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, CheckCircle, PaperPlaneTilt, SignIn } from "@phosphor-icons/react";
+import { ArrowRight, CheckCircle, PaperPlaneTilt, SignIn, Warning } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { api, ChatError, type Analysis, type ChatMessage } from "../api";
 import { buildChatContext } from "../lib/grounding";
 import { retrievalByFault } from "../lib/retrieval";
+import { wasMeasured } from "../lib/quality";
 import { getStoredModel } from "../lib/model";
 import { useAuth } from "../lib/auth";
-import { useI18n } from "../lib/i18n";
+import { movementLabel, useI18n } from "../lib/i18n";
 import FaultCard from "./FaultCard";
 import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
 import { LumenAvatar, LumenLoader } from "./LumenLoader";
@@ -40,6 +41,11 @@ export default function CoachTray({
 
   const byFault = useMemo(() => retrievalByFault(analysis.retrievals), [analysis]);
   const detections = analysis.detections;
+  // An empty `detections` list means BOTH "no faults found" and "no frame was ever measurable".
+  // Same SHARED criterion MetricsCards uses (src/lib/quality.ts) — the HUD and this banner
+  // co-render on one screen (App.tsx), so a second, independently-drifting definition would let
+  // them contradict each other, which is worse than the bug being fixed.
+  const measured = wasMeasured(analysis.quality);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -306,14 +312,29 @@ export default function CoachTray({
         className="scrollbar-thin flex-1 overflow-y-auto"
       >
         {detections.length === 0 ? (
-          // Clean rep — a compact, warm banner, with the KG card flush below it (same stack).
+          // No fault cards to show. WHICH banner depends on whether anything was measured: a warm
+          // green "clean rep" only when it was, and a neutral "could not be measured" note when it
+          // was not — congratulating someone on form nothing measured is a claim, not encouragement.
           <div className="space-y-4 p-4">
-            <div className="flex items-center gap-3 rounded-xl border border-secondary/20 bg-secondary/[0.06] p-4">
-              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-secondary/10">
-                <CheckCircle size={26} weight="fill" className="text-secondary" />
-              </span>
-              <p className="text-sm leading-relaxed text-content">{t("feedback.noFaults")}</p>
-            </div>
+            {measured ? (
+              <div className="flex items-center gap-3 rounded-xl border border-secondary/20 bg-secondary/[0.06] p-4">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-secondary/10">
+                  <CheckCircle size={26} weight="fill" className="text-secondary" />
+                </span>
+                <p className="text-sm leading-relaxed text-content">
+                  {t("feedback.noFaults", {
+                    movement: movementLabel(t, analysis.movement ?? "Squat"),
+                  })}
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 rounded-xl border border-border-dark bg-surface-dark p-4">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/5">
+                  <Warning size={26} weight="fill" className="text-faint" />
+                </span>
+                <p className="text-sm leading-relaxed text-content">{t("feedback.notMeasured")}</p>
+              </div>
+            )}
             <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
           </div>
         ) : (

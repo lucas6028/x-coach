@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 
 const { mockUseAuth, signOut } = vi.hoisted(() => ({
@@ -27,9 +27,24 @@ function renderMenu() {
   );
 }
 
+function renderMenuAt(initialPath: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <I18nProvider>
+        <Routes>
+          <Route path={initialPath} element={<AccountMenu />} />
+          <Route path="/login" element={<div>login page</div>} />
+          <Route path="/admin/login" element={<div>admin login page</div>} />
+        </Routes>
+      </I18nProvider>
+    </MemoryRouter>
+  );
+}
+
 describe("AccountMenu", () => {
   beforeEach(() => {
     signOut.mockReset();
+    signOut.mockResolvedValue(undefined);
     mockUseAuth.mockReset();
   });
 
@@ -78,5 +93,27 @@ describe("AccountMenu", () => {
     await user.click(screen.getByRole("menuitem", { name: /sign out/i }));
     expect(signOut).toHaveBeenCalledOnce();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("redirects to /login after signing out from a normal page", async () => {
+    const user = userEvent.setup();
+    withUser({ email: "ada@example.com", user_metadata: {} });
+    renderMenuAt("/history");
+
+    await user.click(screen.getByRole("button", { name: /account menu/i }));
+    await user.click(screen.getByRole("menuitem", { name: /sign out/i }));
+
+    expect(await screen.findByText("login page")).toBeInTheDocument();
+  });
+
+  it("redirects to /admin/login after signing out from an admin page", async () => {
+    const user = userEvent.setup();
+    withUser({ email: "ada@example.com", user_metadata: {} });
+    renderMenuAt("/admin");
+
+    await user.click(screen.getByRole("button", { name: /account menu/i }));
+    await user.click(screen.getByRole("menuitem", { name: /sign out/i }));
+
+    expect(await screen.findByText("admin login page")).toBeInTheDocument();
   });
 });

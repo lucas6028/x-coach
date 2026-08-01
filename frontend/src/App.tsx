@@ -7,7 +7,10 @@ import CoachTray from "./components/CoachTray";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
+import { extractPoseFromBlob } from "./lib/poseExtract";
+import type { PoseTier } from "./lib/poseTier";
 import { useI18n } from "./lib/i18n";
+import type { AnalyzableMovement } from "./lib/movements";
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -55,13 +58,71 @@ export default function App() {
     }
   }, [t]);
 
-  const runUpload = useCallback(async (file: File) => {
+  const [movements, setMovements] = useState<AnalyzableMovement[]>([
+    { name: "Squat", validated: true },
+  ]);
+  // Tracked separately from the list itself: the seed value is a FALLBACK, not an answer, and
+  // treating it as one would flash "Push-up cannot be analysed yet" on every slow load before
+  // the real list arrives.
+  const [movementsLoaded, setMovementsLoaded] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getMovements()
+      .then((ms) => {
+        if (!cancelled && ms.length) setMovements(ms);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setMovementsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The movement is user-asserted input, taken from the URL when the studio is entered from the
+  // /movements menu. Validate it against the fetched list BEFORE enabling the dropzone: the
+  // backend would 400 anyway, but only after the user picked and uploaded a file.
+  const requestedMovement = searchParams.get("movement");
+  const [movement, setMovement] = useState<string>(requestedMovement || "Squat");
+  useEffect(() => {
+    if (requestedMovement) setMovement(requestedMovement);
+  }, [requestedMovement]);
+
+  // Resolve to the catalog's OWN spelling, matched the way the BACKEND matches it: the movement
+  // registry lowercases its lookup key (registry.get_detector) and `_validated_movement` returns
+  // the registry's canonical name, so `?movement=push-up` is a request the API accepts and
+  // canonicalizes to "Push-up". Comparing exactly here locked the user out of a movement the
+  // server would have analyzed fine.
+  //
+  // Canonicalizing rather than just loosening the comparison, because the canonical spelling is
+  // load-bearing in three more places: it is the <select> option value, the `movement.<Name>`
+  // i18n key, and the key the Beta badge looks up. A case-insensitive `known` alone would clear
+  // the error but still show a phantom duplicate option and drop the Beta tag.
+  const resolved = movements.find(
+    (m) => m.name.toLowerCase() === movement.trim().toLowerCase()
+  );
+  const known = resolved !== undefined;
+  const canonicalMovement = resolved?.name ?? movement;
+  // Only an ANSWERED "not analyzable" is an error. While the list is in flight we know nothing,
+  // and "we don't know yet" must not render as "no". The message quotes what the USER asked for,
+  // not a canonical name we could not resolve.
+  const movementError =
+    !movementsLoaded || known ? "" : t("studio.movementUnavailable", { movement });
+
+  // Client-side capture path: extraction happens in-browser (extractPoseFromBlob), then the pose
+  // JSON + original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
+  const runPoseAnalysis = useCallback(async (blob: Blob, tier: PoseTier) => {
     setLoading(true);
     setError("");
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
     try {
-      const data = await api.analyzeUpload(file);
+      const pose = await extractPoseFromBlob(blob, tier);
+      // The user's selected movement, not a hardcoded "Squat". `analyzePose` has taken a movement
+      // since the client-capture path landed; this is the caller that finally supplies a real one.
+      const data = await api.analyzePose(canonicalMovement, pose, blob);
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;
@@ -77,7 +138,7 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t, setSearchParams]);
+  }, [t, setSearchParams, canonicalMovement]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -133,16 +194,23 @@ export default function App() {
     <AppLayout
       analysis={analysis}
       loading={loading}
+      movement={canonicalMovement}
       onOpenLibrary={() => setPickerOpen(true)}
       onNewAnalysis={newAnalysis}
     >
       {!hasResult ? (
         <DemoIntro
-          onFile={runUpload}
+          onBlob={runPoseAnalysis}
+          onError={setError}
           onOpenLibrary={() => setPickerOpen(true)}
           loading={loading}
           statusMsg={statusMsg}
           error={error}
+          movements={movements}
+          movement={canonicalMovement}
+          onMovementChange={setMovement}
+          movementError={movementError}
+          movementsLoaded={movementsLoaded}
         />
       ) : (
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden scrollbar-thin">

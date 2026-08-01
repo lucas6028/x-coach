@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
 import MetricsCards from "../components/MetricsCards";
 import { renderWithProviders } from "./renderWithProviders";
-import { mockAnalysis, mockCleanAnalysis } from "./fixtures";
+import { mockAnalysis, mockCleanAnalysis, mockUnmeasuredAnalysis } from "./fixtures";
 
 describe("MetricsCards", () => {
   it("renders all four metric labels", () => {
@@ -31,6 +31,31 @@ describe("MetricsCards", () => {
   it("shows 'clean rep' when there are no faults", () => {
     renderWithProviders(<MetricsCards analysis={mockCleanAnalysis} />);
     expect(screen.getByText("clean rep")).toBeInTheDocument();
+  });
+
+  it("keeps the clean-rep card green when the clip was actually measured", () => {
+    renderWithProviders(<MetricsCards analysis={mockCleanAnalysis} />);
+    // `text-secondary` is the "good" tone; the assertion is here so the unmeasured case below
+    // is shown to differ in TONE and not only in wording.
+    expect(screen.getByText("0")).toHaveClass("text-secondary");
+  });
+
+  // An empty `detections` list means BOTH "no faults found" and "never measured" — the detector
+  // returns the same empty list either way. Before this gate, a clip whose pose extraction
+  // produced zero valid frames rendered a green "Faults 0 / clean rep" card right beside
+  // "Valid Frames 0%": a clean bill of health for a clip nothing was measured on.
+  it("says 'not measured' instead of 'clean rep' when no frame was valid", () => {
+    renderWithProviders(<MetricsCards analysis={mockUnmeasuredAnalysis} />);
+    expect(screen.getByText("not measured")).toBeInTheDocument();
+    expect(screen.queryByText("clean rep")).not.toBeInTheDocument();
+    expect(screen.getByText("0%")).toBeInTheDocument();
+  });
+
+  it("drops the good tone when no frame was valid", () => {
+    renderWithProviders(<MetricsCards analysis={mockUnmeasuredAnalysis} />);
+    const faultCount = screen.getByText("0");
+    expect(faultCount).not.toHaveClass("text-secondary");
+    expect(faultCount).toHaveClass("text-white");
   });
 
   it("shows peak severity when faults exist", () => {

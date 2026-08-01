@@ -1,6 +1,8 @@
 // Typed client for the x-coach FastAPI backend. URLs are relative; Vite proxies /api -> :8000.
 
 import { supabase } from "./lib/supabase";
+import type { AnalyzableMovement } from "./lib/movements";
+import type { PoseJson } from "./lib/poseExtract";
 
 export interface VideoMeta {
   fps: number;
@@ -97,6 +99,9 @@ export interface Analysis {
   // Present when an authenticated upload was persisted to the user's history (null if the
   // save failed). Absent for anonymous uploads and library clips.
   analysis_id?: string | null;
+  /** Which detector produced this analysis. Absent on analyses predating per-movement
+   *  selection; consumers fall back to "Squat". */
+  movement?: string;
 }
 
 // A row in the user's history list (the promoted columns, no heavy result payload).
@@ -107,6 +112,7 @@ export interface HistoryItem {
   view_type: string | null;
   fault_count: number;
   created_at: string;
+  movement?: string | null;
 }
 export interface HistoryPage {
   total: number;
@@ -153,6 +159,7 @@ export interface ChatContext {
   fault_count: number;
   quality: Record<string, number>;
   faults: ChatFaultContext[];
+  movement?: string;
 }
 
 // Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
@@ -472,6 +479,11 @@ export const api = {
     return (await res.json()) as { ok: boolean };
   },
 
+  // The movements the pipeline can actually analyse, derived server-side from the detector
+  // registry. Backs the /movements cards and the studio selector.
+  getMovements: () =>
+    getJSON<{ movements: AnalyzableMovement[] }>("/api/movements").then((r) => r.movements),
+
   listVideos: (limit = 50, offset = 0, fault?: string) =>
     getJSON<LibraryPage>(
       `/api/videos?limit=${limit}&offset=${offset}` + (fault ? `&fault=${fault}` : "")
@@ -593,10 +605,31 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   },
 
-  async analyzeUpload(file: File): Promise<Analysis> {
+  async analyzeUpload(file: File, movement: string): Promise<Analysis> {
     const form = new FormData();
     form.append("file", file);
+    // Which detector runs. The backend rejects an unregistered value with 400 before it spends
+    // a MediaPipe pass, and echoes the canonical spelling back as `movement` on the result.
+    form.append("movement", movement);
     const res = await fetch("/api/analyze", {
+      method: "POST",
+      body: form,
+      headers: await authHeader(),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
+    }
+    return (await res.json()) as Analysis;
+  },
+
+  async analyzePose(movement: string, pose: PoseJson, video: Blob): Promise<Analysis> {
+    const form = new FormData();
+    form.append("movement", movement);
+    form.append("pose", JSON.stringify(pose));
+    const ext = video.type.includes("mp4") ? "mp4" : "webm";
+    form.append("file", video, `capture.${ext}`);
+    const res = await fetch("/api/analyze/pose", {
       method: "POST",
       body: form,
       headers: await authHeader(),
