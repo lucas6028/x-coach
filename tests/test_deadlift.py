@@ -4,9 +4,11 @@ import numpy as np
 
 from src.pose.movements.base import CoreFrame, RuleContext
 from src.pose.movements.deadlift import (
+    DEADLIFT_LOCKOUT_MILD_DEG,
     DEADLIFT_METRIC_KEYS,
     deadlift_assign_phases,
     deadlift_compute_raw,
+    rule_incomplete_lockout,
     rule_lumbar_flexion,
     setup_baseline,
 )
@@ -61,6 +63,25 @@ def _varying_window(
             metrics=dict(metrics),
         )
         for i, metrics in enumerate(active_metrics)
+    ]
+
+
+def _varying_frames(metrics_list: list[dict], phase: str = "lockout") -> list[CoreFrame]:
+    """A window of `len(metrics_list)` frames, each carrying a DIFFERENT metrics dict.
+
+    Same motivation as `_varying_window`, but without a `setup` prefix: `rule_incomplete_lockout`
+    has no setup-baseline dependency, so this is the minimal per-frame-varying builder for it.
+    """
+    return [
+        CoreFrame(
+            frame_index=i,
+            time=i / 30.0,
+            phase=phase,
+            valid=True,
+            lower_body_visibility=0.9,
+            metrics=dict(metrics),
+        )
+        for i, metrics in enumerate(metrics_list)
     ]
 
 
@@ -271,3 +292,119 @@ class LumbarFlexionTests(unittest.TestCase):
         self.assertEqual(detection.peak_frame, 10)
         # A `nanmax` mutation for `worst` would report 0.92 instead of 0.80 here.
         self.assertAlmostEqual(detection.evidence["min_torso_length_ratio"], 0.80, places=4)
+
+
+class IncompleteLockoutTests(unittest.TestCase):
+    LOCKED = {"hip_angle_deg": 178.0, "knee_angle_deg": 176.0}
+
+    def test_a_locked_out_rep_is_silent(self):
+        self.assertEqual(rule_incomplete_lockout(_frames(self.LOCKED), _ctx()), [])
+
+    def test_a_soft_hip_fires(self):
+        out = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 150.0, "knee_angle_deg": 176.0}), _ctx()
+        )
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].fault_id, "deadlift_incomplete_lockout")
+        self.assertEqual(out[0].evidence["driver"], "hip")
+        self.assertAlmostEqual(
+            out[0].evidence["threshold"], DEADLIFT_LOCKOUT_MILD_DEG, places=4
+        )
+
+    def test_a_soft_knee_fires(self):
+        out = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 178.0, "knee_angle_deg": 150.0}), _ctx()
+        )
+        self.assertEqual(len(out), 1)
+
+    def test_a_hip_only_failure_still_scores_the_hip_ramp(self):
+        """The OHP mis-attribution regression: selecting the ramp by which reading is finite
+        scored the wrong axis when a segment fired on one criterion alone."""
+        soft = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 145.0, "knee_angle_deg": 178.0}), _ctx()
+        )[0]
+        softer = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 141.0, "knee_angle_deg": 178.0}), _ctx()
+        )[0]
+        self.assertGreater(softer.severity, soft.severity)
+
+    def test_the_worse_of_the_two_axes_drives_severity(self):
+        both = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 160.0, "knee_angle_deg": 141.0}), _ctx()
+        )[0]
+        knee_only = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 178.0, "knee_angle_deg": 141.0}), _ctx()
+        )[0]
+        self.assertAlmostEqual(both.severity, knee_only.severity, places=4)
+        # Knee (141) is worse than hip (160) here, so the reported driver/primary_value must
+        # name the knee, not the hip. Swapping the "hip"/"knee" branches in the rule's driver
+        # ternary would flip this without changing `severity`, so the assertion above alone
+        # cannot catch a mis-attribution -- this one can.
+        self.assertEqual(both.evidence["driver"], "knee")
+        self.assertAlmostEqual(both.evidence["primary_value"], 141.0, places=4)
+
+    def test_severity_saturates_at_the_severe_endpoint(self):
+        out = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": 100.0, "knee_angle_deg": 178.0}), _ctx()
+        )[0]
+        self.assertAlmostEqual(out.severity, 1.0, places=4)
+
+    def test_only_the_lockout_phase_is_scored(self):
+        soft = {"hip_angle_deg": 120.0, "knee_angle_deg": 120.0}
+        for phase in ("setup", "lift_off", "mid_pull", "lowering", "rest"):
+            self.assertEqual(
+                rule_incomplete_lockout(_frames(soft, phase=phase), _ctx()), [],
+                msg=f"{phase} must not be scored",
+            )
+
+    def test_nan_metrics_are_silent_rather_than_firing(self):
+        out = rule_incomplete_lockout(
+            _frames({"hip_angle_deg": np.nan, "knee_angle_deg": np.nan}), _ctx()
+        )
+        self.assertEqual(out, [])
+
+    def test_an_off_view_reading_is_discounted_but_not_suppressed(self):
+        soft = {"hip_angle_deg": 150.0, "knee_angle_deg": 178.0}
+        on = rule_incomplete_lockout(_frames(soft), _ctx(view="side"))[0]
+        off = rule_incomplete_lockout(_frames(soft), _ctx(view="rear"))[0]
+        self.assertEqual(on.observability, "high")
+        self.assertEqual(off.observability, "medium")
+        self.assertLess(off.confidence, on.confidence)
+        # Pin the discount to the named constant, not just "some" reduction: full confidence
+        # in-view, exactly the `_OFF_VIEW_CONFIDENCE` (0.65) scale off-view.
+        self.assertAlmostEqual(on.confidence, on.severity, places=4)
+        self.assertAlmostEqual(off.confidence, off.severity * 0.65, places=4)
+
+    def test_a_run_shorter_than_min_frames_is_not_a_detection(self):
+        soft = {"hip_angle_deg": 150.0, "knee_angle_deg": 178.0}
+        self.assertEqual(rule_incomplete_lockout(_frames(soft, count=3), _ctx()), [])
+
+    def test_peak_and_start_frame_pin_the_worst_frame_not_index_zero(self):
+        """Regression tripwire, same shape as lumbar flexion's: `_frames` builds IDENTICAL
+        frames, so every candidate ties for "worst" and `np.nanargmax` (`build_detection`,
+        driven by `score_values`) returns index 0 regardless of a broken `score_values` sign,
+        and `worst_hip`/`severity` are indistinguishable between `nanmin`/`nanmax` or
+        `max`/`min`. This window varies `hip_angle_deg` frame-to-frame so those mutations each
+        produce a wrong, checkable answer.
+
+        Hip angles 158, 152, 143, 150, 155, 157 -- all below the 165 deg mild threshold (so the
+        whole 6-frame run, exactly `min_frames`, stays flagged), with a genuine minimum (worst
+        extension) at position 2. Knee angle is held at 178 (unflagged) throughout so the hip
+        ramp alone drives the result.
+        """
+        hip_angles = [158.0, 152.0, 143.0, 150.0, 155.0, 157.0]
+        window = _varying_frames(
+            [{"hip_angle_deg": h, "knee_angle_deg": 178.0} for h in hip_angles]
+        )
+        out = rule_incomplete_lockout(window, _ctx())
+        self.assertEqual(len(out), 1)
+        detection = out[0]
+        # The first flagged frame is frame_index 0 -- pins the slice arithmetic.
+        self.assertEqual(detection.start_frame, 0)
+        # The worst (smallest hip angle) frame is index 2.
+        self.assertEqual(detection.peak_frame, 2)
+        # A `nanmax` mutation for `worst_hip` would report 158.0 instead of 143.0 here.
+        self.assertAlmostEqual(detection.evidence["min_hip_angle_deg"], 143.0, places=4)
+        # Severity is the WORST frame's score (index 2: (165-143)/(165-140) = 0.88), not the
+        # best one. A `severity = min(scores)` mutation would report 0.28 (index 0) instead.
+        self.assertAlmostEqual(detection.severity, 0.88, places=4)
