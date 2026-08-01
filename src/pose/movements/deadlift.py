@@ -41,8 +41,22 @@ from src.pose.geometry import (
     LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, midpoint, mean_visibility,
-    line_angle_from_vertical,
+    line_angle_from_vertical, contiguous_true_segments, severity_from_range,
 )
+from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.pose_rule_detector import (
+    SIDE_VIEW_CONF_THRESHOLD,
+    VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
+    PoseRuleDetection,
+    build_detection,
+)
+
+_OFF_VIEW_CONFIDENCE = VIEW_UNAVAILABLE_CONFIDENCE_SCALE
+
+# Views in which a sagittal angle reads at full confidence. Per parent spec section 7 item 2,
+# `front_oblique` is unreachable in the production path (`allow_front=False`), so in practice
+# this is `side`; it is listed because the spec names it and a test can reach it.
+SAGITTAL_VIEWS = {"side", "front_oblique"}
 
 LOWER_BODY_LANDMARKS = (
     LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
@@ -203,3 +217,134 @@ def deadlift_assign_phases(raw: list[dict]) -> list[str]:
         else:
             phases.append("lift_off")
     return phases
+
+
+def setup_baseline(core: list[CoreFrame], key: str) -> float:
+    """Median of `key` over the window's `setup` frames; NaN when there are none.
+
+    A per-rep baseline cannot live in `deadlift_compute_raw`, which `run_detector` calls over
+    the WHOLE CLIP before any rep boundary exists. It belongs here, where the window IS one
+    rep -- the same split lunge uses for lead-side resolution and squat uses for its heel
+    baseline. Median rather than mean so one mis-tracked setup frame cannot move it.
+    """
+    values = [
+        frame.m(key) for frame in core if frame.valid and frame.phase == "setup"
+    ]
+    finite = [v for v in values if np.isfinite(v)]
+    return float(np.median(finite)) if finite else float(np.nan)
+
+
+# The ONLY Deadlift rule whose kg_query resolves. Verified through the production path:
+# `retrieve_graph_context("Lumbar Flexion", movement="Deadlift")` returns the seed
+# `Deadlift:Lumbar Flexion` with a NON-EMPTY bucket -- `INCREASES_RISK_OF -> Lumbar Spine
+# Injury`, `CORRECTED_BY -> Maintain Neutral Spine`, `HAS_FAULT <- Deadlift`. Checking
+# resolution alone was not enough: OHP shipped queries that resolved but returned nothing.
+DEADLIFT_LUMBAR_KG_QUERY = "Lumbar Flexion"
+
+# ---------------------------------------------------------------------------------------
+# THESE THREE NUMBERS ARE UNSOURCED. The suffix is not decoration.
+# ---------------------------------------------------------------------------------------
+# No source anywhere gives a segment-shortening-to-lumbar-flexion figure. 0.95 says "5%
+# shortening", chosen to sit above frame-to-frame landmark jitter WITHOUT ANY MEASUREMENT OF
+# WHAT THAT JITTER IS; 0.85 is a doubling of it; 0.10 of a torso length is a loose "the hips
+# have not really moved yet" band. The fault itself IS cited (see citation_support) -- what
+# is unsupported is the detection, which is why this rule emits at observability `low` with
+# the off-view discount and `run_detector` sorts it last. Calibrating the gate against a
+# measured landmark-jitter floor is the known upgrade path; see the design spec section 4.3.
+DEADLIFT_TORSO_SHORTENING_MILD_UNSOURCED = 0.95
+DEADLIFT_TORSO_SHORTENING_SEVERE_UNSOURCED = 0.85
+DEADLIFT_HIP_STATIONARY_BAND_UNSOURCED = 0.10
+
+
+def rule_lumbar_flexion(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Lower back rounds under load -- PROXY ONLY, and the weakest rule in this module.
+
+    MediaPipe has no lumbar landmarks, so true rounded-vs-neutral spine is not recoverable;
+    the parent spec rates this `low` observability and says "Do NOT assert precision here".
+    The proxy: in a sagittal view a rigid hip hinge holds the PROJECTED shoulder-to-hip length
+    constant, because the trunk rotates within the image plane. Shortening against the rep's
+    own setup baseline, while the hips are not themselves travelling, is consistent with the
+    trunk curling.
+
+    HARD VIEW GATE, unlike this module's other two rules. Off-view, trunk pitch alone shortens
+    the projected segment, so the proxy produces FALSE POSITIVES rather than silence. Where the
+    off-view failure mode is a wrong claim rather than a missed one, the OHP precedent
+    (`ohp_forward_head`) gates instead of discounting. The `SIDE_VIEW_CONF_THRESHOLD` floor
+    follows squat's `rule_knees_forward` and OHP -- no new number.
+    """
+    if ctx.view_type not in SAGITTAL_VIEWS or ctx.view_confidence < SIDE_VIEW_CONF_THRESHOLD:
+        return []
+
+    torso_0 = setup_baseline(core, "torso_len")
+    hip_0 = setup_baseline(core, "hip_y")
+    if not np.isfinite(torso_0) or not np.isfinite(hip_0) or torso_0 < _DEGENERATE_LENGTH:
+        return []
+
+    def _ratio(frame: CoreFrame) -> float:
+        value = frame.m("torso_len")
+        return value / torso_0 if np.isfinite(value) else float(np.nan)
+
+    def _hips_still(frame: CoreFrame) -> bool:
+        value = frame.m("hip_y")
+        if not np.isfinite(value):
+            return False
+        return abs(value - hip_0) / torso_0 < DEADLIFT_HIP_STATIONARY_BAND_UNSOURCED
+
+    mask = [
+        frame.valid
+        and frame.phase in DEADLIFT_ACTIVE_PHASES
+        and np.isfinite(_ratio(frame))
+        and _ratio(frame) < DEADLIFT_TORSO_SHORTENING_MILD_UNSOURCED
+        and _hips_still(frame)
+        for frame in core
+    ]
+
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        ratios = [_ratio(frame) for frame in segment]
+        worst = float(np.nanmin(ratios))
+        severity = severity_from_range(
+            worst,
+            DEADLIFT_TORSO_SHORTENING_MILD_UNSOURCED,
+            DEADLIFT_TORSO_SHORTENING_SEVERE_UNSOURCED,
+            lower_is_worse=True,
+        )
+        detections.append(
+            build_detection(
+                fault_id="deadlift_lumbar_flexion",
+                fault_name="Rounded Lower Back / Lumbar Flexion",
+                kg_query=DEADLIFT_LUMBAR_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                # Severity rises as the ratio FALLS, so the peak frame is the smallest ratio;
+                # negate so build_detection's argmax finds it.
+                score_values=[-r for r in ratios],
+                severity=severity,
+                # ALWAYS discounted: this is a proxy, not a measurement, even in its own view.
+                confidence=severity * _OFF_VIEW_CONFIDENCE,
+                observability="low",
+                evidence={
+                    "min_torso_length_ratio": round(worst, 4),
+                    "setup_torso_length": round(torso_0, 4),
+                    "threshold": DEADLIFT_TORSO_SHORTENING_MILD_UNSOURCED,
+                    "proxy": "projected torso shortening; MediaPipe has no lumbar landmarks",
+                    "primary_label": "torso length vs setup",
+                    "primary_value": round(worst, 4),
+                    "primary_threshold": DEADLIFT_TORSO_SHORTENING_MILD_UNSOURCED,
+                },
+                citation="Moreira VM, et al. \"Analysis of Muscle Strength and Electromyographic "
+                         "Activity during Different Deadlift Positions.\" Muscles (2023). "
+                         "PMC12225233.",
+                citation_support="PMC12225233: \"The lift-off position in DL, using the "
+                                 "powerlift posture, generates greater lumbar spine shear "
+                                 "force,\" and erector-spinae activation peaks at "
+                                 "lift-off/mid-pull because \"ERE requires higher activation "
+                                 "and higher strength to avoid trunk flexion, reducing shear.\" "
+                                 "Verified in RAG doc. NOTE what this does and does not "
+                                 "support: the FAULT is cited, loaded and mechanistically "
+                                 "understood; the source says nothing about detecting it from "
+                                 "pose, and the detection threshold here is unsourced.",
+            )
+        )
+    return detections
