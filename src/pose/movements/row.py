@@ -524,6 +524,30 @@ PULL_DEPTH_SEVERE = 0.30
 PEAK_ELBOW_SEVERE_DEG = 140.0
 
 
+def _unclipped(value: float, mild: float, severe: float) -> float:
+    """`severity_from_range`'s ramp WITHOUT the clip to [0, 1]. Mirrors `pushup._unclipped`
+    verbatim (not imported -- movement modules do not import private helpers from one another;
+    see `registry.py`, whose only cross-module import is the public `register` call). 0.0 at the
+    fire threshold, 1.0 at the ramp's severe end, and free to exceed 1.0 beyond it, so a
+    per-frame RANKING series stays monotonic past saturation instead of every past-severe frame
+    tying at the same clipped 1.0. NaN in, NaN out."""
+    if not np.isfinite(value):
+        return float(np.nan)
+    span = severe - mild
+    if not np.isfinite(span) or span == 0.0:
+        return float(np.nan)
+    return (value - mild) / span
+
+
+def _worst_axis(*values: float) -> float:
+    """Largest of the given per-axis scores, ignoring NaN; NaN only if every axis is NaN. Mirrors
+    `pushup._worst_axis` verbatim, for the same reason `_unclipped` above does. Plain `max` would
+    propagate a NaN from an axis that merely happens to be unmeasurable on this frame, which would
+    hand `nanargmax` a hole exactly where one cue is occluded."""
+    finite = [value for value in values if np.isfinite(value)]
+    return max(finite) if finite else float(np.nan)
+
+
 def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Flag a pull that stops short -- the hands never reach the torso, or the elbows never bend.
 
@@ -531,14 +555,39 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
     ramps are RULE-LEVEL (see the constants above).
 
     TWO OR'd CONDITIONS, ONE FAULT, per the spec's own (a)/(b) structure. A frame qualifies if
-    either holds; the segment's severity is the WORSE of the two sub-severities, and
-    `evidence["fired_on"]` records which one(s) drove it, because the coaching cue differs
-    ("pull the bar all the way to the abdomen" vs "finish the elbow bend").
+    either holds; the segment's severity is the WORSE of the two sub-severities (`max`, computed
+    once per segment from each axis's own worst frame -- monotonic in `severity_from_range`, so
+    this is exactly the same number as taking a per-frame max and then the max over frames), and
+    `evidence["fired_on"]` records which one(s) crossed their fire threshold, because the
+    coaching cue differs ("pull the bar all the way to the abdomen" vs "finish the elbow bend").
 
-    `score_values` is the per-frame MAXIMUM of the two sub-severities rather than either raw
-    metric, so `build_detection` nominates the frame that was worst OVERALL. Passing one raw
-    series would let a frame that was fine on that metric but terrible on the other be named
-    the peak.
+    THE DISPLAY AXIS (`evidence["primary_*"]`) IS WHICHEVER ONE DROVE THE SEVERITY -- decided by
+    comparing `distance_severity` against `elbow_severity` DIRECTLY, never by branching on the
+    categorical `fired_on` string. `fired_on == "both"` says nothing about MAGNITUDE, and an
+    earlier version of this rule branched on `fired_on != "elbow_angle"` -- which is true for
+    both `"pull_distance"` and `"both"` -- so a `"both"` segment where the elbow axis was
+    strictly worse still reported the distance axis as primary. Reproduced concretely: distance
+    0.21 (severity 0.5) with elbow 130 (severity 0.75) reported `primary_label="wrist-to-hip
+    distance at peak"`, `primary_value=0.21`, even though the elbow axis was the one that made
+    the rep worse. Fixed by comparing severities directly, following `pushup.rule_head_drop`'s
+    `if neck_severity >= nose_severity` idiom (squat's `rule_shallow_depth` display-axis
+    convention, inherited from there). On an exact tie the distance axis wins (`>=`), an
+    arbitrary but fixed choice, matching `rule_head_drop`'s own tie-break direction for its first
+    axis.
+
+    `score_values` IS UNCLIPPED, via `_unclipped` / `_worst_axis` above (adopted verbatim from
+    `pushup.rule_head_drop`, which hit the identical trap first). `severity_from_range` clips to
+    [0, 1], so in a segment that saturates BOTH sub-severities to 1.0 on more than one frame,
+    `build_detection`'s `nanargmax` over a clipped series would nominate the FIRST such frame as
+    `peak_frame`, not the worst one -- `rule_head_drop`'s own docstring has the measured example
+    (deviations [16, 40, 36, 60, 17, 16, 16] nominating the 40-degree frame over the 60-degree
+    one). The two axes here are in different units (a distance and an angle) and are made
+    comparable the same way `rule_head_drop`'s are: each is put on a COMMON 0-1 SCALE by its own
+    ramp first (`_unclipped` is exactly `severity_from_range`'s formula without the clip), and
+    only THEN compared via `_worst_axis` -- no separate cross-axis calibration is introduced or
+    needed. The reported SEVERITY still goes through the clipped `severity_from_range` and is
+    unaffected; only `score_values` (which feeds `peak_frame` / `evidence["peak_time"]`) uses the
+    unclipped form.
 
     IT READS `max_elbow_angle`, THE LESS-FLEXED ARM, AND THAT IS A RULE-LEVEL READING OF AN
     UNDER-SPECIFIED SPEC LINE. The spec's condition (b) names no side. Taking the less-flexed
@@ -556,54 +605,59 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
 
     PHASE SCOPE `peak`, from the spec ("at the top"), and the same downgrade-not-gate view
     handling `rule_torso_rising` documents.
-
-    KNOWN LIMITATION, NOT CORRECTED HERE: `score_values` are CLIPPED severities (`clip01`
-    inside `severity_from_range`), so in a segment that saturates both sub-severities to 1.0
-    on more than one frame, `build_detection`'s `nanargmax` nominates the FIRST such frame as
-    `peak_frame`, not the worst one. `pushup.rule_head_drop` hit exactly this and fixed it with
-    an unclipped ranking series (`_unclipped`, its docstring has the measured example). Not
-    adopted here because this rule's two axes are in different units (a distance and an angle)
-    and are only comparable at all once put on the SAME 0-1 scale by their own ramps -- an
-    unclipped `_worst_axis` would need its own cross-axis calibration this task does not
-    introduce. The blast radius is narrow: severity, confidence, evidence and `fired_on` are
-    all computed independently of this ordering and are unaffected; only which frame's
-    timestamp gets reported as `peak_frame` inside an already-saturated segment can be
-    suboptimal.
     """
     observable = ctx.view_type in TRUNK_OBSERVABLE_VIEWS
 
-    def _sub_severities(frame: CoreFrame) -> tuple[float, float]:
-        distance_value = frame.m("mean_wrist_hip_dist")
-        elbow_value = frame.m("max_elbow_angle")
-        distance_severity = (
-            severity_from_range(distance_value, PULL_DEPTH_MILD, PULL_DEPTH_SEVERE, lower_is_worse=False)
-            if np.isfinite(distance_value) and distance_value > PULL_DEPTH_MILD
-            else 0.0
-        )
-        elbow_severity = (
-            severity_from_range(elbow_value, PEAK_ELBOW_MILD_DEG, PEAK_ELBOW_SEVERE_DEG, lower_is_worse=False)
-            if np.isfinite(elbow_value) and elbow_value > PEAK_ELBOW_MILD_DEG
-            else 0.0
-        )
-        return distance_severity, elbow_severity
+    def _distance_fires(frame: CoreFrame) -> bool:
+        value = frame.m("mean_wrist_hip_dist")
+        return np.isfinite(value) and value > PULL_DEPTH_MILD
+
+    def _elbow_fires(frame: CoreFrame) -> bool:
+        value = frame.m("max_elbow_angle")
+        return np.isfinite(value) and value > PEAK_ELBOW_MILD_DEG
 
     mask = [
-        frame.valid and frame.phase == "peak" and max(_sub_severities(frame)) > 0.0
+        frame.valid and frame.phase == "peak" and (_distance_fires(frame) or _elbow_fires(frame))
         for frame in core
     ]
     detections: list[PoseRuleDetection] = []
     for start, end in contiguous_true_segments(mask, ctx.min_frames):
         segment = core[start : end + 1]
-        pairs = [_sub_severities(frame) for frame in segment]
-        scores = [max(pair) for pair in pairs]
-        severity = float(np.nanmax(scores))
-        distance_fired = any(pair[0] > 0.0 for pair in pairs)
-        elbow_fired = any(pair[1] > 0.0 for pair in pairs)
-        fired_on = (
-            "both" if distance_fired and elbow_fired else "pull_distance" if distance_fired else "elbow_angle"
+        distance_values = [frame.m("mean_wrist_hip_dist") for frame in segment]
+        elbow_values = [frame.m("max_elbow_angle") for frame in segment]
+        max_distance = float(np.nanmax(distance_values))
+        max_elbow = float(np.nanmax(elbow_values))
+        distance_severity = severity_from_range(
+            max_distance, PULL_DEPTH_MILD, PULL_DEPTH_SEVERE, lower_is_worse=False
         )
-        max_distance = float(np.nanmax([frame.m("mean_wrist_hip_dist") for frame in segment]))
-        max_elbow = float(np.nanmax([frame.m("max_elbow_angle") for frame in segment]))
+        elbow_severity = severity_from_range(
+            max_elbow, PEAK_ELBOW_MILD_DEG, PEAK_ELBOW_SEVERE_DEG, lower_is_worse=False
+        )
+        severity = max(distance_severity, elbow_severity)
+
+        distance_fired = any(_distance_fires(frame) for frame in segment)
+        elbow_fired = any(_elbow_fires(frame) for frame in segment)
+        fired_on = "both" if distance_fired and elbow_fired else "pull_distance" if distance_fired else "elbow_angle"
+
+        # The display axis is whichever DROVE the severity (Finding 1 fix -- compare the
+        # severities directly, never `fired_on`, which carries no magnitude). See docstring.
+        if distance_severity >= elbow_severity:
+            primary_label = "wrist-to-hip distance at peak"
+            primary_value, primary_threshold = round(max_distance, 4), PULL_DEPTH_MILD
+        else:
+            primary_label = "elbow angle at peak"
+            primary_value, primary_threshold = round(max_elbow, 2), PEAK_ELBOW_MILD_DEG
+
+        # Per-frame ranking series for `build_detection`'s `peak_frame`. UNCLIPPED (see
+        # docstring) so the genuinely worst frame is nominated even in a saturated segment.
+        scores = [
+            _worst_axis(
+                _unclipped(d, PULL_DEPTH_MILD, PULL_DEPTH_SEVERE),
+                _unclipped(e, PEAK_ELBOW_MILD_DEG, PEAK_ELBOW_SEVERE_DEG),
+            )
+            for d, e in zip(distance_values, elbow_values)
+        ]
+
         detections.append(
             build_detection(
                 fault_id="row_incomplete_rom",
@@ -624,11 +678,9 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
                     ),
                     "distance_threshold": PULL_DEPTH_MILD,
                     "elbow_threshold": PEAK_ELBOW_MILD_DEG,
-                    "primary_label": "wrist-to-hip distance at peak"
-                    if fired_on != "elbow_angle"
-                    else "elbow angle at peak",
-                    "primary_value": round(max_distance, 4) if fired_on != "elbow_angle" else round(max_elbow, 2),
-                    "primary_threshold": PULL_DEPTH_MILD if fired_on != "elbow_angle" else PEAK_ELBOW_MILD_DEG,
+                    "primary_label": primary_label,
+                    "primary_value": primary_value,
+                    "primary_threshold": primary_threshold,
                 },
                 citation="Fischer J, et al. J Electromyogr Kinesiol (2025), PMID 40513198. "
                          "Supplemented by Padovan R, et al. J Funct Morphol Kinesiol (2025), "

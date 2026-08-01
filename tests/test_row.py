@@ -685,13 +685,39 @@ class RowIncompleteRomTest(unittest.TestCase):
         self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
 
     def test_the_worse_of_the_two_conditions_sets_the_severity(self) -> None:
-        from src.pose.movements.row import rule_incomplete_rom
+        """Also pins the `primary_*` display fields to the axis that actually drove the
+        severity (review Finding 1): an earlier version branched on the categorical `fired_on`
+        string, which is `"both"` here regardless of which axis was worse, and always reported
+        the distance axis -- silently coaching pull distance when the elbow was the real fault.
+        """
+        from src.pose.movements.row import PEAK_ELBOW_MILD_DEG, rule_incomplete_rom
 
         # distance 0.21 -> 0.5; elbow 130 -> 0.75. The larger must win.
         clip = _row_clip(peak_wrist_hip=0.21, peak_elbow=130.0)
         detections = _run_rule(rule_incomplete_rom, clip)
         self.assertAlmostEqual(detections[0].severity, 0.75, places=3)
         self.assertEqual(detections[0].evidence["fired_on"], "both")
+        self.assertEqual(detections[0].evidence["primary_label"], "elbow angle at peak")
+        self.assertAlmostEqual(detections[0].evidence["primary_value"], 130.0, places=2)
+        self.assertEqual(detections[0].evidence["primary_threshold"], PEAK_ELBOW_MILD_DEG)
+
+    def test_the_worse_of_the_two_conditions_sets_the_severity_distance_axis(self) -> None:
+        """Mirror of the test above with the two axes' roles swapped: distance is now the WORSE
+        axis (severity 0.75) and elbow the milder one (severity 0.5), both still firing
+        (`fired_on == "both"`). Without this case, Finding 1's fix is only half-pinned -- a
+        version that always reports the distance axis would still pass the elbow-axis test above
+        only by accident of which axis that fixture happened to make worse.
+        """
+        from src.pose.movements.row import PULL_DEPTH_MILD, rule_incomplete_rom
+
+        # distance 0.255 -> 0.75; elbow 120 -> 0.5. The larger (distance) must win.
+        clip = _row_clip(peak_wrist_hip=0.255, peak_elbow=120.0)
+        detections = _run_rule(rule_incomplete_rom, clip)
+        self.assertAlmostEqual(detections[0].severity, 0.75, places=3)
+        self.assertEqual(detections[0].evidence["fired_on"], "both")
+        self.assertEqual(detections[0].evidence["primary_label"], "wrist-to-hip distance at peak")
+        self.assertAlmostEqual(detections[0].evidence["primary_value"], 0.255, places=3)
+        self.assertEqual(detections[0].evidence["primary_threshold"], PULL_DEPTH_MILD)
 
     def test_it_reads_the_less_flexed_arm(self) -> None:
         """The conservative reading: a rep is incomplete if EITHER arm fell short."""
