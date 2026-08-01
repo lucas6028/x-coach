@@ -505,8 +505,13 @@ class HipsShootUpTests(unittest.TestCase):
         window = _rep_window({"torso_pitch_deg": 50.0}, {"torso_pitch_deg": 65.0})
         on = rule_hips_shoot_up(window, _ctx(view="side"))[0]
         off = rule_hips_shoot_up(window, _ctx(view="rear"))[0]
+        self.assertEqual(on.observability, "high")
         self.assertEqual(off.observability, "medium")
         self.assertLess(off.confidence, on.confidence)
+        # Pin the discount to the named constant, not just "some" reduction: full confidence
+        # in-view, exactly the `_OFF_VIEW_CONFIDENCE` (0.65) scale off-view.
+        self.assertAlmostEqual(on.confidence, on.severity, places=4)
+        self.assertAlmostEqual(off.confidence, off.severity * 0.65, places=4)
 
     def test_peak_and_start_frame_pin_the_worst_frame_not_index_zero(self):
         """Regression tripwire, same shape as the other two rules': `_rep_window` builds
