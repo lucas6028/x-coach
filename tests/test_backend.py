@@ -1334,6 +1334,55 @@ def _fake_client(resp: _Resp) -> tuple[mock.Mock, _FakeQuery]:
     return client, query
 
 
+class _FakeTable:
+    """One table's chained PostgREST calls; execute() pops the next preset response.
+
+    `_fake_client` returns a single query with a single canned response, which can't express a
+    multi-step store function (read -> delete -> count). This variant queues one response per
+    execute() and records the eq() filters so a test can assert *what* was deleted.
+    """
+
+    def __init__(self, responses: list) -> None:
+        self._responses = list(responses)
+        self.calls: list[str] = []          # "select" / "delete", in order
+        self.eq_filters: list[tuple] = []   # (column, value) per eq()
+
+    def select(self, *a, **k):
+        self.calls.append("select")
+        return self
+
+    def delete(self, *a, **k):
+        self.calls.append("delete")
+        return self
+
+    def eq(self, column, value):
+        self.eq_filters.append((column, value))
+        return self
+
+    def limit(self, *a, **k):
+        return self
+
+    def execute(self):
+        return self._responses.pop(0) if self._responses else _Resp(data=[])
+
+
+def _fake_tables(**by_table: list) -> tuple[mock.Mock, dict[str, _FakeTable]]:
+    """A client whose .table(name) returns a per-table fake with its own response queue.
+
+    Tables not preset are created on demand, so an unexpected table access doesn't crash the
+    test -- assert on `client.table.call_args_list` to catch it instead.
+    """
+    tables: dict[str, _FakeTable] = {n: _FakeTable(r) for n, r in by_table.items()}
+    client = mock.Mock()
+    client.table.side_effect = lambda name: tables.setdefault(name, _FakeTable([]))
+    return client, tables
+
+
+def _tables_touched(client: mock.Mock) -> list[str]:
+    """Table names passed to client.table(), in call order."""
+    return [c.args[0] for c in client.table.call_args_list]
+
+
 class StoreSummarizeTests(unittest.TestCase):
     def test_summarize_promotes_fields(self) -> None:
         result = {
@@ -1465,6 +1514,67 @@ class StoreDeleteTests(unittest.TestCase):
         client, _ = _fake_client(_Resp(data=None))
         with mock.patch.object(store, "_user_client", return_value=client):
             self.assertEqual(store.delete_all_analyses(token="t", user_id="u1"), 0)
+
+    def test_delete_one_returns_true_and_filters_by_id_and_user(self) -> None:
+        # read video_id -> delete (1 row) -> sibling count 0
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[{"id": "a1"}]),
+                _Resp(data=[], count=0),
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertTrue(ok)
+        # The delete is scoped by BOTH the row id and the owner (RLS is the backstop, not the filter).
+        self.assertIn(("id", "a1"), tables["analyses"].eq_filters)
+        self.assertIn(("user_id", "u1"), tables["analyses"].eq_filters)
+
+    def test_delete_one_keeps_video_and_conversation_when_siblings_remain(self) -> None:
+        """Re-analysing one clip inserts a second `analyses` row against the same `video_id`, while
+        `videos`/`conversations` are unique per (user, video_id). Copying delete_all_analyses'
+        unconditional three-table delete would wipe the SIBLING record's chat thread and video row.
+        """
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[{"id": "a1"}]),
+                _Resp(data=[{"id": "a2"}], count=1),  # a sibling still references upload_1
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        self.assertTrue(ok)
+        touched = _tables_touched(client)
+        self.assertNotIn("videos", touched)
+        self.assertNotIn("conversations", touched)
+
+    def test_delete_one_drops_video_and_conversation_when_last(self) -> None:
+        client, tables = _fake_tables(
+            analyses=[
+                _Resp(data=[{"video_id": "upload_1"}]),
+                _Resp(data=[{"id": "a1"}]),
+                _Resp(data=[], count=0),  # nothing left referencing upload_1
+            ]
+        )
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.delete_analysis(token="t", analysis_id="a1", user_id="u1")
+        touched = _tables_touched(client)
+        self.assertIn("videos", touched)
+        self.assertIn("conversations", touched)
+        # Both cascades are scoped to the freed video, not to the whole account.
+        self.assertIn(("video_id", "upload_1"), tables["videos"].eq_filters)
+        self.assertIn(("user_id", "u1"), tables["videos"].eq_filters)
+        self.assertIn(("video_id", "upload_1"), tables["conversations"].eq_filters)
+
+    def test_delete_one_returns_false_when_absent(self) -> None:
+        # RLS makes someone else's id indistinguishable from a missing one: the read comes back empty.
+        client, tables = _fake_tables(analyses=[_Resp(data=[])])
+        with mock.patch.object(store, "_user_client", return_value=client):
+            ok = store.delete_analysis(token="t", analysis_id="ghost", user_id="u1")
+        self.assertFalse(ok)
+        self.assertNotIn("delete", tables["analyses"].calls)  # nothing was deleted
 
 
 class StoreGetTests(unittest.TestCase):
