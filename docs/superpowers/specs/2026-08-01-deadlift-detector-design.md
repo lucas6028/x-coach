@@ -202,12 +202,44 @@ the barbell," requiring greater erector-spinae force to resist flexion; PMC12148
 
 ### 4.2 `deadlift_incomplete_lockout`
 
-**Criterion.** At `lockout`, flag `hip_angle_deg < 165°` **OR** `knee_angle_deg < 165°`. Ramp
-165° → 140° on **both** axes, take the worse.
+**Criterion.** Over the `lockout` phase, take each axis's **peak** (`nanmax`) and flag when
+`peak hip_angle_deg < 165°` **OR** `peak knee_angle_deg < 165°`. Ramp 165° → 140° on **both**
+axes, take the worse. The `lockout` phase gate and the `min_frames` floor still apply — a
+two-frame lockout phase is not scored — but the threshold test is applied to the rep's peak, not
+to individual frames.
+
+> **AMENDED 2026-08-01, after the whole-branch review.** This section originally specified a
+> *per-frame* criterion ("at `lockout`, flag `hip_angle_deg < 165°`…") fed to
+> `contiguous_true_segments`, mirroring §4.1 and §4.3. **That was wrong, and it shipped a false
+> positive.** The reason is §3.2: `lockout` is the **75th percentile of the rep's own hip-angle
+> excursion** — a *rank* cutoff, not an angle. So whenever a lifter spends less than 25% of a
+> rep's frames above 165°, the `lockout` band necessarily extends *below* 165°, and those
+> band-edge frames satisfy a per-frame `< 165` test on a rep that locked out perfectly.
+> Measured end-to-end on the segmented production path (`fallback=None`): a three-rep clip
+> peaking at **178°** — full extension by this rule's own cited target — produced `lockout`
+> bands of 148.5–178.0 and fired at **severity 0.66 / confidence 0.66 / observability "high"**,
+> reporting "minimum hip angle 148.5°". It was a pure contiguity accident: the run of sub-165°
+> lockout frames had to reach `min_frames` (0.20 s), so the fault appeared at 2.8 s/rep,
+> vanished at 2.5 s/rep, and a 0.1-second pause at lockout suppressed it entirely.
+>
+> **Peak-scoring is what this fault always meant.** The parent spec phrases it as measured "at
+> the top phase … at rep end" — a property of the rep's *maximum* extension, not of any window
+> of frames. It also aligns the rule with `overhead_press.rule_incomplete_lockout`, which §4.2
+> already named as its model and which has always aggregated with `np.nanmax` before scoring.
+> Crucially it introduces **no new number**: the same 165°/140° ramp, applied to a different
+> aggregate. Fixing it by tuning the percentile or the `min_frames` floor was rejected for the
+> opposite reason — both would have been unsourced numbers papering over the mechanism.
+>
+> The percentile phase itself is **unchanged**, and deliberately so: it is what guarantees a
+> shallow-finishing rep still *has* a `lockout` phase to score (§3.2, §7). Both directions are
+> now pinned by `DeadliftSeamTests`, which drives real `deadlift_assign_phases` output into the
+> rule — the seam nothing previously tested.
 
 **Score both ramps.** The parent spec's §8 status note records that `ohp_incomplete_lockout`
 originally selected its ramp by asking which reading was finite, which mis-attributed severity
-when a segment fired on one criterion alone. This rule copies the fix, not the bug.
+when a segment fired on one criterion alone. This rule copies the fix, not the bug. The
+peak-scoring amendment does not disturb it: both axes are still scored unconditionally and the
+worse is taken.
 
 **Thresholds.** The best-grounded rule of the three. Moreira PMC12225233 measured the three key
 positions at lift-off ≈ **95°**, mid-pull ≈ **126°** and lock-out ≈ **180°**, with "180° …
@@ -357,8 +389,26 @@ this pass records it.
   must not collapse `lockout` to fewer frames than
   `min_frames = max(3, ceil(fps·0.2))`, which would make `contiguous_true_segments` return
   nothing and silence the rule on exactly the reps it exists to catch. Pinned with an explicit
-  shallow-finish fixture. This is the same class as Lunge's discarded-opening-15% finding, which
-  this codebase has already been bitten by once.
+  shallow-finish fixture that **calls the rule**, not merely a phase count — and on the longest
+  contiguous *run*, since contiguity is what `contiguous_true_segments` requires. This is the
+  same class as Lunge's discarded-opening-15% finding, which this codebase has already been
+  bitten by once.
+- **The opposite direction, added 2026-08-01: a FULL-lockout rep (~178° peak) must stay
+  SILENT.** Nobody checked this, and it failed — see the amendment box in §4.2. The regression
+  fixture asserts *both* halves: that the percentile band genuinely still dips below 165° (so
+  the test cannot decay into a tautology if the phase were quietly given an absolute cutoff),
+  and that the rule is silent anyway. Run at **84, 90 and 120 frames**, the durations that
+  actually fired; below ~2.8 s/rep the sub-165° run fell short of `min_frames` and the bug hid,
+  so a single-duration fixture would not have caught it. Also pinned end-to-end through
+  `run_detector` with `fallback is None` asserted, since on a fallback the per-rep percentile
+  band never forms and the test would pass without proving anything.
+- **A seam test per rule** (`deadlift_compute_raw` → `deadlift_assign_phases` → the rule), each
+  with a matching silent control. Every other rule test hand-sets `phase` strings, so a rule and
+  the phase function could disagree indefinitely without failing — which is exactly how the §4.2
+  defect survived. The fixture generator places the trunk and thigh so `compute_raw` recovers
+  the requested `hip_angle_deg` and `torso_pitch_deg` *independently* (verified to 0.01°); a
+  naive stick model makes pitch a function of hip angle, in which case `hips_shoot_up` cannot be
+  posed at all.
 - View handling, both directions: §4.1 and §4.2 emit off-view at ×0.65; §4.3 emits **nothing**
   off-view and nothing below `view_confidence` 0.20.
 - Registry round-trip; `tests/test_movements_endpoint.py` updated for the five-detector list and

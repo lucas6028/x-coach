@@ -1,4 +1,6 @@
-# Deadlift raw metrics and phase segmentation. Fault rules land in Tasks 2-4.
+# Deadlift raw metrics, phase segmentation, and the three surviving fault rules
+# (`rule_hips_shoot_up`, `rule_incomplete_lockout`, `rule_lumbar_flexion`), registered as
+# `DEADLIFT_DETECTOR` at the foot of the file.
 #
 # THE METRIC LAYER CONTAINS NO THRESHOLDS -- `deadlift_compute_raw` / `deadlift_assign_phases`
 # compute scale-free per-frame metrics and a phase label only. Every number that decides
@@ -10,10 +12,35 @@
 # ---------------------------------------------------------------------------------------
 # `DEADLIFT_DETECTOR` sets `rep_start="flexed"` (Task 5) -- the hook `base.py:55` names
 # deadlift as the motivating case for. A rep therefore runs floor -> lockout -> floor, so
-# the window's OPENING frames are genuinely the bar-on-the-floor setup. Two rules
-# (`rule_hips_shoot_up`, `rule_lumbar_flexion`) reference a per-rep setup baseline, which is
-# only meaningful because of this. For a movement whose rep starts standing, the same
+# ON THE SEGMENTED PATH the window's OPENING frames are genuinely the bar-on-the-floor setup.
+# Two rules (`rule_hips_shoot_up`, `rule_lumbar_flexion`) reference a per-rep setup baseline,
+# which is only meaningful because of this. For a movement whose rep starts standing, the same
 # baseline would be measuring the wrong end of the lift.
+#
+# THAT GUARANTEE HOLDS ONLY WHEN `segment_reps` SUCCEEDS, AND `run_detector` HAS THREE WAYS TO
+# FALL BACK. On `segmentation_disabled`, `no_reps_detected` or `only_partial_reps`
+# (`base.py:159`) it phases the WHOLE CLIP in one pass (`base.py:182`) and runs every rule over
+# it (`base.py:214`). `deadlift_assign_phases` labels the first 10% of whatever it is handed
+# `setup` POSITIONALLY, without ever inspecting `hip_angle_deg` -- so on a fallback run `setup`
+# is the first 10% of the CLIP, which may be the lifter standing around before walking up to
+# the bar, not the setup at all. `setup_baseline` then returns a STANDING torso.
+#
+# The consequence is concrete, not theoretical, and it is worst for `rule_hips_shoot_up`: with a
+# baseline of ~7 degrees instead of ~60, its `torso_pitch_deg > baseline` clause is satisfied by
+# every loaded frame and contributes nothing, so the rule degenerates to its bare 55-degree
+# absolute gate -- and that clause is precisely what the design spec's section 4.1 identifies as
+# THE discriminator between the sequencing fault and a lifter who merely sets up flat.
+# Reproduced on the production path with `DEADLIFT_DETECTOR` unmodified: a trimmed clip yielding
+# `fallback=only_partial_reps` fired `deadlift_hips_shoot_up` at severity 0.2821 on a
+# well-executed rep whose trunk pitch decreased monotonically, with
+# `setup_torso_pitch_deg: 6.84`. `rule_lumbar_flexion` escapes the same corrupted baseline only
+# incidentally, because its `_hips_still` term happens to reject travelling hips.
+#
+# NOT FIXED HERE, deliberately. Threading `fallback` into `RuleContext` so setup-relative rules
+# can abstain is a framework change that touches squat and push-up too, and a plausibility gate
+# on the baseline would be exactly the unsourced threshold this module forbids. Disclosed rather
+# than papered over -- the same convention this module already uses for the `0.0` evidence
+# sentinel. Recorded in the parent spec's section 7.
 #
 # The window also contains the ECCENTRIC. The parent spec's four phases cover only the
 # concentric, so a fifth phase `lowering` exists here; without it, return-to-floor frames
@@ -380,31 +407,64 @@ DEADLIFT_LOCKOUT_MILD_DEG = 165.0
 DEADLIFT_LOCKOUT_SEVERE_DEG = 140.0
 
 
-def _lockout_severities(segment: list[CoreFrame], key: str) -> list[float]:
-    """Per-frame lockout severity on ONE axis, for every frame in the segment.
+def _peak_extension(segment: list[CoreFrame], key: str) -> float:
+    """GREATEST finite value of `key` across the segment; NaN when the axis is wholly missing.
 
-    Scored unconditionally on both axes by the caller. `severity_from_range` already returns
-    0.0 for a non-finite value, so a missing reading contributes nothing without needing a
-    guard -- and, critically, without ever SELECTING which ramp is used. Choosing the ramp by
-    "which reading is finite" is the OHP mis-attribution bug this design exists to avoid.
+    "How far did this rep extend" is a `nanmax`, not a `nanmin`. The guard is not decoration:
+    the rule below flags on either axis independently, so a segment can be flagged entirely by
+    the knee while every hip reading in it is NaN (or vice versa) -- exactly the
+    occluded-landmark failure mode this module's header describes. An unguarded `np.nanmax` over
+    an all-NaN slice both emits a RuntimeWarning AND returns a bare NaN, which
+    `dataclasses.asdict()` carries into a postgrest write with `allow_nan=False`, whose
+    ValueError this codebase documents as silently swallowed -- the analysis vanishes from the
+    user's history with no surfaced error. `overhead_press.rule_incomplete_lockout` (this rule's
+    model) guards its analogous `peak_worse_elbow`/`max_wrist` the same way.
     """
-    return [
-        severity_from_range(
-            frame.m(key),
-            DEADLIFT_LOCKOUT_MILD_DEG,
-            DEADLIFT_LOCKOUT_SEVERE_DEG,
-            lower_is_worse=True,
-        )
-        for frame in segment
-    ]
+    values = [frame.m(key) for frame in segment]
+    return float(np.nanmax(values)) if any(np.isfinite(v) for v in values) else float(np.nan)
 
 
 def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Rep ends without full hip AND knee extension.
 
-    Fires on `hip_angle < 165` OR `knee_angle < 165`, and scores BOTH ramps, taking the worse.
-    Selecting the ramp by "which reading is finite" is the OHP mis-attribution bug recorded in
-    the parent spec's section 8 status note; this scores both unconditionally instead.
+    THIS SCORES THE REP'S PEAK EXTENSION, NOT A RUN OF INDIVIDUALLY-FAILING FRAMES, and that
+    distinction is the whole rule. It fires when the BEST hip extension reached during `lockout`
+    is under 165 degrees, OR the best knee extension is -- `nanmax` per axis, then the ramp.
+
+    ---------------------------------------------------------------------------------------
+    WHY, because the frame-window version shipped a false positive (fixed 2026-08-01)
+    ---------------------------------------------------------------------------------------
+    The first implementation built a per-frame mask (`phase == "lockout" and angle < 165`) and
+    handed it to `contiguous_true_segments`, mirroring this module's other two rules. That is
+    wrong HERE, and the reason is `deadlift_assign_phases`: `lockout` is the 75th PERCENTILE of
+    the rep's own hip-angle excursion -- a RANK cutoff, not an angle. So if a lifter spends less
+    than 25% of the rep's frames above 165 degrees, the `lockout` band necessarily extends BELOW
+    165, and those frames satisfy a per-frame `< 165` test even though the rep locked out
+    perfectly. Measured end to end on the segmented production path (`fallback=None`): a
+    three-rep clip peaking at 178 degrees -- full extension by this rule's own cited target --
+    produced `lockout` bands of 148.5-178.0 and fired at severity 0.66 / confidence 0.66 /
+    observability "high", reporting "minimum hip angle 148.5". The trigger was purely a
+    contiguity accident: it needed `min_frames` (0.20 s) spent between the percentile cutoff and
+    165, so it appeared at 2.8 s/rep and vanished at 2.5 s/rep, and a 0.1-second pause at lockout
+    suppressed it entirely.
+    ---------------------------------------------------------------------------------------
+
+    Peak-scoring removes the failure mode outright rather than tuning around it, and introduces
+    NO new number: it reuses the same 165/140 ramp on a different aggregate. It is also what the
+    parent spec always described -- it phrases this fault as measured "at the top phase ... at
+    rep end", i.e. a property of the rep's MAXIMUM extension, not of any window of frames -- and
+    it brings the rule into line with `overhead_press.rule_incomplete_lockout`, which this
+    docstring already cited as its model and which has always aggregated with `np.nanmax` before
+    scoring.
+
+    The `lockout` phase gate and the `min_frames` floor both stay: the phase keeps its meaning,
+    and a two-frame lockout phase is still too little to judge a rep on.
+
+    BOTH RAMPS ARE SCORED UNCONDITIONALLY and the worse is taken. Selecting the ramp by "which
+    reading is finite" is the OHP mis-attribution bug recorded in the parent spec's section 8
+    status note; that discipline is unchanged by the peak rewrite. `severity_from_range` already
+    returns 0.0 for a non-finite value, so a missing axis contributes nothing WITHOUT ever
+    selecting which ramp is used.
 
     View policy is DEGRADE, not gate. An extension angle seen head-on is foreshortened, so it
     under-reads -- the off-view failure mode is a missed fault, not a false one. Contrast
@@ -412,38 +472,37 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
     """
     observable = ctx.view_type in SAGITTAL_VIEWS
 
-    def _flagged(frame: CoreFrame) -> bool:
-        hip = frame.m("hip_angle_deg")
-        knee = frame.m("knee_angle_deg")
-        return (np.isfinite(hip) and hip < DEADLIFT_LOCKOUT_MILD_DEG) or (
-            np.isfinite(knee) and knee < DEADLIFT_LOCKOUT_MILD_DEG
-        )
-
-    mask = [frame.valid and frame.phase == "lockout" and _flagged(frame) for frame in core]
+    # The mask is now the PHASE ALONE. The `< 165` test has moved off the individual frame and
+    # onto the segment's peak, below -- see the docstring for why a per-frame test was unsound.
+    mask = [frame.valid and frame.phase == "lockout" for frame in core]
 
     detections: list[PoseRuleDetection] = []
     for start, end in contiguous_true_segments(mask, ctx.min_frames):
         segment = core[start : end + 1]
-        hip_sev = _lockout_severities(segment, "hip_angle_deg")
-        knee_sev = _lockout_severities(segment, "knee_angle_deg")
-        scores = [max(a, b) for a, b in zip(hip_sev, knee_sev)]
-        severity = float(max(scores))
-        # `_flagged` ORs two independently-finite-checked clauses, so a segment can be flagged
-        # entirely by the knee criterion while every hip reading in it is NaN (or vice versa) --
-        # exactly the occluded-landmark failure mode this module's header describes. An
-        # unguarded `np.nanmin` over an all-NaN slice both warns AND is the same pattern
-        # `overhead_press.rule_incomplete_lockout` (this rule's own docstring cites it as the
-        # model) already guards against for its analogous `peak_worse_elbow`/`max_wrist`. Match
-        # that shape here rather than reintroducing the bug it exists to prevent.
-        hip_values = [frame.m("hip_angle_deg") for frame in segment]
-        knee_values = [frame.m("knee_angle_deg") for frame in segment]
-        worst_hip = (
-            float(np.nanmin(hip_values)) if any(np.isfinite(v) for v in hip_values) else np.nan
+        peak_hip = _peak_extension(segment, "hip_angle_deg")
+        peak_knee = _peak_extension(segment, "knee_angle_deg")
+        flagged = (np.isfinite(peak_hip) and peak_hip < DEADLIFT_LOCKOUT_MILD_DEG) or (
+            np.isfinite(peak_knee) and peak_knee < DEADLIFT_LOCKOUT_MILD_DEG
         )
-        worst_knee = (
-            float(np.nanmin(knee_values)) if any(np.isfinite(v) for v in knee_values) else np.nan
+        if not flagged:
+            continue
+
+        hip_sev = severity_from_range(
+            peak_hip, DEADLIFT_LOCKOUT_MILD_DEG, DEADLIFT_LOCKOUT_SEVERE_DEG, lower_is_worse=True
         )
-        driver = "hip" if max(hip_sev) >= max(knee_sev) else "knee"
+        knee_sev = severity_from_range(
+            peak_knee, DEADLIFT_LOCKOUT_MILD_DEG, DEADLIFT_LOCKOUT_SEVERE_DEG, lower_is_worse=True
+        )
+        severity = float(max(hip_sev, knee_sev))
+        driver = "hip" if hip_sev >= knee_sev else "knee"
+        driver_peak = peak_hip if driver == "hip" else peak_knee
+        # `build_detection` takes `argmax(score_values)` as the peak frame, so feeding it the
+        # DRIVER AXIS'S raw angles points `peak_frame` at the frame that actually achieved the
+        # reported peak extension -- the frame the evidence is quoting. Same convention as
+        # `overhead_press.rule_incomplete_lockout`, which passes its raw `wrist_values`.
+        # `flagged` guarantees the driver axis has at least one finite reading, so this is never
+        # an all-NaN argmax.
+        score_values = [frame.m(f"{driver}_angle_deg") for frame in segment]
 
         detections.append(
             build_detection(
@@ -452,7 +511,7 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
                 kg_query=DEADLIFT_LOCKOUT_KG_QUERY,
                 retrieval_mode="rag",
                 segment_metrics=segment,
-                score_values=scores,
+                score_values=score_values,
                 severity=severity,
                 confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
                 observability="high" if observable else "medium",
@@ -462,15 +521,13 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
                     # `json_safe_view_payload`), and postgrest's JSON encoder raises on NaN --
                     # matching `overhead_press.rule_incomplete_lockout`'s
                     # `round(x, 2) if np.isfinite(x) else 0.0` for the same evidence shape.
-                    "min_hip_angle_deg": round(worst_hip, 2) if np.isfinite(worst_hip) else 0.0,
-                    "min_knee_angle_deg": round(worst_knee, 2) if np.isfinite(worst_knee) else 0.0,
+                    "peak_hip_angle_deg": round(peak_hip, 2) if np.isfinite(peak_hip) else 0.0,
+                    "peak_knee_angle_deg": round(peak_knee, 2) if np.isfinite(peak_knee) else 0.0,
                     "threshold": DEADLIFT_LOCKOUT_MILD_DEG,
                     "driver": driver,
-                    "primary_label": f"minimum {driver} angle at lockout",
+                    "primary_label": f"peak {driver} angle at lockout",
                     "primary_value": (
-                        round(worst_hip if driver == "hip" else worst_knee, 2)
-                        if np.isfinite(worst_hip if driver == "hip" else worst_knee)
-                        else 0.0
+                        round(driver_peak, 2) if np.isfinite(driver_peak) else 0.0
                     ),
                     "primary_threshold": DEADLIFT_LOCKOUT_MILD_DEG,
                 },
@@ -543,6 +600,20 @@ def rule_hips_shoot_up(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRule
     The relative-to-setup clause is kept because it is what separates the SEQUENCING fault the
     citation describes from a lifter who merely sets up flat and stays there; the absolute
     55-degree gate alone cannot tell those apart.
+
+    KNOWN DEFECT ON `run_detector`'S WHOLE-CLIP FALLBACK, and this rule is the one that
+    misbehaves, so it is repeated here rather than left in the module header. When `segment_reps`
+    fails (`segmentation_disabled` / `no_reps_detected` / `only_partial_reps`, `base.py:159`)
+    the rules run over the whole clip, and `setup` becomes the clip's first 10% POSITIONALLY --
+    which can be the lifter standing around before approaching the bar. `setup_baseline` then
+    returns a STANDING torso (~7 degrees measured, vs ~60 for a real setup), the
+    `torso_pitch_deg > baseline` clause is satisfied by every loaded frame and so nullified, and
+    this rule DEGENERATES TO ITS BARE 55-DEGREE ABSOLUTE GATE -- losing exactly the
+    discriminator the paragraph above says it exists for, and firing on a clean rep. Measured on
+    the production path: `fallback=only_partial_reps` fired this rule at severity 0.2821 with
+    `setup_torso_pitch_deg: 6.84` on a well-executed rep. Not fixed here (threading `fallback`
+    into `RuleContext` is a framework change touching squat and push-up too); see the module
+    header and the parent spec's section 7.
 
     View policy is DEGRADE, not gate: head-on, a pitched trunk projects short and near-vertical
     so the angle UNDER-reads, making the off-view failure mode silence rather than a wrong

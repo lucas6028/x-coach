@@ -605,43 +605,35 @@ DEADLIFT_LOCKOUT_MILD_DEG = 165.0
 DEADLIFT_LOCKOUT_SEVERE_DEG = 140.0
 
 
-def _worst_angle(segment: list[CoreFrame], key: str) -> float:
-    """Smallest finite value of `key` across the segment; NaN when the axis is wholly missing.
+# SUPERSEDED 2026-08-01 by the whole-branch review. The version below is what SHIPPED; the
+# original plan text specified a PER-FRAME mask (`phase == "lockout" and angle < 165`) handed to
+# `contiguous_true_segments`, and that was wrong. `lockout` is the 75th PERCENTILE of the rep's
+# own hip-angle excursion -- a rank cutoff, not an angle -- so a rep that spends under 25% of its
+# frames above 165 gets a lockout band reaching BELOW 165, and the per-frame mask fired
+# "incomplete lockout" on a rep peaking at 178 deg (severity 0.66, observability "high",
+# reproduced on the segmented production path). The fix scores the rep's PEAK extension, which
+# introduces no new number and matches both the parent spec's "at rep end" phrasing and
+# `overhead_press.rule_incomplete_lockout`'s long-standing `nanmax` aggregate. See the design
+# spec section 4.2 amendment box.
+def _peak_extension(segment: list[CoreFrame], key: str) -> float:
+    """GREATEST finite value of `key` across the segment; NaN when the axis is wholly missing.
 
-    The guard is not decoration. `rule_incomplete_lockout`'s mask ORs two independently
-    finite-checked clauses, so a segment can be flagged entirely by one axis while the other
-    is NaN on every frame. Bare `np.nanmin` over an all-NaN list warns and returns NaN, and a
-    NaN in `evidence` survives `dataclasses.asdict()` into a postgrest write with
-    `allow_nan=False` -- a ValueError this codebase documents as silently swallowed, dropping
-    the analysis from the user's history. Mirrors `overhead_press.py:321-328`.
+    "How far did this rep extend" is a `nanmax`, not a `nanmin`. The guard is not decoration:
+    the rule flags on either axis independently, so a segment can be flagged entirely by one
+    axis while the other is NaN on every frame. Bare `np.nanmax` over an all-NaN list warns and
+    returns NaN, and a NaN in `evidence` survives `dataclasses.asdict()` into a postgrest write
+    with `allow_nan=False` -- a ValueError this codebase documents as silently swallowed,
+    dropping the analysis from the user's history. Mirrors `overhead_press.py:321-328`.
     """
     values = [frame.m(key) for frame in segment]
-    return float(np.nanmin(values)) if any(np.isfinite(v) for v in values) else float(np.nan)
-
-
-def _lockout_severities(segment: list[CoreFrame], key: str) -> list[float]:
-    """Per-frame lockout severity on ONE axis, for every frame in the segment.
-
-    Scored unconditionally on both axes by the caller. `severity_from_range` already returns
-    0.0 for a non-finite value, so a missing reading contributes nothing without needing a
-    guard -- and, critically, without ever SELECTING which ramp is used. Choosing the ramp by
-    "which reading is finite" is the OHP mis-attribution bug this design exists to avoid.
-    """
-    return [
-        severity_from_range(
-            frame.m(key),
-            DEADLIFT_LOCKOUT_MILD_DEG,
-            DEADLIFT_LOCKOUT_SEVERE_DEG,
-            lower_is_worse=True,
-        )
-        for frame in segment
-    ]
+    return float(np.nanmax(values)) if any(np.isfinite(v) for v in values) else float(np.nan)
 
 
 def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
     """Rep ends without full hip AND knee extension.
 
-    Fires on `hip_angle < 165` OR `knee_angle < 165`, and scores BOTH ramps, taking the worse.
+    Scores the rep's PEAK extension over the `lockout` phase: fires when the best hip extension
+    reached is under 165 deg OR the best knee extension is. Scores BOTH ramps, taking the worse.
     Selecting the ramp by "which reading is finite" is the OHP mis-attribution bug recorded in
     the parent spec's section 8 status note; this scores both unconditionally instead.
 
@@ -651,35 +643,33 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
     """
     observable = ctx.view_type in SAGITTAL_VIEWS
 
-    def _flagged(frame: CoreFrame) -> bool:
-        hip = frame.m("hip_angle_deg")
-        knee = frame.m("knee_angle_deg")
-        return (np.isfinite(hip) and hip < DEADLIFT_LOCKOUT_MILD_DEG) or (
-            np.isfinite(knee) and knee < DEADLIFT_LOCKOUT_MILD_DEG
-        )
-
-    mask = [frame.valid and frame.phase == "lockout" and _flagged(frame) for frame in core]
+    # The mask is the PHASE ALONE; the `< 165` test moved onto the segment's peak, below.
+    mask = [frame.valid and frame.phase == "lockout" for frame in core]
 
     detections: list[PoseRuleDetection] = []
     for start, end in contiguous_true_segments(mask, ctx.min_frames):
         segment = core[start : end + 1]
-        hip_sev = _lockout_severities(segment, "hip_angle_deg")
-        knee_sev = _lockout_severities(segment, "knee_angle_deg")
-        scores = [max(a, b) for a, b in zip(hip_sev, knee_sev)]
-        severity = float(max(scores))
-        # CORRECTED 2026-08-01 after the Task 2 review; the first draft of this plan called
-        # bare `np.nanmin(...)` here and that was a drafting error, not a design choice.
-        # `_flagged` ORs two independently finite-checked clauses, so a segment can be flagged
-        # entirely by the knee while `hip_angle_deg` is NaN on every frame -- precisely the
-        # one-occluded-landmark case this module's header warns about. Bare `nanmin` over an
-        # all-NaN list emits a RuntimeWarning and returns NaN, and NaN in `evidence` reaches
-        # `dataclasses.asdict()` and then a postgrest write with `allow_nan=False`, whose
-        # ValueError this codebase already documents as silently swallowed
-        # (`pose_rule_detector.py:569-588`) -- the analysis vanishes from the user's history
-        # with no surfaced error. `overhead_press.py:321-328` guards exactly this; match it.
-        worst_hip = _worst_angle(segment, "hip_angle_deg")
-        worst_knee = _worst_angle(segment, "knee_angle_deg")
-        driver = "hip" if max(hip_sev) >= max(knee_sev) else "knee"
+        peak_hip = _peak_extension(segment, "hip_angle_deg")
+        peak_knee = _peak_extension(segment, "knee_angle_deg")
+        flagged = (np.isfinite(peak_hip) and peak_hip < DEADLIFT_LOCKOUT_MILD_DEG) or (
+            np.isfinite(peak_knee) and peak_knee < DEADLIFT_LOCKOUT_MILD_DEG
+        )
+        if not flagged:
+            continue
+
+        hip_sev = severity_from_range(
+            peak_hip, DEADLIFT_LOCKOUT_MILD_DEG, DEADLIFT_LOCKOUT_SEVERE_DEG, lower_is_worse=True
+        )
+        knee_sev = severity_from_range(
+            peak_knee, DEADLIFT_LOCKOUT_MILD_DEG, DEADLIFT_LOCKOUT_SEVERE_DEG, lower_is_worse=True
+        )
+        severity = float(max(hip_sev, knee_sev))
+        driver = "hip" if hip_sev >= knee_sev else "knee"
+        driver_peak = peak_hip if driver == "hip" else peak_knee
+        # `build_detection` takes `argmax(score_values)`, so the driver axis's raw angles point
+        # `peak_frame` at the frame that achieved the reported peak -- the frame the evidence
+        # quotes. Same convention as `overhead_press`, which passes its raw `wrist_values`.
+        score_values = [frame.m(f"{driver}_angle_deg") for frame in segment]
 
         detections.append(
             build_detection(
@@ -688,17 +678,17 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
                 kg_query=DEADLIFT_LOCKOUT_KG_QUERY,
                 retrieval_mode="rag",
                 segment_metrics=segment,
-                score_values=scores,
+                score_values=score_values,
                 severity=severity,
                 confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
                 observability="high" if observable else "medium",
                 evidence={
-                    "min_hip_angle_deg": round(worst_hip, 2),
-                    "min_knee_angle_deg": round(worst_knee, 2),
+                    "peak_hip_angle_deg": round(peak_hip, 2) if np.isfinite(peak_hip) else 0.0,
+                    "peak_knee_angle_deg": round(peak_knee, 2) if np.isfinite(peak_knee) else 0.0,
                     "threshold": DEADLIFT_LOCKOUT_MILD_DEG,
                     "driver": driver,
-                    "primary_label": f"minimum {driver} angle at lockout",
-                    "primary_value": round(worst_hip if driver == "hip" else worst_knee, 2),
+                    "primary_label": f"peak {driver} angle at lockout",
+                    "primary_value": round(driver_peak, 2) if np.isfinite(driver_peak) else 0.0,
                     "primary_threshold": DEADLIFT_LOCKOUT_MILD_DEG,
                 },
                 citation="Moreira VM, et al. \"Analysis of Muscle Strength and Electromyographic "

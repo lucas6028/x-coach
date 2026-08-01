@@ -1405,7 +1405,7 @@ These are stated rather than papered over, per the spec's honesty requirement:
   the literal opposite of `incomplete_lockout`.
 - **Deadlift and OHP lockout evidence cannot distinguish "not measured" from "fully flexed"**
   (2026-08-01). When one axis is entirely unmeasurable across a flagged segment,
-  `deadlift_incomplete_lockout` reports `min_hip_angle_deg` / `min_knee_angle_deg` as **0.0**,
+  `deadlift_incomplete_lockout` reports `peak_hip_angle_deg` / `peak_knee_angle_deg` as **0.0**,
   following `overhead_press.py`'s established `round(x, 2) if np.isfinite(x) else 0.0`
   convention. 0.0° is a physically meaningful angle — a maximally flexed joint — so a reader of
   the evidence cannot tell a missing measurement from a catastrophic one. The fallback exists
@@ -1414,6 +1414,30 @@ These are stated rather than papered over, per the spec's honesty requirement:
   the analysis from the user's history entirely. Choosing a misleading number over a vanished
   analysis is the lesser evil, not a good outcome; a `None`-with-explicit-reason evidence shape
   would fix both movements at once and is not attempted here.
+- **Setup-relative rules are silently corrupted on `run_detector`'s whole-clip fallback**
+  (2026-08-01). `run_detector` falls back to analyzing the clip as one unit on
+  `segmentation_disabled`, `no_reps_detected` or `only_partial_reps`
+  (`src/pose/movements/base.py:159`), phasing the whole clip in one pass (`:182`) and running
+  every rule over it (`:214`). Deadlift's `deadlift_assign_phases` labels the first 10% of
+  whatever it is handed `setup` **positionally**, without inspecting the signal — so on a
+  fallback run `setup` is the first 10% of the *clip*, which may be the lifter standing around
+  before walking up to the bar, and `setup_baseline` returns a **standing** torso.
+  `rule_hips_shoot_up` is the casualty: with a ~7° baseline instead of ~60°, its
+  `torso_pitch_deg > baseline` clause is satisfied by every loaded frame and contributes
+  nothing, so the rule degenerates to its bare 55° absolute gate — losing exactly the
+  discriminator the deadlift design spec's §4.1 says it exists for, and firing on a clean rep.
+  Reproduced with `DEADLIFT_DETECTOR` unmodified on a trimmed clip yielding
+  `fallback=only_partial_reps`: severity 0.2821 with `setup_torso_pitch_deg: 6.84` on a rep
+  whose trunk pitch decreased monotonically. `rule_lumbar_flexion` escapes the same corrupted
+  baseline only incidentally, because its `_hips_still` term happens to reject travelling hips.
+  **The user gets no signal this happened**: `RunResult.fallback` *is* carried in the API
+  payload (`src/pose/pose_rule_detector.py:688`) but is rendered **nowhere** in `frontend/src`,
+  so a whole-clip analysis is presented exactly like a per-rep one. The same fallback path is
+  shared by squat and push-up, whose setup/rest-relative baselines were not tested for this.
+  **Not fixed here**: threading `fallback` into `RuleContext` so setup-relative rules can
+  abstain is a framework change touching all three movements at once, and a plausibility gate on
+  the baseline would introduce exactly the unsourced threshold the deadlift module forbids.
+  Threading `fallback` is the known upgrade path and is **not** attempted.
 - **Push-up scapular winging** (`pushup_scapular_winging`) is real and cited but **observability
   none** from monocular pose (no scapular landmarks); listed for completeness, not detection.
 - **Band-pull-apart / row loss of scapular retraction** is **low observability** — scapular
@@ -1946,7 +1970,21 @@ documented in-code:
 - `deadlift_incomplete_lockout` scores **both** the hip and knee ramps unconditionally and takes
   the worse, rather than selecting a ramp by which reading is finite — the mis-attribution bug
   §8's 2026-07-25 block records against `ohp_incomplete_lockout`. Because
-  `max(scores) == max(max(hip_sev), max(knee_sev))`, the reported `driver` axis cannot disagree
-  with the reported severity. Its `nanmin` over each axis is guarded for the all-NaN case
-  (`overhead_press.py`'s shape), which is reachable here precisely because the firing mask ORs
+  `severity == max(hip_sev, knee_sev)`, the reported `driver` axis cannot disagree with the
+  reported severity. Its per-axis aggregate is guarded for the all-NaN case
+  (`overhead_press.py`'s shape), which is reachable here precisely because the firing test ORs
   two independently finite-checked clauses.
+- `deadlift_incomplete_lockout` scores the rep's **PEAK extension** (`nanmax` per axis), not a
+  contiguous run of individually-failing frames — **corrected 2026-08-01 after the whole-branch
+  review found the frame-window version emitting a false positive.** Because `lockout` is a
+  *rank* cutoff (the 75th percentile of the rep's own hip-angle excursion, see the bullet
+  above), a rep that spends under 25% of its frames above 165° gets a `lockout` band reaching
+  *below* 165°, and a per-frame `< 165` mask fired on it. Measured on the segmented production
+  path: a rep peaking at **178°** reported "incomplete lockout, minimum hip angle 148.5°" at
+  severity 0.66 / observability "high". Peak-scoring introduces **no new number** (same 165/140
+  ramp, different aggregate), matches the spec's own "at the top phase … at rep end" phrasing,
+  and matches `ohp_incomplete_lockout`, which has always aggregated with `nanmax` before
+  scoring. The percentile phase is deliberately unchanged — it is what guarantees a
+  shallow-finishing rep still has a `lockout` phase to score. **General lesson: a percentile
+  phase boundary and an absolute per-frame threshold inside that phase do not compose.** Squat,
+  lunge and push-up should be checked for the same pairing.

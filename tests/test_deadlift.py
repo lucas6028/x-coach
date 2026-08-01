@@ -4,6 +4,7 @@ import warnings
 
 import numpy as np
 
+from src.pose.geometry import contiguous_true_segments
 from src.pose.movements.base import CoreFrame, RuleContext, run_detector
 from src.pose.movements.deadlift import (
     DEADLIFT_LOCKOUT_MILD_DEG,
@@ -134,6 +135,121 @@ def _deadlift_reps(n_reps: int, frames_per_rep: int = 30, low_offset: float = 0.
     return frames
 
 
+# ---------------------------------------------------------------------------------------
+# SEAM FIXTURES: real landmarks -> deadlift_compute_raw -> deadlift_assign_phases -> a rule.
+# ---------------------------------------------------------------------------------------
+# Every OTHER rule test in this file hand-builds `CoreFrame`s with hand-set `phase` strings,
+# which cannot catch a disagreement between what `deadlift_assign_phases` actually labels and
+# what a rule expects to be handed. That gap hid a real defect: `lockout` is the 75th PERCENTILE
+# of the rep's own hip-angle excursion, so on a rep that locks out fully the band still reaches
+# below 165 degrees, and the original per-frame `< 165` mask fired "incomplete lockout" on it.
+# See `DeadliftSeamTests` below.
+#
+# `_pose_landmarks` places the trunk and thigh so that `deadlift_compute_raw` recovers EXACTLY
+# the requested `hip_angle_deg` and `torso_pitch_deg` (verified to 0.01 deg), with the knee held
+# collinear at 180 deg so the hip axis alone drives `rule_incomplete_lockout`. That independent
+# control is the point: in a naive stick model trunk pitch is a function of hip angle, so a
+# fixture could not vary one without the other and `rule_hips_shoot_up` could not be posed at
+# all.
+_THIGH_LEN, _SHANK_LEN, _TORSO_LEN = 0.20, 0.20, 0.25
+
+
+def _pose_landmarks(
+    hip_angle_deg: float,
+    torso_pitch_deg: float,
+    hip_y: float = 0.55,
+    torso_len: float = _TORSO_LEN,
+) -> list[dict]:
+    hip = np.array([0.51, hip_y])
+    # Trunk: `torso_pitch_deg` from vertical, leaning forward (+x), shoulders above the hips.
+    phi = math.radians(torso_pitch_deg)
+    trunk = np.array([math.sin(phi), -math.cos(phi)])
+    shoulder = hip + torso_len * trunk
+    # Thigh: the trunk direction rotated by `hip_angle_deg`, so the interior angle at the hip
+    # between shoulder and knee is exactly that.
+    th = math.radians(hip_angle_deg)
+    cos_t, sin_t = math.cos(th), math.sin(th)
+    thigh = np.array(
+        [cos_t * trunk[0] - sin_t * trunk[1], sin_t * trunk[0] + cos_t * trunk[1]]
+    )
+    knee = hip + _THIGH_LEN * thigh
+    ankle = knee + _SHANK_LEN * thigh  # collinear with the thigh -> knee angle 180
+    points = {
+        11: shoulder + np.array([-0.01, 0.0]), 12: shoulder + np.array([0.01, 0.0]),
+        23: hip + np.array([-0.01, 0.0]), 24: hip + np.array([0.01, 0.0]),
+        25: knee + np.array([-0.01, 0.0]), 26: knee + np.array([0.01, 0.0]),
+        27: ankle + np.array([-0.01, 0.0]), 28: ankle + np.array([0.01, 0.0]),
+        29: ankle + np.array([-0.02, 0.01]), 30: ankle + np.array([0.0, 0.01]),
+        31: ankle + np.array([0.04, 0.02]), 32: ankle + np.array([0.06, 0.02]),
+    }
+    base = [{"x": 0.5, "y": 0.5, "z": 0.0, "visibility": 0.99} for _ in range(33)]
+    for index, point in points.items():
+        base[index] = {"x": float(point[0]), "y": float(point[1]), "z": 0.0, "visibility": 0.99}
+    return base
+
+
+def _hip_track(n: int, low: float, peak: float) -> list[float]:
+    """One flexed-start rep's hip angle: floor -> peak -> floor, constant angular velocity.
+
+    Constant velocity is deliberate, not incidental. It is the profile that spreads the rep's
+    frames UNIFORMLY over the hip-angle range, which is what pushes the 75th-percentile lockout
+    cutoff far below the peak -- the condition the 2026-08-01 false positive needed. A fixture
+    that dwelt near the peak would hide the very thing these tests exist to pin.
+    """
+    half = n // 2
+    return list(np.linspace(low, peak, half)) + list(np.linspace(peak, low, n - half))
+
+
+def _hinge_pitch(hip_angle: float) -> float:
+    """A well-executed hinge: the trunk uprights monotonically as the hip extends."""
+    return float(np.interp(hip_angle, [60.0, 180.0], [60.0, 2.0]))
+
+
+def _shoot_pitch(hip_angle: float) -> float:
+    """Hips shoot up: the chest DROPS early -- pitch rises well past its setup value."""
+    return float(np.interp(hip_angle, [60.0, 95.0, 180.0], [40.0, 78.0, 2.0]))
+
+
+def _rep_frames(n: int, peak: float, pitch_fn, torso_fn=None) -> list[dict]:
+    return [
+        {
+            "frame_index": i,
+            "landmarks": _pose_landmarks(
+                hip, pitch_fn(hip), torso_len=torso_fn(hip) if torso_fn else _TORSO_LEN
+            ),
+        }
+        for i, hip in enumerate(_hip_track(n, 60.0, peak))
+    ]
+
+
+def _core_from(raw: list[dict], phases: list[str]) -> list[CoreFrame]:
+    """Assemble `CoreFrame`s the way `run_detector` does, but without smoothing or segmentation.
+
+    Deliberately NOT re-implementing rule dispatch -- this is only the glue that lets a test
+    drive `compute_raw` -> `assign_phases` -> one rule directly, so a phase-label mismatch shows
+    up as a rule-level failure.
+    """
+    return [
+        CoreFrame(
+            frame_index=int(item.get("frame_index", i) or i),
+            time=float(item.get("time", 0.0) or 0.0),
+            phase=phase,
+            valid=bool(item.get("valid", False)),
+            lower_body_visibility=float(item.get("lower_body_visibility", 0.0) or 0.0),
+            metrics={key: float(item.get(key, np.nan)) for key in DEADLIFT_METRIC_KEYS},
+        )
+        for i, (item, phase) in enumerate(zip(raw, phases))
+    ]
+
+
+def _seam(frames: list[dict], rule, ctx: RuleContext | None = None):
+    """compute_raw -> assign_phases -> rule. Returns (core, phases, detections)."""
+    raw = deadlift_compute_raw(frames, 30.0)
+    phases = deadlift_assign_phases(raw)
+    core = _core_from(raw, phases)
+    return core, phases, rule(core, ctx or _ctx())
+
+
 class DeadliftRunDetectorTests(unittest.TestCase):
     """The one design point the parent task calls out: `rep_start="flexed"` with
     `rep_polarity="min"` is the combination that makes `segment_reps` treat the FLOOR (a low
@@ -243,17 +359,37 @@ class DeadliftPhaseTests(unittest.TestCase):
         raw = self._rep(self._pull(60, 60.0, 178.0))
         self.assertEqual(deadlift_assign_phases(raw)[0], "setup")
 
-    def test_a_rep_that_never_locks_out_still_has_a_lockout_phase(self):
+    def test_a_rep_that_never_locks_out_still_has_a_lockout_phase_AND_the_rule_scores_it(self):
         """The fault IS failing to reach extension, so the phase must not vanish with it.
 
         The lockout threshold is a PERCENTILE of this rep's own hip-angle excursion, not an
         absolute angle, so a rep peaking at 150 degrees still yields a lockout phase for
         `rule_incomplete_lockout` to score. An absolute cutoff would silence the rule on
         exactly the reps it exists to catch.
+
+        A raw `phases.count("lockout")` was the original assertion and it was not enough on two
+        counts, both of which this now covers. (1) `contiguous_true_segments(mask, min_frames)`
+        needs the lockout frames CONTIGUOUS, not merely numerous -- 8 lockout frames split into
+        two runs of 4 yield no segment at all -- so the count is asserted on the longest RUN.
+        (2) The scoring half was never exercised: the docstring claimed the phase had to survive
+        "for `rule_incomplete_lockout` to score" and then never checked that it does. Design
+        spec section 7 promised this fixture would pin the rule firing; now it does.
         """
         raw = self._rep(self._pull(60, 60.0, 150.0))
         phases = deadlift_assign_phases(raw)
-        self.assertGreaterEqual(phases.count("lockout"), 6)
+        mask = [p == "lockout" for p in phases]
+        runs = contiguous_true_segments(mask, 6)
+        self.assertEqual(len(runs), 1, "the lockout phase must be ONE contiguous run")
+        start, end = runs[0]
+        self.assertGreaterEqual(end - start + 1, 6)
+
+        # ...and the rule actually scores it. `knee_angle_deg` is absent from this raw fixture,
+        # so the hip ramp alone drives the verdict.
+        core = _core_from(raw, phases)
+        out = rule_incomplete_lockout(core, _ctx())
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0].fault_id, "deadlift_incomplete_lockout")
+        self.assertAlmostEqual(out[0].evidence["peak_hip_angle_deg"], 150.0, places=1)
 
     def test_phase_count_always_equals_frame_count(self):
         """run_detector raises if assign_phases returns a different length."""
@@ -444,9 +580,9 @@ class IncompleteLockoutTests(unittest.TestCase):
 
         The RuntimeWarning-to-error promotion is scoped to just this call (not the module or
         session) so the guard's absence fails THIS test under a plain `pytest tests/` run --
-        without it, `evidence["min_hip_angle_deg"] == 0.0` alone can never catch a removed
+        without it, `evidence["peak_hip_angle_deg"] == 0.0` alone can never catch a removed
         guard, because the evidence-dict `if np.isfinite(...) else 0.0` fallback converts the
-        NaN to 0.0 regardless of whether the upstream nanmin call was guarded.
+        NaN to 0.0 regardless of whether the upstream `nanmax` call was guarded.
         """
         with warnings.catch_warnings():
             warnings.simplefilter("error", RuntimeWarning)
@@ -455,7 +591,7 @@ class IncompleteLockoutTests(unittest.TestCase):
             )
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0].evidence["driver"], "knee")
-        self.assertEqual(out[0].evidence["min_hip_angle_deg"], 0.0)
+        self.assertEqual(out[0].evidence["peak_hip_angle_deg"], 0.0)
 
     def test_a_knee_nan_segment_flagged_purely_by_the_hip_criterion_is_evidence_safe(self):
         """Symmetric case: knee NaN throughout every frame, hip alone flags the segment. See
@@ -468,7 +604,7 @@ class IncompleteLockoutTests(unittest.TestCase):
             )
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0].evidence["driver"], "hip")
-        self.assertEqual(out[0].evidence["min_knee_angle_deg"], 0.0)
+        self.assertEqual(out[0].evidence["peak_knee_angle_deg"], 0.0)
 
     def test_an_off_view_reading_is_discounted_but_not_suppressed(self):
         soft = {"hip_angle_deg": 150.0, "knee_angle_deg": 178.0}
@@ -486,35 +622,43 @@ class IncompleteLockoutTests(unittest.TestCase):
         soft = {"hip_angle_deg": 150.0, "knee_angle_deg": 178.0}
         self.assertEqual(rule_incomplete_lockout(_frames(soft, count=3), _ctx()), [])
 
-    def test_peak_and_start_frame_pin_the_worst_frame_not_index_zero(self):
-        """Regression tripwire, same shape as lumbar flexion's: `_frames` builds IDENTICAL
-        frames, so every candidate ties for "worst" and `np.nanargmax` (`build_detection`,
-        driven by `score_values`) returns index 0 regardless of a broken `score_values` sign,
-        and `worst_hip`/`severity` are indistinguishable between `nanmin`/`nanmax` or
-        `max`/`min`. This window varies `hip_angle_deg` frame-to-frame so those mutations each
-        produce a wrong, checkable answer.
+    def test_the_reported_angle_is_the_reps_BEST_extension_not_its_worst_frame(self):
+        """Regression tripwire, and the one that pins the 2026-08-01 peak-scoring rewrite.
 
-        Hip angles 158, 152, 143, 150, 155, 157 -- all below the 165 deg mild threshold (so the
-        whole 6-frame run, exactly `min_frames`, stays flagged), with a genuine minimum (worst
-        extension) at position 2. Knee angle is held at 178 (unflagged) throughout so the hip
-        ramp alone drives the result.
+        This rule aggregates with `nanmax` -- "how far did this rep actually extend" -- while
+        every other rule in this module takes a per-frame worst. `_frames` builds IDENTICAL
+        frames, so every candidate ties and `np.nanargmax` (`build_detection`, driven by
+        `score_values`) returns index 0 whatever the aggregate is; this window varies
+        `hip_angle_deg` frame-to-frame so a `nanmax` -> `nanmin` slip produces a wrong,
+        checkable answer instead of an invisible one.
+
+        Hip angles 143, 150, 158, 155, 152, 147 -- all below the 165 deg mild threshold, so the
+        rep is genuinely a failed lockout and the whole 6-frame run (exactly `min_frames`) is
+        one lockout segment. The MAXIMUM sits at position 2, deliberately NOT at index 0 or at
+        the end, so `peak_frame` discriminates. Knee is held at 178 (unflagged) throughout so
+        the hip ramp alone drives the result.
         """
-        hip_angles = [158.0, 152.0, 143.0, 150.0, 155.0, 157.0]
+        hip_angles = [143.0, 150.0, 158.0, 155.0, 152.0, 147.0]
         window = _varying_frames(
             [{"hip_angle_deg": h, "knee_angle_deg": 178.0} for h in hip_angles]
         )
         out = rule_incomplete_lockout(window, _ctx())
         self.assertEqual(len(out), 1)
         detection = out[0]
-        # The first flagged frame is frame_index 0 -- pins the slice arithmetic.
+        # The lockout phase starts at frame_index 0 -- pins the slice arithmetic.
         self.assertEqual(detection.start_frame, 0)
-        # The worst (smallest hip angle) frame is index 2.
+        # `score_values` is the driver axis's raw angles, so `peak_frame` names the frame that
+        # achieved the reported peak extension (index 2). A `score_values=[-v ...]` mutation
+        # would pick the smallest angle (index 0) instead.
         self.assertEqual(detection.peak_frame, 2)
-        # A `nanmax` mutation for `worst_hip` would report 158.0 instead of 143.0 here.
-        self.assertAlmostEqual(detection.evidence["min_hip_angle_deg"], 143.0, places=4)
-        # Severity is the WORST frame's score (index 2: (165-143)/(165-140) = 0.88), not the
-        # best one. A `severity = min(scores)` mutation would report 0.28 (index 0) instead.
-        self.assertAlmostEqual(detection.severity, 0.88, places=4)
+        # THE CORE ASSERTION: the rep reached 158, so that -- not the 143 of its worst single
+        # frame -- is what "this rep failed to lock out" is scored on. A `nanmax` -> `nanmin`
+        # mutation in `_peak_extension` reports 143.0 here.
+        self.assertAlmostEqual(detection.evidence["peak_hip_angle_deg"], 158.0, places=4)
+        self.assertAlmostEqual(detection.evidence["primary_value"], 158.0, places=4)
+        # Severity follows the peak: (165-158)/(165-140) = 0.28. The same `nanmin` mutation
+        # would report 0.88, inflating a marginal miss into a Moderate fault.
+        self.assertAlmostEqual(detection.severity, 0.28, places=4)
 
 
 class HipsShootUpTests(unittest.TestCase):
@@ -606,6 +750,155 @@ class HipsShootUpTests(unittest.TestCase):
         # index 0), reporting peak_frame 8 and evidence 58.0 here.
         self.assertEqual(detection.peak_frame, 10)
         self.assertAlmostEqual(detection.evidence["peak_torso_pitch_deg"], 71.0, places=4)
+
+
+class DeadliftSeamTests(unittest.TestCase):
+    """Real `deadlift_assign_phases` output driving each real rule's phase mask.
+
+    Nothing else in this file exercises that seam: every other rule test hand-sets `phase`
+    strings, so a rule and the phase function could disagree indefinitely without failing. They
+    did. The 2026-08-01 defect these tests pin is recorded in `rule_incomplete_lockout`'s
+    docstring; the two lockout tests below are its regression, in both directions.
+    """
+
+    def test_a_shallow_finish_fires_through_the_real_phase_labels(self):
+        """A rep peaking at ~150 deg never locks out, and the rule must say so -- driven by the
+        phases `deadlift_assign_phases` actually produced, not by hand-set labels."""
+        for n in (60, 90):
+            with self.subTest(frames=n):
+                _, phases, out = _seam(_rep_frames(n, 150.0, _hinge_pitch), rule_incomplete_lockout)
+                self.assertIn("lockout", phases)
+                self.assertEqual(len(out), 1)
+                self.assertEqual(out[0].fault_id, "deadlift_incomplete_lockout")
+                self.assertEqual(out[0].evidence["driver"], "hip")
+                self.assertAlmostEqual(out[0].evidence["peak_hip_angle_deg"], 150.0, places=1)
+                # Ramp check: (165 - 150) / (165 - 140) = 0.60.
+                self.assertAlmostEqual(out[0].severity, 0.60, places=2)
+
+    def test_a_FULL_LOCKOUT_rep_stays_silent_even_though_the_phase_band_dips_below_165(self):
+        """THE 2026-08-01 REGRESSION. This is the direction nobody checked, and it failed.
+
+        `deadlift_assign_phases` sets `lockout` at the 75th PERCENTILE of the rep's own
+        hip-angle excursion -- a RANK cutoff, not an angle. A rep that extends fully to 178 deg
+        but spends under 25% of its frames above 165 therefore gets a `lockout` band reaching
+        down to ~148 deg. The original rule masked frames individually on `< 165`, so those
+        band-edge frames formed a contiguous run and it reported "incomplete lockout, minimum
+        hip angle 148.5" at severity 0.66 on a rep that locked out perfectly.
+
+        The durations are the ones that actually fired: 84, 90 and 120 frames (2.8 / 3.0 /
+        4.0 s per rep at 30 fps). Below ~2.8 s/rep the sub-165 run fell short of `min_frames`
+        and the bug hid, which is exactly why a single-duration fixture would not have caught it.
+
+        This test asserts BOTH halves, and the first half is what stops it from silently
+        decaying into a tautology: the lockout band genuinely still contains sub-165 frames (so
+        the percentile behaviour that makes shallow-finish detection work is intact and NOT
+        quietly replaced by an absolute cutoff), AND the rule is nevertheless silent, because it
+        now scores the rep's PEAK extension instead of a run of frames.
+        """
+        for n in (84, 90, 120):
+            with self.subTest(frames=n):
+                core, phases, out = _seam(
+                    _rep_frames(n, 178.0, _hinge_pitch), rule_incomplete_lockout
+                )
+                band = [
+                    frame.m("hip_angle_deg")
+                    for frame, phase in zip(core, phases)
+                    if phase == "lockout"
+                ]
+                self.assertGreater(max(band), 165.0, "the rep must genuinely reach lockout")
+                # The percentile band still dips below the threshold -- the hazard is real...
+                self.assertTrue(
+                    any(value < DEADLIFT_LOCKOUT_MILD_DEG for value in band),
+                    "fixture no longer poses the hazard: the lockout band is entirely >= 165",
+                )
+                self.assertGreaterEqual(
+                    sum(value < DEADLIFT_LOCKOUT_MILD_DEG for value in band), 6,
+                    "fewer than min_frames sub-165 lockout frames: the old bug could not fire "
+                    "here either, so this fixture would not prove anything",
+                )
+                # ...and the rule is silent anyway, because it scores the PEAK.
+                self.assertEqual(out, [], f"false 'incomplete lockout' on a 178 deg rep (n={n})")
+
+    def test_a_full_lockout_clip_is_clean_end_to_end_through_run_detector(self):
+        """The same regression on the FULL production path, which is where it was found.
+
+        `_seam` skips `run_detector`'s smoothing and rep segmentation; this drives all of it.
+        `fallback` must stay None -- on a fallback the clip is scored whole and the per-rep
+        percentile band never forms, so the test would pass without proving anything.
+        """
+        for n in (84, 90, 120):
+            with self.subTest(frames=n):
+                frames: list[dict] = []
+                for _ in range(3):
+                    for hip in _hip_track(n, 60.0, 178.0):
+                        frames.append(
+                            {
+                                "frame_index": len(frames),
+                                "landmarks": _pose_landmarks(hip, _hinge_pitch(hip)),
+                            }
+                        )
+                result = run_detector(DEADLIFT_DETECTOR, frames, 30.0, "side", 0.9)
+                self.assertIsNone(result.fallback)
+                self.assertEqual(len(result.analyzed), 3)
+                self.assertEqual(
+                    [d.fault_id for d in result.detections], [],
+                    "a clean, fully locked-out deadlift must produce no faults at all",
+                )
+
+    def test_hips_shooting_up_fires_through_the_real_phase_labels(self):
+        """Trunk pitch rising past its own setup value during the pull, via real phases.
+
+        Paired with the good-hinge control below, this pins that the `setup` label
+        `deadlift_assign_phases` emits actually lands on the floor portion of the rep -- if it
+        did not, `setup_baseline` would return a mid-pull pitch and the relative clause would
+        stop discriminating.
+        """
+        for n in (60, 90):
+            with self.subTest(frames=n):
+                _, _, out = _seam(_rep_frames(n, 175.0, _shoot_pitch), rule_hips_shoot_up)
+                self.assertEqual(len(out), 1)
+                self.assertEqual(out[0].fault_id, "deadlift_hips_shoot_up")
+                evidence = out[0].evidence
+                self.assertGreater(evidence["peak_torso_pitch_deg"], 70.0)
+                # The baseline must be a FLOOR pitch (~40-52 deg here), not a mid-pull one.
+                self.assertLess(evidence["setup_torso_pitch_deg"], 60.0)
+                self.assertGreater(
+                    evidence["peak_torso_pitch_deg"], evidence["setup_torso_pitch_deg"]
+                )
+
+    def test_a_good_hinge_is_silent_through_the_real_phase_labels(self):
+        """Control for the test above: same seam, same durations, trunk uprighting normally."""
+        for n in (60, 90):
+            with self.subTest(frames=n):
+                _, _, out = _seam(_rep_frames(n, 175.0, _hinge_pitch), rule_hips_shoot_up)
+                self.assertEqual(out, [])
+
+    def test_lumbar_flexion_fires_through_the_real_phase_labels(self):
+        """Projected torso shortening over stationary hips, via real phases.
+
+        `torso_len` is held at its full 0.25 while the hip angle is still near the floor (where
+        `deadlift_assign_phases` puts `setup`) and shortened to 0.22 once the pull is under way,
+        so the 0.88 ratio is measured against a genuine setup baseline.
+        """
+        def torso_fn(hip_angle: float) -> float:
+            return float(np.interp(hip_angle, [60.0, 75.0, 90.0, 180.0], [0.25, 0.25, 0.22, 0.22]))
+
+        for n in (60, 90):
+            with self.subTest(frames=n):
+                _, _, out = _seam(
+                    _rep_frames(n, 175.0, _hinge_pitch, torso_fn=torso_fn), rule_lumbar_flexion
+                )
+                self.assertEqual(len(out), 1)
+                self.assertEqual(out[0].fault_id, "deadlift_lumbar_flexion")
+                self.assertEqual(out[0].observability, "low")
+                self.assertAlmostEqual(out[0].evidence["min_torso_length_ratio"], 0.88, places=2)
+
+    def test_a_rigid_torso_is_silent_through_the_real_phase_labels(self):
+        """Control for the test above: identical seam with the torso length held constant."""
+        for n in (60, 90):
+            with self.subTest(frames=n):
+                _, _, out = _seam(_rep_frames(n, 175.0, _hinge_pitch), rule_lumbar_flexion)
+                self.assertEqual(out, [])
 
 
 class DeadliftDetectorTests(unittest.TestCase):
