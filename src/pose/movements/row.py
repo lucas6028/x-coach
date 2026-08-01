@@ -1088,10 +1088,12 @@ from src.pose.movements import registry
 
 # FOUR of the parent spec's FIVE Row rules are listed here. The fifth,
 # `rounded_thoracolumbar_spine`, is absent because none of the three constructions its spec
-# heuristic offers measures spinal curvature -- two collapse to constants and the third
-# measures a different quantity (trunk pitch plus whole-body translation, not spinal shape)
-# -- the proof is in this module's docstring, and `test_the_fifth_spec_rule_is_absent_by_design`
-# pins the absence so a future reader cannot mistake it for an oversight.
+# heuristic offers measures spinal curvature -- two collapse to constants and the third is
+# computable but measures trunk pitch compared against the setup baseline --
+# `row_torso_rising`'s own signal, relabeled as spinal shape -- which is what makes attaching
+# the Saeterbakken PMID 26134664 erector-spinae citation to it wrong. The proof is in this
+# module's docstring, and `test_the_fifth_spec_rule_is_absent_by_design` pins the absence so a
+# future reader cannot mistake it for an oversight.
 #
 # `ROW_METRIC_KEYS` must stay a two-way match with what `row_compute_raw` emits (pinned by
 # `test_metric_keys_match_the_emitted_metrics_exactly`): a key the tuple omits is dropped by
