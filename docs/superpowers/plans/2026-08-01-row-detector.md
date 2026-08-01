@@ -1213,27 +1213,52 @@ git commit -m "feat(pose): row incomplete-ROM rule, reading the arm that fell sh
 Append to `tests/test_row.py`:
 
 ```python
-def _jerk_clip(spike_scale: float, spike_at: int = 12, frame_count: int = 24) -> list[dict]:
-    """A pull whose wrists travel smoothly, with one injected acceleration spike.
+_JERK_PULL_FRAMES = 26
+_JERK_TOTAL_FRAMES = 38
+_JERK_BURST_AT = 10
+_JERK_BURST_WIDTH = 1.2
 
-    The wrist-to-hip distance shrinks linearly (constant velocity => zero acceleration
-    everywhere), and `spike_scale` displaces exactly ONE frame off that line, which produces a
-    2-3 frame acceleration transient centered on it. A spike_scale of 0 gives a clip whose
-    median acceleration is 0 -- deliberately, so the degenerate-median guard gets exercised.
+
+def _jerk_clip(burst_amplitude: float) -> list[dict]:
+    """A smooth bell-shaped pull, optionally with one injected acceleration burst.
+
+    THE BASELINE MUST NOT BE LINEAR, and this was established by measurement, not taste. A
+    constant-velocity wrist path has zero acceleration everywhere, so the rule's median over the
+    pull is ~1e-5 -- below `_DEGENERATE_ACCEL` -- and `rule_momentum_jerk` returns [] via the
+    degenerate guard on EVERY such clip, spike or no spike. A fixture built that way tests the
+    guard and nothing else. The cosine-ease travel below gives a half-sine velocity and a
+    genuinely nonzero acceleration median, which is what puts the ratio test in play at all.
+
+    MEASURED BEHAVIOUR OF THIS FIXTURE, after `run_detector`'s 5-frame median filter, with the
+    median taken over `pull` frames exactly as the rule takes it:
+
+        burst_amplitude   peak/median ratio   severity   fired-frame span
+        0.00 (clean)               1.56          --          silent
+        0.03                       4.22         0.271           3
+        0.05                       6.94         0.876           7
+
+    Two facts those numbers carry, both of which the tests below pin:
+      - A smooth pull does NOT fire, at any pull speed tried (ratio 1.25-1.56 for pulls of
+        10-26 frames). The design spec's "expected to over-fire" worry is not borne out on
+        synthetic smooth profiles; it remains untested on real video.
+      - The 0.03 burst's fired span is 3 frames, SHORTER than `ctx.min_frames` (6 at 30 fps).
+        That is the concrete case the event-rule deviation exists for.
     """
     frames: list[dict] = []
-    for index in range(frame_count):
-        # Elbow angle drives phase assignment: extended -> flexed -> extended.
-        progress = min(index / (frame_count * 0.6), 1.0)
-        elbow = 170.0 - 100.0 * progress
-        distance_value = 0.30 - 0.010 * index
-        if index == spike_at:
-            distance_value -= spike_scale
+    for index in range(_JERK_TOTAL_FRAMES):
+        progress = min(index / _JERK_PULL_FRAMES, 1.0)
+        # Cosine ease: velocity is a half-sine, so acceleration is nonzero across the pull.
+        travel = 0.25 * (1.0 - math.cos(math.pi * progress)) / 2.0
+        distance_value = 0.30 - travel
+        if burst_amplitude:
+            distance_value -= burst_amplitude * math.exp(
+                -(((index - _JERK_BURST_AT) / _JERK_BURST_WIDTH) ** 2)
+            )
         frames.append(
             row_frame(
                 trunk_angle_deg=20.0,
                 wrist_hip_dist=max(distance_value, 0.02),
-                elbow_angle_deg=elbow,
+                elbow_angle_deg=170.0 - 100.0 * progress,
                 frame_index=index,
             )
         )
@@ -1242,9 +1267,10 @@ def _jerk_clip(spike_scale: float, spike_at: int = 12, frame_count: int = 24) ->
 
 class RowMomentumJerkTest(unittest.TestCase):
     def test_a_smooth_controlled_pull_does_not_fire(self) -> None:
+        """Specificity on a realistic profile: measured peak/median ratio 1.56, well under 3."""
         from src.pose.movements.row import rule_momentum_jerk
 
-        self.assertEqual(_run_rule(rule_momentum_jerk, _jerk_clip(spike_scale=0.0)), [])
+        self.assertEqual(_run_rule(rule_momentum_jerk, _jerk_clip(burst_amplitude=0.0)), [])
 
     def test_a_three_frame_spike_survives_the_median_filter_and_fires(self) -> None:
         """The §4.6(b) claim, verified rather than asserted.
@@ -1257,27 +1283,34 @@ class RowMomentumJerkTest(unittest.TestCase):
         from src.pose.movements.row import ROW_DETECTOR
 
         result = run_detector(
-            ROW_DETECTOR, _jerk_clip(spike_scale=0.06), fps=30.0,
+            ROW_DETECTOR, _jerk_clip(burst_amplitude=0.05), fps=30.0,
             view_type="rear_oblique", view_confidence=0.8, max_reps=None,
         )
         fired = [d for d in result.detections if d.fault_id == "row_momentum_jerk"]
         self.assertEqual(len(fired), 1)
 
-    def test_a_spike_shorter_than_min_frames_still_fires(self) -> None:
-        """min_frames is 6 at 30fps; the transient is 2-3 frames. It must NOT be filtered out."""
+    def test_a_burst_shorter_than_min_frames_still_fires(self) -> None:
+        """min_frames is 6 at 30fps; this burst's fired span is 3. It must NOT be filtered out.
+
+        This is the concrete case the event-rule deviation exists for: a `contiguous_true_segments`
+        call passing `ctx.min_frames` instead of 1 would drop this detection entirely.
+        """
         from src.pose.movements.row import rule_momentum_jerk
 
-        detections = _run_rule(rule_momentum_jerk, _jerk_clip(spike_scale=0.06))
+        detections = _run_rule(rule_momentum_jerk, _jerk_clip(burst_amplitude=0.03))
         self.assertEqual(len(detections), 1)
-        self.assertLess(detections[0].end_frame - detections[0].start_frame, 6)
+        self.assertLess(detections[0].end_frame - detections[0].start_frame + 1, 6)
 
     def test_severity_rises_with_the_ratio(self) -> None:
         from src.pose.movements.row import rule_momentum_jerk
 
-        small = _run_rule(rule_momentum_jerk, _jerk_clip(spike_scale=0.03))
-        large = _run_rule(rule_momentum_jerk, _jerk_clip(spike_scale=0.12))
+        small = _run_rule(rule_momentum_jerk, _jerk_clip(burst_amplitude=0.03))
+        large = _run_rule(rule_momentum_jerk, _jerk_clip(burst_amplitude=0.05))
         self.assertTrue(small and large)
         self.assertLess(small[0].severity, large[0].severity)
+        # Measured against the 3.0 -> 7.5 ramp; exact, because the fixture is deterministic.
+        self.assertAlmostEqual(small[0].severity, 0.271, places=2)
+        self.assertAlmostEqual(large[0].severity, 0.876, places=2)
 
     def test_a_motionless_window_is_refused_rather_than_maximally_flagged(self) -> None:
         """A zero median makes every ratio infinite; the guard must silence, not fire."""
@@ -1293,7 +1326,7 @@ class RowMomentumJerkTest(unittest.TestCase):
         from src.pose.movements.row import rule_momentum_jerk
 
         for view in ("side", "rear", "rear_oblique", "unknown"):
-            detections = _run_rule(rule_momentum_jerk, _jerk_clip(spike_scale=0.06), view_type=view)
+            detections = _run_rule(rule_momentum_jerk, _jerk_clip(burst_amplitude=0.05), view_type=view)
             self.assertEqual(len(detections), 1, view)
             self.assertEqual(detections[0].observability, "medium", view)
             self.assertAlmostEqual(detections[0].confidence, detections[0].severity, places=6)
@@ -1301,7 +1334,7 @@ class RowMomentumJerkTest(unittest.TestCase):
     def test_trunk_heave_is_evidence_and_never_a_fire_condition(self) -> None:
         from src.pose.movements.row import rule_momentum_jerk
 
-        detections = _run_rule(rule_momentum_jerk, _jerk_clip(spike_scale=0.06))
+        detections = _run_rule(rule_momentum_jerk, _jerk_clip(burst_amplitude=0.05))
         self.assertIn("trunk_heave", detections[0].evidence)
         self.assertIn(detections[0].evidence["trunk_heave"], ("yes", "no"))
 ```
