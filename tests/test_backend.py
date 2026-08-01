@@ -1776,6 +1776,35 @@ class AnalysesRouterTests(unittest.TestCase):
         resp = self.client.delete("/api/analyses")
         self.assertEqual(resp.status_code, 401)
 
+    def test_delete_one_returns_deleted_count(self) -> None:
+        with mock.patch.object(store, "delete_analysis", return_value=True) as da:
+            resp = self.client.delete("/api/analyses/3f2a5c1e-0000-4000-8000-000000000001")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"deleted": 1})
+        da.assert_called_once_with(
+            token="tok",
+            analysis_id="3f2a5c1e-0000-4000-8000-000000000001",
+            user_id="u1",
+        )
+
+    def test_delete_one_missing_is_404(self) -> None:
+        with mock.patch.object(store, "delete_analysis", return_value=False):
+            resp = self.client.delete("/api/analyses/3f2a5c1e-0000-4000-8000-000000000002")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_one_bad_uuid_is_404(self) -> None:
+        """`.eq("id", "not-a-uuid")` makes Postgres raise 22P02, which would surface as a 500.
+        The id is validated before the store is reached, so a junk path param is a plain 404."""
+        with mock.patch.object(store, "delete_analysis") as da:
+            resp = self.client.delete("/api/analyses/not-a-uuid")
+        self.assertEqual(resp.status_code, 404)
+        da.assert_not_called()
+
+    def test_delete_one_requires_auth(self) -> None:
+        app.dependency_overrides.clear()  # drop the override -> real dependency runs
+        resp = self.client.delete("/api/analyses/3f2a5c1e-0000-4000-8000-000000000003")
+        self.assertEqual(resp.status_code, 401)
+
     def test_requires_auth(self) -> None:
         app.dependency_overrides.clear()  # drop the override -> real dependency runs
         resp = self.client.get("/api/analyses")
