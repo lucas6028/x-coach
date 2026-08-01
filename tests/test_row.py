@@ -1110,11 +1110,17 @@ class RowDetectorAssemblyTest(unittest.TestCase):
 
 class RowPerRepBaselineTest(unittest.TestCase):
     def test_each_rep_is_scored_against_its_own_setup(self) -> None:
-        """The §4.2 guard: a clean rep 1 followed by a rising rep 2 flags rep 2 only.
+        """Half of the §4.2 guard -- ATTRIBUTION: a clean rep 1 followed by a rising rep 2 flags
+        rep 2 only, never rep 1 and never both. Single-rep fixtures structurally cannot check
+        this -- the whole clip is one window there. This is Row's analogue of Lunge's
+        alternating-lead fixture.
 
-        Single-rep fixtures structurally cannot check this -- the whole clip is one window
-        there, so a per-clip baseline would pass every earlier test. This is Row's analogue of
-        Lunge's alternating-lead fixture.
+        This fixture alone does NOT prove per-rep SCOPING: both reps share the same 20 deg
+        setup angle, so a pooled (clip-level) baseline and a per-rep one compute the identical
+        20 deg number here, and this test would pass unchanged even if the per-rep baseline
+        regressed to a clip-level one. `test_a_clip_level_baseline_would_fire_but_the_per_rep_one_stays_silent`
+        below is the fixture built specifically so the two scopings diverge; the two tests
+        together cover attribution and scoping respectively.
         """
         from src.pose.movements.base import run_detector
         from src.pose.movements.row import ROW_DETECTOR
@@ -1149,6 +1155,73 @@ class RowPerRepBaselineTest(unittest.TestCase):
         # `(1, 2, 3)`). The rising rep is the SECOND physical rep, so its window index -- and
         # therefore `occurred_reps` -- is `(2,)`, not `(1,)`.
         self.assertEqual(rising[0].occurred_reps, (2,))
+
+    def test_a_clip_level_baseline_would_fire_but_the_per_rep_one_stays_silent(self) -> None:
+        """The other half of the §4.2 guard -- SCOPING, not attribution.
+
+        `test_each_rep_is_scored_against_its_own_setup` (above) proves which rep a fault is
+        charged to, but both its reps share one 20 deg setup angle, so a pooled (clip-level)
+        baseline and a per-rep one land on the identical number there -- that fixture cannot
+        tell the two scopings apart, and would pass unchanged under a regression to a
+        clip-level baseline. This fixture is built so the two scopings give DIFFERENT verdicts.
+
+        MEASURED against this exact fixture (via `run_detector` and `_setup_baseline` directly,
+        before any assertion below was written -- not assumed):
+          rep 1: window frames 5-16 (12 frames). `setup_cutoff = max(1, int(12 * 0.15)) == 1`,
+            so exactly ONE frame is labelled `setup` (frame 5, 20 deg). Peak phase holds at 20
+            deg. Per-rep baseline: 20.0 deg (measured `_setup_baseline` output
+            20.000001907348633, i.e. exact modulo float noise). Rise: 0.0 deg. Silent under
+            EITHER scoping.
+          rep 2: window frames 21-32 (12 frames), same 1-frame setup slice (frame 21, 45 deg).
+            Unlike Task 2's worked contamination example, this single setup frame is NOT
+            smoothed into the adjoining 55 deg peak value (verified: the 5-frame centered
+            median at frame 21 sees `[45, 45, 45, 55, 55]`, whose median is 45). Per-rep
+            baseline: 45.0 deg (measured 44.999996185302734). Peak max: 55 deg. Rise: 10.0 deg
+            -- UNDER the 15 deg fire threshold, so rep 2 must stay SILENT under correct per-rep
+            scoping.
+          Pooled over BOTH reps' single setup frames (20 deg, 45 deg), the clip-level baseline
+            is median([20, 45]) == 32.5 deg (measured `_setup_baseline` called on the whole,
+            unsliced `core` -- exactly what a regression to clip-level scoping would compute).
+            Against that baseline, rep 2's rise is 55 - 32.5 == 22.5 deg -- OVER the 15 deg
+            threshold. A clip-level regression fires here; the real per-rep implementation does
+            not.
+
+        `len(result.reps) == 2` is asserted first so the test cannot pass vacuously by finding
+        no reps at all. Verified by mutation (not merely asserted): changing
+        `src/pose/movements/base.py`'s per-rep `window = core[rep.start : rep.end + 1]` to
+        `window = core` (i.e. every rule sees the whole clip, phases intact, exactly the
+        regression this test exists to catch) makes THIS test fail -- `row_torso_rising` fires
+        on rep 2 -- while leaving it restored makes it pass.
+        """
+        from src.pose.movements.base import run_detector
+        from src.pose.movements.row import ROW_DETECTOR
+
+        frames: list[dict] = []
+        index = 0
+        # (setup_trunk_deg, peak_trunk_deg) per rep -- see docstring for the measured per-rep
+        # and pooled baselines and rises these produce.
+        specs = [(20.0, 20.0), (45.0, 55.0)]
+        for setup_trunk, peak_trunk in specs:
+            for _ in range(6):  # setup / return to extension
+                frames.append(row_frame(trunk_angle_deg=setup_trunk, elbow_angle_deg=170.0,
+                                        wrist_hip_dist=0.30, frame_index=index))
+                index += 1
+            for _ in range(10):  # peak hold
+                frames.append(row_frame(trunk_angle_deg=peak_trunk, elbow_angle_deg=60.0,
+                                        wrist_hip_dist=0.05, frame_index=index))
+                index += 1
+        for _ in range(6):
+            frames.append(row_frame(trunk_angle_deg=specs[-1][0], elbow_angle_deg=170.0,
+                                    wrist_hip_dist=0.30, frame_index=index))
+            index += 1
+
+        result = run_detector(
+            ROW_DETECTOR, frames, fps=30.0, view_type="rear_oblique",
+            view_confidence=0.8, max_reps=None,
+        )
+        self.assertEqual(len(result.reps), 2)
+        rising = [d for d in result.detections if d.fault_id == "row_torso_rising"]
+        self.assertEqual(rising, [])
 
     def test_the_worse_of_the_two_conditions_sets_the_primary_axis_tilt(self) -> None:
         """Mirror of the test above with the two axes' roles swapped: without this case, the
