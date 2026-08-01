@@ -281,7 +281,7 @@ export default function SixSeven() {
   const showCamera = phase === "playing" || phase === "countdown";
 
   return (
-    <AppLayout title={t("six.title")} initialSidebarOpen={false}>
+    <AppLayout initialSidebarOpen={false}>
       {phase === "intro" && (
         <SixSevenStartScreen
           leaderboard={leaderboard}

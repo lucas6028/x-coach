@@ -43,7 +43,7 @@ export default function Movements() {
   }, 0);
 
   return (
-    <AppLayout title={t("movements.title")}>
+    <AppLayout>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <main className="mx-auto max-w-5xl px-4 py-8 lg:px-6 lg:py-12">
           <h1 className="font-display text-2xl font-bold text-content">{t("movements.title")}</h1>

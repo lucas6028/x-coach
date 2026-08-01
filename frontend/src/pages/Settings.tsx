@@ -79,7 +79,7 @@ export default function Settings() {
   };
 
   return (
-    <AppLayout title={t("settings.title")}>
+    <AppLayout>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
           <p className="text-sm text-muted">{t("settings.subtitle")}</p>

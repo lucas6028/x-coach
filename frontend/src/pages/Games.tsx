@@ -70,7 +70,7 @@ export default function Games() {
   ];
 
   return (
-    <AppLayout title={t("games.title")}>
+    <AppLayout>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         <motion.div
           initial={reduce ? false : { opacity: 0, y: 14 }}

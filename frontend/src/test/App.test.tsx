@@ -73,11 +73,6 @@ describe("App — initial state", () => {
     );
   });
 
-  it("renders the header with AWAITING INPUT status", () => {
-    renderApp();
-    expect(screen.getByText("AWAITING INPUT")).toBeInTheDocument();
-  });
-
   it("renders the sidebar", () => {
     renderApp();
     expect(screen.getAllByText("X-Coach").length).toBeGreaterThan(0);
@@ -135,7 +130,7 @@ describe("App — analysis loaded", () => {
     } as Response);
 
     await user.click(screen.getByText("vid_001").closest("button")!);
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
   });
 
   it("shows an error message when an upload fails", async () => {
@@ -180,15 +175,16 @@ describe("App — upload reflects the analysis in the URL", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
     // The URL now carries the id (shareable + refresh-survivable). Poll it: the router's location
     // update can settle a tick after the analysis render.
     await waitFor(() =>
       expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
     );
     // The replay effect is guarded, so the analysis is NOT re-fetched — if it were, GET
-    // /api/analyses/<id> would return this same (result-less) shape and drop "ANALYSIS COMPLETE".
-    expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument();
+    // /api/analyses/<id> would return this same (result-less) shape and the fault card's evidence
+    // line would disappear.
+    expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument();
   });
 
   it("leaves the URL untouched for an anonymous upload (no analysis_id)", async () => {
@@ -201,7 +197,7 @@ describe("App — upload reflects the analysis in the URL", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
     expect(screen.getByTestId("loc-search").textContent).toBe("");
   });
 });
@@ -218,7 +214,7 @@ describe("App — new analysis reset", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
     );

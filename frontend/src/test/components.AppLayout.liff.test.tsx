@@ -24,7 +24,7 @@ const renderLayout = () =>
       <LiffProvider>
         <AuthProvider>
           <I18nProvider>
-            <AppLayout title="My records">
+            <AppLayout>
               <p>page body</p>
             </AppLayout>
           </I18nProvider>
@@ -46,11 +46,10 @@ describe("AppLayout — inside the LINE app", () => {
   it("renders the tab bar and drops the sidebar", async () => {
     renderLayout();
     await waitFor(() => expect(screen.getByRole("navigation")).toBeInTheDocument());
-    // The web sidebar itself (its version of "New analysis" — a full-width, labelled button —
-    // and its version-tag footer) is gone. The shell header carries its own icon-only "New
-    // analysis" action instead (see the "header actions" describe block below), so this only
-    // checks the sidebar's own labelled rendering is absent, not the accessible name.
-    expect(screen.queryByText("Prototype v0.1")).not.toBeInTheDocument();
+    // The web sidebar itself (its version of "New analysis" — a full-width, labelled button) is
+    // gone. The shell header carries its own icon-only "New analysis" action instead (see the
+    // "header actions" describe block below), so this only checks the sidebar's own labelled
+    // rendering is absent, not the accessible name.
     expect(screen.queryByText("New analysis")).not.toBeInTheDocument();
     // The tab bar's four destinations are present.
     expect(screen.getByRole("link", { name: /Analyse/i })).toBeInTheDocument();
@@ -92,7 +91,7 @@ describe("AppLayout — inside the LINE app", () => {
                 <Route
                   path="/history"
                   element={
-                    <AppLayout title="My records">
+                    <AppLayout>
                       <p>history body</p>
                     </AppLayout>
                   }
@@ -114,11 +113,10 @@ describe("AppLayout — inside the LINE app", () => {
 describe("AppLayout — on the web (regression guard)", () => {
   it("keeps the existing navbar + sidebar shell", async () => {
     renderLayout();
-    // AppLayout renders Sidebar twice (desktop rail hidden on mobile, mobile drawer hidden on desktop),
-    // so both "Prototype v0.1" and "New analysis" button appear twice in the DOM.
-    await waitFor(() => expect(screen.getAllByText("Prototype v0.1")).toHaveLength(2));
+    // AppLayout renders Sidebar twice (desktop rail hidden on mobile, mobile drawer hidden on
+    // desktop), so its "New analysis" button appears twice in the DOM.
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /New analysis/i })).toHaveLength(2));
     expect(screen.getByLabelText("X-Coach")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /New analysis/i })).toHaveLength(2);
     expect(screen.getByText("page body")).toBeInTheDocument();
   });
 });

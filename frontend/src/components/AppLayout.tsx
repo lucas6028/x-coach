@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Analysis } from "../api";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import LiffAppShell from "./LiffAppShell";
@@ -12,14 +11,6 @@ const SIDEBAR_WIDTH = 200;
 
 interface Props {
   children: ReactNode;
-  // Header content: analysis-mode (studio) shows the session + status pill; a plain `title`
-  // (History/Settings) shows just the page name. Analysis-mode wins when both are given.
-  analysis?: Analysis | null;
-  loading?: boolean;
-  title?: string;
-  // The studio's currently-selected movement, pre-result (see Header's `movement` prop). Ignored
-  // once `title` or `analysis` is set — both already know what to show.
-  movement?: string;
   // The studio supplies a picker opener; other pages fall back to navigating into the studio.
   onOpenLibrary?: () => void;
   // The studio resets its own state for a fresh session; other pages just route into the studio.
@@ -36,10 +27,6 @@ interface Props {
 // instead (see lib/liffContext).
 export default function AppLayout({
   children,
-  analysis = null,
-  loading = false,
-  title,
-  movement,
   onOpenLibrary,
   onNewAnalysis,
   initialSidebarOpen = true,
@@ -63,7 +50,7 @@ export default function AppLayout({
   // second analysis without leaving LINE.
   if (isInClient) {
     return (
-      <LiffAppShell title={title} movement={movement} onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis}>
+      <LiffAppShell onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis}>
         {children}
       </LiffAppShell>
     );
@@ -74,10 +61,6 @@ export default function AppLayout({
       {/* Full-width top navbar, spanning both the sidebar and main columns (the reference layout).
           It carries the brand and the desktop sidebar-collapse toggle. */}
       <Header
-        analysis={analysis}
-        loading={loading}
-        title={title}
-        movement={movement}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         onMenu={() => setMobileNav(true)}

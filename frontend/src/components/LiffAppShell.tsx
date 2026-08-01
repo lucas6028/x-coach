@@ -1,7 +1,7 @@
 import { ClockCounterClockwise, Folders, GameController, GearSix, Plus, VideoCamera } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { type ReactNode } from "react";
-import { movementLabel, useI18n } from "../lib/i18n";
+import { useI18n } from "../lib/i18n";
 
 // The in-LINE shell: what AppLayout renders instead of the navbar + sidebar when the SPA is
 // running inside the LINE app. A bottom tab bar is the one thing that makes a web app read as
@@ -16,12 +16,6 @@ import { movementLabel, useI18n } from "../lib/i18n";
 
 interface Props {
   children: ReactNode;
-  // The page name, same prop AppLayout takes. The studio passes none and gets the studio title
-  // — mirroring Header's own fallback, so the copy matches the web build.
-  title?: string;
-  // The studio's currently-selected movement, mirroring Header's `movement` prop — so the LINE
-  // shell's fallback title is "{movement} Analysis" too, not a hardcoded "Squat Analysis".
-  movement?: string;
   // Same "start a fresh session" / "open a saved clip" actions the web sidebar carries on every
   // page (AppLayout already falls back to navigating into the studio off the studio itself — see
   // AppLayout's openLibrary/newAnalysis). Surfaced here in the header because there is no sidebar
@@ -32,7 +26,7 @@ interface Props {
   onNewAnalysis: () => void;
 }
 
-export default function LiffAppShell({ children, title, movement, onOpenLibrary, onNewAnalysis }: Props) {
+export default function LiffAppShell({ children, onOpenLibrary, onNewAnalysis }: Props) {
   const { t } = useI18n();
   const { pathname } = useLocation();
 
@@ -59,9 +53,8 @@ export default function LiffAppShell({ children, title, movement, onOpenLibrary,
     // bar; the top inset covers a notch when LINE renders the LIFF view full-bleed.
     <div className="h-[100dvh] w-full flex flex-col overflow-hidden bg-background-dark text-content pt-[env(safe-area-inset-top)]">
       <header className="h-12 shrink-0 border-b border-border-dark bg-surface flex items-center gap-1 px-4">
-        <h1 className="flex-1 min-w-0 text-sm font-semibold tracking-tight truncate">
-          {title ?? t("header.title", { movement: movementLabel(t, movement ?? "Squat") })}
-        </h1>
+        {/* No page title: the bottom tab bar's active tab is what says which page you're on. */}
+        <div className="flex-1" />
         {/* Icon-only — the header has no room for labels, so the accessible name carries the copy. */}
         <button
           onClick={onNewAnalysis}

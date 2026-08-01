@@ -23,8 +23,6 @@ const en: Dict = {
   "nav.hide": "Hide navigation",
   "nav.show": "Show navigation",
   "nav.tabBar": "Primary navigation",
-  "sidebar.version": "Prototype v0.1",
-  "sidebar.tagline": "Pose · Rules · GraphRAG",
 
   // Games hub — the App-Store-style catalog of the pose mini-games
   "games.title": "Games",
@@ -50,12 +48,6 @@ const en: Dict = {
   "game.kcal.note": "estimated",
 
   // Header
-  "header.session": "Session: {id}",
-  "header.title": "{movement} Analysis",
-  "header.processing": "PROCESSING",
-  "header.complete": "ANALYSIS COMPLETE",
-  "header.awaiting": "AWAITING INPUT",
-  "header.view": "{type} view",
 
   // Camera views
   "view.front": "Front",
@@ -701,8 +693,6 @@ const zhHant: Dict = {
   "nav.hide": "隱藏導覽列",
   "nav.show": "顯示導覽列",
   "nav.tabBar": "主要導覽",
-  "sidebar.version": "原型 v0.1",
-  "sidebar.tagline": "姿態 · 規則 · GraphRAG",
 
   // 小遊戲中心 — App Store 風格的姿態小遊戲總覽
   "games.title": "小遊戲",
@@ -728,12 +718,6 @@ const zhHant: Dict = {
   "game.kcal.note": "估計值",
 
   // Header
-  "header.session": "工作階段：{id}",
-  "header.title": "{movement}分析",
-  "header.processing": "處理中",
-  "header.complete": "分析完成",
-  "header.awaiting": "等待輸入",
-  "header.view": "{type}視角",
 
   // Camera views
   "view.front": "正面",
