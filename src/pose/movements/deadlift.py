@@ -487,3 +487,117 @@ def rule_incomplete_lockout(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
             )
         )
     return detections
+
+
+# NO KG NODE EXISTS FOR THIS FAULT -- `rag` fallback, resolved before the rule was written.
+# The nearest Deadlift-scoped candidate, `Deadlift:Insufficient Hip Hinge`, is a near-miss
+# POINTING THE WRONG WAY: insufficient hinge means failing to push the hips back, a
+# knee-dominant squat-like pull, whereas this fault is excessive hip dominance with the trunk
+# flattening. Its only edge is `AFFECTS_QUALITY -> Hip Hinge` -- no risk, no correction. The
+# other candidates (`Hips Rise Before Shoulders`, `Trunk Over Inclination`, `Anterior Trunk
+# Tilt`, `Excessive Forward Lean`) resolve to nothing or to the bare `Hip` anatomy node.
+#
+# IN `rag` MODE THIS STRING IS A VECTOR-DB SEARCH PHRASE, NOT A NODE NAME, and it was chosen by
+# running candidates rather than by writing something plausible. The corpus holds only 2
+# deadlift documents among 85, so semantic search drifts badly: "Hips Rise Before Shoulders"
+# returns a row EMG paper, and four different mechanism-keyword phrasings ("...erector spinae
+# trunk flexion barbell shear force", "...lever arm lower back barbell", and two more) each
+# returned 0/3 deadlift documents, mostly Overhead Press. The phrasing below returns
+# PMC12225233 -- this rule's primary citation -- at ranks 1, 2 AND 3. Verified 2026-08-01;
+# re-run before changing it, because near-miss phrasings silently ground this fault in the
+# wrong movement's literature.
+DEADLIFT_HIPS_KG_QUERY = "deadlift trunk position electromyographic activity lift-off mid-pull lockout"
+
+# Spec-derived, UNVALIDATED AND UNSOURCED. Neither deadlift RAG document reports a trunk
+# inclination in degrees -- the only degree value in PMC12148905 is an unrelated 8 deg knee
+# adduction. What the citation backs is the MECHANISM and the DIRECTION (a flatter trunk means
+# more spinal flexion torque), which is what the two-clause criterion encodes; these endpoints
+# are the parent spec's numbers.
+DEADLIFT_PITCH_MILD_DEG = 55.0
+DEADLIFT_PITCH_SEVERE_DEG = 75.0
+
+
+def rule_hips_shoot_up(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Hips out-run the shoulders off the floor, flattening the trunk into a back-dominant pull.
+
+    THIS IS NOT WRITTEN AS A HIP-VS-SHOULDER RISE DIFFERENTIAL, and the omission is deliberate.
+    The parent spec phrases the signal as "Delta(hip_y) rises faster than Delta(shoulder_y)",
+    and an earlier draft implemented that literally as
+
+        hip_lead_ratio = ((hip_y0 - hip_y) - (shoulder_y0 - shoulder_y)) / torso_len0 > 0
+
+    That term was checked numerically before any code was written and is ALGEBRAICALLY
+    IDENTICAL to a trunk-pitch change. Since `shoulder_y - hip_y = -torso_len*cos(pitch)`, a
+    rigid torso gives
+
+        hip_lead_ratio == cos(pitch_0) - cos(pitch_t)
+
+    exact to machine precision on a sagittal stick model. It depends ONLY on pitch and carries
+    no information about how far the hips actually travelled -- two landmarks dressing up a
+    single-angle test. Writing it as a differential would have implied this rule corroborates
+    trunk pitch with an independent kinematic signal, which is false. The parent spec's own
+    "i.e." equating the two phrasings turns out to be correct, so stating the rule in pitch
+    terms is faithful to it rather than a deviation.
+
+    The relative-to-setup clause is kept because it is what separates the SEQUENCING fault the
+    citation describes from a lifter who merely sets up flat and stays there; the absolute
+    55-degree gate alone cannot tell those apart.
+
+    View policy is DEGRADE, not gate: head-on, a pitched trunk projects short and near-vertical
+    so the angle UNDER-reads, making the off-view failure mode silence rather than a wrong
+    claim.
+    """
+    baseline = setup_baseline(core, "torso_pitch_deg")
+    if not np.isfinite(baseline):
+        return []
+    observable = ctx.view_type in SAGITTAL_VIEWS
+
+    mask = [
+        frame.valid
+        and frame.phase in DEADLIFT_ACTIVE_PHASES
+        and np.isfinite(frame.m("torso_pitch_deg"))
+        and frame.m("torso_pitch_deg") > baseline
+        and frame.m("torso_pitch_deg") > DEADLIFT_PITCH_MILD_DEG
+        for frame in core
+    ]
+
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        pitches = [frame.m("torso_pitch_deg") for frame in segment]
+        peak = float(np.nanmax(pitches))
+        severity = severity_from_range(
+            peak, DEADLIFT_PITCH_MILD_DEG, DEADLIFT_PITCH_SEVERE_DEG, lower_is_worse=False
+        )
+        detections.append(
+            build_detection(
+                fault_id="deadlift_hips_shoot_up",
+                fault_name="Hips Rise Before Shoulders / Trunk Over-Inclination",
+                kg_query=DEADLIFT_HIPS_KG_QUERY,
+                retrieval_mode="rag",
+                segment_metrics=segment,
+                score_values=pitches,
+                severity=severity,
+                confidence=severity * (1.0 if observable else _OFF_VIEW_CONFIDENCE),
+                observability="high" if observable else "medium",
+                evidence={
+                    "peak_torso_pitch_deg": round(peak, 2),
+                    "setup_torso_pitch_deg": round(baseline, 2),
+                    "threshold": DEADLIFT_PITCH_MILD_DEG,
+                    "primary_label": "peak trunk pitch from vertical",
+                    "primary_value": round(peak, 2),
+                    "primary_threshold": DEADLIFT_PITCH_MILD_DEG,
+                },
+                citation="Moreira VM, et al. PMC12225233 (2023). Cross-support: Hanen NC, "
+                         "et al. PMC12148905 (2025).",
+                citation_support="PMC12225233: \"leaning the trunk forward results in higher "
+                                 "spinal flexion torque generated by the barbell. Therefore, "
+                                 "ERE [erector spinae] requires higher activation and higher "
+                                 "strength to avoid trunk flexion, reducing shear.\" "
+                                 "PMC12148905 frames \"a significantly reduced trunk "
+                                 "inclination angle\" as the low-back-sparing state. Verified "
+                                 "in RAG docs. Both ramp endpoints are spec-derived: neither "
+                                 "source reports a trunk inclination in degrees.",
+            )
+        )
+    return detections
