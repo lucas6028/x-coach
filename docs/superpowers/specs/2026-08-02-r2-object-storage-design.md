@@ -255,8 +255,11 @@ worse than naming the gap.
   against a patched fake boto3 client asserting bucket/key/content-type and the presign
   expiry; `get_object_store()` selection by settings.
 - Analyze-router tests: thumbnail accepted / rejected / absent; source-put failure yields 503
-  <!-- Superseded during implementation: "rejected" became "dropped" — the assertion is that a
-       bad-type / oversized thumbnail still yields a successful analysis with no thumbnail. -->
+
+  > **Superseded during implementation — see the plan.** "rejected" became "dropped": the
+  > assertion is that a bad-type or oversized thumbnail still yields a SUCCESSFUL analysis,
+  > carrying no thumbnail.
+
 
   and runs no analysis; pose-put failure still returns the analysis; `video_url` present in
   the response and absent from the persisted `result`.
