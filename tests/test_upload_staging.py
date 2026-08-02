@@ -73,6 +73,14 @@ class StageUploadTests(unittest.TestCase):
             with self.assertRaises(storage.StorageError):
                 analysis.stage_upload(b"v", suffix=".mp4", owner="u1")
 
+    def test_video_ids_are_unique_across_uploads(self) -> None:
+        """Two uploads must never collide onto one key prefix — one would overwrite the other."""
+        first = analysis.stage_upload(b"v", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, first)
+        second = analysis.stage_upload(b"v", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, second)
+        self.assertNotEqual(first.video_id, second.video_id)
+
 
 class StoreArtifactsTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -112,6 +120,26 @@ class StoreArtifactsTests(unittest.TestCase):
         """A storage hiccup must not discard an already-completed (expensive) analysis."""
         self.staged.pose_path.write_text("{}", encoding="utf-8")
         with mock.patch.object(storage, "get_object_store", return_value=_FailingStore()):
+            analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
+
+    def test_never_raises_when_the_staged_pose_file_cannot_be_read(self) -> None:
+        """`is_file()` and the read are not atomic, and the read raises OSError — which a
+        StorageError-only guard would let escape."""
+        self.staged.pose_path.write_text("{}", encoding="utf-8")
+        with mock.patch.object(Path, "read_bytes", side_effect=OSError("gone")):
+            analysis.store_artifacts(self.staged)  # must not raise
+
+    def test_never_raises_when_the_put_hits_the_filesystem(self) -> None:
+        """LocalObjectStore.put does mkdir + write_bytes, so on the dev/CI path a disk error
+        surfaces as OSError, not StorageError."""
+        self.staged.pose_path.write_text("{}", encoding="utf-8")
+        with mock.patch.object(
+            storage.LocalObjectStore, "put", side_effect=OSError("no space left on device")
+        ):
+            analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
+
+    def test_never_raises_when_the_object_store_is_unavailable(self) -> None:
+        with mock.patch.object(storage, "get_object_store", side_effect=RuntimeError("boom")):
             analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
 
 
