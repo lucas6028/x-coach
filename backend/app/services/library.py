@@ -14,7 +14,7 @@ from typing import Any
 
 from src.pose.pose_rule_detector import retrieve_contexts_for_detections
 
-from backend.app import config, settings
+from backend.app import config
 from backend.app.services.analysis import build_pose_block
 
 # Time-segment ground-truth labels keyed by video id (start/end seconds per fault file).
@@ -77,22 +77,6 @@ def video_path(video_id: str) -> Path | None:
         return None
     candidate = config.VIDEOS_DIR / f"{video_id}.mp4"
     return candidate if candidate.exists() else None
-
-
-def uploaded_video_path(video_id: str) -> Path | None:
-    """Resolve a prior upload to its on-disk path by trying each allowed suffix.
-
-    Replaces a ``glob(f"{video_id}.*")`` lookup: globbing let a crafted ``video_id`` (e.g.
-    ``*`` or ``upload_a*``) expand into a wildcard match and return *another* user's upload.
-    This does exact-name existence checks instead, so only the requested id can ever match.
-    """
-    if not is_safe_video_id(video_id):
-        return None
-    for suffix in settings.allowed_upload_suffixes():
-        candidate = config.UPLOAD_DIR / f"{video_id}{suffix}"
-        if candidate.exists():
-            return candidate
-    return None
 
 
 def list_videos(*, limit: int = 50, offset: int = 0, fault: str | None = None) -> dict[str, Any]:
