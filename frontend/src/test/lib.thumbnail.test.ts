@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { THUMBNAIL_MAX_EDGE, thumbnailSize, thumbnailTime } from "../lib/thumbnail";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { THUMBNAIL_MAX_EDGE, thumbnailSize, thumbnailTime, withTimeout } from "../lib/thumbnail";
 
 describe("thumbnailSize", () => {
   it("leaves a small frame alone", () => {
@@ -31,5 +31,28 @@ describe("thumbnailTime", () => {
     expect(thumbnailTime(Number.NaN)).toBe(0);
     expect(thumbnailTime(0)).toBe(0);
     expect(thumbnailTime(Infinity)).toBe(0);
+  });
+});
+
+describe("withTimeout", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("resolves with the promise's value when it settles first", async () => {
+    await expect(withTimeout(Promise.resolve("frame"), 5000)).resolves.toBe("frame");
+  });
+
+  it("rejects with the promise's own error when it rejects first", async () => {
+    await expect(withTimeout(Promise.reject(new Error("decode failed")), 5000)).rejects.toThrow(
+      "decode failed"
+    );
+  });
+
+  it("rejects with a timeout error when the promise never settles in time", async () => {
+    vi.useFakeTimers();
+    const never = new Promise<void>(() => undefined);
+    const result = withTimeout(never, 5000);
+    const assertion = expect(result).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(5000);
+    await assertion;
   });
 });
