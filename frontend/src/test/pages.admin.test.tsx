@@ -28,7 +28,12 @@ const SAMPLE_SETTINGS: AdminSettingsResponse = {
       followup_timeout: 15,
     },
     rag_kg: { rag_top_k: 5, kg_hops: 1, kg_seeds: 5 },
-    analyze: { allowed_upload_suffixes: [".mp4", ".mov"], max_concurrent_analyses: 2 },
+    analyze: {
+      allowed_upload_suffixes: [".mp4", ".mov"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+      max_concurrent_analyses: 2,
+    },
   },
   defaults: {
     llm: {
@@ -40,7 +45,12 @@ const SAMPLE_SETTINGS: AdminSettingsResponse = {
       followup_timeout: 15,
     },
     rag_kg: { rag_top_k: 5, kg_hops: 1, kg_seeds: 5 },
-    analyze: { allowed_upload_suffixes: [".mp4", ".mov"], max_concurrent_analyses: 2 },
+    analyze: {
+      allowed_upload_suffixes: [".mp4", ".mov"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+      max_concurrent_analyses: 2,
+    },
   },
 };
 
@@ -493,10 +503,15 @@ describe("Admin settings pages", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /max concurrent/i })).toBeNull();
 
-    // Saving only sends the editable upload-formats field — never max_concurrent_analyses.
+    // Saving sends only the editable analyze knobs — never max_concurrent_analyses. Kept as an
+    // exact-equality assertion (not toMatchObject) precisely because that absence is the claim.
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => expect(update).toHaveBeenCalled());
-    expect(update.mock.calls[0][0]).toEqual({ allowed_upload_suffixes: [".mp4", ".mov"] });
+    expect(update.mock.calls[0][0]).toEqual({
+      allowed_upload_suffixes: [".mp4", ".mov"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+    });
   });
 });
 
@@ -602,7 +617,7 @@ describe("AdminSettingsRag save-error + full edit", () => {
 });
 
 describe("AdminSettingsAnalyze edit + save-error", () => {
-  it("sends only the edited upload suffixes on save", async () => {
+  it("sends the analyze group — suffixes plus both upload limits — on save", async () => {
     const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
     renderAdmin("/admin/settings/analyze");
     fireEvent.change(await screen.findByLabelText("Allowed upload formats"), {
@@ -610,7 +625,47 @@ describe("AdminSettingsAnalyze edit + save-error", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => expect(update).toHaveBeenCalled());
-    expect(update.mock.calls[0][0]).toEqual({ allowed_upload_suffixes: [".mp4", ".avi"] });
+    expect(update.mock.calls[0][0]).toEqual({
+      allowed_upload_suffixes: [".mp4", ".avi"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+    });
+  });
+
+  it("persists edited upload limits, so the panel really can retune them without a redeploy", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/analyze");
+    fireEvent.change(await screen.findByLabelText("Max upload size (bytes)"), {
+      target: { value: "262144000" },
+    });
+    fireEvent.change(screen.getByLabelText("Per-user storage quota (bytes)"), {
+      target: { value: "2147483648" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0].max_upload_bytes).toBe(262144000);
+    expect(update.mock.calls[0][0].user_storage_quota_bytes).toBe(2147483648);
+  });
+
+  it("shows the effective limits and their defaults", async () => {
+    renderAdmin("/admin/settings/analyze");
+    expect(await screen.findByLabelText("Max upload size (bytes)")).toHaveValue("104857600");
+    expect(screen.getByLabelText("Per-user storage quota (bytes)")).toHaveValue("524288000");
+    expect(screen.getByText("Default: 104857600")).toBeInTheDocument();
+    expect(screen.getByText("Default: 524288000")).toBeInTheDocument();
+  });
+
+  it("blocks the save and shows the invalid-number error when a limit is cleared", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/analyze");
+    fireEvent.change(await screen.findByLabelText("Max upload size (bytes)"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    expect(
+      await screen.findByText("Please enter a valid number for every field.")
+    ).toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("shows the save-error state when the update rejects", async () => {

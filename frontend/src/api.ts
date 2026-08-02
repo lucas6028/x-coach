@@ -99,6 +99,10 @@ export interface Analysis {
   // Present when an authenticated upload was persisted to the user's history (null if the
   // save failed). Absent for anonymous uploads and library clips.
   analysis_id?: string | null;
+  /** A short-lived presigned URL for the source clip, attached to the analyze RESPONSE only —
+   *  never stored in the history row, where it would already be expired on replay. Replays
+   *  re-sign through `api.uploadMedia`. */
+  video_url?: string | null;
   /** Which detector produced this analysis. Absent on analyses predating per-movement
    *  selection; consumers fall back to "Squat". */
   movement?: string;
@@ -117,6 +121,13 @@ export interface HistoryItem {
 export interface HistoryPage {
   total: number;
   items: HistoryItem[];
+}
+
+// Short-lived URLs for one upload's stored artifacts, from GET /api/uploads/{id}/url.
+export interface UploadMedia {
+  video_url: string;
+  thumbnail_url: string;
+  expires_in: number;
 }
 
 // A single stored analysis row; `result` is the full Analysis document for replay.
@@ -228,6 +239,9 @@ export interface AdminRagKgSettings {
 }
 export interface AdminAnalyzeSettings {
   allowed_upload_suffixes: string[];
+  // Upload limits, in BYTES (the key names carry the unit). Both are runtime-tunable here.
+  max_upload_bytes: number;
+  user_storage_quota_bytes: number;
   max_concurrent_analyses: number;
 }
 export interface AdminSettingsGroups {
@@ -255,6 +269,8 @@ export interface AdminSettingsUpdate {
   // max_concurrent_analyses is intentionally omitted: it's read-only (sourced from the
   // XCOACH_MAX_CONCURRENT_ANALYSES env var, applied at startup) and must never be sent in an update.
   allowed_upload_suffixes?: string[];
+  max_upload_bytes?: number;
+  user_storage_quota_bytes?: number;
 }
 
 // ---- Admin: user oversight + system overview (admin-only; P3) -----------------------------
@@ -404,6 +420,42 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+export type UploadLimitCode = "upload_too_large" | "storage_quota_exceeded";
+
+/**
+ * A 413 from an analyze endpoint: the clip is over the per-file cap, or the user is out of
+ * storage. Typed rather than a plain Error because the message must be LOCALISED at the call
+ * site — this module has no access to the i18n `t()`, and the server's detail is English.
+ */
+export class UploadLimitError extends Error {
+  constructor(
+    readonly code: UploadLimitCode,
+    readonly limitMb: number,
+    readonly usedMb: number | null
+  ) {
+    super(code);
+    this.name = "UploadLimitError";
+  }
+}
+
+/** Parse an analyze failure body into an UploadLimitError, or null if it is not one. */
+function uploadLimitError(status: number, body: unknown): UploadLimitError | null {
+  if (status !== 413) return null;
+  const detail = (body as { detail?: unknown })?.detail as
+    | { code?: string; limit_mb?: number; used_mb?: number }
+    | undefined;
+  if (detail?.code !== "upload_too_large" && detail?.code !== "storage_quota_exceeded") {
+    // A 413 we do not recognise (a proxy's own body, say) falls through to the generic path
+    // rather than being mislabelled as a quota problem.
+    return null;
+  }
+  return new UploadLimitError(
+    detail.code,
+    Number(detail.limit_mb ?? 0),
+    detail.used_mb === undefined ? null : Number(detail.used_mb)
+  );
+}
+
 export const api = {
   health: () => getJSON<HealthResponse>("/api/health"),
 
@@ -504,7 +556,30 @@ export const api = {
       `/api/knowledge/faults?movement=${encodeURIComponent(movement)}`
     ),
 
+  // Library demo clips only — uploads are not reachable here (they need an ownership check).
   videoFileUrl: (videoId: string) => `/api/video-file/${videoId}`,
+
+  // Short-lived URLs for ONE of the caller's uploads (requires a session).
+  uploadMedia: (videoId: string) =>
+    getJSON<UploadMedia>(`/api/uploads/${encodeURIComponent(videoId)}/url`),
+
+  // The same URLs for a whole history page in one round trip. Ids the caller does not own are
+  // absent from `items` rather than an error.
+  async uploadMediaBatch(
+    videoIds: string[]
+  ): Promise<Record<string, { video_url: string; thumbnail_url: string }>> {
+    if (videoIds.length === 0) return {};
+    const res = await fetch("/api/uploads/urls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ video_ids: videoIds }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/uploads/urls`);
+    const body = (await res.json()) as {
+      items: Record<string, { video_url: string; thumbnail_url: string }>;
+    };
+    return body.items;
+  },
 
   // The caller's saved analyses, newest first (requires a signed-in session).
   listAnalyses: (limit = 50, offset = 0) =>
@@ -613,12 +688,16 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   },
 
-  async analyzeUpload(file: File, movement: string): Promise<Analysis> {
+  // No in-app caller today — App.tsx always goes through `analyzePose`. The `thumbnail`
+  // parameter exists so reviving this path does not silently lose thumbnails.
+  async analyzeUpload(file: File, movement: string, thumbnail?: Blob | null): Promise<Analysis> {
     const form = new FormData();
     form.append("file", file);
     // Which detector runs. The backend rejects an unregistered value with 400 before it spends
     // a MediaPipe pass, and echoes the canonical spelling back as `movement` on the result.
     form.append("movement", movement);
+    // Optional by design: a browser where frame capture failed must still be able to analyze.
+    if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
     const res = await fetch("/api/analyze", {
       method: "POST",
       body: form,
@@ -626,17 +705,25 @@ export const api = {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
+      const limit = uploadLimitError(res.status, detail);
+      if (limit) throw limit;
       throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
     }
     return (await res.json()) as Analysis;
   },
 
-  async analyzePose(movement: string, pose: PoseJson, video: Blob): Promise<Analysis> {
+  async analyzePose(
+    movement: string,
+    pose: PoseJson,
+    video: Blob,
+    thumbnail?: Blob | null
+  ): Promise<Analysis> {
     const form = new FormData();
     form.append("movement", movement);
     form.append("pose", JSON.stringify(pose));
     const ext = video.type.includes("mp4") ? "mp4" : "webm";
     form.append("file", video, `capture.${ext}`);
+    if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
     const res = await fetch("/api/analyze/pose", {
       method: "POST",
       body: form,
@@ -644,6 +731,8 @@ export const api = {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
+      const limit = uploadLimitError(res.status, detail);
+      if (limit) throw limit;
       throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
     }
     return (await res.json()) as Analysis;

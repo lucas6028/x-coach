@@ -13,7 +13,12 @@ routers that use it) stays light, and the unit tests can patch ``_user_client`` 
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from backend.app.services import storage
+
+logger = logging.getLogger(__name__)
 
 
 def _user_client(token: str) -> Any:
@@ -137,14 +142,25 @@ def persist_analysis(
     user_id: str,
     video_id: str,
     source: str,
+    storage_key: str,
+    size_bytes: int,
     result: dict[str, Any],
     filename: str | None = None,
 ) -> str:
     """Upsert the video row and insert the analysis; return the new analysis id.
 
-    The ``videos`` row carries the (currently trivial) status machine and the storage key,
-    which P2 will repoint at object storage. ``result`` is stored verbatim as JSONB so history
-    replay is self-contained.
+    ``storage_key`` is the object-store key PREFIX holding this upload's artifacts
+    (``uploads/{owner}/{video_id}``), not a single object — the read path signs
+    ``{storage_key}/source`` and ``{storage_key}/thumb.jpg`` off it, and deletion reaps
+    everything under it. ``result`` is stored verbatim as JSONB so history replay is
+    self-contained; note that the caller attaches the presigned ``video_url`` only AFTER this
+    returns, so no expired URL is ever persisted.
+
+    ``size_bytes`` is the total the upload's stored artifacts occupy (source + pose JSON +
+    thumbnail), and is what the storage quota sums. REQUIRED rather than defaulted: a caller
+    that forgets it would silently write a row consuming no quota, which is a hole that fails
+    open. It must reflect what was ACTUALLY stored -- ``store_artifacts`` returns 0 for an
+    artifact whose put failed, so a partial failure does not bill the user for absent bytes.
     """
     client = _user_client(token)
 
@@ -153,7 +169,8 @@ def persist_analysis(
             "user_id": user_id,
             "video_id": video_id,
             "filename": filename,
-            "storage_key": f"runtime/uploads/{video_id}",
+            "storage_key": storage_key,
+            "size_bytes": size_bytes,
             "status": "done",
         },
         on_conflict="user_id,video_id",
@@ -198,18 +215,45 @@ def list_analyses(*, token: str, limit: int = 50, offset: int = 0) -> dict[str, 
     return {"total": resp.count or 0, "items": resp.data or []}
 
 
+def _reap_objects(prefixes: list[str]) -> None:
+    """Delete every stored artifact under each prefix. Best-effort: logged, never raised.
+
+    A storage failure must not roll back a DB deletion the user already asked for — an orphaned
+    object is a cost, a record that refuses to delete is a bug. This runs AFTER the DB rows are
+    already gone, so nothing here -- not `delete_prefix`, not `get_object_store()` itself -- may
+    escape and 500 a delete that already succeeded; each prefix is isolated so one bad prefix
+    doesn't abandon the rest.
+    """
+    for prefix in prefixes:
+        try:
+            # ``get_object_store()`` is INSIDE the try, and the except is broad, for the same
+            # reason as ``analysis._put_artifact``: this runs AFTER the DB rows are already gone,
+            # so anything escaping here 500s a deletion that actually succeeded. It is lru_cached,
+            # so calling it per prefix is a cache hit, not a cost.
+            storage.get_object_store().delete_prefix(prefix)
+        except Exception:  # noqa: BLE001 — an orphaned object is a cost; a stuck delete is a bug
+            logger.exception("Failed to delete stored objects under %s", prefix)
+
+
 def delete_all_analyses(*, token: str, user_id: str) -> int:
-    """Delete every analysis (and source video row) owned by the caller; return how many analyses
-    were removed.
+    """Delete every analysis (and source video row + stored objects) owned by the caller;
+    return how many analyses were removed.
 
     RLS already scopes writes to ``auth.uid() = user_id``, but we also filter by ``user_id``
     explicitly: PostgREST refuses an unfiltered bulk delete, and the predicate is a second guard.
     """
     client = _user_client(token)
+    # READ THE STORAGE KEYS FIRST. PostgREST returns nothing useful from a bulk delete, so a
+    # select issued afterwards would find no rows and silently reap nothing — a failure mode that
+    # passes a mocked test. The order is the correctness property here.
+    videos = client.table("videos").select("storage_key").eq("user_id", user_id).execute()
+    prefixes = [row["storage_key"] for row in (videos.data or []) if row.get("storage_key")]
+
     resp = client.table("analyses").delete().eq("user_id", user_id).execute()
     # Drop the (now orphaned) source video rows and chat threads too, so a "clear" leaves no residue.
     client.table("videos").delete().eq("user_id", user_id).execute()
     client.table("conversations").delete().eq("user_id", user_id).execute()
+    _reap_objects(prefixes)
     return len(resp.data or [])
 
 
@@ -222,8 +266,8 @@ def delete_analysis(*, token: str, analysis_id: str, user_id: str) -> bool:
     analysis referencing that video -- never unconditionally the way ``delete_all_analyses`` can,
     or deleting one record would silently wipe a sibling record's chat thread.
 
-    The uploaded file under ``runtime/uploads/`` is deliberately left on disk, matching the
-    clear-all path; reaping those is a separate change that should cover both.
+    The upload's stored objects are reaped along with the video row, but only on that same
+    last-analysis condition: a sibling analysis still needs the clip to replay.
     """
     client = _user_client(token)
     found = (
@@ -259,10 +303,22 @@ def delete_analysis(*, token: str, analysis_id: str, user_id: str) -> bool:
         .execute()
     )
     if (siblings.count or 0) == 0:
+        # Read the key before dropping the row that holds it.
+        videos = (
+            client.table("videos")
+            .select("storage_key")
+            .eq("user_id", user_id)
+            .eq("video_id", video_id)
+            .limit(1)
+            .execute()
+        )
+        rows = videos.data or []
+        prefix = rows[0].get("storage_key") if rows else None
         client.table("videos").delete().eq("user_id", user_id).eq("video_id", video_id).execute()
         client.table("conversations").delete().eq("user_id", user_id).eq(
             "video_id", video_id
         ).execute()
+        _reap_objects([prefix] if prefix else [])
     return True
 
 
@@ -329,3 +385,90 @@ def get_conversation(*, token: str, video_id: str) -> dict[str, Any] | None:
         "messages": rows[0].get("messages") or [],
         "followups": rows[0].get("followups") or [],
     }
+
+
+def get_storage_key(*, token: str, video_id: str) -> str | None:
+    """The object-store key prefix for one of the caller's uploads, or ``None``.
+
+    Read with the CALLER'S OWN JWT, so the ``videos`` RLS policy performs the ownership check:
+    another user's row is simply not visible, which is why the endpoint answers 404 for both
+    "does not exist" and "not yours". A patchable seam — the unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("videos")
+        .select("storage_key")
+        .eq("video_id", video_id)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    # ``or None`` so a row whose ``storage_key`` column is empty answers the same as a missing
+    # row. Returning ``""`` verbatim would send the caller on to presign ``"/source"``, which
+    # fails and surfaces as a 503 — where 404 ("there is no upload here") is the honest answer.
+    # ``get_storage_keys`` already filters falsy keys out; this makes the two agree.
+    return (rows[0].get("storage_key") or None) if rows else None
+
+
+def get_storage_keys(*, token: str, video_ids: list[str]) -> dict[str, str]:
+    """``{video_id: storage_key}`` for whichever of ``video_ids`` the caller owns.
+
+    One round trip for a whole history page instead of one per row. Ids the caller does not own
+    are absent from the result (RLS filters them), never an error.
+    """
+    if not video_ids:
+        return {}
+    client = _user_client(token)
+    resp = (
+        client.table("videos")
+        .select("video_id, storage_key")
+        .in_("video_id", video_ids)
+        .execute()
+    )
+    return {
+        row["video_id"]: row["storage_key"]
+        for row in (resp.data or [])
+        if row.get("video_id") and row.get("storage_key")
+    }
+
+
+def get_storage_used(*, token: str, user_id: str) -> int:
+    """Total bytes this user's uploads occupy, for the storage quota.
+
+    Read with the CALLER'S OWN JWT, so the ``videos`` RLS policy is what scopes it — the
+    ``user_id`` filter is belt-and-braces, not the security boundary, exactly as everywhere
+    else on this path.
+
+    Summed in Python rather than with a PostgREST aggregate: aggregates depend on
+    ``db-aggregates-enabled``, which is not ours to guarantee. A row whose ``size_bytes`` is NULL
+    or absent counts as 0, matching the column default for rows that predate it. If the row count
+    ever outgrows this, the upgrade is an RPC returning ``coalesce(sum(size_bytes), 0)`` for
+    ``auth.uid()``.
+
+    The row count is NOT bounded by the quota: rows predating the column carry ``size_bytes = 0``,
+    and so do rows whose artifacts all failed to store, so an unbounded number of them can exist
+    under any quota. A PostgREST ``db-max-rows`` would then silently truncate the page and the sum
+    would UNDERCOUNT — a fail-open in a feature that fails closed everywhere else. So the select
+    asks for the exact total and this RAISES on a short page rather than returning a wrong number;
+    the router already turns any exception here into the same 503 it produces for a failed usage
+    query. A ``None`` count (PostgREST may omit it) is not treated as truncation — that would
+    turn every ordinary read into a 503.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("videos")
+        .select("size_bytes", count="exact")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    rows = resp.data or []
+    # ``resp.count`` directly, not ``getattr(resp, "count", None)``: postgrest's ``APIResponse``
+    # always declares the field (``Optional[int]``, default ``None``), and a defaulted getattr would
+    # silently turn "the client changed shape" into "no truncation check" — the same fail-open
+    # direction this guard exists to close.
+    total = resp.count
+    if total is not None and len(rows) < total:
+        raise RuntimeError(
+            f"Storage usage query returned {len(rows)} of {total} rows; refusing to undercount."
+        )
+    return sum(int(row.get("size_bytes") or 0) for row in rows)

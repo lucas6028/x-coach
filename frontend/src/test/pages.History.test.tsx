@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
@@ -8,6 +8,7 @@ import { api, type HistoryItem } from "../api";
 vi.mock("../lib/auth", () => ({ useAuth: vi.fn() }));
 import { useAuth } from "../lib/auth";
 import History from "../pages/History";
+import HistoryThumb from "../components/HistoryThumb";
 
 const mockUseAuth = vi.mocked(useAuth);
 const signOut = vi.fn().mockResolvedValue(undefined);
@@ -43,6 +44,10 @@ beforeEach(() => {
     user: { email: "ada@x.com" },
     signOut,
   } as unknown as ReturnType<typeof useAuth>);
+  // Every render now triggers a thumbnail batch fetch. The pre-existing suites below don't care
+  // about thumbnails, so stub it to an empty result and let the "History thumbnails" describe
+  // block below override it per test.
+  vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({});
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -276,5 +281,90 @@ describe("History", () => {
     await userEvent.click(screen.getByRole("button", { name: /Account menu/i }));
     await userEvent.click(screen.getByRole("menuitem", { name: /Sign out/i }));
     await waitFor(() => expect(signOut).toHaveBeenCalled());
+  });
+});
+
+describe("History thumbnails", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches every row's URLs in one batch request", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 2,
+      items: [item({ id: "1", video_id: "upload_a" }), item({ id: "2", video_id: "upload_b" })],
+    });
+    const batch = vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({});
+    renderHistory();
+    await waitFor(() => expect(batch).toHaveBeenCalledWith(["upload_a", "upload_b"]));
+    expect(batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the thumbnail when one is available", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ id: "1", video_id: "upload_a" })],
+    });
+    vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({
+      upload_a: { video_url: "v", thumbnail_url: "https://signed/thumb" },
+    });
+    // Scoped to `li img`, not just `img`: AppLayout's Header and Sidebar each render an
+    // unconditional `<img src="/icon.svg">` brand logo ahead of the row content in DOM order, so
+    // an unscoped `container.querySelector("img")` finds the logo, not the row's thumbnail.
+    const { container } = renderHistory();
+    await waitFor(() =>
+      expect(container.querySelector("li img")?.getAttribute("src")).toBe("https://signed/thumb")
+    );
+  });
+
+  it("keeps the icon placeholder for a row with no thumbnail", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ id: "1", video_id: "upload_a" })],
+    });
+    vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({});
+    const { container } = renderHistory();
+    await waitFor(() => expect(container.querySelectorAll("li").length).toBeGreaterThan(0));
+    // No <img> in the card (scoped past the Header/Sidebar logo, see above) — and the fallback
+    // icon tile is actually there, not just "no image and no card at all". Scoped to `li a svg`
+    // rather than `li svg`: the delete button is a SIBLING of the card link and its Trash icon
+    // would make a bare `li svg` check pass unconditionally. Inside the link the fallback icon is
+    // now the only svg (the fault-count badge holds text, and the trailing CaretRight the old row
+    // layout had is gone).
+    expect(container.querySelector("li img")).toBeNull();
+    expect(container.querySelector("li a svg")).not.toBeNull();
+  });
+
+  it("still renders the list when the URL batch fails", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ id: "1", video_id: "upload_a" })],
+    });
+    vi.spyOn(api, "uploadMediaBatch").mockRejectedValue(new Error("503"));
+    const { container } = renderHistory();
+    await waitFor(() => expect(container.querySelectorAll("li").length).toBeGreaterThan(0));
+    // Asserts on the rendered copy, not the i18n key -- history.errorTitle resolves to "Couldn't
+    // load your history" (see the existing "shows an error and retries" test above).
+    expect(screen.queryByText("Couldn't load your history")).toBeNull();
+  });
+});
+
+describe("HistoryThumb", () => {
+  it("falls back to the icon when the image fails to load", () => {
+    const { container } = render(<HistoryThumb src="https://signed/expired" />);
+    fireEvent.error(container.querySelector("img")!);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
+  it("recovers when a later render supplies a different src", () => {
+    // Signed URLs expire and the page re-fetches them in batches, so one row can 404 with an
+    // old URL and then be handed a working one. Without resetting `failed` on `src` change the
+    // component keeps the fallback icon forever -- React reuses the instance across renders, so
+    // the failure of a URL that no longer exists would outlive it.
+    const { container, rerender } = render(<HistoryThumb src="https://signed/expired" />);
+    fireEvent.error(container.querySelector("img")!);
+    expect(container.querySelector("img")).toBeNull();
+
+    rerender(<HistoryThumb src="https://signed/fresh" />);
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("https://signed/fresh");
   });
 });

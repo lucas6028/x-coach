@@ -1,23 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CaretRight,
-  FilmSlate,
-  PersonSimpleRun,
-  Trash,
-  VideoCamera,
-  WarningCircle,
-} from "@phosphor-icons/react";
+import { FilmSlate, Trash, VideoCamera, WarningCircle } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
 import AppLayout from "../components/AppLayout";
 import ConfirmDialog from "../components/ConfirmDialog";
+import HistoryThumb from "../components/HistoryThumb";
 import { useAuth } from "../lib/auth";
 import { movementLabel, useI18n, viewLabel } from "../lib/i18n";
 
 type Status = "loading" | "ready" | "error";
 
-// "我的紀錄": the signed-in user's saved analyses. Each row replays into the studio via
-// /app?analysis=<id>. Product UI — kept in the app's token system, with loading/empty/error states.
+// "我的紀錄": the signed-in user's saved analyses, as a grid of cards grouped by day. Each card
+// replays into the studio via /app?analysis=<id>. Product UI — kept in the app's token system,
+// with loading/empty/error states.
 export default function History() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
@@ -32,6 +27,11 @@ export default function History() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
 
+  // Thumbnail URLs, keyed by video_id. Fetched in ONE batch for the whole page rather than per
+  // row: 50 rows would otherwise mean 50 presign requests. A failure here is silent — the rows
+  // still render, just with their icon placeholders.
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+
   const load = useCallback(async () => {
     setStatus("loading");
     setError("");
@@ -39,6 +39,17 @@ export default function History() {
       const page = await api.listAnalyses();
       setItems(page.items);
       setStatus("ready");
+      const ids = page.items.map((it) => it.video_id);
+      try {
+        const media = await api.uploadMediaBatch(ids);
+        setThumbs(
+          Object.fromEntries(Object.entries(media).map(([id, m]) => [id, m.thumbnail_url]))
+        );
+      } catch {
+        // Thumbnails are decoration. A storage problem must not turn a readable history page
+        // into an error state.
+        setThumbs({});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStatus("error");
@@ -114,22 +125,29 @@ export default function History() {
   return (
     <AppLayout>
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
+        {/* Wider than the old single-column list: at max-w-3xl a three-up card grid would leave
+            each card too narrow for its own title to fit on one line. */}
+        <main className="mx-auto max-w-5xl px-4 py-8 lg:px-6 lg:py-12">
           <p className="text-sm text-muted">
             {user?.email ? t("history.subtitle", { email: user.email }) : t("history.subtitleAnon")}
           </p>
 
         {status === "loading" && (
-          <ul className="mt-8 flex flex-col gap-2" aria-hidden="true">
-            {[0, 1, 2, 3].map((i) => (
+          // Same grid and same 3:4 tile as the loaded state, so the page does not reflow when the
+          // rows arrive.
+          <ul
+            className="mt-8 grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3"
+            aria-hidden="true"
+          >
+            {[0, 1, 2, 3, 4, 5].map((i) => (
               <li
                 key={i}
-                className="flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4"
+                className="overflow-hidden rounded-2xl border border-border-dark bg-surface-dark"
               >
-                <span className="h-10 w-10 shrink-0 animate-pulse rounded-lg bg-content/10" />
-                <span className="flex-1">
-                  <span className="block h-3.5 w-32 animate-pulse rounded bg-content/10" />
-                  <span className="mt-2 block h-3 w-24 animate-pulse rounded bg-content/5" />
+                <span className="block aspect-[3/4] w-full animate-pulse bg-content/10" />
+                <span className="block p-3">
+                  <span className="block h-3.5 w-24 animate-pulse rounded bg-content/10" />
+                  <span className="mt-2 block h-3 w-16 animate-pulse rounded bg-content/5" />
                 </span>
               </li>
             ))}
@@ -180,71 +198,77 @@ export default function History() {
                   <span>{g.label}</span>
                   <span className="h-px flex-1 bg-border-dark" />
                 </h2>
-                <ul className="flex flex-col gap-2">
+                <ul className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3">
                   {g.items.map((it) => {
                     const clean = it.fault_count === 0;
                     return (
                       <li key={it.id} className="group relative">
                         <Link
                           to={`/app?analysis=${it.id}`}
-                          className="flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 pr-14 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
+                          className="flex h-full flex-col overflow-hidden rounded-2xl border border-border-dark bg-surface-dark transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
                         >
-                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <PersonSimpleRun size={22} weight="duotone" />
-                          </span>
-                          <div className="min-w-0 flex-1">
+                          {/* The verdict badge sits ON the frame rather than beside the title:
+                              it is the one thing worth reading at a glance across a grid, and
+                              the caption below has only two short lines to spare. */}
+                          <div className="relative">
+                            <HistoryThumb src={thumbs[it.video_id]} />
+                            {/* A DARK SCRIM plus coloured text, not the tinted-background pill the
+                                list rows used. Those sat on a known card background; this one sits
+                                on an arbitrary video frame, where a 25%-opacity tint of the accent
+                                colour can land on anything from a black gym to a bright window and
+                                lose all contrast. The scrim fixes the backdrop so only the text
+                                colour carries the verdict. */}
+                            <span
+                              className={`absolute bottom-2 left-2 rounded-full bg-surface-dark/85 px-2.5 py-1 text-xs font-medium ring-1 ring-inset backdrop-blur-sm ${
+                                clean
+                                  ? "text-secondary ring-secondary/30"
+                                  : "text-[rgb(var(--c-fault))] ring-[rgb(var(--c-fault))]/30"
+                              }`}
+                            >
+                              {clean
+                                ? t("history.clean")
+                                : it.fault_count === 1
+                                  ? t("history.faultOne")
+                                  : t("history.faultMany", { count: it.fault_count })}
+                            </span>
+                          </div>
+                          <div className="min-w-0 p-3">
                             <p className="truncate font-medium text-content">
                               {t("history.rowTitle", {
                                 view: viewLabel(t, it.view_type ?? "unknown"),
                                 movement: movementLabel(t, it.movement ?? "Squat"),
                               })}
                             </p>
-                            <p className="mt-0.5 flex items-center gap-2 font-mono text-xs text-muted">
+                            <p className="mt-0.5 flex min-w-0 items-center gap-2 font-mono text-xs text-muted">
                               {fmtTime(it.created_at)}
-                              <span className="rounded bg-content/5 px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                              <span className="truncate rounded bg-content/5 px-1.5 py-0.5 text-[11px] font-medium text-muted">
                                 {/* The promoted column, then Squat. `HistoryItem` carries no
                                     `result` -- list_analyses selects only the promoted columns, not
-                                    the heavy document -- so there is no per-row echo to fall back
-                                    to here. Rows predating the column are Squat by construction:
+                                    the heavy document -- so there is no per-card echo to fall back
+                                    to here. Cards predating the column are Squat by construction:
                                     every analysis before this change was pinned to it. */}
                                 {movementLabel(t, it.movement ?? "Squat")}
                               </span>
                             </p>
                           </div>
-                          <span
-                            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-                              clean
-                                ? "bg-secondary/15 text-secondary"
-                                : "bg-[rgb(var(--c-fault))]/15 text-[rgb(var(--c-fault))]"
-                            }`}
-                          >
-                            {clean
-                              ? t("history.clean")
-                              : it.fault_count === 1
-                                ? t("history.faultOne")
-                                : t("history.faultMany", { count: it.fault_count })}
-                          </span>
-                          <CaretRight
-                            size={18}
-                            className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
-                          />
                         </Link>
 
                         {/* Sibling of the Link, not a child: a <button> inside an <a> is invalid
-                            HTML and its click bubbles into navigation. Hidden until the row is
-                            hovered or the button is focused; always visible on touch. */}
+                            HTML and its click bubbles into navigation. Hidden until the card is
+                            hovered or the button is focused; always visible on touch. Sits over
+                            the frame, so it carries its own backdrop to stay legible on any image. */}
                         <button
                           type="button"
                           aria-label={t("history.deleteAria")}
                           title={t("history.deleteCta")}
                           onClick={() => {
                             setPendingId(it.id);
-                            // Only clear this row's own error, if any -- a different row's
+                            // Only clear this card's own error, if any -- a different card's
                             // still-unresolved failure must not be silently forgotten just
-                            // because the user opened another row's confirm.
+                            // because the user opened another card's confirm.
                             setDeleteError((prev) => (prev?.id === it.id ? null : prev));
                           }}
-                          className="absolute right-3 top-9 -translate-y-1/2 rounded-lg p-2 text-muted opacity-0 transition-opacity hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                          className="absolute right-2 top-2 rounded-lg bg-surface-dark/70 p-2 text-muted opacity-0 backdrop-blur-sm transition-opacity hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                         >
                           <Trash size={16} weight="duotone" />
                         </button>

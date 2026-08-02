@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import { AuthProvider } from "../lib/auth";
 import App from "../App";
+import { api, UploadLimitError } from "../api";
 import { mockAnalysis } from "./fixtures";
 
 // The upload path now extracts pose client-side before hitting the API (CaptureStudio ->
@@ -17,6 +18,10 @@ vi.mock("../lib/poseExtract", () => ({
     frames: [],
   }),
 }));
+
+// runPoseAnalysis also calls captureThumbnail on the same blob, driving a <video> decode jsdom
+// can't run either. Stub it the same way, for the same reason.
+vi.mock("../lib/thumbnail", () => ({ captureThumbnail: () => Promise.resolve(null) }));
 
 function renderApp() {
   return render(
@@ -160,6 +165,19 @@ describe("App — analysis loaded", () => {
     );
     // The backend's detail message is surfaced to the user.
     expect(screen.getByText("Server error")).toBeInTheDocument();
+  });
+
+  it("shows a localised message when the upload exceeds the storage quota", async () => {
+    vi.spyOn(api, "analyzePose").mockRejectedValue(
+      new UploadLimitError("storage_quota_exceeded", 500, 480)
+    );
+
+    renderApp();
+    await uploadAClip();
+
+    expect(
+      await screen.findByText(/Your storage is full \(480 MB of 500 MB\)/)
+    ).toBeInTheDocument();
   });
 });
 

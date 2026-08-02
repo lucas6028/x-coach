@@ -188,6 +188,8 @@ const en: Dict = {
   "upload.analysing": "Analysing…",
   "upload.prompt": "Drop a {movement} video or tap to upload",
   "upload.hint": "MP4 / MOV · single athlete · side or rear view",
+  "upload.tooLarge": "That clip is too large — the limit is {limit} MB. Try a shorter recording.",
+  "upload.quotaFull": "Your storage is full ({used} MB of {limit} MB). Delete a saved analysis to make room.",
 
   // Capture studio — input mode + the MediaPipe model-tier picker
   "capture.upload": "Upload video",
@@ -544,6 +546,8 @@ const en: Dict = {
   "admin.settings.analyzeDesc": "Upload constraints and concurrency.",
   "admin.settings.uploadFormats": "Allowed upload formats",
   "admin.settings.uploadFormatsHint": "Comma-separated .ext values.",
+  "admin.settings.maxUploadBytes": "Max upload size (bytes)",
+  "admin.settings.userStorageQuotaBytes": "Per-user storage quota (bytes)",
   "admin.settings.maxConcurrent": "Max concurrent analyses",
   "admin.settings.restartRequired": "Restart required to take effect",
   "admin.settings.maxConcurrentReadonly": "Read-only: set via the XCOACH_MAX_CONCURRENT_ANALYSES environment variable; requires a restart to change.",
@@ -858,6 +862,8 @@ const zhHant: Dict = {
   "upload.analysing": "分析中…",
   "upload.prompt": "拖放{movement}影片或點擊上傳",
   "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
+  "upload.tooLarge": "這支影片太大了,上限是 {limit} MB。請改用較短的片段。",
+  "upload.quotaFull": "儲存空間已滿({used} MB / {limit} MB)。請先刪除一些已存的分析來騰出空間。",
 
   // Capture studio — input mode + the MediaPipe model-tier picker
   "capture.upload": "上傳影片",
@@ -1220,6 +1226,8 @@ const zhHant: Dict = {
   "admin.settings.analyzeDesc": "上傳限制與並發數。",
   "admin.settings.uploadFormats": "允許的上傳格式",
   "admin.settings.uploadFormatsHint": "以逗號分隔的 .ext 值。",
+  "admin.settings.maxUploadBytes": "單檔上傳上限（位元組）",
+  "admin.settings.userStorageQuotaBytes": "每位使用者的儲存配額（位元組）",
   "admin.settings.maxConcurrent": "最大同時分析數",
   "admin.settings.restartRequired": "需重啟才生效",
   "admin.settings.maxConcurrentReadonly": "唯讀：透過 XCOACH_MAX_CONCURRENT_ANALYSES 環境變數設定，需重啟才能變更。",

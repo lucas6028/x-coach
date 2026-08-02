@@ -29,6 +29,11 @@ _DEFAULT_TESTS = [
     "tests/test_backend_line_auth.py",
     "tests/test_backend_line_webhook.py",
     "tests/test_backend_admin_line.py",
+    "tests/test_storage.py",
+    "tests/test_upload_staging.py",
+    "tests/test_upload_urls.py",
+    "tests/test_delete_reaping.py",
+    "tests/test_upload_limits.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     line_channel_id: str = ""
     supabase_service_role_key: str = ""
 
+    # Cloudflare R2 object storage for user uploads (raw video, pose JSON, thumbnail), reached
+    # over the S3-compatible API. Leave any of these blank and the backend transparently uses the
+    # local-filesystem store instead (backend/app/services/storage.py) — which is what CI and
+    # offline development run on, so no credentials are needed to work on this codebase.
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = ""
+
     # LINE Messaging API bot (the official account chat room). A SEPARATE channel from the
     # Login channel above — its own secret (webhook signature) and access token (reply API).
     # Both channels must live under the SAME LINE provider: that is what makes the webhook's
@@ -93,6 +102,16 @@ class Settings(BaseSettings):
     def chat_configured(self) -> bool:
         """True when an LLM API key is present (the chat endpoint is otherwise 503)."""
         return bool(self.llm_api_key)
+
+    @property
+    def storage_configured(self) -> bool:
+        """True when R2 is fully configured; otherwise the local filesystem store is used."""
+        return bool(
+            self.r2_account_id
+            and self.r2_access_key_id
+            and self.r2_secret_access_key
+            and self.r2_bucket
+        )
 
     @property
     def line_login_configured(self) -> bool:
@@ -178,6 +197,15 @@ _DEFAULT_RAG_TOP_K = 5
 _DEFAULT_KG_HOPS = 1
 _DEFAULT_KG_SEEDS = 5
 _DEFAULT_UPLOAD_SUFFIXES: tuple[str, ...] = (".mp4", ".mov", ".avi", ".mkv", ".webm")
+# Upload limits, in BYTES — the override keys say `_bytes` so no unit guessing is possible.
+_DEFAULT_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+_DEFAULT_USER_STORAGE_QUOTA_BYTES = 500 * 1024 * 1024
+# Clamp bounds. A floor because a 0 would reject every upload and lock the product; a ceiling
+# because a limit an operator can raise without bound is not a limit.
+_MIN_MAX_UPLOAD_BYTES = 1 * 1024 * 1024
+_MAX_MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+_MIN_USER_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024
+_MAX_USER_STORAGE_QUOTA_BYTES = 100 * 1024 * 1024 * 1024
 
 
 def _overrides() -> dict:
@@ -306,6 +334,32 @@ def allowed_upload_suffixes() -> tuple[str, ...]:
         if cleaned:
             return cleaned
     return _DEFAULT_UPLOAD_SUFFIXES
+
+
+def max_upload_bytes() -> int:
+    """Largest accepted upload — override ``max_upload_bytes``, else 100 MB (clamped 1 MB..2 GB).
+
+    Bounds what the process READS AND STORES, not what a client can transmit: Starlette has
+    already spooled the whole body to a temp file before the handler runs. Rejecting oversized
+    requests at the door is a reverse-proxy concern (see the spec's deployment prerequisites).
+    """
+    return _coerce_int(
+        _overrides().get("max_upload_bytes"),
+        _DEFAULT_MAX_UPLOAD_BYTES,
+        minimum=_MIN_MAX_UPLOAD_BYTES,
+        maximum=_MAX_MAX_UPLOAD_BYTES,
+    )
+
+
+def user_storage_quota_bytes() -> int:
+    """Total bytes one user's uploads may occupy — override ``user_storage_quota_bytes``, else
+    500 MB (clamped 10 MB..100 GB). Anonymous uploads are not counted against any quota."""
+    return _coerce_int(
+        _overrides().get("user_storage_quota_bytes"),
+        _DEFAULT_USER_STORAGE_QUOTA_BYTES,
+        minimum=_MIN_USER_STORAGE_QUOTA_BYTES,
+        maximum=_MAX_USER_STORAGE_QUOTA_BYTES,
+    )
 
 
 def _coerce_float(

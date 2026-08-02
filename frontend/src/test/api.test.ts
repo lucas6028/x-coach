@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { api, ChatError, type ChatContext, type ChatMessage } from "../api";
+import { api, ChatError, UploadLimitError, type ChatContext, type ChatMessage } from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -458,6 +458,70 @@ describe("api.chatStream", () => {
   });
 });
 
+describe("api.analyzeUpload thumbnail", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("appends the thumbnail when one was captured", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    const file = new File(["v"], "squat.mp4", { type: "video/mp4" });
+    await api.analyzeUpload(file, "Squat", new Blob(["jpeg"], { type: "image/jpeg" }));
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeInstanceOf(Blob);
+  });
+
+  it("omits the field when capture failed", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    const file = new File(["v"], "squat.mp4", { type: "video/mp4" });
+    await api.analyzeUpload(file, "Squat", null);
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeNull();
+  });
+});
+
+describe("api.uploadMedia", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches the ownership-checked URL endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ video_url: "u", thumbnail_url: "t", expires_in: 3600 }),
+        { status: 200 }
+      )
+    );
+    const media = await api.uploadMedia("upload_a");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/uploads/upload_a/url");
+    expect(media.video_url).toBe("u");
+  });
+});
+
+describe("api.uploadMediaBatch", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("posts every id and unwraps items", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ items: { a: { video_url: "u", thumbnail_url: "t" } }, expires_in: 3600 }),
+        { status: 200 }
+      )
+    );
+    const items = await api.uploadMediaBatch(["a", "b"]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      video_ids: ["a", "b"],
+    });
+    expect(items.a.video_url).toBe("u");
+  });
+
+  it("short-circuits an empty list without a request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    expect(await api.uploadMediaBatch([])).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("api.chatFollowups", () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -532,5 +596,67 @@ describe("api.conversations", () => {
   it("putConversation throws on a non-ok response", async () => {
     mockFetch({}, false, 500);
     await expect(api.putConversation("vid", [])).rejects.toThrow(/500/);
+  });
+});
+
+describe("upload limit errors", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("turns a 413 quota body into a typed error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: { code: "storage_quota_exceeded", used_mb: 480, limit_mb: 500 } }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(UploadLimitError);
+    expect(err.code).toBe("storage_quota_exceeded");
+    expect(err.usedMb).toBe(480);
+    expect(err.limitMb).toBe(500);
+  });
+
+  it("turns a 413 file-size body into a typed error with no used figure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: { code: "upload_too_large", limit_mb: 100 } }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(UploadLimitError);
+    expect(err.code).toBe("upload_too_large");
+    expect(err.usedMb).toBeNull();
+  });
+
+  it("leaves a non-413 failure as a plain Error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ detail: "boom" }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(UploadLimitError);
+    expect(err.message).toBe("boom");
+  });
+
+  // Plan constraint: "A 413 the parser does not recognise (a reverse proxy's own error body,
+  // say) must fall through to the generic error path rather than being mislabelled as a quota
+  // problem." A body without one of the two known codes is exactly that case.
+  it("leaves an unrecognised 413 as a plain Error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: "Request Entity Too Large" }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(UploadLimitError);
+    expect(err.message).toBe("Request Entity Too Large");
   });
 });
