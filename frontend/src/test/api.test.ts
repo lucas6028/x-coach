@@ -458,6 +458,70 @@ describe("api.chatStream", () => {
   });
 });
 
+describe("api.analyzeUpload thumbnail", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("appends the thumbnail when one was captured", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    const file = new File(["v"], "squat.mp4", { type: "video/mp4" });
+    await api.analyzeUpload(file, "Squat", new Blob(["jpeg"], { type: "image/jpeg" }));
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeInstanceOf(Blob);
+  });
+
+  it("omits the field when capture failed", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    const file = new File(["v"], "squat.mp4", { type: "video/mp4" });
+    await api.analyzeUpload(file, "Squat", null);
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeNull();
+  });
+});
+
+describe("api.uploadMedia", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches the ownership-checked URL endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ video_url: "u", thumbnail_url: "t", expires_in: 3600 }),
+        { status: 200 }
+      )
+    );
+    const media = await api.uploadMedia("upload_a");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/uploads/upload_a/url");
+    expect(media.video_url).toBe("u");
+  });
+});
+
+describe("api.uploadMediaBatch", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("posts every id and unwraps items", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ items: { a: { video_url: "u", thumbnail_url: "t" } }, expires_in: 3600 }),
+        { status: 200 }
+      )
+    );
+    const items = await api.uploadMediaBatch(["a", "b"]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      video_ids: ["a", "b"],
+    });
+    expect(items.a.video_url).toBe("u");
+  });
+
+  it("short-circuits an empty list without a request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    expect(await api.uploadMediaBatch([])).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("api.chatFollowups", () => {
   afterEach(() => vi.restoreAllMocks());
 

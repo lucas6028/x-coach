@@ -26,3 +26,15 @@ describe("api.analyzePose", () => {
     await expect(api.analyzePose("Squat", pose as never, new Blob(["x"]))).rejects.toThrow("frames");
   });
 });
+
+describe("api.analyzePose thumbnail", () => {
+  it("appends the thumbnail when one was captured", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    await api.analyzePose("Squat", pose as never, new Blob(["v"], { type: "video/webm" }),
+      new Blob(["jpeg"], { type: "image/jpeg" }));
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeInstanceOf(Blob);
+  });
+});
