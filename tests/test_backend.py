@@ -121,10 +121,10 @@ class _TempConfigBase(unittest.TestCase):
         self.labels_dir = root / "labels"
         # NOTE: upload_dir/upload_pose_dir are no longer patched into `config` — the runtime
         # upload directories were removed in favour of object storage (see
-        # backend/app/services/storage.py). They still exist as plain temp paths here because a
-        # handful of not-yet-updated router/library tests below reference them; those go through
-        # library.uploaded_video_path, which itself is slated for removal (closes the upload
-        # video-file IDOR) rather than repointed at a temp dir.
+        # backend/app/services/storage.py), and `library.uploaded_video_path` (which used to read
+        # from them) is gone entirely (closes the upload video-file IDOR — see test_upload_urls.py).
+        # These two plain temp paths remain only as scratch locations for a few fixtures below that
+        # write a stand-in "uploaded" file on disk without touching real config.
         self.upload_dir = root / "uploads"
         self.upload_pose_dir = root / "upload_pose"
         self.kg_file = root / "kg.graphml"
@@ -415,35 +415,15 @@ class LibraryHelperTests(_TempConfigBase):
         self.assertEqual(library.video_path("clipA"), self.videos_dir / "clipA.mp4")
         self.assertIsNone(library.video_path("missing"))
 
-    def test_uploaded_video_path_resolves_exact_name(self) -> None:
-        self.upload_dir.mkdir(parents=True, exist_ok=True)
-        (self.upload_dir / "upload_abc.webm").write_bytes(b"v")
-        self.assertEqual(
-            library.uploaded_video_path("upload_abc"), self.upload_dir / "upload_abc.webm"
-        )
-        self.assertIsNone(library.uploaded_video_path("missing"))
-
-    def test_uploaded_video_path_does_not_glob(self) -> None:
-        # Regression for the glob-injection IDOR: a wildcard id must never expand to match a
-        # real upload — only the exact requested id may resolve.
-        self.upload_dir.mkdir(parents=True, exist_ok=True)
-        (self.upload_dir / "upload_secret.mp4").write_bytes(b"v")
-        self.assertIsNone(library.uploaded_video_path("*"))
-        self.assertIsNone(library.uploaded_video_path("upload_*"))
-        self.assertIsNone(library.uploaded_video_path("upload_s*"))
-
     def test_path_resolvers_reject_unsafe_ids(self) -> None:
         # Even with matching files on disk, an unsafe id resolves to nothing.
         self.write_detection("clipA", "train", _detection_payload([]))
         self.write_pose_json("clipA", "train", _pose_payload())
         self.write_video("clipA")
-        self.upload_dir.mkdir(parents=True, exist_ok=True)
-        (self.upload_dir / "clipA.mp4").write_bytes(b"v")
         for bad in ("*", "upload_*", "a?b", "a[bc]", "..", "../etc", "a/b", "a\\b"):
             self.assertIsNone(library.detection_path(bad), bad)
             self.assertIsNone(library.pose_json_path(bad), bad)
             self.assertIsNone(library.video_path(bad), bad)
-            self.assertIsNone(library.uploaded_video_path(bad), bad)
 
 
 class IsSafeVideoIdTests(unittest.TestCase):
@@ -947,13 +927,6 @@ class VideosRouterTests(_TempConfigBase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.content, b"\x00\x01mp4data")
         self.assertEqual(resp.headers["content-type"], "video/mp4")
-
-    def test_get_video_file_upload_fallback(self) -> None:
-        self.upload_dir.mkdir(parents=True, exist_ok=True)
-        (self.upload_dir / "upload_xyz.mp4").write_bytes(b"uploaded")
-        resp = self.client.get("/api/video-file/upload_xyz")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.content, b"uploaded")
 
     def test_get_video_file_404(self) -> None:
         self.upload_dir.mkdir(parents=True, exist_ok=True)

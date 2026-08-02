@@ -333,3 +333,44 @@ def get_conversation(*, token: str, video_id: str) -> dict[str, Any] | None:
         "messages": rows[0].get("messages") or [],
         "followups": rows[0].get("followups") or [],
     }
+
+
+def get_storage_key(*, token: str, video_id: str) -> str | None:
+    """The object-store key prefix for one of the caller's uploads, or ``None``.
+
+    Read with the CALLER'S OWN JWT, so the ``videos`` RLS policy performs the ownership check:
+    another user's row is simply not visible, which is why the endpoint answers 404 for both
+    "does not exist" and "not yours". A patchable seam — the unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("videos")
+        .select("storage_key")
+        .eq("video_id", video_id)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0].get("storage_key") if rows else None
+
+
+def get_storage_keys(*, token: str, video_ids: list[str]) -> dict[str, str]:
+    """``{video_id: storage_key}`` for whichever of ``video_ids`` the caller owns.
+
+    One round trip for a whole history page instead of one per row. Ids the caller does not own
+    are absent from the result (RLS filters them), never an error.
+    """
+    if not video_ids:
+        return {}
+    client = _user_client(token)
+    resp = (
+        client.table("videos")
+        .select("video_id, storage_key")
+        .in_("video_id", video_ids)
+        .execute()
+    )
+    return {
+        row["video_id"]: row["storage_key"]
+        for row in (resp.data or [])
+        if row.get("video_id") and row.get("storage_key")
+    }
