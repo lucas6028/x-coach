@@ -1526,8 +1526,9 @@ class StoreDeleteTests(unittest.TestCase):
             n = store.delete_all_analyses(token="t", user_id="u1")
         self.assertEqual(n, 2)
         self.assertTrue(query.deleted)
-        # The analyses, source video, and conversation rows are all cleared.
-        self.assertEqual(client.table.call_count, 3)
+        # The video rows are read once (for storage keys, before anything is deleted) and then
+        # the analyses, source video, and conversation rows are all cleared -- four calls total.
+        self.assertEqual(client.table.call_count, 4)
         client.table.assert_any_call("analyses")
         client.table.assert_any_call("videos")
         client.table.assert_any_call("conversations")
@@ -1594,10 +1595,12 @@ class StoreDeleteTests(unittest.TestCase):
         touched = _tables_touched(client)
         self.assertIn("videos", touched)
         self.assertIn("conversations", touched)
-        # Both cascades are scoped to the freed video, not to the whole account. Each of these
-        # tables only sees one call (its delete), so call_filters[0] is that call's filters.
-        self.assertIn(("video_id", "upload_1"), tables["videos"].call_filters[0])
-        self.assertIn(("user_id", "u1"), tables["videos"].call_filters[0])
+        # `videos` now sees a select (read the storage key before dropping the row) then its
+        # delete; `conversations` sees only its delete. Both cascades are scoped to the freed
+        # video, not to the whole account -- checked on each table's DELETE call specifically.
+        self.assertEqual(tables["videos"].calls, ["select", "delete"])
+        self.assertIn(("video_id", "upload_1"), tables["videos"].call_filters[1])
+        self.assertIn(("user_id", "u1"), tables["videos"].call_filters[1])
         self.assertIn(("video_id", "upload_1"), tables["conversations"].call_filters[0])
 
     def test_delete_one_returns_false_when_absent(self) -> None:
