@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     line_channel_id: str = ""
     supabase_service_role_key: str = ""
 
+    # Cloudflare R2 object storage for user uploads (raw video, pose JSON, thumbnail), reached
+    # over the S3-compatible API. Leave any of these blank and the backend transparently uses the
+    # local-filesystem store instead (backend/app/services/storage.py) — which is what CI and
+    # offline development run on, so no credentials are needed to work on this codebase.
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = ""
+
     # LINE Messaging API bot (the official account chat room). A SEPARATE channel from the
     # Login channel above — its own secret (webhook signature) and access token (reply API).
     # Both channels must live under the SAME LINE provider: that is what makes the webhook's
@@ -93,6 +102,16 @@ class Settings(BaseSettings):
     def chat_configured(self) -> bool:
         """True when an LLM API key is present (the chat endpoint is otherwise 503)."""
         return bool(self.llm_api_key)
+
+    @property
+    def storage_configured(self) -> bool:
+        """True when R2 is fully configured; otherwise the local filesystem store is used."""
+        return bool(
+            self.r2_account_id
+            and self.r2_access_key_id
+            and self.r2_secret_access_key
+            and self.r2_bucket
+        )
 
     @property
     def line_login_configured(self) -> bool:
