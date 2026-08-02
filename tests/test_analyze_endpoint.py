@@ -244,7 +244,13 @@ class AnalyzeStorageTests(unittest.TestCase):
         )
         self.artifacts: list[dict] = []
         self.discarded: list[object] = []
-        analysis_service.stage_upload = lambda data, *, suffix=".mp4", owner="anon": self.staged
+        self.stage_calls: list[dict] = []
+
+        def _stage_upload(data, *, suffix=".mp4", owner="anon"):
+            self.stage_calls.append({"data": data, "suffix": suffix, "owner": owner})
+            return self.staged
+
+        analysis_service.stage_upload = _stage_upload
         analysis_service.store_artifacts = lambda staged, *, thumbnail=None: self.artifacts.append(
             {"staged": staged, "thumbnail": thumbnail}
         )
@@ -348,6 +354,32 @@ class AnalyzeStorageTests(unittest.TestCase):
         with mock.patch.object(store, "persist_analysis", side_effect=lambda **kw: seen.append(kw) or "id"):
             self._run(user=user)
         self.assertEqual(seen[0]["storage_key"], "uploads/anon/upload_test")
+
+    def test_stages_under_the_anon_owner_for_an_anonymous_caller(self) -> None:
+        """A regression here would put every anonymous upload's artifacts under the WRONG
+        prefix and be invisible to every test that stubs ``stage_upload`` and ignores its
+        ``owner`` kwarg -- this reads the actual value the router passed."""
+        self._run()
+        self.assertEqual(self.stage_calls[0]["owner"], "anon")
+
+    def test_stages_under_the_authenticated_users_id(self) -> None:
+        """The property this protects: an authenticated user's artifacts must land under
+        ``uploads/{user_id}/``, not the shared ``uploads/anon/`` prefix -- which a lifecycle
+        rule expires after 7 days. A regression here would silently destroy real users' videos."""
+        user = mock.Mock(id="u1", token="tok")
+        with mock.patch.object(store, "persist_analysis", return_value="id"):
+            self._run(user=user)
+        self.assertEqual(self.stage_calls[0]["owner"], "u1")
+
+
+class SourceUrlTests(unittest.TestCase):
+    """Direct coverage of ``_source_url``'s degrade-to-None branch (not exercised by
+    ``AnalyzeStorageTests``, which patches ``_source_url`` out entirely to stay offline)."""
+
+    def test_returns_none_when_signing_fails(self) -> None:
+        with mock.patch.object(analyze_router.storage, "get_object_store") as get_store:
+            get_store.return_value.presigned_url.side_effect = storage.StorageError("R2 down")
+            self.assertIsNone(analyze_router._source_url("uploads/anon/upload_test"))
 
 
 if __name__ == "__main__":
