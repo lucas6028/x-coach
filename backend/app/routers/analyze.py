@@ -29,6 +29,15 @@ _ANALYSIS_SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_ANALYSES)
 MAX_THUMBNAIL_BYTES = 512 * 1024
 
 
+def _as_mb(value: int) -> int:
+    """Bytes -> whole MB, rounded UP, for a user-facing limit message.
+
+    Rounded up, not down, so a limit is never reported as a number SMALLER than the one actually
+    enforced — telling a user their cap is 99 MB when it is 100 MB invites a support question.
+    """
+    return -(-value // (1024 * 1024))
+
+
 def _source_url(prefix: str) -> str | None:
     """A short-lived playback URL for the upload's source object, or None if signing failed.
 
@@ -125,9 +134,22 @@ async def _stage_analyze_persist(
     then CPU-bound) analysis phase -- the same memory property the original two-copy code had via
     its own ``del data``.
     """
-    data = await file.read()
+    # ``max_upload_bytes`` reads the admin overrides, which can do a synchronous Supabase round
+    # trip on a cold cache — threadpool it so it never blocks the event loop, exactly as the
+    # suffix check above already does.
+    max_bytes = await run_in_threadpool(settings.max_upload_bytes)
+    # Cap the READ itself, not just a check after it: an unbounded ``read()`` materialises the
+    # whole clip as one bytes object before any size check could reject it. Reading one byte
+    # past the limit is enough to detect "too large" without ever holding more than that — the
+    # same technique ``_read_thumbnail`` uses for the thumbnail part.
+    data = await file.read(max_bytes + 1)
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    if len(data) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "upload_too_large", "limit_mb": _as_mb(max_bytes)},
+        )
 
     # Anonymous demo uploads are still stored, under their own key prefix, so both paths behave
     # identically. A bucket lifecycle rule expires `uploads/anon/` — see the design doc.
