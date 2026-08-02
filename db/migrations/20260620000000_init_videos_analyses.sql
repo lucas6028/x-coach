@@ -7,9 +7,13 @@
 --     run. The full nested Analysis document (matching frontend/src/api.ts `Analysis`)
 --     lives in `analyses.result` JSONB; `view_type` / `fault_count` are promoted to
 --     columns so the "我的紀錄" list can sort/filter without parsing JSON.
---   * The source video binary stays on local disk for now (storage_key = runtime path).
---     Swapping to object storage + presigned upload (R2/S3) is P2 and only changes
---     what storage_key points at — the schema does not move.
+--   * The source video binary lives in object storage (Cloudflare R2, local filesystem
+--     store in dev/CI — see backend/app/services/storage.py). `storage_key` holds the key
+--     PREFIX for one upload, `uploads/{owner}/{video_id}`, under which the raw video
+--     (`/source`), the pose JSON (`/pose.json`) and the captured frame (`/thumb.jpg`) sit;
+--     deleting a video reaps the whole prefix. As predicted when this migration was written,
+--     the move off local disk changed only what storage_key points at — the schema did not
+--     move, so there is no follow-up migration.
 --
 -- RLS strategy: every row is scoped to its owner via auth.uid() = user_id.
 --   - If the FastAPI backend talks to Postgres with the *user's* JWT (anon key +
@@ -30,7 +34,7 @@ create table if not exists public.videos (
     user_id      uuid not null references auth.users (id) on delete cascade,
     video_id     text not null,                  -- app slug, e.g. "upload_ab12cd34ef56"
     filename     text,                            -- original client filename (display only)
-    storage_key  text,                            -- local runtime path now; object-store key later
+    storage_key  text,                            -- object-store key PREFIX, e.g. "uploads/{user_id}/{video_id}"
     status       text not null default 'pending'
                  check (status in ('pending', 'processing', 'done', 'failed')),
     error_detail text,                            -- failure reason surfaced to the user

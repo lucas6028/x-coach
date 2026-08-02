@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
@@ -8,6 +8,7 @@ import { api, type HistoryItem } from "../api";
 vi.mock("../lib/auth", () => ({ useAuth: vi.fn() }));
 import { useAuth } from "../lib/auth";
 import History from "../pages/History";
+import HistoryThumb from "../components/HistoryThumb";
 
 const mockUseAuth = vi.mocked(useAuth);
 const signOut = vi.fn().mockResolvedValue(undefined);
@@ -343,5 +344,27 @@ describe("History thumbnails", () => {
     // Asserts on the rendered copy, not the i18n key -- history.errorTitle resolves to "Couldn't
     // load your history" (see the existing "shows an error and retries" test above).
     expect(screen.queryByText("Couldn't load your history")).toBeNull();
+  });
+});
+
+describe("HistoryThumb", () => {
+  it("falls back to the icon when the image fails to load", () => {
+    const { container } = render(<HistoryThumb src="https://signed/expired" />);
+    fireEvent.error(container.querySelector("img")!);
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector("svg")).not.toBeNull();
+  });
+
+  it("recovers when a later render supplies a different src", () => {
+    // Signed URLs expire and the page re-fetches them in batches, so one row can 404 with an
+    // old URL and then be handed a working one. Without resetting `failed` on `src` change the
+    // component keeps the fallback icon forever -- React reuses the instance across renders, so
+    // the failure of a URL that no longer exists would outlive it.
+    const { container, rerender } = render(<HistoryThumb src="https://signed/expired" />);
+    fireEvent.error(container.querySelector("img")!);
+    expect(container.querySelector("img")).toBeNull();
+
+    rerender(<HistoryThumb src="https://signed/fresh" />);
+    expect(container.querySelector("img")?.getAttribute("src")).toBe("https://signed/fresh");
   });
 });
