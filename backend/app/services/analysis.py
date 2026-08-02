@@ -247,31 +247,44 @@ def stage_upload(data: bytes, *, suffix: str, owner: str) -> StagedUpload:
     )
 
 
+def _put_artifact(staged: StagedUpload, name: str, data: bytes, content_type: str) -> None:
+    """Upload one derived artifact, swallowing every failure. See ``store_artifacts``.
+
+    ``except Exception`` is deliberate and matches ``store.persist_analysis``'s policy. A
+    narrower ``except storage.StorageError`` would NOT hold the contract: ``LocalObjectStore.put``
+    does real filesystem IO (``mkdir`` + ``write_bytes``) and raises ``OSError``, not
+    ``StorageError`` — so on the dev/CI path a full disk would escape and sink a completed analysis.
+    """
+    try:
+        storage.get_object_store().put(
+            f"{staged.prefix}/{name}", data, content_type=content_type
+        )
+    except Exception:  # noqa: BLE001 — a derived artifact must never sink a completed analysis
+        logger.exception("Failed to store %s for %s", name, staged.video_id)
+
+
 def store_artifacts(staged: StagedUpload, *, thumbnail: bytes | None = None) -> None:
     """Best-effort upload of the derived artifacts. NEVER RAISES.
 
     Mirrors ``store.persist_analysis``'s policy: a storage hiccup is logged, but it must never
-    discard an analysis that already cost a full pipeline run.
+    discard an analysis that already cost a full pipeline run. The caller relies on that literally
+    — it does not wrap this call — so every path here has to hold it.
 
     ``pose.json`` is uploaded ONLY when one was actually produced. ``analyze_pose_payload``
     returns the ``analysis_pending`` skeleton without writing any pose JSON for a movement with
     no registered detector — which is most of the movement registry, not an edge case.
     """
-    store = storage.get_object_store()
     if staged.pose_path.is_file():
         try:
-            store.put(
-                f"{staged.prefix}/pose.json",
-                staged.pose_path.read_bytes(),
-                content_type="application/json",
-            )
-        except storage.StorageError:
-            logger.exception("Failed to store pose JSON for %s", staged.video_id)
+            pose_bytes = staged.pose_path.read_bytes()
+        except OSError:
+            # ``is_file()`` and the read are not atomic, and the read raises OSError rather than
+            # StorageError — so this needs its own guard, not the put's.
+            logger.exception("Failed to read staged pose JSON for %s", staged.video_id)
+        else:
+            _put_artifact(staged, "pose.json", pose_bytes, "application/json")
     if thumbnail:
-        try:
-            store.put(f"{staged.prefix}/thumb.jpg", thumbnail, content_type="image/jpeg")
-        except storage.StorageError:
-            logger.exception("Failed to store thumbnail for %s", staged.video_id)
+        _put_artifact(staged, "thumb.jpg", thumbnail, "image/jpeg")
 
 
 def discard_stage(staged: StagedUpload) -> None:
