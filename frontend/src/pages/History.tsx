@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CaretRight,
   FilmSlate,
-  PersonSimpleRun,
   Trash,
   VideoCamera,
   WarningCircle,
@@ -11,6 +10,7 @@ import { Link } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
 import AppLayout from "../components/AppLayout";
 import ConfirmDialog from "../components/ConfirmDialog";
+import HistoryThumb from "../components/HistoryThumb";
 import { useAuth } from "../lib/auth";
 import { movementLabel, useI18n, viewLabel } from "../lib/i18n";
 
@@ -32,6 +32,11 @@ export default function History() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
 
+  // Thumbnail URLs, keyed by video_id. Fetched in ONE batch for the whole page rather than per
+  // row: 50 rows would otherwise mean 50 presign requests. A failure here is silent — the rows
+  // still render, just with their icon placeholders.
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+
   const load = useCallback(async () => {
     setStatus("loading");
     setError("");
@@ -39,6 +44,17 @@ export default function History() {
       const page = await api.listAnalyses();
       setItems(page.items);
       setStatus("ready");
+      const ids = page.items.map((it) => it.video_id);
+      try {
+        const media = await api.uploadMediaBatch(ids);
+        setThumbs(
+          Object.fromEntries(Object.entries(media).map(([id, m]) => [id, m.thumbnail_url]))
+        );
+      } catch {
+        // Thumbnails are decoration. A storage problem must not turn a readable history page
+        // into an error state.
+        setThumbs({});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStatus("error");
@@ -189,9 +205,7 @@ export default function History() {
                           to={`/app?analysis=${it.id}`}
                           className="flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 pr-14 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
                         >
-                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <PersonSimpleRun size={22} weight="duotone" />
-                          </span>
+                          <HistoryThumb src={thumbs[it.video_id]} />
                           <div className="min-w-0 flex-1">
                             <p className="truncate font-medium text-content">
                               {t("history.rowTitle", {
