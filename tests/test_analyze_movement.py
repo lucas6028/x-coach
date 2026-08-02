@@ -32,7 +32,7 @@ def _stub_result(movement: str) -> dict:
 
 
 @contextmanager
-def _staged_upload(video_id: str = "vid1"):
+def _staged_upload(video_id: str = "vid1", *, owner: str = "anon"):
     """Patch the analyze router's staging trio for one HTTP-level test.
 
     These tests exercise the REAL router through ``TestClient``, so ``analysis.discard_stage``
@@ -44,10 +44,16 @@ def _staged_upload(video_id: str = "vid1"):
     resolves against the CWD, so an accidentally-unpatched ``discard_stage`` would ``rmtree`` the
     repository root) so a future test that forgets to patch ``discard_stage`` fails loudly on a
     missing file rather than deleting something real.
+
+    ``owner`` only shapes the returned ``StagedUpload.prefix``; this module's tests are about
+    movement validation, not storage ownership, so unlike ``tests/test_backend.py``'s twin helper
+    this one does not also expose the ``stage_upload`` mock for ``owner`` assertions -- that
+    coverage lives in ``tests/test_backend.py::AnalyzeRouterTests`` and
+    ``tests/test_analyze_endpoint.py::AnalyzeStorageTests``.
     """
     staged = analysis.StagedUpload(
         video_id=video_id,
-        prefix=f"uploads/anon/{video_id}",
+        prefix=f"uploads/{owner}/{video_id}",
         video_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}.mp4",
         pose_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}_pose.json",
     )

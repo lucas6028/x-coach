@@ -76,7 +76,7 @@ def _detection_payload(faults: list[str], *, view: str = "rear", retrievals=None
 
 
 @contextmanager
-def _staged_upload(video_id: str = "upload_abc"):
+def _staged_upload(video_id: str = "upload_abc", *, owner: str = "anon"):
     """Patch the analyze router's staging trio for one HTTP-level test.
 
     These tests exercise the REAL router through ``TestClient``, so -- unlike the direct-call
@@ -88,17 +88,25 @@ def _staged_upload(video_id: str = "upload_abc"):
     RELATIVE path's ``.parent`` resolves against the CWD, so an accidentally-unpatched
     ``discard_stage`` would ``rmtree`` the repository root) so a future test that forgets to
     patch ``discard_stage`` fails loudly on a missing file rather than deleting something real.
+
+    ``owner`` only shapes the returned ``StagedUpload.prefix`` (so ``storage_key`` assertions
+    reflect the caller's expectation) -- it does NOT constrain what the router actually passes to
+    ``stage_upload``. The context manager yields the ``stage_upload`` mock itself so a test that
+    needs to verify the router computed the RIGHT owner (from ``user``, not a fixture) can inspect
+    ``call_args.kwargs["owner"]`` directly -- a stub that ignores its own ``owner`` argument, as
+    this one used to, cannot catch a regression that puts every authenticated upload's artifacts
+    under the shared (and lifecycle-expiring) ``uploads/anon/`` prefix.
     """
     staged = analysis.StagedUpload(
         video_id=video_id,
-        prefix=f"uploads/anon/{video_id}",
+        prefix=f"uploads/{owner}/{video_id}",
         video_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}.mp4",
         pose_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}_pose.json",
     )
-    with mock.patch.object(analysis, "stage_upload", return_value=staged), mock.patch.object(
+    with mock.patch.object(analysis, "stage_upload", return_value=staged) as stage, mock.patch.object(
         analysis, "store_artifacts"
     ), mock.patch.object(analysis, "discard_stage"):
-        yield staged
+        yield stage
 
 
 class _TempConfigBase(unittest.TestCase):
@@ -715,11 +723,22 @@ class AnalyzeRouterTests(_TempConfigBase):
         persist.assert_not_called()
         self.assertNotIn("analysis_id", resp.json())
 
+    def test_stages_under_the_anon_owner_for_an_anonymous_caller(self) -> None:
+        fake_result = {"detections": [], "source": "upload"}
+        with _staged_upload() as stage, mock.patch.object(
+            analysis, "analyze_video_file", return_value=fake_result
+        ):
+            resp = self.client.post(
+                "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(stage.call_args.kwargs["owner"], "anon")
+
     def test_authenticated_upload_persists_and_returns_id(self) -> None:
         app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="tok")
         self.addCleanup(app.dependency_overrides.clear)
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
-        with _staged_upload(), mock.patch.object(
+        with _staged_upload(owner="u1") as stage, mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ), mock.patch.object(store, "persist_analysis", return_value="analysis-1") as persist:
             resp = self.client.post(
@@ -727,12 +746,16 @@ class AnalyzeRouterTests(_TempConfigBase):
             )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["analysis_id"], "analysis-1")
+        # The router must derive `owner` from the AUTHENTICATED user, not fall back to "anon" --
+        # a regression here would put a real user's artifacts under the shared, lifecycle-expiring
+        # anonymous prefix.
+        self.assertEqual(stage.call_args.kwargs["owner"], "u1")
         kwargs = persist.call_args.kwargs
         self.assertEqual(kwargs["user_id"], "u1")
         self.assertEqual(kwargs["token"], "tok")
         self.assertEqual(kwargs["video_id"], "upload_abc")
         self.assertEqual(kwargs["source"], "upload")
-        self.assertEqual(kwargs["storage_key"], "uploads/anon/upload_abc")
+        self.assertEqual(kwargs["storage_key"], "uploads/u1/upload_abc")
         self.assertEqual(kwargs["filename"], "clip.mp4")
 
     def test_authenticated_upload_persist_failure_sets_id_none(self) -> None:

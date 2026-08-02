@@ -15,6 +15,8 @@ from starlette.datastructures import UploadFile
 from backend.app.routers import analyze as analyze_router
 from backend.app.services import analysis as analysis_service
 from backend.app.services import runtime_config
+from backend.app.services import storage
+from backend.app.services import store
 
 _GOOD_POSE = json.dumps({"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []})
 
@@ -185,6 +187,137 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
             )
         )
         self.assertEqual(len(self.artifacts), 1)
+
+
+class AnalyzePoseStorageTests(unittest.TestCase):
+    """The object-storage contract of /api/analyze/pose: mirrors ``AnalyzeStorageTests`` in
+    ``tests/test_analyze_endpoint.py`` -- both endpoints now share ``_stage_analyze_persist``,
+    but each endpoint's own coverage still has to exist independently: nothing stops a future
+    change to ``analyze_pose``'s call site (e.g. dropping the ``user``/``thumb`` kwargs it passes
+    into the shared helper) from breaking this endpoint alone while `/api/analyze`'s tests stay
+    green.
+    """
+
+    def setUp(self) -> None:
+        self._orig = {
+            name: getattr(analysis_service, name)
+            for name in ("stage_upload", "store_artifacts", "discard_stage", "analyze_pose_payload")
+        }
+        overrides = mock.patch.object(runtime_config, "get_overrides", return_value={})
+        overrides.start()
+        self.addCleanup(overrides.stop)
+
+        self.staged = analysis_service.StagedUpload(
+            video_id="upload_test",
+            prefix="uploads/anon/upload_test",
+            video_path=Path("upload_test.mp4"),
+            pose_path=Path("pose.json"),
+        )
+        self.artifacts: list[dict] = []
+        self.discarded: list[object] = []
+        self.stage_calls: list[dict] = []
+
+        def _stage_upload(data, *, suffix=".mp4", owner="anon"):
+            self.stage_calls.append({"data": data, "suffix": suffix, "owner": owner})
+            return self.staged
+
+        analysis_service.stage_upload = _stage_upload
+        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: self.artifacts.append(
+            {"staged": staged, "thumbnail": thumbnail}
+        )
+        analysis_service.discard_stage = lambda staged: self.discarded.append(staged)
+        analysis_service.analyze_pose_payload = (
+            lambda payload, *, movement, video_id=None, pose_json_path=None, max_reps=-1: {
+                "video_id": video_id, "source": "upload", "movement": movement, "detections": [],
+            }
+        )
+        presign = mock.patch.object(
+            analyze_router, "_source_url", side_effect=lambda prefix: f"https://signed/{prefix}"
+        )
+        presign.start()
+        self.addCleanup(presign.stop)
+
+    def tearDown(self) -> None:
+        for name, value in self._orig.items():
+            setattr(analysis_service, name, value)
+
+    def _run(self, **kwargs):
+        params = {
+            "movement": "Squat",
+            "pose": _GOOD_POSE,
+            "file": _upload(),
+            "max_reps": None,
+            "thumbnail": None,
+            "user": None,
+        }
+        params.update(kwargs)
+        return asyncio.run(analyze_router.analyze_pose(**params))
+
+    def test_returns_a_presigned_video_url(self) -> None:
+        result = self._run()
+        self.assertEqual(result["video_url"], "https://signed/uploads/anon/upload_test")
+
+    def test_a_storage_failure_before_analysis_is_a_503(self) -> None:
+        def boom(data, *, suffix=".mp4", owner="anon"):
+            raise storage.StorageError("R2 down")
+
+        analysis_service.stage_upload = boom
+        ran = []
+        analysis_service.analyze_pose_payload = lambda *a, **k: ran.append(1) or {}
+        with self.assertRaises(HTTPException) as ctx:
+            self._run()
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(ran, [], "no CPU may be spent on a clip whose video could not be stored")
+
+    def test_stores_the_derived_artifacts_after_a_successful_analysis(self) -> None:
+        self._run()
+        self.assertEqual(len(self.artifacts), 1)
+        self.assertIs(self.artifacts[0]["staged"], self.staged)
+
+    def test_discards_the_stage_even_when_the_analysis_fails(self) -> None:
+        def boom(*args, **kwargs):
+            raise RuntimeError("detector failed")
+
+        analysis_service.analyze_pose_payload = boom
+        with self.assertRaises(HTTPException):
+            self._run()
+        self.assertEqual(self.discarded, [self.staged])
+        self.assertEqual(self.artifacts, [], "a failed analysis stores no derived artifacts")
+
+    def test_discards_the_stage_after_a_successful_analysis(self) -> None:
+        self._run()
+        self.assertEqual(self.discarded, [self.staged])
+
+    def test_video_url_is_not_written_into_the_persisted_result(self) -> None:
+        """A presigned URL in the history row would be expired the moment it is replayed."""
+        persisted: list[dict] = []
+
+        def fake_persist(**kwargs):
+            persisted.append(dict(kwargs["result"]))
+            return "analysis-1"
+
+        user = mock.Mock(id="u1", token="tok")
+        with mock.patch.object(store, "persist_analysis", side_effect=fake_persist):
+            result = self._run(user=user)
+        self.assertNotIn("video_url", persisted[0])
+        self.assertIn("video_url", result)
+
+    def test_persists_the_storage_prefix_as_the_storage_key(self) -> None:
+        seen: list[dict] = []
+        user = mock.Mock(id="u1", token="tok")
+        with mock.patch.object(store, "persist_analysis", side_effect=lambda **kw: seen.append(kw) or "id"):
+            self._run(user=user)
+        self.assertEqual(seen[0]["storage_key"], "uploads/anon/upload_test")
+
+    def test_stages_under_the_anon_owner_for_an_anonymous_caller(self) -> None:
+        self._run()
+        self.assertEqual(self.stage_calls[0]["owner"], "anon")
+
+    def test_stages_under_the_authenticated_users_id(self) -> None:
+        user = mock.Mock(id="u1", token="tok")
+        with mock.patch.object(store, "persist_analysis", return_value="id"):
+            self._run(user=user)
+        self.assertEqual(self.stage_calls[0]["owner"], "u1")
 
 
 if __name__ == "__main__":
