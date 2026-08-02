@@ -151,6 +151,8 @@ async def _stage_analyze_persist(
             detail={"code": "upload_too_large", "limit_mb": _as_mb(max_bytes)},
         )
 
+    # Anonymous demo uploads are still stored, under their own key prefix, so both paths behave
+    # identically. A bucket lifecycle rule expires `uploads/anon/` — see the design doc.
     owner = user.id if user is not None else "anon"
     if user is not None:
         quota = await run_in_threadpool(settings.user_storage_quota_bytes)
@@ -176,8 +178,6 @@ async def _stage_analyze_persist(
                 },
             )
 
-    # Anonymous demo uploads are still stored, under their own key prefix, so both paths behave
-    # identically. A bucket lifecycle rule expires `uploads/anon/` — see the design doc.
     try:
         staged = await run_in_threadpool(analysis.stage_upload, data, suffix=suffix, owner=owner)
     except storage.StorageError as exc:
