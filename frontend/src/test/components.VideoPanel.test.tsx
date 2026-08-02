@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type React from "react";
-import { screen, fireEvent, waitFor } from "@testing-library/react";
+import { screen, fireEvent, waitFor, act, render } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { AuthProvider } from "../lib/auth";
+import { I18nProvider } from "../lib/i18n";
 import VideoPanel from "../components/VideoPanel";
 import { renderWithProviders } from "./renderWithProviders";
 import { mockAnalysis, mockCleanAnalysis } from "./fixtures";
-import { api, type Analysis } from "../api";
+import { api, type Analysis, type UploadMedia } from "../api";
 
 // VideoPanel renders <video ref={videoRef}>, so React attaches the real jsdom
 // <video> DOM node to .current on mount. We only need an empty container ref —
@@ -194,16 +197,39 @@ describe("VideoPanel", () => {
   });
 });
 
+// Keeps one `videoRef` across `rerender` calls — a fresh ref per render would change what a
+// switched-analysis test is exercising (the DOM node is meant to persist across the switch).
+//
+// `rerender` (unlike a fresh `renderWithProviders` call) replaces the whole tree it's given, so
+// the provider wrapping has to be part of what's passed to `rerender` too — otherwise the second
+// render loses its `I18nProvider`/`AuthProvider` context. Rebuilding renderWithProviders' default
+// wrapping (route "/") here is the price of using `rerender` at all.
 function renderPanel(analysis: Analysis) {
-  return renderWithProviders(
-    <VideoPanel
-      analysis={analysis}
-      videoRef={makeVideoRef()}
-      onTimeUpdate={vi.fn()}
-      onActiveFault={vi.fn()}
-      onSeek={vi.fn()}
-    />
+  const videoRef = makeVideoRef();
+  const panel = (a: Analysis) => (
+    <MemoryRouter initialEntries={["/"]}>
+      <AuthProvider>
+        <I18nProvider>
+          <VideoPanel
+            analysis={a}
+            videoRef={videoRef}
+            onTimeUpdate={vi.fn()}
+            onActiveFault={vi.fn()}
+            onSeek={vi.fn()}
+          />
+        </I18nProvider>
+      </AuthProvider>
+    </MemoryRouter>
   );
+  // Plain `render`, not `renderWithProviders` — the wrapping already happens in `panel` above,
+  // and `renderWithProviders` would nest a second `MemoryRouter` around it.
+  const utils = render(panel(analysis));
+  return {
+    ...utils,
+    // Takes the next analysis (not a raw element) so callers don't have to rebuild the provider
+    // wrapping themselves.
+    rerender: (next: Analysis) => utils.rerender(panel(next)),
+  };
 }
 
 describe("VideoPanel video source", () => {
@@ -240,10 +266,61 @@ describe("VideoPanel video source", () => {
     );
   });
 
-  it("renders the analysis without playback when signing fails", async () => {
+  it("still renders the analysis when re-signing fails", async () => {
     vi.spyOn(api, "uploadMedia").mockRejectedValue(new Error("503"));
     renderPanel({ ...mockAnalysis, source: "upload", video_id: "upload_a" });
-    await waitFor(() => expect(document.querySelector("video")).not.toBeNull());
+    // Actually let the rejection settle — asserting immediately after render would pass on a
+    // state that already held before `uploadMedia` was even called (the hook clears `src` to
+    // `null` synchronously on entering the re-sign branch), so it couldn't tell a working
+    // `.catch` from a missing one.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // The panel degrades to no playback rather than blocking: the video element is present with
+    // no `src`, and the rest of the analysis (the fault badge) still renders.
+    expect(document.querySelector("video")).not.toBeNull();
     expect(document.querySelector("video")?.getAttribute("src")).toBeNull();
+    expect(screen.getByText("1 fault detected")).toBeInTheDocument();
+    // NOTE: this test cannot discriminate a correct `.catch` from a missing one — either way
+    // `src` reads `null` here. What a missing `.catch` would break is silent: an unhandled
+    // promise rejection. That is caught by the suite's own unhandled-rejection strictness, not
+    // by an assertion in this test.
+  });
+
+  it("ignores an in-flight URL once the panel has switched analyses", async () => {
+    // A request for the first analysis that resolves only when we say so, so we can settle it
+    // AFTER the panel has already moved on to a second analysis.
+    let releaseFirst: (media: UploadMedia) => void = () => {};
+    const first = new Promise<UploadMedia>((resolve) => {
+      releaseFirst = resolve;
+    });
+    vi.spyOn(api, "uploadMedia").mockImplementation((videoId: string) =>
+      videoId === "upload_a"
+        ? first
+        : Promise.resolve({
+            video_url: "https://signed/second",
+            thumbnail_url: "https://signed/thumb",
+            expires_in: 3600,
+          })
+    );
+
+    const { rerender } = renderPanel({ ...mockAnalysis, source: "upload", video_id: "upload_a" });
+    // Switch before the first request settles.
+    rerender({ ...mockAnalysis, source: "upload", video_id: "upload_b" });
+    await waitFor(() =>
+      expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/second")
+    );
+
+    // The first analysis's URL arrives late. Without the `cancelled` guard it would overwrite the
+    // second video's src — showing the user the wrong clip.
+    await act(async () => {
+      releaseFirst({
+        video_url: "https://signed/first",
+        thumbnail_url: "https://signed/thumb",
+        expires_in: 3600,
+      });
+      await Promise.resolve();
+    });
+    expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/second");
   });
 });
