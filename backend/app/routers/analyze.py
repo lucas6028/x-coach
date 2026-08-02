@@ -42,27 +42,62 @@ def _source_url(prefix: str) -> str | None:
         return None
 
 
-async def _read_thumbnail(thumbnail: UploadFile | None) -> bytes | None:
-    """Validate and read the optional browser-captured frame.
+# What a browser may label a captured JPEG frame with. ``image/jpg`` is not the registered type,
+# but some encoders and hand-rolled clients emit it; accepting it costs nothing now that an
+# unusable thumbnail degrades instead of failing, and the header is client-supplied and never
+# verified against the bytes either way — this check bounds what we *store*, it is not validation.
+_THUMBNAIL_CONTENT_TYPES = frozenset({"image/jpeg", "image/jpg"})
 
-    A missing thumbnail is NOT an error — older clients and browsers where frame capture failed
-    must still be able to analyze. Only a wrong type or an implausible size is rejected.
+
+async def _read_thumbnail(thumbnail: UploadFile | None) -> bytes | None:
+    """Read the optional browser-captured frame, or ``None`` when there is nothing usable.
+
+    NEVER raises over a bad thumbnail, and that is the point. A missing thumbnail is not an error
+    (older clients, and browsers where frame capture failed, must still analyze) — and neither is
+    a malformed one. The frontend goes to real lengths to hold that contract on its own side
+    ("a decode problem must never block an analysis", ``frontend/src/lib/thumbnail.ts``), so
+    rejecting the whole upload because the one OPTIONAL part arrived with a type we dislike would
+    punish exactly the client whose capture *succeeded*. ``api.analyzeUpload`` accepts any blob,
+    so an unexpected type is reachable, not hypothetical.
+
+    A wrong type or an oversized part is therefore logged and dropped: the analysis runs, and the
+    history row simply falls back to the movement icon the way a thumbnail-less row already does.
     """
     if thumbnail is None:
         return None
     content_type = (thumbnail.content_type or "").split(";")[0].strip().lower()
-    if content_type != "image/jpeg":
-        raise HTTPException(status_code=400, detail="Thumbnail must be image/jpeg.")
+    if content_type not in _THUMBNAIL_CONTENT_TYPES:
+        logger.warning("Dropping a thumbnail with unusable content type %r", content_type)
+        return None
     # Cap the READ itself, not just the check after it: an unbounded ``.read()`` would fully
     # materialize an oversized part (up to whatever the client sends) before the length check
-    # below ever gets a chance to reject it. Reading one byte past the limit is enough to still
-    # detect "too large" without ever buffering more than that.
+    # below ever gets a chance to drop it. Reading one byte past the limit is enough to still
+    # detect "too large" without ever buffering more than that. The cap is still a cap — it just
+    # means "no thumbnail" now rather than "no analysis".
     data = await thumbnail.read(MAX_THUMBNAIL_BYTES + 1)
     if not data:
         return None
     if len(data) > MAX_THUMBNAIL_BYTES:
-        raise HTTPException(status_code=400, detail="Thumbnail is too large.")
+        logger.warning("Dropping a thumbnail larger than %d bytes", MAX_THUMBNAIL_BYTES)
+        return None
     return data
+
+
+async def _reap_orphaned_upload(staged: analysis.StagedUpload) -> None:
+    """Delete the stored objects of an upload whose analysis never completed.
+
+    ``stage_upload`` puts the source object FIRST by design (fail fast before spending CPU), so
+    by the time the analysis raises, ``{prefix}/source`` already exists — and no ``videos`` row
+    will ever be written to point at it. Object reaping is driven entirely by those rows
+    (``store.delete_analysis`` / ``delete_all_analyses``), so without this every failed analysis
+    leaks one video under ``uploads/{user_id}/``, where — unlike ``uploads/anon/`` — no lifecycle
+    rule expires it. That is precisely the unbounded growth this whole change set exists to stop.
+
+    Reuses ``store._reap_objects`` rather than adding a second swallowing helper: its contract is
+    already exactly the one needed here (per-prefix try, broad except, logged, never raises), and
+    a near-copy would be free to drift from it. ``analyze`` already imports ``store``.
+    """
+    await run_in_threadpool(store._reap_objects, [staged.prefix])
 
 
 async def _stage_analyze_persist(
@@ -109,8 +144,17 @@ async def _stage_analyze_persist(
     try:
         async with _ANALYSIS_SEMAPHORE:
             result = await run_in_threadpool(run, staged)
+    # Both failure arms reap, and ONLY the failure arms do: the reap must not be reachable from
+    # the success path (a live client is holding the ``video_url`` we are about to sign), so it
+    # sits in the handlers rather than in ``finally`` next to ``discard_stage``. The two arms are
+    # spelled out instead of collapsed into ``except BaseException`` on purpose -- that would also
+    # catch ``CancelledError``, and awaiting a threadpool call after cancellation is unreliable.
     except RuntimeError as exc:
+        await _reap_orphaned_upload(staged)
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception:
+        await _reap_orphaned_upload(staged)
+        raise
     else:
         # Only a SUCCESSFUL analysis has derived artifacts worth keeping. In an ``else`` (not
         # inside the ``try``) so this holds even if ``store_artifacts`` ever stopped honoring its
@@ -133,6 +177,11 @@ async def _stage_analyze_persist(
                 filename=file.filename,
             )
         except Exception:  # noqa: BLE001 — never lose a completed analysis to a storage error
+            # The objects are deliberately NOT reaped here, unlike the failed-analysis path above:
+            # the analysis succeeded and the caller is about to be handed a live ``video_url``, so
+            # deleting the source would break a session that is otherwise fine. The stored objects
+            # are then orphaned (no row will ever reference them) — an accepted, documented gap;
+            # see "Error handling summary" in the R2 design doc and the note in `.env.example`.
             logger.exception(persist_log_message, user.id, staged.video_id)
             result["analysis_id"] = None
 
@@ -146,8 +195,8 @@ async def _stage_analyze_persist(
 def _validated_movement(movement: str) -> str:
     """Resolve a requested movement to its canonical name, or 400.
 
-    Rejecting HERE -- before save_upload and before pose extraction -- means a bad request
-    costs no compute. The registry lookup is case-insensitive (get_detector lowercases its
+    Rejecting HERE -- before the upload is staged and before pose extraction -- means a bad
+    request costs no compute, and stores no object that would then have to be reaped. The registry lookup is case-insensitive (get_detector lowercases its
     key), so the canonical spelling is what comes back.
 
     An explicit empty/whitespace-only ``movement`` is rejected here rather than left to
