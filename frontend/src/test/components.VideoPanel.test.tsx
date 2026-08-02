@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type React from "react";
-import { screen, fireEvent } from "@testing-library/react";
+import { screen, fireEvent, waitFor } from "@testing-library/react";
 import VideoPanel from "../components/VideoPanel";
 import { renderWithProviders } from "./renderWithProviders";
 import { mockAnalysis, mockCleanAnalysis } from "./fixtures";
+import { api, type Analysis } from "../api";
 
 // VideoPanel renders <video ref={videoRef}>, so React attaches the real jsdom
 // <video> DOM node to .current on mount. We only need an empty container ref —
@@ -190,5 +191,59 @@ describe("VideoPanel", () => {
     fireEvent(video, new Event("pause"));
     // After 'pause' fires, pause button becomes play button
     expect(screen.getAllByRole("button", { name: /play/i }).length).toBeGreaterThan(0);
+  });
+});
+
+function renderPanel(analysis: Analysis) {
+  return renderWithProviders(
+    <VideoPanel
+      analysis={analysis}
+      videoRef={makeVideoRef()}
+      onTimeUpdate={vi.fn()}
+      onActiveFault={vi.fn()}
+      onSeek={vi.fn()}
+    />
+  );
+}
+
+describe("VideoPanel video source", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("uses the local file endpoint for a library clip", () => {
+    const media = vi.spyOn(api, "uploadMedia");
+    renderPanel({ ...mockAnalysis, source: "library", video_id: "vid_001" });
+    expect(document.querySelector("video")?.getAttribute("src")).toBe("/api/video-file/vid_001");
+    expect(media).not.toHaveBeenCalled();
+  });
+
+  it("uses the presigned URL that came back with a fresh upload", () => {
+    const media = vi.spyOn(api, "uploadMedia");
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_a",
+      video_url: "https://signed/source",
+    });
+    expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/source");
+    expect(media).not.toHaveBeenCalled();
+  });
+
+  it("re-signs on a history replay, where the stored result carries no URL", async () => {
+    vi.spyOn(api, "uploadMedia").mockResolvedValue({
+      video_url: "https://signed/replayed",
+      thumbnail_url: "https://signed/thumb",
+      expires_in: 3600,
+    });
+    renderPanel({ ...mockAnalysis, source: "upload", video_id: "upload_a" });
+    await waitFor(() =>
+      expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/replayed")
+    );
+  });
+
+  it("renders the analysis without playback when signing fails", async () => {
+    vi.spyOn(api, "uploadMedia").mockRejectedValue(new Error("503"));
+    renderPanel({ ...mockAnalysis, source: "upload", video_id: "upload_a" });
+    await waitFor(() => expect(document.querySelector("video")).not.toBeNull());
+    expect(document.querySelector("video")?.getAttribute("src")).toBeNull();
   });
 });
