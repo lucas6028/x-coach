@@ -54,6 +54,13 @@ Two implementations behind it:
   no signature and is registered only when `storage_configured` is false, so a deployment with
   R2 credentials never exposes it. Reaching an object still requires having called the
   ownership-checked `/api/uploads/{video_id}/url` first.
+
+  > **Superseded during implementation — see the plan.** The endpoint is registered
+  > unconditionally and 404s at request time whenever the live store is not a
+  > `LocalObjectStore` (`backend/app/routers/videos.py:118`), rather than being conditionally
+  > registered. Identical exposure when R2 *is* configured — but it means a MISCONFIGURED
+  > deployment silently activates it, which is why `storage_configured` is now reported on
+  > `/api/health` and logged at startup.
 - `R2ObjectStore` — boto3 S3 client with
   `endpoint_url=https://{account_id}.r2.cloudflarestorage.com`, `region_name="auto"`,
   signature v4. `presigned_url` delegates to `generate_presigned_url("get_object", ...)`.
@@ -84,6 +91,10 @@ uploads/{owner}/{video_id}/source{suffix}
 uploads/{owner}/{video_id}/pose.json
 uploads/{owner}/{video_id}/thumb.jpg
 ```
+
+> **Superseded during implementation — see the plan.** The source object is `source`, with **no
+> suffix**: R2 replays the `ContentType` set at put time and `<video src>` plays by content
+> type, so an extension would only force the read path to discover which suffix was used.
 
 `owner` is the authenticated user's id, or the literal `anon` for unauthenticated demo
 uploads. `videos.storage_key` stores the **prefix** `uploads/{owner}/{video_id}` (not a single
@@ -136,6 +147,13 @@ form field. The backend validates content type (`image/jpeg` or `image/png`) and
 size cap; a missing thumbnail is not an error (older clients, or a browser where frame capture
 failed, still analyze fine).
 
+> **Superseded during implementation — see the plan.** JPEG only (`image/jpeg`, plus the
+> `image/jpg` misspelling some encoders emit) — the browser helper always produces JPEG, so PNG
+> would have been an unused branch. More importantly, an unusable thumbnail is **dropped and
+> logged, never rejected**: a wrong type or an oversized part yields an analysis with no
+> thumbnail, not a 400. Failing the upload would have inverted the frontend's own contract that
+> a thumbnail problem must never block an analysis.
+
 ## Read path
 
 - **New: `GET /api/uploads/{video_id}/url`** → `{video_url, thumbnail_url, expires_in}`.
@@ -180,6 +198,10 @@ cases:
 `GET /api/uploads/{video_id}/url`, with the existing card layout as the placeholder while
 loading and for rows that have no thumbnail (every row predating this change).
 
+> **Superseded during implementation — see the plan.** URLs are fetched for the whole page in
+> ONE request via `POST /api/uploads/urls` (capped at 200 ids), not per row: a 50-row page would
+> otherwise mean 50 requests and 50 DB round trips.
+
 ## Deletion
 
 `store.delete_analysis` and `store.delete_all_analyses` call `delete_prefix(storage_key)` for
@@ -198,9 +220,31 @@ That failure mode passes a mocked test, so the test must assert the call order.
 | --- | --- |
 | Source video put fails | 503, no analysis run |
 | pose.json / thumb.jpg put fails | logged, analysis returned normally |
+| **The analysis itself raises** | 422 / 500 — **and the stored objects are reaped** (best-effort, logged), because no `videos` row will ever point at them |
+| **`persist_analysis` fails** | logged, analysis still returned — objects are deliberately **left**, and are orphaned. See below |
 | Presign fails on read | 503 from the URL endpoint; frontend renders analysis without video |
 | `delete_prefix` fails | logged, DB deletion still committed |
 | R2 unconfigured | `LocalObjectStore` transparently, no error |
+
+### Accepted gap: objects orphaned by a failed persist
+
+Reaping is driven entirely by `videos` rows, so anything stored without a row is invisible to
+deletion. Two paths could produce that; only one is fixed in code.
+
+- **A failed analysis** is reaped inline (`analyze._reap_orphaned_upload`), on the failure arms
+  only. The client gets an error, holds no URL, and nothing is lost by deleting.
+- **A failed `persist_analysis`** is *not* reaped, and this is a decision. The analysis
+  succeeded and the response carries a live presigned `video_url`; deleting the source inline
+  would break a session that is otherwise working, to save one video's worth of storage. So the
+  objects under `uploads/{owner}/{video_id}` stay with no row referencing them.
+
+**What handles it operationally: nothing automatic, by design.** `uploads/anon/` is expired by
+the 7-day lifecycle rule, but `uploads/{user_id}/` has no expiry, so these accumulate. The bound
+is that a failed persist means Supabase was unreachable *after* a full pipeline run — rare, and
+already loud in the logs (`Failed to persist analysis (user=... video=...)`). The accepted
+remedy is manual: if that log line appears at volume, reconcile the bucket against the `videos`
+table by hand. A sweeper is **not** in scope here; writing one down as if it existed would be
+worse than naming the gap.
 
 ## Testing
 
@@ -211,6 +255,9 @@ That failure mode passes a mocked test, so the test must assert the call order.
   against a patched fake boto3 client asserting bucket/key/content-type and the presign
   expiry; `get_object_store()` selection by settings.
 - Analyze-router tests: thumbnail accepted / rejected / absent; source-put failure yields 503
+  <!-- Superseded during implementation: "rejected" became "dropped" — the assertion is that a
+       bad-type / oversized thumbnail still yields a successful analysis with no thumbnail. -->
+
   and runs no analysis; pose-put failure still returns the analysis; `video_url` present in
   the response and absent from the persisted `result`.
 - `GET /api/uploads/{video_id}/url`: owner gets URLs, non-owner and unknown id both get 404,
@@ -235,6 +282,16 @@ CI parity: `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-unde
 2. Set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` in the
    backend environment.
 3. Add the lifecycle rule expiring `uploads/anon/` after 7 days.
+4. **Verify the four settings actually took.** All four are required for R2 to be selected, and
+   pydantic-settings ignores an unknown env var silently, so one typo falls back to the local
+   filesystem store on an ephemeral disk *and* activates the unauthenticated dev endpoint
+   `GET /api/local-object/{key}`. Two signals: `GET /api/health` reports
+   `"storage_configured": true`, and startup logs `Object storage: Cloudflare R2 (bucket=...)`
+   at INFO — the fallback logs a WARNING instead.
+5. **Know the one orphan case that has no automatic cleanup.** Objects under
+   `uploads/{user_id}/` whose `persist_analysis` failed are never referenced by a row and never
+   expire (see "Accepted gap" above). Watch for `Failed to persist analysis` in the logs; if it
+   appears at volume, reconcile the bucket against the `videos` table manually.
 
 No bucket CORS configuration is required: a plain `<video src>` playing a cross-origin URL is
 not CORS-restricted, and the skeleton overlay draws on a separate canvas above the video
