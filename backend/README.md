@@ -87,7 +87,9 @@ can be low; there's no env for it yet, so add one if you hit it.
 | GET  | `/api/videos?limit=&offset=&fault=` | — | list precomputed labeled clips (faulty clips first) |
 | GET  | `/api/analysis/{video_id}` | — | precomputed analysis for a library clip (retrieval enriched on demand) |
 | GET  | `/api/pose/{video_id}` | — | slim 33-landmark overlay block |
-| GET  | `/api/video-file/{video_id}` | — | stream the source mp4 (supports HTTP Range / seeking) |
+| GET  | `/api/video-file/{video_id}` | — | stream a **library demo clip's** mp4 (Range / seeking); uploads are deliberately not reachable here |
+| GET  | `/api/uploads/{video_id}/url` | required | short-lived playback + thumbnail URLs for one of the caller's uploads (RLS-enforced) |
+| POST | `/api/uploads/urls` | required | the same, batched for a page of history rows |
 | GET  | `/api/knowledge/graph?query=` | — | knowledge-graph subgraph for the KG widget |
 | GET  | `/api/knowledge/rag?query=` | — | ranked RAG snippets |
 | POST | `/api/chat` | required | grounded LLM follow-up chat over an analysis (503 if `LLM_API_KEY` unset, 502 on upstream error) |
