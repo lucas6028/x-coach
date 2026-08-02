@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from backend.app.services import analysis, library
+from backend.app.services import analysis, library, storage
 
 router = APIRouter(prefix="/api", tags=["videos"])
 
@@ -43,3 +43,28 @@ def get_video_file(video_id: str) -> FileResponse:
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail=f"No video file for '{video_id}'.")
     return FileResponse(path, media_type="video/mp4")
+
+
+@router.get("/local-object/{key:path}")
+def get_local_object(key: str) -> FileResponse:
+    """DEVELOPMENT ONLY: serve an object out of the local filesystem store.
+
+    Inert in production: when R2 is configured, ``get_object_store()`` returns an
+    ``R2ObjectStore`` and this endpoint 404s for every key. It exists so ``LocalObjectStore``
+    can hand back a URL the browser can actually fetch, keeping the frontend contract identical
+    in both modes. It carries no signature — reaching a key still requires having been given it
+    by the ownership-checked ``/api/uploads/{video_id}/url``.
+    """
+    # Named `store_`: Task 4 adds a `store` service import to this module, and the trailing
+    # underscore keeps this local from shadowing it later.
+    store_ = storage.get_object_store()
+    if not isinstance(store_, storage.LocalObjectStore):
+        raise HTTPException(status_code=404, detail="Not found.")
+    try:
+        found = store_.open_object(key)
+    except storage.StorageError as exc:
+        raise HTTPException(status_code=404, detail="Not found.") from exc
+    if found is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+    path, content_type = found
+    return FileResponse(path, media_type=content_type)
