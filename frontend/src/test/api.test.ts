@@ -643,4 +643,20 @@ describe("upload limit errors", () => {
     expect(err).not.toBeInstanceOf(UploadLimitError);
     expect(err.message).toBe("boom");
   });
+
+  // Plan constraint: "A 413 the parser does not recognise (a reverse proxy's own error body,
+  // say) must fall through to the generic error path rather than being mislabelled as a quota
+  // problem." A body without one of the two known codes is exactly that case.
+  it("leaves an unrecognised 413 as a plain Error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: "Request Entity Too Large" }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(UploadLimitError);
+    expect(err.message).toBe("Request Entity Too Large");
+  });
 });
