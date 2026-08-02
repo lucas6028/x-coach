@@ -43,8 +43,8 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
         self.artifacts: list[dict] = []
         self.discarded: list[object] = []
         analysis_service.stage_upload = lambda data, *, suffix=".mp4", owner="anon": self.staged
-        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: self.artifacts.append(
-            {"staged": staged, "thumbnail": thumbnail}
+        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: (
+            self.artifacts.append({"staged": staged, "thumbnail": thumbnail}) or 0
         )
         analysis_service.discard_stage = lambda staged: self.discarded.append(staged)
         analysis_service.analyze_pose_payload = (
@@ -229,8 +229,8 @@ class AnalyzePoseStorageTests(unittest.TestCase):
             return self.staged
 
         analysis_service.stage_upload = _stage_upload
-        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: self.artifacts.append(
-            {"staged": staged, "thumbnail": thumbnail}
+        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: (
+            self.artifacts.append({"staged": staged, "thumbnail": thumbnail}) or 0
         )
         analysis_service.discard_stage = lambda staged: self.discarded.append(staged)
         analysis_service.analyze_pose_payload = (

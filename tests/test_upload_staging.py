@@ -142,6 +142,40 @@ class StoreArtifactsTests(unittest.TestCase):
         with mock.patch.object(storage, "get_object_store", side_effect=RuntimeError("boom")):
             analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
 
+    def test_returns_the_bytes_it_stored(self) -> None:
+        self.staged.pose_path.write_text('{"a": 1}', encoding="utf-8")
+        pose_len = self.staged.pose_path.stat().st_size
+        stored = analysis.store_artifacts(self.staged, thumbnail=b"jpeg-bytes")
+        self.assertEqual(stored, pose_len + len(b"jpeg-bytes"))
+
+    def test_returns_zero_when_there_is_nothing_derived_to_store(self) -> None:
+        """The no-detector branch writes no pose JSON and may carry no thumbnail."""
+        self.assertEqual(analysis.store_artifacts(self.staged, thumbnail=None), 0)
+
+    def test_a_failed_put_contributes_zero_not_its_length(self) -> None:
+        """MUTATION CHECK for the quota's honesty: charging a user for bytes that were never
+        written bills them for space they do not occupy. Returning len(data) here instead of 0
+        must fail this test."""
+        self.staged.pose_path.write_text('{"a": 1}', encoding="utf-8")
+        with mock.patch.object(storage, "get_object_store", return_value=_FailingStore()):
+            stored = analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
+        self.assertEqual(stored, 0)
+
+    def test_a_partial_failure_returns_only_what_landed(self) -> None:
+        """Thumbnail put fails, pose put succeeds -> only the pose bytes count."""
+        self.staged.pose_path.write_text('{"a": 1}', encoding="utf-8")
+        pose_len = self.staged.pose_path.stat().st_size
+        real_put = self.store.put
+
+        def flaky_put(key, data, *, content_type):
+            if key.endswith("thumb.jpg"):
+                raise storage.StorageError("nope")
+            real_put(key, data, content_type=content_type)
+
+        with mock.patch.object(self.store, "put", side_effect=flaky_put):
+            stored = analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
+        self.assertEqual(stored, pose_len)
+
 
 class DiscardStageTests(unittest.TestCase):
     def setUp(self) -> None:

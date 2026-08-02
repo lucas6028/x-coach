@@ -247,8 +247,13 @@ def stage_upload(data: bytes, *, suffix: str, owner: str) -> StagedUpload:
     )
 
 
-def _put_artifact(staged: StagedUpload, name: str, data: bytes, content_type: str) -> None:
-    """Upload one derived artifact, swallowing every failure. See ``store_artifacts``.
+def _put_artifact(staged: StagedUpload, name: str, data: bytes, content_type: str) -> int:
+    """Upload one derived artifact, swallowing every failure. Returns the bytes STORED — 0 when
+    the put failed. See ``store_artifacts``.
+
+    Returning 0 rather than ``len(data)`` on failure is what keeps the storage quota honest:
+    the caller adds this into ``videos.size_bytes``, and counting bytes that were never written
+    would charge a user for space they do not occupy.
 
     ``except Exception`` is deliberate and matches ``store.persist_analysis``'s policy. A
     narrower ``except storage.StorageError`` would NOT hold the contract: ``LocalObjectStore.put``
@@ -261,19 +266,25 @@ def _put_artifact(staged: StagedUpload, name: str, data: bytes, content_type: st
         )
     except Exception:  # noqa: BLE001 — a derived artifact must never sink a completed analysis
         logger.exception("Failed to store %s for %s", name, staged.video_id)
+        return 0
+    return len(data)
 
 
-def store_artifacts(staged: StagedUpload, *, thumbnail: bytes | None = None) -> None:
-    """Best-effort upload of the derived artifacts. NEVER RAISES.
+def store_artifacts(staged: StagedUpload, *, thumbnail: bytes | None = None) -> int:
+    """Best-effort upload of the derived artifacts. NEVER RAISES. Returns bytes ACTUALLY stored.
 
     Mirrors ``store.persist_analysis``'s policy: a storage hiccup is logged, but it must never
     discard an analysis that already cost a full pipeline run. The caller relies on that literally
-    — it does not wrap this call — so every path here has to hold it.
+    — it does not wrap this call — so every path here has to hold it, including the new return.
+
+    The return value feeds ``videos.size_bytes`` and therefore the storage quota, so it counts
+    only what landed: a failed put contributes 0, and an unreadable pose file contributes 0.
 
     ``pose.json`` is uploaded ONLY when one was actually produced. ``analyze_pose_payload``
     returns the ``analysis_pending`` skeleton without writing any pose JSON for a movement with
     no registered detector — which is most of the movement registry, not an edge case.
     """
+    stored = 0
     if staged.pose_path.is_file():
         try:
             pose_bytes = staged.pose_path.read_bytes()
@@ -282,9 +293,10 @@ def store_artifacts(staged: StagedUpload, *, thumbnail: bytes | None = None) -> 
             # StorageError — so this needs its own guard, not the put's.
             logger.exception("Failed to read staged pose JSON for %s", staged.video_id)
         else:
-            _put_artifact(staged, "pose.json", pose_bytes, "application/json")
+            stored += _put_artifact(staged, "pose.json", pose_bytes, "application/json")
     if thumbnail:
-        _put_artifact(staged, "thumb.jpg", thumbnail, "image/jpeg")
+        stored += _put_artifact(staged, "thumb.jpg", thumbnail, "image/jpeg")
+    return stored
 
 
 def discard_stage(staged: StagedUpload) -> None:

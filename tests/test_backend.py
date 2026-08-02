@@ -108,7 +108,7 @@ def _staged_upload(video_id: str = "upload_abc", *, owner: str = "anon"):
     # resolves the LIVE object store -- an R2 client, and a real network delete, on a machine
     # whose env carries R2 credentials.
     with mock.patch.object(analysis, "stage_upload", return_value=staged) as stage, mock.patch.object(
-        analysis, "store_artifacts"
+        analysis, "store_artifacts", return_value=0
     ), mock.patch.object(analysis, "discard_stage"), mock.patch.object(store, "_reap_objects"):
         yield stage
 
