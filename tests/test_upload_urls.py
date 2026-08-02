@@ -13,7 +13,9 @@ from pathlib import Path
 from unittest import mock
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
+from backend.app.main import app
 from backend.app.routers import videos as videos_router
 from backend.app.services import storage, store
 
@@ -96,6 +98,45 @@ class UploadUrlBatchTests(unittest.TestCase):
             )
         lookup.assert_not_called()
         self.assertEqual(body["items"], {})
+
+
+class UploadUrlAuthTests(unittest.TestCase):
+    """These two endpoints REPLACE the IDOR this branch closes, so their auth is the whole
+    security thesis -- and every other test in this file calls the handlers as plain Python
+    functions with a ``_User()`` stand-in, which cannot notice ``Depends(get_current_user)``
+    being deleted. These go through the real app over HTTP, where the dependency itself is
+    what is under test.
+
+    Verified by mutation, not by assumption: with ``= Depends(get_current_user)`` removed from
+    ``videos.get_upload_urls``, ``test_get_upload_urls_requires_auth`` fails.
+    """
+
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        # A sibling suite that forgot to clear its override would otherwise silently authenticate
+        # these requests and turn both assertions green for the wrong reason.
+        self.assertEqual(app.dependency_overrides, {}, "a leaked dependency override would hide a 401 regression")
+
+    def test_get_upload_urls_requires_auth(self) -> None:
+        resp = self.client.get("/api/uploads/upload_a/url")
+        self.assertEqual(resp.status_code, 401, resp.text)
+
+    def test_batch_upload_urls_requires_auth(self) -> None:
+        # A VALID body on purpose: with a malformed one, a 422 from request validation could
+        # stand in for the 401 this test exists to pin, depending on validation order.
+        resp = self.client.post("/api/uploads/urls", json={"video_ids": ["upload_a"]})
+        self.assertEqual(resp.status_code, 401, resp.text)
+
+    def test_neither_endpoint_reaches_the_database_without_auth(self) -> None:
+        """401 must come from the dependency, before any storage-key lookup runs -- otherwise the
+        endpoint would be doing owner-scoped work for an unauthenticated caller."""
+        with mock.patch.object(store, "get_storage_key") as one, mock.patch.object(
+            store, "get_storage_keys"
+        ) as many:
+            self.client.get("/api/uploads/upload_a/url")
+            self.client.post("/api/uploads/urls", json={"video_ids": ["upload_a"]})
+        one.assert_not_called()
+        many.assert_not_called()
 
 
 class VideoFileIsLibraryOnlyTests(unittest.TestCase):
