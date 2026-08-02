@@ -462,7 +462,11 @@ def get_storage_used(*, token: str, user_id: str) -> int:
         .execute()
     )
     rows = resp.data or []
-    total = getattr(resp, "count", None)
+    # ``resp.count`` directly, not ``getattr(resp, "count", None)``: postgrest's ``APIResponse``
+    # always declares the field (``Optional[int]``, default ``None``), and a defaulted getattr would
+    # silently turn "the client changed shape" into "no truncation check" — the same fail-open
+    # direction this guard exists to close.
+    total = resp.count
     if total is not None and len(rows) < total:
         raise RuntimeError(
             f"Storage usage query returned {len(rows)} of {total} rows; refusing to undercount."
