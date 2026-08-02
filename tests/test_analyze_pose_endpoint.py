@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from fastapi import HTTPException
-from starlette.datastructures import UploadFile
+from starlette.datastructures import Headers, UploadFile
 
 from backend.app.routers import analyze as analyze_router
 from backend.app.services import analysis as analysis_service
@@ -59,6 +59,13 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
         )
         presign.start()
         self.addCleanup(presign.stop)
+
+        # Reaping a failed upload's objects is a storage concern too: unpatched it resolves the
+        # LIVE object store, which is an R2 client (and a real network delete) on any machine
+        # whose env carries R2 credentials. See AnalyzePoseStorageTests for what it should do.
+        reap = mock.patch.object(store, "_reap_objects")
+        reap.start()
+        self.addCleanup(reap.stop)
 
         # KEEP THESE TESTS OFFLINE, as the module docstring promises. ``analyze_pose`` calls
         # ``settings.allowed_upload_suffixes()``, which reads the admin overrides via
@@ -237,6 +244,13 @@ class AnalyzePoseStorageTests(unittest.TestCase):
         presign.start()
         self.addCleanup(presign.stop)
 
+        # Stubbed for the whole class, both to keep the reap offline (unpatched it resolves the
+        # LIVE object store) and so every test can assert on WHETHER it fired, not only the ones
+        # that expect it to.
+        reap = mock.patch.object(store, "_reap_objects")
+        self.reap = reap.start()
+        self.addCleanup(reap.stop)
+
     def tearDown(self) -> None:
         for name, value in self._orig.items():
             setattr(analysis_service, name, value)
@@ -273,6 +287,71 @@ class AnalyzePoseStorageTests(unittest.TestCase):
         self._run()
         self.assertEqual(len(self.artifacts), 1)
         self.assertIs(self.artifacts[0]["staged"], self.staged)
+
+    def test_forwards_the_thumbnail_bytes(self) -> None:
+        """The mirror of ``/api/analyze``'s own test, for the reason this class exists: nothing
+        stops a change to ``analyze_pose``'s call site from dropping the ``thumb`` kwarg it
+        passes into the shared helper while the other endpoint's tests stay green."""
+        thumb = UploadFile(file=io.BytesIO(b"jpeg-bytes"), filename="t.jpg",
+                           headers=Headers({"content-type": "image/jpeg"}))
+        self._run(thumbnail=thumb)
+        self.assertEqual(self.artifacts[0]["thumbnail"], b"jpeg-bytes")
+
+    def test_accepts_the_image_jpg_content_type_alias(self) -> None:
+        thumb = UploadFile(file=io.BytesIO(b"jpeg-bytes"), filename="t.jpg",
+                           headers=Headers({"content-type": "image/jpg"}))
+        self._run(thumbnail=thumb)
+        self.assertEqual(self.artifacts[0]["thumbnail"], b"jpeg-bytes")
+
+    def test_drops_a_thumbnail_with_an_unusable_type_instead_of_failing(self) -> None:
+        thumb = UploadFile(file=io.BytesIO(b"png"), filename="t.png",
+                           headers=Headers({"content-type": "image/png"}))
+        result = self._run(thumbnail=thumb)
+        self.assertEqual(result["video_id"], "upload_test")
+        self.assertIsNone(self.artifacts[0]["thumbnail"], "the bad thumbnail must be dropped")
+
+    def test_drops_an_oversized_thumbnail_instead_of_failing(self) -> None:
+        big = b"x" * (analyze_router.MAX_THUMBNAIL_BYTES + 1)
+        thumb = UploadFile(file=io.BytesIO(big), filename="t.jpg",
+                           headers=Headers({"content-type": "image/jpeg"}))
+        result = self._run(thumbnail=thumb)
+        self.assertEqual(result["video_id"], "upload_test")
+        self.assertIsNone(self.artifacts[0]["thumbnail"], "the oversized thumbnail is dropped")
+
+    def test_reaps_the_stored_objects_when_the_analysis_fails(self) -> None:
+        """The source is stored BEFORE the analysis runs and a failed analysis writes no
+        ``videos`` row, so nothing else would ever delete it."""
+        def boom(*args, **kwargs):
+            raise RuntimeError("detector failed")
+
+        analysis_service.analyze_pose_payload = boom
+        with self.assertRaises(HTTPException):
+            self._run()
+        self.reap.assert_called_once_with([self.staged.prefix])
+
+    def test_reaps_the_stored_objects_when_the_analysis_fails_unexpectedly(self) -> None:
+        def boom(*args, **kwargs):
+            raise ValueError("something nobody predicted")
+
+        analysis_service.analyze_pose_payload = boom
+        with self.assertRaises(ValueError):
+            self._run()
+        self.reap.assert_called_once_with([self.staged.prefix])
+
+    def test_never_reaps_after_a_successful_analysis(self) -> None:
+        """Pins WHERE the reap sits: one that also fired on success would delete the clip the
+        caller is being handed a live ``video_url`` for."""
+        self._run()
+        self.reap.assert_not_called()
+
+    def test_never_reaps_when_only_the_history_write_failed(self) -> None:
+        """A documented, accepted orphan: the analysis succeeded and the client holds a live
+        playback URL, so deleting the source inline would break a working session."""
+        user = mock.Mock(id="u1", token="tok")
+        with mock.patch.object(store, "persist_analysis", side_effect=RuntimeError("db down")):
+            result = self._run(user=user)
+        self.assertIsNone(result["analysis_id"])
+        self.reap.assert_not_called()
 
     def test_discards_the_stage_even_when_the_analysis_fails(self) -> None:
         def boom(*args, **kwargs):

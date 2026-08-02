@@ -75,6 +75,13 @@ class AnalyzeEndpointTests(unittest.TestCase):
         presign.start()
         self.addCleanup(presign.stop)
 
+        # Reaping a failed upload's objects is a storage concern too: unpatched it resolves the
+        # LIVE object store, which is an R2 client (and a real network delete) on any machine
+        # whose env carries R2 credentials. See AnalyzeStorageTests for what it should do.
+        reap = mock.patch.object(store, "_reap_objects")
+        reap.start()
+        self.addCleanup(reap.stop)
+
         # KEEP THESE TESTS OFFLINE, as the module docstring promises. ``analyze`` calls
         # ``settings.allowed_upload_suffixes()``, which reads the admin overrides via
         # ``runtime_config.get_overrides()`` -- and that does a REAL Supabase round-trip whenever
@@ -268,6 +275,13 @@ class AnalyzeStorageTests(unittest.TestCase):
         presign.start()
         self.addCleanup(presign.stop)
 
+        # Stubbed for the whole class, both to keep the reap offline (unpatched it resolves the
+        # LIVE object store) and so every test can assert on WHETHER it fired, not only the ones
+        # that expect it to.
+        reap = mock.patch.object(store, "_reap_objects")
+        self.reap = reap.start()
+        self.addCleanup(reap.stop)
+
     def tearDown(self) -> None:
         for name, value in self._orig.items():
             setattr(analysis_service, name, value)
@@ -304,20 +318,72 @@ class AnalyzeStorageTests(unittest.TestCase):
         self._run(thumbnail=thumb)
         self.assertEqual(self.artifacts[0]["thumbnail"], b"jpeg-bytes")
 
-    def test_rejects_a_non_jpeg_thumbnail(self) -> None:
+    def test_accepts_the_image_jpg_content_type_alias(self) -> None:
+        """``image/jpg`` is not the registered type, but encoders emit it. Since an unusable
+        thumbnail now degrades rather than failing, accepting the alias can only help."""
+        thumb = UploadFile(file=io.BytesIO(b"jpeg-bytes"), filename="t.jpg",
+                           headers=Headers({"content-type": "image/jpg"}))
+        self._run(thumbnail=thumb)
+        self.assertEqual(self.artifacts[0]["thumbnail"], b"jpeg-bytes")
+
+    def test_drops_a_thumbnail_with_an_unusable_type_instead_of_failing(self) -> None:
+        """A thumbnail problem must NEVER block an analysis -- the contract the frontend's
+        capture helper holds on its own side. Rejecting the whole upload over the one optional
+        part would invert it for exactly the client whose capture succeeded."""
         thumb = UploadFile(file=io.BytesIO(b"png"), filename="t.png",
                            headers=Headers({"content-type": "image/png"}))
-        with self.assertRaises(HTTPException) as ctx:
-            self._run(thumbnail=thumb)
-        self.assertEqual(ctx.exception.status_code, 400)
+        result = self._run(thumbnail=thumb)
+        self.assertEqual(result["video_id"], "upload_test")
+        self.assertIsNone(self.artifacts[0]["thumbnail"], "the bad thumbnail must be dropped")
 
-    def test_rejects_an_oversized_thumbnail(self) -> None:
+    def test_drops_an_oversized_thumbnail_instead_of_failing(self) -> None:
+        """The cap is still a cap -- exceeding it means 'no thumbnail', not 'no analysis'."""
         big = b"x" * (analyze_router.MAX_THUMBNAIL_BYTES + 1)
         thumb = UploadFile(file=io.BytesIO(big), filename="t.jpg",
                            headers=Headers({"content-type": "image/jpeg"}))
-        with self.assertRaises(HTTPException) as ctx:
-            self._run(thumbnail=thumb)
-        self.assertEqual(ctx.exception.status_code, 400)
+        result = self._run(thumbnail=thumb)
+        self.assertEqual(result["video_id"], "upload_test")
+        self.assertIsNone(self.artifacts[0]["thumbnail"], "the oversized thumbnail is dropped")
+
+    def test_reaps_the_stored_objects_when_the_analysis_fails(self) -> None:
+        """``stage_upload`` stores the source BEFORE the analysis runs, and a failed analysis
+        writes no ``videos`` row -- so without this reap the object is invisible to every
+        deletion path and lives forever under ``uploads/{user_id}/``, which has no lifecycle rule.
+        """
+        def boom(*args, **kwargs):
+            raise RuntimeError("Pose extraction failed")
+
+        analysis_service.analyze_video_file = boom
+        with self.assertRaises(HTTPException):
+            self._run()
+        self.reap.assert_called_once_with([self.staged.prefix])
+
+    def test_reaps_the_stored_objects_when_the_analysis_fails_unexpectedly(self) -> None:
+        """Not just the RuntimeError -> 422 arm: a bug in the pipeline 500s, and orphans just
+        as much."""
+        def boom(*args, **kwargs):
+            raise ValueError("something nobody predicted")
+
+        analysis_service.analyze_video_file = boom
+        with self.assertRaises(ValueError):
+            self._run()
+        self.reap.assert_called_once_with([self.staged.prefix])
+
+    def test_never_reaps_after_a_successful_analysis(self) -> None:
+        """The assertion with teeth: a reap that also fired on success would delete the clip the
+        caller is being handed a live ``video_url`` for. This pins WHERE the reap sits, which the
+        failure-path tests above cannot."""
+        self._run()
+        self.reap.assert_not_called()
+
+    def test_never_reaps_when_only_the_history_write_failed(self) -> None:
+        """A documented, accepted orphan: the analysis succeeded and the client holds a live
+        playback URL, so deleting the source inline would break a working session."""
+        user = mock.Mock(id="u1", token="tok")
+        with mock.patch.object(store, "persist_analysis", side_effect=RuntimeError("db down")):
+            result = self._run(user=user)
+        self.assertIsNone(result["analysis_id"])
+        self.reap.assert_not_called()
 
     def test_discards_the_stage_even_when_the_analysis_fails(self) -> None:
         def boom(*args, **kwargs):
