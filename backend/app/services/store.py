@@ -143,6 +143,7 @@ def persist_analysis(
     video_id: str,
     source: str,
     storage_key: str,
+    size_bytes: int,
     result: dict[str, Any],
     filename: str | None = None,
 ) -> str:
@@ -154,6 +155,12 @@ def persist_analysis(
     everything under it. ``result`` is stored verbatim as JSONB so history replay is
     self-contained; note that the caller attaches the presigned ``video_url`` only AFTER this
     returns, so no expired URL is ever persisted.
+
+    ``size_bytes`` is the total the upload's stored artifacts occupy (source + pose JSON +
+    thumbnail), and is what the storage quota sums. REQUIRED rather than defaulted: a caller
+    that forgets it would silently write a row consuming no quota, which is a hole that fails
+    open. It must reflect what was ACTUALLY stored -- ``store_artifacts`` returns 0 for an
+    artifact whose put failed, so a partial failure does not bill the user for absent bytes.
     """
     client = _user_client(token)
 
@@ -163,6 +170,7 @@ def persist_analysis(
             "video_id": video_id,
             "filename": filename,
             "storage_key": storage_key,
+            "size_bytes": size_bytes,
             "status": "done",
         },
         on_conflict="user_id,video_id",
@@ -422,3 +430,21 @@ def get_storage_keys(*, token: str, video_ids: list[str]) -> dict[str, str]:
         for row in (resp.data or [])
         if row.get("video_id") and row.get("storage_key")
     }
+
+
+def get_storage_used(*, token: str, user_id: str) -> int:
+    """Total bytes this user's uploads occupy, for the storage quota.
+
+    Read with the CALLER'S OWN JWT, so the ``videos`` RLS policy is what scopes it — the
+    ``user_id`` filter is belt-and-braces, not the security boundary, exactly as everywhere
+    else on this path.
+
+    Summed in Python rather than with a PostgREST aggregate: aggregates depend on
+    ``db-aggregates-enabled``, which is not ours to guarantee, and the quota itself bounds how
+    many rows this can return. A row whose ``size_bytes`` is NULL or absent counts as 0,
+    matching the column default for rows that predate it. If the row count ever outgrows this,
+    the upgrade is an RPC returning ``coalesce(sum(size_bytes), 0)`` for ``auth.uid()``.
+    """
+    client = _user_client(token)
+    resp = client.table("videos").select("size_bytes").eq("user_id", user_id).execute()
+    return sum(int(row.get("size_bytes") or 0) for row in (resp.data or []))

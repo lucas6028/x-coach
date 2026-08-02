@@ -1498,6 +1498,7 @@ class StorePersistTests(unittest.TestCase):
                 video_id="vid",
                 source="upload",
                 storage_key="uploads/u1/vid",
+                size_bytes=0,
                 result={"view": {"view_type": "rear"}, "detections": [1]},
                 filename="clip.mp4",
             )
@@ -1520,6 +1521,7 @@ class StorePersistTests(unittest.TestCase):
                 video_id="vid",
                 source="upload",
                 storage_key="uploads/u1/vid",
+                size_bytes=0,
                 result={},
             )
         self.assertEqual(aid, "")
@@ -1533,6 +1535,7 @@ class StorePersistTests(unittest.TestCase):
                 video_id="vid",
                 source="upload",
                 storage_key="uploads/u1/vid",
+                size_bytes=0,
                 result={"view": {"view_type": "rear"}, "detections": [1], "movement": "Push-up"},
             )
         self.assertEqual(query.inserted["movement"], "Push-up")
@@ -1550,6 +1553,7 @@ class StorePersistTests(unittest.TestCase):
                 video_id="vid",
                 source="upload",
                 storage_key="uploads/u1/vid",
+                size_bytes=0,
                 result={"view": {"view_type": "rear"}, "detections": [1]},
             )
         self.assertIn("movement", query.inserted)
