@@ -29,6 +29,7 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
@@ -72,6 +73,32 @@ def _detection_payload(faults: list[str], *, view: str = "rear", retrievals=None
     if retrievals is not None:
         data["retrievals"] = retrievals
     return data
+
+
+@contextmanager
+def _staged_upload(video_id: str = "upload_abc"):
+    """Patch the analyze router's staging trio for one HTTP-level test.
+
+    These tests exercise the REAL router through ``TestClient``, so -- unlike the direct-call
+    suites in ``tests/test_analyze_endpoint.py`` -- ``analysis.discard_stage`` genuinely runs
+    unless patched, and its real body does ``shutil.rmtree(staged.video_path.parent)``. Patching
+    all three here means it never runs at all, keeping these tests on the same "no real disk /
+    object-store I/O" footing as the coroutine-level tests. ``video_path`` still points at a
+    dedicated scratch subdirectory under the system temp dir (never a bare relative name -- a
+    RELATIVE path's ``.parent`` resolves against the CWD, so an accidentally-unpatched
+    ``discard_stage`` would ``rmtree`` the repository root) so a future test that forgets to
+    patch ``discard_stage`` fails loudly on a missing file rather than deleting something real.
+    """
+    staged = analysis.StagedUpload(
+        video_id=video_id,
+        prefix=f"uploads/anon/{video_id}",
+        video_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}.mp4",
+        pose_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}_pose.json",
+    )
+    with mock.patch.object(analysis, "stage_upload", return_value=staged), mock.patch.object(
+        analysis, "store_artifacts"
+    ), mock.patch.object(analysis, "discard_stage"):
+        yield staged
 
 
 class _TempConfigBase(unittest.TestCase):
@@ -611,6 +638,14 @@ class AnalyzeRouterTests(_TempConfigBase):
     def setUp(self) -> None:
         super().setUp()
         self.client = TestClient(app)
+        # KEEP THESE TESTS OFFLINE. ``analyze`` calls ``settings.allowed_upload_suffixes()``,
+        # which reads the admin overrides via ``runtime_config.get_overrides()`` -- and that does
+        # a REAL Supabase round-trip whenever auth is configured (true on any machine with a
+        # populated ``.env``). ``{}`` is exactly what ``get_overrides`` returns when auth is
+        # unconfigured, so this runs the same code path CI does rather than a bespoke stub.
+        overrides = mock.patch.object(runtime_config, "get_overrides", return_value={})
+        overrides.start()
+        self.addCleanup(overrides.stop)
 
     def test_rejects_unsupported_suffix(self) -> None:
         resp = self.client.post(
@@ -628,19 +663,25 @@ class AnalyzeRouterTests(_TempConfigBase):
 
     def test_success_returns_analysis(self) -> None:
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(analysis, "analyze_video_file", return_value=fake_result):
+        with _staged_upload(), mock.patch.object(
+            analysis, "analyze_video_file", return_value=fake_result
+        ):
             resp = self.client.post(
                 "/api/analyze", files={"file": ("clip.mp4", b"abcd", "video/mp4")}
             )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json(), fake_result)
+        body = resp.json()
+        # Assert the analysis payload's own keys individually rather than the whole dict: the
+        # router adds `video_url` to this SAME object after the mock returns it (see
+        # `test_returns_a_presigned_video_url` for the direct-call version of this contract), so
+        # `resp.json() == fake_result` would still hold even if `video_url` were silently dropped.
+        self.assertEqual(body["detections"], fake_result["detections"])
+        self.assertEqual(body["source"], fake_result["source"])
+        self.assertEqual(body["pose"], fake_result["pose"])
+        self.assertIn("video_url", body)
 
     def test_pipeline_runtime_error_maps_to_422(self) -> None:
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(
+        with _staged_upload(), mock.patch.object(
             analysis, "analyze_video_file", side_effect=RuntimeError("boom")
         ):
             resp = self.client.post(
@@ -654,9 +695,9 @@ class AnalyzeRouterTests(_TempConfigBase):
         self.assertEqual(resp.status_code, 422)
 
     def test_uppercase_suffix_accepted(self) -> None:
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(analysis, "analyze_video_file", return_value={"ok": True}):
+        with _staged_upload(), mock.patch.object(
+            analysis, "analyze_video_file", return_value={"ok": True}
+        ):
             resp = self.client.post(
                 "/api/analyze", files={"file": ("CLIP.MP4", b"abcd", "video/mp4")}
             )
@@ -664,9 +705,7 @@ class AnalyzeRouterTests(_TempConfigBase):
 
     def test_anonymous_upload_does_not_persist(self) -> None:
         fake_result = {"detections": [], "source": "upload"}
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(
+        with _staged_upload(), mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ), mock.patch.object(store, "persist_analysis") as persist:
             resp = self.client.post(
@@ -680,9 +719,7 @@ class AnalyzeRouterTests(_TempConfigBase):
         app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="tok")
         self.addCleanup(app.dependency_overrides.clear)
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(
+        with _staged_upload(), mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ), mock.patch.object(store, "persist_analysis", return_value="analysis-1") as persist:
             resp = self.client.post(
@@ -695,14 +732,13 @@ class AnalyzeRouterTests(_TempConfigBase):
         self.assertEqual(kwargs["token"], "tok")
         self.assertEqual(kwargs["video_id"], "upload_abc")
         self.assertEqual(kwargs["source"], "upload")
+        self.assertEqual(kwargs["storage_key"], "uploads/anon/upload_abc")
         self.assertEqual(kwargs["filename"], "clip.mp4")
 
     def test_authenticated_upload_persist_failure_sets_id_none(self) -> None:
         app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="tok")
         self.addCleanup(app.dependency_overrides.clear)
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(
+        with _staged_upload(), mock.patch.object(
             analysis, "analyze_video_file", return_value={"detections": []}
         ), mock.patch.object(
             store, "persist_analysis", side_effect=RuntimeError("db down")
@@ -734,9 +770,7 @@ class AnalyzeRouterTests(_TempConfigBase):
     def test_analyze_max_reps_zero_reaches_detector_as_none(self) -> None:
         """The client-facing 0 ('every rep') must cross the boundary as the detector's None."""
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(
+        with _staged_upload(), mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ) as mocked:
             resp = self.client.post(
@@ -750,9 +784,7 @@ class AnalyzeRouterTests(_TempConfigBase):
     def test_analyze_omitted_max_reps_resolves_to_the_configured_default(self) -> None:
         """A client that sends nothing at all must get the configured default (3), not -1."""
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(
+        with _staged_upload(), mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ) as mocked:
             resp = self.client.post(
@@ -766,9 +798,7 @@ class AnalyzeRouterTests(_TempConfigBase):
     def test_analyze_accepts_max_reps_upper_bound(self) -> None:
         """20 is IN range (the check is > 20, not >= 20) and must reach the detector unchanged."""
         fake_result = {"detections": [], "source": "upload", "pose": {"frames": []}}
-        with mock.patch.object(
-            analysis, "save_upload", return_value=("upload_abc", self.upload_dir / "u.mp4")
-        ), mock.patch.object(
+        with _staged_upload(), mock.patch.object(
             analysis, "analyze_video_file", return_value=fake_result
         ) as mocked:
             resp = self.client.post(
@@ -789,20 +819,20 @@ class AnalyzeRouterTests(_TempConfigBase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("max_reps", response.json()["detail"])
 
-    def test_analyze_rejects_max_reps_before_save_upload(self) -> None:
-        """A rejected max_reps must cost no disk I/O and never reach the analysis semaphore.
+    def test_analyze_rejects_max_reps_before_stage_upload(self) -> None:
+        """A rejected max_reps must cost no storage put and never reach the analysis semaphore.
 
-        save_upload is called strictly before the semaphore is acquired in the router, so
+        stage_upload is called strictly before the semaphore is acquired in the router, so
         asserting it was never invoked also proves the semaphore slot was never touched.
         """
-        with mock.patch.object(analysis, "save_upload") as mocked_save:
+        with mock.patch.object(analysis, "stage_upload") as mocked_stage:
             response = self.client.post(
                 "/api/analyze",
                 files={"file": ("clip.mp4", b"not-a-real-video", "video/mp4")},
                 data={"movement": "Squat", "max_reps": "99"},
             )
         self.assertEqual(response.status_code, 400)
-        mocked_save.assert_not_called()
+        mocked_stage.assert_not_called()
 
 
 class AnalyzePoseRouterTests(_TempConfigBase):
@@ -816,6 +846,10 @@ class AnalyzePoseRouterTests(_TempConfigBase):
     def setUp(self) -> None:
         super().setUp()
         self.client = TestClient(app)
+        # KEEP THESE TESTS OFFLINE. See ``AnalyzeRouterTests.setUp`` for why this must be patched.
+        overrides = mock.patch.object(runtime_config, "get_overrides", return_value={})
+        overrides.start()
+        self.addCleanup(overrides.stop)
 
     def test_rejects_out_of_range_max_reps(self) -> None:
         response = self.client.post(
@@ -826,9 +860,9 @@ class AnalyzePoseRouterTests(_TempConfigBase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("max_reps", response.json()["detail"])
 
-    def test_rejects_max_reps_before_save_upload(self) -> None:
+    def test_rejects_max_reps_before_stage_upload(self) -> None:
         """Same no-compute-on-rejection guarantee as /api/analyze, for the pose-upload path."""
-        with mock.patch.object(analysis, "save_upload") as mocked_save:
+        with mock.patch.object(analysis, "stage_upload") as mocked_stage:
             response = self.client.post(
                 "/api/analyze/pose",
                 data={
@@ -839,7 +873,7 @@ class AnalyzePoseRouterTests(_TempConfigBase):
                 files={"file": ("clip.mp4", b"fake", "video/mp4")},
             )
         self.assertEqual(response.status_code, 400)
-        mocked_save.assert_not_called()
+        mocked_stage.assert_not_called()
 
 
 class VideosRouterTests(_TempConfigBase):
@@ -1408,6 +1442,7 @@ class StorePersistTests(unittest.TestCase):
                 user_id="u1",
                 video_id="vid",
                 source="upload",
+                storage_key="uploads/u1/vid",
                 result={"view": {"view_type": "rear"}, "detections": [1]},
                 filename="clip.mp4",
             )
@@ -1416,15 +1451,21 @@ class StorePersistTests(unittest.TestCase):
         self.assertEqual(query.inserted["user_id"], "u1")
         self.assertEqual(query.inserted["view_type"], "rear")
         self.assertEqual(query.inserted["fault_count"], 1)
-        # The video row was upserted with the runtime storage key.
+        # The video row was upserted with the caller-supplied object-store prefix.
         self.assertEqual(query.upserted["video_id"], "vid")
+        self.assertEqual(query.upserted["storage_key"], "uploads/u1/vid")
         self.assertEqual(query.upserted["status"], "done")
 
     def test_persist_returns_empty_when_no_row(self) -> None:
         client, _ = _fake_client(_Resp(data=[]))
         with mock.patch.object(store, "_user_client", return_value=client):
             aid = store.persist_analysis(
-                token="t", user_id="u1", video_id="vid", source="upload", result={}
+                token="t",
+                user_id="u1",
+                video_id="vid",
+                source="upload",
+                storage_key="uploads/u1/vid",
+                result={},
             )
         self.assertEqual(aid, "")
 
@@ -1436,6 +1477,7 @@ class StorePersistTests(unittest.TestCase):
                 user_id="u1",
                 video_id="vid",
                 source="upload",
+                storage_key="uploads/u1/vid",
                 result={"view": {"view_type": "rear"}, "detections": [1], "movement": "Push-up"},
             )
         self.assertEqual(query.inserted["movement"], "Push-up")
@@ -1452,6 +1494,7 @@ class StorePersistTests(unittest.TestCase):
                 user_id="u1",
                 video_id="vid",
                 source="upload",
+                storage_key="uploads/u1/vid",
                 result={"view": {"view_type": "rear"}, "detections": [1]},
             )
         self.assertIn("movement", query.inserted)
