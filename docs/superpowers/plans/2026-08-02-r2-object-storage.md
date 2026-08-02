@@ -2840,8 +2840,24 @@ describe("VideoPanel video source", () => {
     await waitFor(() => expect(document.querySelector("video")).not.toBeNull());
     expect(document.querySelector("video")?.getAttribute("src")).toBeNull();
   });
+
+  // A FIFTH test is required, and the fourth above needs strengthening — see the note below.
 });
 ```
+
+> **Corrected during execution (2026-08-02).** The Task 7 review found the fourth test above has no
+> discriminating power for the failure path it names: `waitFor`'s callback is already true on the
+> first synchronous check (the `<video>` element renders unconditionally), so it never waits for the
+> rejection to settle, and the asserted `src === null` is true *before* `uploadMedia` is even called
+> because the effect calls `setSrc(null)` synchronously on entry. Deleting the `.catch` entirely
+> leaves the test passing. It must actually await the rejection and assert the panel still renders
+> its analysis content.
+>
+> Separately, **property 1 — "switching analyses mid-flight must not apply the previous video's
+> URL" — has no test at all**, despite being the race this hook's `cancelled` flag exists for. None
+> of the four tests renders more than one analysis. A fifth test must resolve a slow in-flight
+> request *after* the panel has switched to a different analysis, and assert the stale URL is not
+> applied. That one is genuinely discriminating: deleting the `cancelled` guard fails it.
 
 Add `afterEach` to the existing `vitest` import at the top of the file if it is not already there.
 
