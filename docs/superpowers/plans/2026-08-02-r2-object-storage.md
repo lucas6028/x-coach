@@ -2440,7 +2440,9 @@ export function thumbnailTime(duration: number): number {
   return duration * THUMBNAIL_POSITION;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+/** Reject if `promise` has not settled within `ms`. Exported for test only — it is pure and
+ *  DOM-free, so it does not belong behind the `c8 ignore` marker that covers the decode glue. */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("thumbnail capture timed out")), ms);
     promise.then(
@@ -2464,21 +2466,30 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * an analysis, so every error path here is a silent degradation rather than a thrown one.
  */
 export async function captureThumbnail(video: Blob): Promise<Blob | null> {
-  const url = URL.createObjectURL(video);
-  const el = document.createElement("video");
-  el.muted = true;
-  el.playsInline = true;
+  // Declared out here so `finally` can clean up whatever got as far as being created, but
+  // ASSIGNED inside the try: `URL.createObjectURL` and `document.createElement` can themselves
+  // throw, and this function's contract is to resolve null on ANY failure. Setup sitting above
+  // the try would reject instead — and the only caller awaits this inside its own try, so a
+  // rejection would surface as an ANALYSIS failure rather than a missing thumbnail, which is
+  // exactly what "a thumbnail must never block an analysis" forbids.
+  let url: string | null = null;
+  let el: HTMLVideoElement | null = null;
   try {
+    url = URL.createObjectURL(video);
+    const media = document.createElement("video");
+    el = media;
+    media.muted = true;
+    media.playsInline = true;
     const loaded = new Promise<void>((resolve, reject) => {
-      el.onloadedmetadata = () => resolve();
-      el.onerror = () => reject(new Error("could not decode the clip"));
+      media.onloadedmetadata = () => resolve();
+      media.onerror = () => reject(new Error("could not decode the clip"));
     });
-    el.src = url;
+    media.src = url;
     await withTimeout(loaded, CAPTURE_TIMEOUT_MS);
 
     // A recorded clip's duration is not known until probed — reuse the same recovery the pose
     // extractor needs, so both paths behave the same on a live recording.
-    const duration = await resolveDuration(el, CAPTURE_TIMEOUT_MS).catch(() => Number.NaN);
+    const duration = await resolveDuration(media, CAPTURE_TIMEOUT_MS).catch(() => Number.NaN);
     const target = thumbnailTime(duration);
 
     const seeked = new Promise<void>((resolve, reject) => {
@@ -2488,35 +2499,40 @@ export async function captureThumbnail(video: Blob): Promise<Blob | null> {
       // effect. Resolving on it would capture the clip's OPENING frame — usually black — which is
       // exactly the frame this whole 25% offset exists to avoid. The recorded-clip path is where
       // resolveDuration does its probe-seek dance, so this is the app's live path, not a corner.
-      el.onseeked = () => {
-        if (Math.abs(el.currentTime - target) < SEEK_TOLERANCE_S) resolve();
+      media.onseeked = () => {
+        if (Math.abs(media.currentTime - target) < SEEK_TOLERANCE_S) resolve();
       };
-      el.onerror = () => reject(new Error("could not seek the clip"));
+      media.onerror = () => reject(new Error("could not seek the clip"));
     });
-    if (Math.abs(el.currentTime - target) >= SEEK_TOLERANCE_S) {
-      el.currentTime = target;
+    if (Math.abs(media.currentTime - target) >= SEEK_TOLERANCE_S) {
+      media.currentTime = target;
       await withTimeout(seeked, CAPTURE_TIMEOUT_MS);
     }
     // else: already at the target (the unusable-duration fallback leaves us at 0). Assigning
     // currentTime the value it already holds fires no `seeked`, so awaiting one would only time out.
 
-    if (!el.videoWidth || !el.videoHeight) return null;
-    const { width, height } = thumbnailSize(el.videoWidth, el.videoHeight);
+    if (!media.videoWidth || !media.videoHeight) return null;
+    const { width, height } = thumbnailSize(media.videoWidth, media.videoHeight);
     const canvas = document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
-    ctx.drawImage(el, 0, 0, width, height);
+    ctx.drawImage(media, 0, 0, width, height);
     return await new Promise<Blob | null>((resolve) =>
       canvas.toBlob((blob) => resolve(blob), "image/jpeg", JPEG_QUALITY)
     );
   } catch {
     return null;
   } finally {
-    URL.revokeObjectURL(url);
-    el.removeAttribute("src");
-    el.load();
+    // Guarded: setup can fail partway, and revoking a URL that was never created — or calling
+    // load() on an element that was never made — would throw out of the finally, defeating the
+    // catch above.
+    if (url) URL.revokeObjectURL(url);
+    if (el) {
+      el.removeAttribute("src");
+      el.load();
+    }
   }
 }
 /* c8 ignore stop */
