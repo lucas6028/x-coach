@@ -43,6 +43,10 @@ beforeEach(() => {
     user: { email: "ada@x.com" },
     signOut,
   } as unknown as ReturnType<typeof useAuth>);
+  // Every render now triggers a thumbnail batch fetch. The pre-existing suites below don't care
+  // about thumbnails, so stub it to an empty result and let the "History thumbnails" describe
+  // block below override it per test.
+  vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({});
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -276,5 +280,68 @@ describe("History", () => {
     await userEvent.click(screen.getByRole("button", { name: /Account menu/i }));
     await userEvent.click(screen.getByRole("menuitem", { name: /Sign out/i }));
     await waitFor(() => expect(signOut).toHaveBeenCalled());
+  });
+});
+
+describe("History thumbnails", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches every row's URLs in one batch request", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 2,
+      items: [item({ id: "1", video_id: "upload_a" }), item({ id: "2", video_id: "upload_b" })],
+    });
+    const batch = vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({});
+    renderHistory();
+    await waitFor(() => expect(batch).toHaveBeenCalledWith(["upload_a", "upload_b"]));
+    expect(batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the thumbnail when one is available", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ id: "1", video_id: "upload_a" })],
+    });
+    vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({
+      upload_a: { video_url: "v", thumbnail_url: "https://signed/thumb" },
+    });
+    // Scoped to `li img`, not just `img`: AppLayout's Header and Sidebar each render an
+    // unconditional `<img src="/icon.svg">` brand logo ahead of the row content in DOM order, so
+    // an unscoped `container.querySelector("img")` finds the logo, not the row's thumbnail.
+    const { container } = renderHistory();
+    await waitFor(() =>
+      expect(container.querySelector("li img")?.getAttribute("src")).toBe("https://signed/thumb")
+    );
+  });
+
+  it("keeps the icon placeholder for a row with no thumbnail", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ id: "1", video_id: "upload_a" })],
+    });
+    vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({});
+    const { container } = renderHistory();
+    await waitFor(() => expect(container.querySelectorAll("li").length).toBeGreaterThan(0));
+    // No <img> in the row (scoped past the Header/Sidebar logo, see above) — and the fallback
+    // icon tile is actually there, not just "no image and no row at all". Scoped to
+    // `li a > span svg` because the row also has other svgs (the trailing CaretRight, the delete
+    // button's Trash icon) that would make a bare `li svg` check pass unconditionally; the
+    // leading tile is the only direct-child `<span>` of the row link that wraps an icon (the
+    // fault-count badge is a `<span>` too, but holds text, not an svg).
+    expect(container.querySelector("li img")).toBeNull();
+    expect(container.querySelector("li a > span svg")).not.toBeNull();
+  });
+
+  it("still renders the list when the URL batch fails", async () => {
+    vi.spyOn(api, "listAnalyses").mockResolvedValue({
+      total: 1,
+      items: [item({ id: "1", video_id: "upload_a" })],
+    });
+    vi.spyOn(api, "uploadMediaBatch").mockRejectedValue(new Error("503"));
+    const { container } = renderHistory();
+    await waitFor(() => expect(container.querySelectorAll("li").length).toBeGreaterThan(0));
+    // Asserts on the rendered copy, not the i18n key -- history.errorTitle resolves to "Couldn't
+    // load your history" (see the existing "shows an error and retries" test above).
+    expect(screen.queryByText("Couldn't load your history")).toBeNull();
   });
 });
