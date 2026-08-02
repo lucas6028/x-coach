@@ -2191,13 +2191,14 @@ def _reap_objects(prefixes: list[str]) -> None:
     A storage failure must not roll back a DB deletion the user already asked for — an orphaned
     object is a cost, a record that refuses to delete is a bug.
     """
-    if not prefixes:
-        return
-    obj_store = storage.get_object_store()
     for prefix in prefixes:
         try:
-            obj_store.delete_prefix(prefix)
-        except storage.StorageError:
+            # ``get_object_store()`` is INSIDE the try, and the except is broad, for the same
+            # reason as ``analysis._put_artifact``: this runs AFTER the DB rows are already gone,
+            # so anything escaping here 500s a deletion that actually succeeded. It is lru_cached,
+            # so calling it per prefix is a cache hit, not a cost.
+            storage.get_object_store().delete_prefix(prefix)
+        except Exception:  # noqa: BLE001 — an orphaned object is a cost; a stuck delete is a bug
             logger.exception("Failed to delete stored objects under %s", prefix)
 ```
 
