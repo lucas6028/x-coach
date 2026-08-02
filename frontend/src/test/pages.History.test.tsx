@@ -323,14 +323,14 @@ describe("History thumbnails", () => {
     vi.spyOn(api, "uploadMediaBatch").mockResolvedValue({});
     const { container } = renderHistory();
     await waitFor(() => expect(container.querySelectorAll("li").length).toBeGreaterThan(0));
-    // No <img> in the row (scoped past the Header/Sidebar logo, see above) — and the fallback
-    // icon tile is actually there, not just "no image and no row at all". Scoped to
-    // `li a > span svg` because the row also has other svgs (the trailing CaretRight, the delete
-    // button's Trash icon) that would make a bare `li svg` check pass unconditionally; the
-    // leading tile is the only direct-child `<span>` of the row link that wraps an icon (the
-    // fault-count badge is a `<span>` too, but holds text, not an svg).
+    // No <img> in the card (scoped past the Header/Sidebar logo, see above) — and the fallback
+    // icon tile is actually there, not just "no image and no card at all". Scoped to `li a svg`
+    // rather than `li svg`: the delete button is a SIBLING of the card link and its Trash icon
+    // would make a bare `li svg` check pass unconditionally. Inside the link the fallback icon is
+    // now the only svg (the fault-count badge holds text, and the trailing CaretRight the old row
+    // layout had is gone).
     expect(container.querySelector("li img")).toBeNull();
-    expect(container.querySelector("li a > span svg")).not.toBeNull();
+    expect(container.querySelector("li a svg")).not.toBeNull();
   });
 
   it("still renders the list when the URL batch fails", async () => {
