@@ -797,6 +797,14 @@ class StageUploadTests(unittest.TestCase):
         self.addCleanup(analysis.discard_stage, staged)
         self.assertTrue(staged.video_id.startswith("upload_"))
 
+    def test_video_ids_are_unique_across_uploads(self) -> None:
+        """Two uploads must never collide onto one key prefix — one would overwrite the other."""
+        first = analysis.stage_upload(b"v", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, first)
+        second = analysis.stage_upload(b"v", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, second)
+        self.assertNotEqual(first.video_id, second.video_id)
+
     def test_stages_a_temp_copy_the_pipeline_can_open(self) -> None:
         staged = analysis.stage_upload(b"video-bytes", suffix=".mp4", owner="u1")
         self.addCleanup(analysis.discard_stage, staged)
@@ -855,6 +863,26 @@ class StoreArtifactsTests(unittest.TestCase):
         """A storage hiccup must not discard an already-completed (expensive) analysis."""
         self.staged.pose_path.write_text("{}", encoding="utf-8")
         with mock.patch.object(storage, "get_object_store", return_value=_FailingStore()):
+            analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
+
+    def test_never_raises_when_the_staged_pose_file_cannot_be_read(self) -> None:
+        """`is_file()` and the read are not atomic, and the read raises OSError — which a
+        StorageError-only guard would let escape."""
+        self.staged.pose_path.write_text("{}", encoding="utf-8")
+        with mock.patch.object(Path, "read_bytes", side_effect=OSError("gone")):
+            analysis.store_artifacts(self.staged)  # must not raise
+
+    def test_never_raises_when_the_put_hits_the_filesystem(self) -> None:
+        """LocalObjectStore.put does mkdir + write_bytes, so on the dev/CI path a disk error
+        surfaces as OSError, not StorageError."""
+        self.staged.pose_path.write_text("{}", encoding="utf-8")
+        with mock.patch.object(
+            storage.LocalObjectStore, "put", side_effect=OSError("no space left on device")
+        ):
+            analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
+
+    def test_never_raises_when_the_object_store_is_unavailable(self) -> None:
+        with mock.patch.object(storage, "get_object_store", side_effect=RuntimeError("boom")):
             analysis.store_artifacts(self.staged, thumbnail=b"jpeg")  # must not raise
 
 
@@ -957,31 +985,44 @@ def stage_upload(data: bytes, *, suffix: str, owner: str) -> StagedUpload:
     )
 
 
+def _put_artifact(staged: StagedUpload, name: str, data: bytes, content_type: str) -> None:
+    """Upload one derived artifact, swallowing every failure. See ``store_artifacts``.
+
+    ``except Exception`` is deliberate and matches ``store.persist_analysis``'s policy. A
+    narrower ``except storage.StorageError`` would NOT hold the contract: ``LocalObjectStore.put``
+    does real filesystem IO (``mkdir`` + ``write_bytes``) and raises ``OSError``, not
+    ``StorageError`` — so on the dev/CI path a full disk would escape and sink a completed analysis.
+    """
+    try:
+        storage.get_object_store().put(
+            f"{staged.prefix}/{name}", data, content_type=content_type
+        )
+    except Exception:  # noqa: BLE001 — a derived artifact must never sink a completed analysis
+        logger.exception("Failed to store %s for %s", name, staged.video_id)
+
+
 def store_artifacts(staged: StagedUpload, *, thumbnail: bytes | None = None) -> None:
     """Best-effort upload of the derived artifacts. NEVER RAISES.
 
     Mirrors ``store.persist_analysis``'s policy: a storage hiccup is logged, but it must never
-    discard an analysis that already cost a full pipeline run.
+    discard an analysis that already cost a full pipeline run. The caller relies on that literally
+    — it does not wrap this call — so every path here has to hold it.
 
     ``pose.json`` is uploaded ONLY when one was actually produced. ``analyze_pose_payload``
     returns the ``analysis_pending`` skeleton without writing any pose JSON for a movement with
     no registered detector — which is most of the movement registry, not an edge case.
     """
-    store = storage.get_object_store()
     if staged.pose_path.is_file():
         try:
-            store.put(
-                f"{staged.prefix}/pose.json",
-                staged.pose_path.read_bytes(),
-                content_type="application/json",
-            )
-        except storage.StorageError:
-            logger.exception("Failed to store pose JSON for %s", staged.video_id)
+            pose_bytes = staged.pose_path.read_bytes()
+        except OSError:
+            # ``is_file()`` and the read are not atomic, and the read raises OSError rather than
+            # StorageError — so this needs its own guard, not the put's.
+            logger.exception("Failed to read staged pose JSON for %s", staged.video_id)
+        else:
+            _put_artifact(staged, "pose.json", pose_bytes, "application/json")
     if thumbnail:
-        try:
-            store.put(f"{staged.prefix}/thumb.jpg", thumbnail, content_type="image/jpeg")
-        except storage.StorageError:
-            logger.exception("Failed to store thumbnail for %s", staged.video_id)
+        _put_artifact(staged, "thumb.jpg", thumbnail, "image/jpeg")
 
 
 def discard_stage(staged: StagedUpload) -> None:
