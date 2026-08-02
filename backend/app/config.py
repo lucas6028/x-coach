@@ -32,10 +32,9 @@ DEFAULT_ANALYSIS_MOVEMENT = "Squat"
 # How many repetitions the web path analyzes. Sampled first/middle/last, not the first N.
 DEFAULT_MAX_REPS = 3
 
-# Runtime scratch space for uploaded videos and their derived pose JSON (gitignored).
+# Runtime scratch space (gitignored). The local object store lives under this; uploads
+# themselves are no longer kept here — see backend/app/services/storage.py.
 RUNTIME_DIR = DATA_DIR / "runtime"
-UPLOAD_DIR = RUNTIME_DIR / "uploads"
-UPLOAD_POSE_DIR = RUNTIME_DIR / "pose_json"
 
 SPLIT_NAMES = ("train", "val", "test")
 
@@ -55,9 +54,3 @@ CORS_ORIGINS = [
     "http://127.0.0.1:5173",
     *[o.strip() for o in os.getenv("XCOACH_CORS_ORIGINS", "").split(",") if o.strip()],
 ]
-
-
-def ensure_runtime_dirs() -> None:
-    """Create the runtime upload directories if they do not yet exist."""
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    UPLOAD_POSE_DIR.mkdir(parents=True, exist_ok=True)

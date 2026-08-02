@@ -84,6 +84,12 @@ class _TempConfigBase(unittest.TestCase):
         self.pose_json_dir = root / "pose_json"
         self.detections_dir = root / "detections"
         self.labels_dir = root / "labels"
+        # NOTE: upload_dir/upload_pose_dir are no longer patched into `config` — the runtime
+        # upload directories were removed in favour of object storage (see
+        # backend/app/services/storage.py). They still exist as plain temp paths here because a
+        # handful of not-yet-updated router/library tests below reference them; those go through
+        # library.uploaded_video_path, which itself is slated for removal (closes the upload
+        # video-file IDOR) rather than repointed at a temp dir.
         self.upload_dir = root / "uploads"
         self.upload_pose_dir = root / "upload_pose"
         self.kg_file = root / "kg.graphml"
@@ -96,8 +102,6 @@ class _TempConfigBase(unittest.TestCase):
             mock.patch.object(config, "POSE_JSON_DIR", self.pose_json_dir),
             mock.patch.object(config, "DETECTIONS_DIR", self.detections_dir),
             mock.patch.object(config, "LABELS_DIR", self.labels_dir),
-            mock.patch.object(config, "UPLOAD_DIR", self.upload_dir),
-            mock.patch.object(config, "UPLOAD_POSE_DIR", self.upload_pose_dir),
             mock.patch.object(config, "KG_GRAPH_FILE", self.kg_file),
             mock.patch.object(config, "RAG_DB_DIR", self.rag_dir),
         ]
@@ -130,21 +134,6 @@ class _TempConfigBase(unittest.TestCase):
 
 
 class ConfigTests(unittest.TestCase):
-    def test_ensure_runtime_dirs_creates_upload_dirs(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            up = Path(tmp) / "uploads"
-            pj = Path(tmp) / "pose"
-            with mock.patch.object(config, "UPLOAD_DIR", up), mock.patch.object(
-                config, "UPLOAD_POSE_DIR", pj
-            ):
-                self.assertFalse(up.exists())
-                config.ensure_runtime_dirs()
-                self.assertTrue(up.is_dir())
-                self.assertTrue(pj.is_dir())
-                # Idempotent: a second call with the dirs present does not raise.
-                config.ensure_runtime_dirs()
-                self.assertTrue(up.is_dir())
-
     def test_repo_root_resolves_to_repository_root(self) -> None:
         # config lives at backend/app/config.py; repo root contains it.
         self.assertTrue((config.REPO_ROOT / "backend" / "app" / "config.py").exists())
@@ -274,25 +263,6 @@ class StripFrameMetricsTests(unittest.TestCase):
         self.assertEqual(out, {"detections": []})
 
 
-class SaveUploadTests(_TempConfigBase):
-    def test_persists_bytes_and_returns_id_and_path(self) -> None:
-        video_id, dest = analysis.save_upload(b"hello-bytes", suffix=".mov")
-        self.assertTrue(video_id.startswith("upload_"))
-        self.assertTrue(dest.exists())
-        self.assertEqual(dest.read_bytes(), b"hello-bytes")
-        self.assertEqual(dest.suffix, ".mov")
-        self.assertEqual(dest.parent, self.upload_dir)
-
-    def test_default_suffix_is_mp4(self) -> None:
-        _, dest = analysis.save_upload(b"x")
-        self.assertEqual(dest.suffix, ".mp4")
-
-    def test_ids_are_unique(self) -> None:
-        id1, _ = analysis.save_upload(b"a")
-        id2, _ = analysis.save_upload(b"b")
-        self.assertNotEqual(id1, id2)
-
-
 class AnalyzeVideoFileTests(_TempConfigBase):
     """Exercise the upload pipeline without importing the heavy pose stack.
 
@@ -326,6 +296,12 @@ class AnalyzeVideoFileTests(_TempConfigBase):
         source.write_bytes(b"video")
         return source
 
+    def _pose_json_path(self) -> Path:
+        # Scratch path standing in for the caller-supplied staged pose path (`stage_upload` puts
+        # this in the upload's own temp dir in production).
+        self.upload_pose_dir.mkdir(parents=True, exist_ok=True)
+        return self.upload_pose_dir / "pose.json"
+
     def test_full_pipeline_success(self) -> None:
         detector_result = {
             "detections": [{"fault_id": "knees_inward"}],
@@ -334,7 +310,9 @@ class AnalyzeVideoFileTests(_TempConfigBase):
         }
         module_patch, detect_patch = self._patches(detector_result=detector_result)
         with module_patch, detect_patch as detect:
-            result = analysis.analyze_video_file(self._source(), video_id="vid42")
+            result = analysis.analyze_video_file(
+                self._source(), video_id="vid42", pose_json_path=self._pose_json_path()
+            )
 
         # frame_metrics stripped, slim pose block + source attached.
         self.assertNotIn("frame_metrics", result)
@@ -355,7 +333,7 @@ class AnalyzeVideoFileTests(_TempConfigBase):
         module_patch, detect_patch = self._patches(ok=False)
         with module_patch, detect_patch as detect:
             with self.assertRaises(RuntimeError):
-                analysis.analyze_video_file(self._source())
+                analysis.analyze_video_file(self._source(), pose_json_path=self._pose_json_path())
             detect.assert_not_called()
 
     def test_raises_when_pose_json_missing(self) -> None:
@@ -363,12 +341,14 @@ class AnalyzeVideoFileTests(_TempConfigBase):
         module_patch, detect_patch = self._patches(ok=True, write=False)
         with module_patch, detect_patch:
             with self.assertRaises(RuntimeError):
-                analysis.analyze_video_file(self._source())
+                analysis.analyze_video_file(self._source(), pose_json_path=self._pose_json_path())
 
     def test_video_id_defaults_to_source_stem(self) -> None:
         module_patch, detect_patch = self._patches()
         with module_patch, detect_patch as detect:
-            analysis.analyze_video_file(self._source("myclip.mp4"))
+            analysis.analyze_video_file(
+                self._source("myclip.mp4"), pose_json_path=self._pose_json_path()
+            )
         self.assertEqual(detect.call_args.kwargs["video_id"], "myclip")
 
 
@@ -1059,12 +1039,6 @@ class MainAppTests(_TempConfigBase):
         self.assertFalse(body["stores"]["rag_db"])
         # videos + detections dirs were created in setUp.
         self.assertTrue(body["stores"]["labeled_videos"])
-
-    def test_startup_creates_runtime_dirs(self) -> None:
-        self.assertFalse(self.upload_dir.exists())
-        with TestClient(app):  # triggers the startup event
-            self.assertTrue(self.upload_dir.is_dir())
-            self.assertTrue(self.upload_pose_dir.is_dir())
 
     def test_cors_headers_present(self) -> None:
         resp = self.client.get(

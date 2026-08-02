@@ -76,8 +76,3 @@ def health() -> dict:
             "rag_db": config.RAG_DB_DIR.exists(),
         },
     }
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    config.ensure_runtime_dirs()

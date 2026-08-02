@@ -1,7 +1,9 @@
 """analyze_pose_payload: route a client pose payload to a detector (no server extraction)."""
 from __future__ import annotations
 
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from backend.app import config
@@ -10,6 +12,15 @@ from src.pose.movements import registry
 
 
 class AnalyzePosePayloadTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _pose_json_path(self) -> Path:
+        # Stands in for the caller-supplied staged path (`stage_upload` puts this in the
+        # upload's own temp dir in production).
+        return Path(self._tmp.name) / "pose.json"
+
     @staticmethod
     def _payload(frames: int = 1) -> dict:
         landmarks = [{"x": 0.1, "y": 0.2, "z": 0.0, "visibility": 0.9}] * 33
@@ -19,9 +30,12 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         }
 
     def test_squat_routes_to_the_detector_and_attaches_pose_block(self) -> None:
+        pose_json_path = self._pose_json_path()
         with mock.patch("src.pose.pose_rule_detector.detect_pose_rules_from_payload") as detect:
             detect.return_value = {"detections": [], "video_id": "vid1"}
-            result = svc.analyze_pose_payload(self._payload(), movement="Squat", video_id="vid1")
+            result = svc.analyze_pose_payload(
+                self._payload(), movement="Squat", video_id="vid1", pose_json_path=pose_json_path
+            )
 
         self.assertEqual(result["source"], "upload")
         self.assertEqual(result["video_id"], "vid1")
@@ -32,7 +46,7 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         # The pose JSON path is load-bearing, not incidental: without it the detector forces
         # view_type="unknown", which suppresses knees_forward on side view and downweights
         # knees_inward / excessive_forward_lean. It was a review Critical once already.
-        self.assertEqual(kwargs["pose_json_path"].name, "vid1.json")
+        self.assertEqual(kwargs["pose_json_path"], pose_json_path)
         self.assertTrue(kwargs["pose_json_path"].exists())
 
     # THE BUG THIS FILE MISSED. `/api/movements` advertises every registered detector and the studio
@@ -53,7 +67,12 @@ class AnalyzePosePayloadTests(unittest.TestCase):
             with self.subTest(movement=movement):
                 with mock.patch("src.pose.pose_rule_detector.detect_pose_rules_from_payload") as detect:
                     detect.return_value = {"detections": [], "video_id": "v"}
-                    result = svc.analyze_pose_payload(self._payload(), movement=movement, video_id="v")
+                    result = svc.analyze_pose_payload(
+                        self._payload(),
+                        movement=movement,
+                        video_id="v",
+                        pose_json_path=self._pose_json_path(),
+                    )
                 detect.assert_called_once()
                 # Passed through unchanged -- e.g. "Row", never silently coerced to the "Squat"
                 # fallback `registry.get_detector` applies to a falsy movement.
@@ -79,7 +98,12 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         # rejected a spelling the detector itself accepts.
         with mock.patch("src.pose.pose_rule_detector.detect_pose_rules_from_payload") as detect:
             detect.return_value = {"detections": [], "video_id": "v3"}
-            result = svc.analyze_pose_payload(self._payload(), movement="push-up", video_id="v3")
+            result = svc.analyze_pose_payload(
+                self._payload(),
+                movement="push-up",
+                video_id="v3",
+                pose_json_path=self._pose_json_path(),
+            )
         self.assertNotIn("analysis_pending", result)
         detect.assert_called_once()
 
@@ -93,11 +117,17 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         # what turns that staleness into a loud failure instead of a silently vacuous test.
         self.assertNotIn("Band Pull Apart", [d.name for d in registry.list_detectors()])
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
-        result = svc.analyze_pose_payload(payload, movement="Band Pull Apart", video_id="v2")
+        pose_json_path = self._pose_json_path()
+        result = svc.analyze_pose_payload(
+            payload, movement="Band Pull Apart", video_id="v2", pose_json_path=pose_json_path
+        )
         self.assertEqual(result["analysis_pending"], True)
         self.assertEqual(result["detections"], [])
         self.assertEqual(result["video_id"], "v2")
         self.assertIn("pose", result)
+        # The no-detector branch never writes pose JSON — `store_artifacts` relies on this to
+        # decide whether to upload pose.json at all.
+        self.assertFalse(pose_json_path.exists())
 
 
 if __name__ == "__main__":
