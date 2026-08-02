@@ -2185,7 +2185,26 @@ Expected: imports clean, no output. An `ImportError: cannot import name ... (mos
 Run: `.venv\Scripts\python.exe -m pytest tests/test_delete_reaping.py -v`
 Expected: PASS
 
-- [ ] **Step 6: Run the whole backend suite and the coverage gate**
+- [ ] **Step 6: Register the new suites with the coverage gate, then run it**
+
+`scripts/run_backend_coverage.py` measures all of `backend/app` but runs only a HARDCODED list of test files (`_DEFAULT_TESTS`, line 25). Four new suites are not in it, so the gate would measure `storage.py` and the amended `store.py` while running none of their tests — reporting a coverage drop that is really a missing entry. Add all four:
+
+```python
+_DEFAULT_TESTS = [
+    "tests/test_backend.py",
+    "tests/test_analyze_pose_endpoint.py",
+    "tests/test_chat_endpoint.py",
+    "tests/test_backend_line_auth.py",
+    "tests/test_backend_line_webhook.py",
+    "tests/test_backend_admin_line.py",
+    "tests/test_storage.py",
+    "tests/test_upload_staging.py",
+    "tests/test_upload_urls.py",
+    "tests/test_delete_reaping.py",
+]
+```
+
+(Keep any entries already present that are not shown here — add, don't replace.)
 
 Run: `.venv\Scripts\python.exe -m pytest tests/ -q`
 Expected: PASS
