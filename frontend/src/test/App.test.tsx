@@ -18,6 +18,10 @@ vi.mock("../lib/poseExtract", () => ({
   }),
 }));
 
+// runPoseAnalysis also calls captureThumbnail on the same blob, driving a <video> decode jsdom
+// can't run either. Stub it the same way, for the same reason.
+vi.mock("../lib/thumbnail", () => ({ captureThumbnail: () => Promise.resolve(null) }));
+
 function renderApp() {
   return render(
     <MemoryRouter>

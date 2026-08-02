@@ -8,6 +8,7 @@ import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
 import { extractPoseFromBlob } from "./lib/poseExtract";
+import { captureThumbnail } from "./lib/thumbnail";
 import type { PoseTier } from "./lib/poseTier";
 import { useI18n } from "./lib/i18n";
 import type { AnalyzableMovement } from "./lib/movements";
@@ -120,9 +121,12 @@ export default function App() {
     setStatusMsg(t("app.analysing"));
     try {
       const pose = await extractPoseFromBlob(blob, tier);
+      // Captured from the same blob the browser just decoded for MediaPipe, so it costs one
+      // extra seek. Resolves to null on any failure — a missing thumbnail never blocks analysis.
+      const thumbnail = await captureThumbnail(blob);
       // The user's selected movement, not a hardcoded "Squat". `analyzePose` has taken a movement
       // since the client-capture path landed; this is the caller that finally supplies a real one.
-      const data = await api.analyzePose(canonicalMovement, pose, blob);
+      const data = await api.analyzePose(canonicalMovement, pose, blob, thumbnail);
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;

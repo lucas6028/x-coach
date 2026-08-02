@@ -99,6 +99,10 @@ export interface Analysis {
   // Present when an authenticated upload was persisted to the user's history (null if the
   // save failed). Absent for anonymous uploads and library clips.
   analysis_id?: string | null;
+  /** A short-lived presigned URL for the source clip, attached to the analyze RESPONSE only —
+   *  never stored in the history row, where it would already be expired on replay. Replays
+   *  re-sign through `api.uploadMedia`. */
+  video_url?: string | null;
   /** Which detector produced this analysis. Absent on analyses predating per-movement
    *  selection; consumers fall back to "Squat". */
   movement?: string;
@@ -117,6 +121,13 @@ export interface HistoryItem {
 export interface HistoryPage {
   total: number;
   items: HistoryItem[];
+}
+
+// Short-lived URLs for one upload's stored artifacts, from GET /api/uploads/{id}/url.
+export interface UploadMedia {
+  video_url: string;
+  thumbnail_url: string;
+  expires_in: number;
 }
 
 // A single stored analysis row; `result` is the full Analysis document for replay.
@@ -504,7 +515,30 @@ export const api = {
       `/api/knowledge/faults?movement=${encodeURIComponent(movement)}`
     ),
 
+  // Library demo clips only — uploads are not reachable here (they need an ownership check).
   videoFileUrl: (videoId: string) => `/api/video-file/${videoId}`,
+
+  // Short-lived URLs for ONE of the caller's uploads (requires a session).
+  uploadMedia: (videoId: string) =>
+    getJSON<UploadMedia>(`/api/uploads/${encodeURIComponent(videoId)}/url`),
+
+  // The same URLs for a whole history page in one round trip. Ids the caller does not own are
+  // absent from `items` rather than an error.
+  async uploadMediaBatch(
+    videoIds: string[]
+  ): Promise<Record<string, { video_url: string; thumbnail_url: string }>> {
+    if (videoIds.length === 0) return {};
+    const res = await fetch("/api/uploads/urls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ video_ids: videoIds }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/uploads/urls`);
+    const body = (await res.json()) as {
+      items: Record<string, { video_url: string; thumbnail_url: string }>;
+    };
+    return body.items;
+  },
 
   // The caller's saved analyses, newest first (requires a signed-in session).
   listAnalyses: (limit = 50, offset = 0) =>
@@ -613,12 +647,16 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   },
 
-  async analyzeUpload(file: File, movement: string): Promise<Analysis> {
+  // No in-app caller today — App.tsx always goes through `analyzePose`. The `thumbnail`
+  // parameter exists so reviving this path does not silently lose thumbnails.
+  async analyzeUpload(file: File, movement: string, thumbnail?: Blob | null): Promise<Analysis> {
     const form = new FormData();
     form.append("file", file);
     // Which detector runs. The backend rejects an unregistered value with 400 before it spends
     // a MediaPipe pass, and echoes the canonical spelling back as `movement` on the result.
     form.append("movement", movement);
+    // Optional by design: a browser where frame capture failed must still be able to analyze.
+    if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
     const res = await fetch("/api/analyze", {
       method: "POST",
       body: form,
@@ -631,12 +669,18 @@ export const api = {
     return (await res.json()) as Analysis;
   },
 
-  async analyzePose(movement: string, pose: PoseJson, video: Blob): Promise<Analysis> {
+  async analyzePose(
+    movement: string,
+    pose: PoseJson,
+    video: Blob,
+    thumbnail?: Blob | null
+  ): Promise<Analysis> {
     const form = new FormData();
     form.append("movement", movement);
     form.append("pose", JSON.stringify(pose));
     const ext = video.type.includes("mp4") ? "mp4" : "webm";
     form.append("file", video, `capture.${ext}`);
+    if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
     const res = await fetch("/api/analyze/pose", {
       method: "POST",
       body: form,

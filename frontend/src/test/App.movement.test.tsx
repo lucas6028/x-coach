@@ -17,6 +17,11 @@ vi.mock("../lib/poseExtract", () => ({
   }),
 }));
 
+// runPoseAnalysis also calls captureThumbnail on the same blob. The real implementation drives a
+// <video> decode jsdom cannot perform (it hung/failed these tests once App.tsx started calling
+// it); these tests are about which MOVEMENT reaches the request, not about thumbnail capture.
+vi.mock("../lib/thumbnail", () => ({ captureThumbnail: () => Promise.resolve(null) }));
+
 const LIVE = [
   { name: "Squat", validated: true },
   { name: "Overhead Press", validated: false },
@@ -55,8 +60,16 @@ describe("studio movement selection", () => {
     await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
     // The movement is analyzePose's FIRST argument. It shipped hardcoded to "Squat" when the
     // client-capture path landed; this asserts the user's actual selection now reaches it.
+    // Trailing args: pose, video blob, and the (mocked-null) thumbnail — not this test's concern.
     await vi.waitFor(() =>
-      expect(analyze).toHaveBeenCalledWith("Push-up", expect.anything(), expect.anything())
+      expect(analyze).toHaveBeenCalledWith(
+        "Push-up",
+        expect.anything(),
+        expect.anything(),
+        // The mocked captureThumbnail above always resolves null; expect.anything() does not
+        // match null/undefined, so this asserts the literal value it actually forwards.
+        null
+      )
     );
   });
 
@@ -115,7 +128,14 @@ describe("studio movement selection", () => {
       expect(input).not.toBeNull();
       await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
       await vi.waitFor(() =>
-        expect(analyze).toHaveBeenCalledWith("Push-up", expect.anything(), expect.anything())
+        expect(analyze).toHaveBeenCalledWith(
+          "Push-up",
+          expect.anything(),
+          expect.anything(),
+          // The mocked captureThumbnail above always resolves null; expect.anything() does not
+          // match null/undefined, so this asserts the literal value it actually forwards.
+          null
+        )
       );
     }
   );
