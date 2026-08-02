@@ -1060,6 +1060,8 @@ def _startup() -> None:
 
 `config` is still imported by `main.py` for `CORS_ORIGINS` and the `/api/health` store checks, so leave the import.
 
+**No startup hook replaces this, by design.** Nothing needs the object directory to pre-exist: `LocalObjectStore.put` creates its own parents, `delete_prefix` uses `rmtree(..., ignore_errors=True)`, and `open_object` returns `None` for a missing path. Do not re-add a directory-creating hook.
+
 - [ ] **Step 6: Run the staging tests to verify they pass**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_upload_staging.py -v`
@@ -2171,12 +2173,19 @@ Also update `delete_analysis`'s docstring — delete the paragraph beginning "Th
     last-analysis condition: a sibling analysis still needs the clip to replay.
 ```
 
-- [ ] **Step 4: Run the reaping tests to verify they pass**
+- [ ] **Step 4: Verify the new import introduced no cycle**
+
+`store.py` importing `storage` is the first `services/ → services/` edge in this codebase, and `auth.py` already imports `store`. The chain should be `auth → store → storage → settings → config`, which is acyclic — but check it rather than reasoning about it:
+
+Run: `.venv\Scripts\python.exe -c "import backend.app.main"`
+Expected: imports clean, no output. An `ImportError: cannot import name ... (most likely due to a circular import)` means the `storage` import in `store.py` must move inside `_reap_objects` instead.
+
+- [ ] **Step 5: Run the reaping tests to verify they pass**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/test_delete_reaping.py -v`
 Expected: PASS
 
-- [ ] **Step 5: Run the whole backend suite and the coverage gate**
+- [ ] **Step 6: Run the whole backend suite and the coverage gate**
 
 Run: `.venv\Scripts\python.exe -m pytest tests/ -q`
 Expected: PASS
@@ -2197,7 +2206,7 @@ class R2ClientBuildTests(unittest.TestCase):
         self.assertEqual(kwargs["region_name"], "auto")
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add backend/app/services/store.py tests/test_delete_reaping.py
@@ -2298,6 +2307,10 @@ const THUMBNAIL_POSITION = 0.25;
 const CAPTURE_TIMEOUT_MS = 5000;
 const JPEG_QUALITY = 0.8;
 
+/** How close to the requested timestamp counts as "the seek landed". Browsers snap to the
+ *  nearest keyframe, so an exact match is not something this may depend on. */
+const SEEK_TOLERANCE_S = 0.05;
+
 /** Downscale a frame to fit THUMBNAIL_MAX_EDGE, preserving aspect. Never returns 0 in either
  *  dimension — a 0-width canvas throws on drawImage. */
 export function thumbnailSize(width: number, height: number): { width: number; height: number } {
@@ -2355,13 +2368,26 @@ export async function captureThumbnail(video: Blob): Promise<Blob | null> {
     // A recorded clip's duration is not known until probed — reuse the same recovery the pose
     // extractor needs, so both paths behave the same on a live recording.
     const duration = await resolveDuration(el, CAPTURE_TIMEOUT_MS).catch(() => Number.NaN);
+    const target = thumbnailTime(duration);
 
     const seeked = new Promise<void>((resolve, reject) => {
-      el.onseeked = () => resolve();
+      // GUARDED ON POSITION, not just on the event firing. `resolveDuration` rewinds to
+      // currentTime = 0 as its last act (both on success and on timeout), and that write can emit
+      // a `seeked` that lands after this handler is attached but before our own seek takes
+      // effect. Resolving on it would capture the clip's OPENING frame — usually black — which is
+      // exactly the frame this whole 25% offset exists to avoid. The recorded-clip path is where
+      // resolveDuration does its probe-seek dance, so this is the app's live path, not a corner.
+      el.onseeked = () => {
+        if (Math.abs(el.currentTime - target) < SEEK_TOLERANCE_S) resolve();
+      };
       el.onerror = () => reject(new Error("could not seek the clip"));
     });
-    el.currentTime = thumbnailTime(duration);
-    await withTimeout(seeked, CAPTURE_TIMEOUT_MS);
+    if (Math.abs(el.currentTime - target) >= SEEK_TOLERANCE_S) {
+      el.currentTime = target;
+      await withTimeout(seeked, CAPTURE_TIMEOUT_MS);
+    }
+    // else: already at the target (the unusable-duration fallback leaves us at 0). Assigning
+    // currentTime the value it already holds fires no `seeked`, so awaiting one would only time out.
 
     if (!el.videoWidth || !el.videoHeight) return null;
     const { width, height } = thumbnailSize(el.videoWidth, el.videoHeight);
@@ -2415,6 +2441,8 @@ export interface UploadMedia {
 Change `analyzeUpload` and `analyzePose` to take and forward the thumbnail:
 
 ```ts
+  // No in-app caller today — App.tsx always goes through `analyzePose`. The `thumbnail`
+  // parameter exists so reviving this path does not silently lose thumbnails.
   async analyzeUpload(file: File, movement: string, thumbnail?: Blob | null): Promise<Analysis> {
     const form = new FormData();
     form.append("file", file);
