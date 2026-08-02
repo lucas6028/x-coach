@@ -63,6 +63,16 @@ def _validate_key(key: str) -> str:
         raise StorageError(f"Unsafe object key: {key!r}")
     if any(ch in _UNSAFE_KEY_CHARS for ch in key):
         raise StorageError(f"Unsafe object key: {key!r}")
+    # A DRIVE-ANCHORED key ("C:/Windows/System32/x", or the drive-relative "D:x") escapes the
+    # store entirely: pathlib's `/` DISCARDS the left operand when the right one carries a drive,
+    # so `OBJECTS_DIR / key` returns the caller's absolute path rather than anything under the
+    # store. `Path("C:/tmp/objects") / "C:/Windows/x"` is `WindowsPath("C:/Windows/x")` — verified,
+    # not theoretical. The dev serving endpoint has no auth, so on Windows (this project's primary
+    # OS) that is an unauthenticated arbitrary file read. A colon never appears in a legitimate
+    # key, and rejecting it covers both forms on every platform — which matters because a POSIX
+    # CI box can mint a key that only escapes once a Windows box resolves it.
+    if ":" in key:
+        raise StorageError(f"Unsafe object key: {key!r}")
     return key
 
 
@@ -175,6 +185,7 @@ class R2ObjectStore:
 
     def delete_prefix(self, prefix: str) -> None:
         prefix = _validate_key(prefix)
+        failures: list[dict] = []
         try:
             client = self._s3()
             paginator = client.get_paginator("list_objects_v2")
@@ -183,9 +194,18 @@ class R2ObjectStore:
             for page in paginator.paginate(Bucket=self._bucket, Prefix=f"{prefix}/"):
                 keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
                 if keys:
-                    client.delete_objects(Bucket=self._bucket, Delete={"Objects": keys})
+                    resp = client.delete_objects(Bucket=self._bucket, Delete={"Objects": keys})
+                    failures.extend(resp.get("Errors") or [])
         except Exception as exc:  # noqa: BLE001
             raise StorageError(f"Failed to delete objects under {prefix!r}.") from exc
+        # `delete_objects` reports PER-KEY failures in its response body and raises only for
+        # whole-request errors, so discarding the return value would report a successful reap that
+        # deleted nothing. Raised OUTSIDE the try so it is not caught and re-wrapped as its own cause.
+        if failures:
+            raise StorageError(
+                f"Failed to delete {len(failures)} object(s) under {prefix!r}; "
+                f"first: {failures[0].get('Key')} ({failures[0].get('Code')})"
+            )
 
 
 @lru_cache(maxsize=1)

@@ -17,7 +17,15 @@ from backend.app.services import storage
 class KeyValidationTests(unittest.TestCase):
     def test_rejects_traversal_and_absolute_keys(self) -> None:
         store = storage.LocalObjectStore(Path(tempfile.mkdtemp()))
-        for bad in ("", "/etc/passwd", "uploads/../../etc/passwd", "uploads/\x00/x"):
+        for bad in ("", "/etc/passwd", "uploads/../../etc/passwd", "uploads/\x00/x", "uploads\\..\\x"):
+            with self.subTest(key=bad), self.assertRaises(storage.StorageError):
+                store.put(bad, b"x", content_type="text/plain")
+
+    def test_rejects_windows_drive_anchored_keys(self) -> None:
+        """`Path(root) / "C:/x"` is `WindowsPath("C:/x")` — pathlib drops the root for a
+        drive-anchored operand, so an unguarded key of this shape escapes the store entirely."""
+        store = storage.LocalObjectStore(Path(tempfile.mkdtemp()))
+        for bad in ("C:/Windows/System32/evil", "D:evil", "uploads/C:/x"):
             with self.subTest(key=bad), self.assertRaises(storage.StorageError):
                 store.put(bad, b"x", content_type="text/plain")
 
@@ -92,6 +100,9 @@ class FakeS3Client:
         self.deleted: list[list[dict]] = []
         self.pages: list[dict] = [{"Contents": []}]
         self.raise_on_put = False
+        # Per-key delete failures, which the real API reports in the response body rather than
+        # by raising. Empty means every delete succeeded.
+        self.delete_errors: list[dict] = []
 
     def put_object(self, **kwargs):
         if self.raise_on_put:
@@ -115,6 +126,7 @@ class FakeS3Client:
 
     def delete_objects(self, *, Bucket, Delete):
         self.deleted.append(Delete["Objects"])
+        return {"Deleted": Delete["Objects"], "Errors": self.delete_errors}
 
 
 class R2ObjectStoreTests(unittest.TestCase):
@@ -166,6 +178,14 @@ class R2ObjectStoreTests(unittest.TestCase):
         self.fake.pages = [{"Contents": []}]
         self.store.delete_prefix("uploads/u1/v1")
         self.assertEqual(self.fake.deleted, [])
+
+    def test_delete_prefix_raises_when_a_key_fails_to_delete(self) -> None:
+        """`delete_objects` reports per-key failures in the body and raises only for whole-request
+        errors, so a discarded return value would report a reap that deleted nothing."""
+        self.fake.pages = [{"Contents": [{"Key": "uploads/u1/v1/source"}]}]
+        self.fake.delete_errors = [{"Key": "uploads/u1/v1/source", "Code": "AccessDenied"}]
+        with self.assertRaises(storage.StorageError):
+            self.store.delete_prefix("uploads/u1/v1")
 
 
 class GetObjectStoreTests(unittest.TestCase):
