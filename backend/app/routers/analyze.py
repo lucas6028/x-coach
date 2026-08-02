@@ -122,7 +122,9 @@ async def _stage_analyze_persist(
 
     Shared by ``analyze`` and ``analyze_pose``, which differ only in how the analysis itself is
     invoked (``run``) and in one log message. Everything else -- the fail-fast 503 BEFORE any
-    CPU is spent, that only a successful analysis gets its derived artifacts kept, that the
+    CPU is spent, the per-file size cap and the signed-in caller's storage quota (both checked
+    before anything is staged, and both fail CLOSED: an unreadable usage figure refuses rather
+    than admits), that only a successful analysis gets its derived artifacts kept, that the
     stage is discarded on every path, that persistence is best-effort, and that the presigned
     ``video_url`` is attached to the RESPONSE only after persistence returns (never into the
     JSONB ``result`` itself, which would otherwise carry an already-expiring URL into history) --

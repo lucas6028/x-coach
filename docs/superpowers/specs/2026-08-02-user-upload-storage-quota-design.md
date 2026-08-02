@@ -163,7 +163,7 @@ exists to prevent. Refusing is the conservative direction, and the caller can re
 
 ## Accepted imprecision
 
-Three, all stated rather than engineered away.
+Four, all stated rather than engineered away.
 
 **Overshoot by one upload's derived artifacts.** The quota is checked against the source size,
 because that is all that is known before anything is stored, but the recorded `size_bytes` is
@@ -180,6 +180,21 @@ A correct fix is a database-side reservation, which is disproportionate machiner
 **Orphans undercount.** An upload whose `persist_analysis` fails leaves objects with no row,
 so they occupy space that no quota counts. This is the gap already documented and accepted in
 the companion spec; the quota inherits it rather than widening it.
+
+**The quota-bearer can write the column the quota is measured from.**
+`db/migrations/20260620000000_init_videos_analyses.sql:94-99` grants `videos_owner_all` `for all`
+to `authenticated`, and the browser holds the Supabase project URL, the anon key, and the user's
+JWT. An authenticated user who drives PostgREST directly can therefore `DELETE` their own `videos`
+row — which frees their quota *without reaping the R2 objects*, an unbounded-growth vector
+distinct from the failed-persist orphan above, because there the objects were never counted while
+here they were counted and then stop being counted — or `PATCH size_bytes` to 0 and reset their
+measured usage outright. This needs deliberate action against the REST API with one's own
+credentials; it is not a remote unauthenticated hole, and the permissive RLS shape predates this
+feature rather than being introduced by it. The obvious fix does **not** work: `revoke update
+(size_bytes)` would break `persist_analysis`'s upsert, whose `ON CONFLICT DO UPDATE` requires
+UPDATE on that column. A real fix is a `BEFORE UPDATE` trigger that pins the column, or moving the
+write into a `SECURITY DEFINER` RPC — both judged disproportionate at this stage, and recorded
+here so the choice is visible rather than assumed.
 
 ## Frontend
 

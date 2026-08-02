@@ -51,6 +51,11 @@ def _effective_settings() -> dict[str, Any]:
         },
         "analyze": {
             "allowed_upload_suffixes": list(settings.allowed_upload_suffixes()),
+            # The upload limits, in BYTES (the key names carry the unit so nothing has to guess).
+            # Both are genuinely retunable at runtime — the getters read the overrides on every
+            # call, so a PUT here takes effect on the next upload with no redeploy.
+            "max_upload_bytes": settings.max_upload_bytes(),
+            "user_storage_quota_bytes": settings.user_storage_quota_bytes(),
             # READ-ONLY display value: the semaphore is fixed at import from the env var (see
             # routers/analyze), so this is never overridable — it is surfaced purely so the admin UI
             # can show the effective ceiling. It is sourced from the env constant and never written.
@@ -79,6 +84,8 @@ def _default_settings() -> dict[str, Any]:
         },
         "analyze": {
             "allowed_upload_suffixes": list(settings._DEFAULT_UPLOAD_SUFFIXES),
+            "max_upload_bytes": settings._DEFAULT_MAX_UPLOAD_BYTES,
+            "user_storage_quota_bytes": settings._DEFAULT_USER_STORAGE_QUOTA_BYTES,
             "max_concurrent_analyses": config.MAX_CONCURRENT_ANALYSES,
         },
     }
@@ -116,6 +123,20 @@ class AdminSettingsUpdate(BaseModel):
     # fixed at import from the env var and an override never applied, so the PUT no longer accepts it.
     # It remains a READ-ONLY, env-sourced display value in the GET payload (see ``_effective_settings``).
     allowed_upload_suffixes: list[str] | None = None
+    # Upload limits in BYTES. The bounds are the settings module's own clamp constants rather than
+    # literals so the two can't drift: ``_coerce_int`` CLAMPS instead of rejecting, so this validator
+    # is the layer that turns an out-of-range PUT into a 422, while the clamp keeps a direct-DB write
+    # contained to the same window. Sharing one pair of constants is what makes those agree.
+    max_upload_bytes: int | None = Field(
+        default=None,
+        ge=settings._MIN_MAX_UPLOAD_BYTES,
+        le=settings._MAX_MAX_UPLOAD_BYTES,
+    )
+    user_storage_quota_bytes: int | None = Field(
+        default=None,
+        ge=settings._MIN_USER_STORAGE_QUOTA_BYTES,
+        le=settings._MAX_USER_STORAGE_QUOTA_BYTES,
+    )
 
     @field_validator("llm_models")
     @classmethod

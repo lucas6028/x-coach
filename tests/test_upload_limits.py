@@ -22,9 +22,16 @@ from backend.app.services import runtime_config
 from backend.app.services import store
 
 
+_MISSING = object()
+
+
 class _Result:
-    def __init__(self, data=None):
+    def __init__(self, data=None, count=_MISSING):
         self.data = data if data is not None else []
+        # ``count`` defaults to "the page is complete" so every existing case keeps meaning what it
+        # meant before ``get_storage_used`` started asking for an exact count. Pass it explicitly to
+        # model a db-max-rows truncation (count > len(data)) or an omitted count (None).
+        self.count = len(self.data) if count is _MISSING else count
 
 
 class _Table:
@@ -32,19 +39,21 @@ class _Table:
         self._name, self._responses, self._log = name, responses, log
         self._op = None
 
+    # Every entry is a uniform 4-tuple ``(table, op, payload_or_args, kwargs)`` so a consumer can
+    # unpack the whole log without knowing which op produced a given row.
     def select(self, *args, **kwargs):
         self._op = "select"
-        self._log.append((self._name, "select", args))
+        self._log.append((self._name, "select", args, kwargs))
         return self
 
     def upsert(self, payload, **kwargs):
         self._op = "upsert"
-        self._log.append((self._name, "upsert", payload))
+        self._log.append((self._name, "upsert", payload, kwargs))
         return self
 
     def insert(self, payload, **kwargs):
         self._op = "insert"
-        self._log.append((self._name, "insert", payload))
+        self._log.append((self._name, "insert", payload, kwargs))
         return self
 
     def eq(self, *args, **kwargs):
@@ -63,8 +72,8 @@ class _Client:
 
 
 class GetStorageUsedTests(unittest.TestCase):
-    def _used(self, rows):
-        client = _Client({("videos", "select"): _Result(data=rows)}, [])
+    def _used(self, rows, *, count=_MISSING):
+        client = _Client({("videos", "select"): _Result(data=rows, count=count)}, [])
         with mock.patch.object(store, "_user_client", return_value=client):
             return store.get_storage_used(token="t", user_id="u1")
 
@@ -81,6 +90,29 @@ class GetStorageUsedTests(unittest.TestCase):
     def test_a_row_missing_the_key_counts_as_zero(self) -> None:
         self.assertEqual(self._used([{}, {"size_bytes": 7}]), 7)
 
+    def test_a_truncated_page_raises_rather_than_undercounting(self) -> None:
+        """A PostgREST ``db-max-rows`` truncation must NOT silently return a smaller total.
+
+        Returning the partial sum would be a fail-OPEN in a feature that fails closed everywhere
+        else: the router treats a low usage figure as headroom. The raise is turned into the same
+        503 a failed usage query already produces.
+        """
+        with self.assertRaises(RuntimeError):
+            self._used([{"size_bytes": 10}, {"size_bytes": 32}], count=500)
+
+    def test_an_omitted_count_is_not_treated_as_truncation(self) -> None:
+        """PostgREST may answer with no count at all; that must stay an ordinary read, not a 503."""
+        self.assertEqual(self._used([{"size_bytes": 10}, {"size_bytes": 32}], count=None), 42)
+
+    def test_asks_postgrest_for_the_exact_count(self) -> None:
+        """The truncation guard is only possible because the select requests an exact count."""
+        log: list[tuple] = []
+        client = _Client({("videos", "select"): _Result(data=[])}, log)
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.get_storage_used(token="t", user_id="u1")
+        selects = [kwargs for name, op, _args, kwargs in log if name == "videos" and op == "select"]
+        self.assertEqual(selects, [{"count": "exact"}])
+
 
 class PersistAnalysisRecordsSizeTests(unittest.TestCase):
     def test_writes_size_bytes_onto_the_videos_row(self) -> None:
@@ -96,7 +128,7 @@ class PersistAnalysisRecordsSizeTests(unittest.TestCase):
                 size_bytes=1234,
                 result={},
             )
-        upserts = [payload for name, op, payload in log if name == "videos" and op == "upsert"]
+        upserts = [payload for name, op, payload, _kw in log if name == "videos" and op == "upsert"]
         self.assertEqual(len(upserts), 1)
         self.assertEqual(upserts[0]["size_bytes"], 1234)
 
@@ -169,6 +201,18 @@ class _StubbedAnalyzePath(unittest.TestCase):
         )
 
 
+class AsMbTests(unittest.TestCase):
+    def test_a_partial_megabyte_rounds_up(self) -> None:
+        """Asserted DIRECTLY, on a non-multiple, because every limit used elsewhere in this file is
+        a whole number of MB — where floor and ceiling division agree, so nothing there can tell a
+        reverted ``_as_mb`` from the real one. Reporting a 1 MB + 1 byte cap as "1 MB" would name a
+        limit SMALLER than the one actually enforced."""
+        self.assertEqual(analyze_router._as_mb(1024 * 1024 + 1), 2)
+
+    def test_an_exact_megabyte_does_not_round_up(self) -> None:
+        self.assertEqual(analyze_router._as_mb(1024 * 1024), 1)
+
+
 class PerFileSizeCapTests(_StubbedAnalyzePath):
     def test_an_upload_at_exactly_the_limit_is_accepted(self) -> None:
         """The boundary is tested from BOTH sides so an off-by-one cannot slip through."""
@@ -220,11 +264,13 @@ class StorageQuotaTests(_StubbedAnalyzePath):
         used.assert_not_called()
         self.assertEqual(self.staged_calls, [1024])
 
-    def test_an_upload_that_fits_is_accepted(self) -> None:
+    def test_an_upload_that_exactly_fills_the_remaining_space_is_accepted(self) -> None:
+        """ON the boundary, not near it: ``used + len(data) == quota`` exactly. With any slack the
+        test survives ``>`` becoming ``>=``, which would wrongly refuse an upload that fits."""
         quota = 10 * 1024 * 1024
         with mock.patch.object(runtime_config, "get_overrides",
                                return_value={"user_storage_quota_bytes": quota}):
-            with mock.patch.object(store, "get_storage_used", return_value=quota - 2048):
+            with mock.patch.object(store, "get_storage_used", return_value=quota - 1024):
                 with mock.patch.object(store, "persist_analysis", return_value="a1"):
                     self._run(b"x" * 1024, user=_User())
         self.assertEqual(self.staged_calls, [1024])

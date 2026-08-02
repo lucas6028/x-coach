@@ -239,6 +239,9 @@ export interface AdminRagKgSettings {
 }
 export interface AdminAnalyzeSettings {
   allowed_upload_suffixes: string[];
+  // Upload limits, in BYTES (the key names carry the unit). Both are runtime-tunable here.
+  max_upload_bytes: number;
+  user_storage_quota_bytes: number;
   max_concurrent_analyses: number;
 }
 export interface AdminSettingsGroups {
@@ -266,6 +269,8 @@ export interface AdminSettingsUpdate {
   // max_concurrent_analyses is intentionally omitted: it's read-only (sourced from the
   // XCOACH_MAX_CONCURRENT_ANALYSES env var, applied at startup) and must never be sent in an update.
   allowed_upload_suffixes?: string[];
+  max_upload_bytes?: number;
+  user_storage_quota_bytes?: number;
 }
 
 // ---- Admin: user oversight + system overview (admin-only; P3) -----------------------------

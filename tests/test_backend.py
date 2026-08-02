@@ -2353,6 +2353,13 @@ class AdminSettingsRouterTests(unittest.TestCase):
             {"allowed_upload_suffixes": ["mp4"]},  # missing leading dot
             {"llm_base_url": "ftp://nope"},
             {"llm_base_url": "https://evil.example.org/v1"},  # off-allowlist host (F1)
+            # Upload limits: one below the floor and one above the ceiling for each. The bounds are
+            # the settings module's clamp constants, so the validator and the getter's clamp cannot
+            # disagree — the validator rejects here, the clamp contains a direct-DB write.
+            {"max_upload_bytes": app_settings._MIN_MAX_UPLOAD_BYTES - 1},
+            {"max_upload_bytes": app_settings._MAX_MAX_UPLOAD_BYTES + 1},
+            {"user_storage_quota_bytes": app_settings._MIN_USER_STORAGE_QUOTA_BYTES - 1},
+            {"user_storage_quota_bytes": app_settings._MAX_USER_STORAGE_QUOTA_BYTES + 1},
         ]
         with mock.patch.object(store, "is_admin", return_value=True):
             for payload in bad_payloads:
@@ -2435,6 +2442,52 @@ class AdminSettingsRouterTests(unittest.TestCase):
             )
         self.assertEqual(resp.status_code, 200)
         up.assert_called_once_with(token="tok", items={"rag_top_k": 8})  # no max_concurrent key
+
+    def test_put_persists_the_upload_limit_knobs(self) -> None:
+        """Both upload limits are PUT-able, i.e. the panel can retune them without a redeploy.
+
+        Without a declared field, Pydantic's default ``extra="ignore"`` would make this PUT return
+        200 having written nothing — the promise in the spec's Limits section would be silently
+        false. Asserting the upsert payload is what proves the field exists and is carried through.
+        """
+        new_max = 250 * 1024 * 1024
+        new_quota = 2 * 1024 * 1024 * 1024
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "upsert_app_settings") as up, \
+             mock.patch.object(runtime_config, "clear_cache"), \
+             mock.patch.object(
+                 runtime_config,
+                 "get_overrides",
+                 return_value={"max_upload_bytes": new_max, "user_storage_quota_bytes": new_quota},
+             ):
+            resp = self.client.put(
+                "/api/admin/settings",
+                json={"max_upload_bytes": new_max, "user_storage_quota_bytes": new_quota},
+            )
+        self.assertEqual(resp.status_code, 200)
+        up.assert_called_once_with(
+            token="tok",
+            items={"max_upload_bytes": new_max, "user_storage_quota_bytes": new_quota},
+        )
+        analyze = resp.json()["effective"]["analyze"]
+        self.assertEqual(analyze["max_upload_bytes"], new_max)
+        self.assertEqual(analyze["user_storage_quota_bytes"], new_quota)
+
+    def test_get_exposes_the_upload_limits_with_their_defaults(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(runtime_config, "get_overrides", return_value={}):
+            resp = self.client.get("/api/admin/settings")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        for section in ("effective", "defaults"):
+            self.assertEqual(
+                body[section]["analyze"]["max_upload_bytes"],
+                app_settings._DEFAULT_MAX_UPLOAD_BYTES,
+            )
+            self.assertEqual(
+                body[section]["analyze"]["user_storage_quota_bytes"],
+                app_settings._DEFAULT_USER_STORAGE_QUOTA_BYTES,
+            )
 
     def test_get_effective_includes_readonly_max_concurrent(self) -> None:
         # F5: the value stays present (read-only, env-sourced) under analyze in both effective+defaults.

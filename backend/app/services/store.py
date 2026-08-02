@@ -440,11 +440,31 @@ def get_storage_used(*, token: str, user_id: str) -> int:
     else on this path.
 
     Summed in Python rather than with a PostgREST aggregate: aggregates depend on
-    ``db-aggregates-enabled``, which is not ours to guarantee, and the quota itself bounds how
-    many rows this can return. A row whose ``size_bytes`` is NULL or absent counts as 0,
-    matching the column default for rows that predate it. If the row count ever outgrows this,
-    the upgrade is an RPC returning ``coalesce(sum(size_bytes), 0)`` for ``auth.uid()``.
+    ``db-aggregates-enabled``, which is not ours to guarantee. A row whose ``size_bytes`` is NULL
+    or absent counts as 0, matching the column default for rows that predate it. If the row count
+    ever outgrows this, the upgrade is an RPC returning ``coalesce(sum(size_bytes), 0)`` for
+    ``auth.uid()``.
+
+    The row count is NOT bounded by the quota: rows predating the column carry ``size_bytes = 0``,
+    and so do rows whose artifacts all failed to store, so an unbounded number of them can exist
+    under any quota. A PostgREST ``db-max-rows`` would then silently truncate the page and the sum
+    would UNDERCOUNT — a fail-open in a feature that fails closed everywhere else. So the select
+    asks for the exact total and this RAISES on a short page rather than returning a wrong number;
+    the router already turns any exception here into the same 503 it produces for a failed usage
+    query. A ``None`` count (PostgREST may omit it) is not treated as truncation — that would
+    turn every ordinary read into a 503.
     """
     client = _user_client(token)
-    resp = client.table("videos").select("size_bytes").eq("user_id", user_id).execute()
-    return sum(int(row.get("size_bytes") or 0) for row in (resp.data or []))
+    resp = (
+        client.table("videos")
+        .select("size_bytes", count="exact")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    rows = resp.data or []
+    total = getattr(resp, "count", None)
+    if total is not None and len(rows) < total:
+        raise RuntimeError(
+            f"Storage usage query returned {len(rows)} of {total} rows; refusing to undercount."
+        )
+    return sum(int(row.get("size_bytes") or 0) for row in rows)
