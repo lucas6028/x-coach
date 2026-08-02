@@ -32,6 +32,7 @@ _DEFAULT_TESTS = [
     "tests/test_storage.py",
     "tests/test_upload_staging.py",
     "tests/test_upload_urls.py",
+    "tests/test_delete_reaping.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

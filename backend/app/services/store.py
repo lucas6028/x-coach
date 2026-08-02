@@ -13,7 +13,12 @@ routers that use it) stays light, and the unit tests can patch ``_user_client`` 
 
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+from backend.app.services import storage
+
+logger = logging.getLogger(__name__)
 
 
 def _user_client(token: str) -> Any:
@@ -202,18 +207,41 @@ def list_analyses(*, token: str, limit: int = 50, offset: int = 0) -> dict[str, 
     return {"total": resp.count or 0, "items": resp.data or []}
 
 
+def _reap_objects(prefixes: list[str]) -> None:
+    """Delete every stored artifact under each prefix. Best-effort: logged, never raised.
+
+    A storage failure must not roll back a DB deletion the user already asked for — an orphaned
+    object is a cost, a record that refuses to delete is a bug.
+    """
+    if not prefixes:
+        return
+    obj_store = storage.get_object_store()
+    for prefix in prefixes:
+        try:
+            obj_store.delete_prefix(prefix)
+        except storage.StorageError:
+            logger.exception("Failed to delete stored objects under %s", prefix)
+
+
 def delete_all_analyses(*, token: str, user_id: str) -> int:
-    """Delete every analysis (and source video row) owned by the caller; return how many analyses
-    were removed.
+    """Delete every analysis (and source video row + stored objects) owned by the caller;
+    return how many analyses were removed.
 
     RLS already scopes writes to ``auth.uid() = user_id``, but we also filter by ``user_id``
     explicitly: PostgREST refuses an unfiltered bulk delete, and the predicate is a second guard.
     """
     client = _user_client(token)
+    # READ THE STORAGE KEYS FIRST. PostgREST returns nothing useful from a bulk delete, so a
+    # select issued afterwards would find no rows and silently reap nothing — a failure mode that
+    # passes a mocked test. The order is the correctness property here.
+    videos = client.table("videos").select("storage_key").eq("user_id", user_id).execute()
+    prefixes = [row["storage_key"] for row in (videos.data or []) if row.get("storage_key")]
+
     resp = client.table("analyses").delete().eq("user_id", user_id).execute()
     # Drop the (now orphaned) source video rows and chat threads too, so a "clear" leaves no residue.
     client.table("videos").delete().eq("user_id", user_id).execute()
     client.table("conversations").delete().eq("user_id", user_id).execute()
+    _reap_objects(prefixes)
     return len(resp.data or [])
 
 
@@ -226,8 +254,8 @@ def delete_analysis(*, token: str, analysis_id: str, user_id: str) -> bool:
     analysis referencing that video -- never unconditionally the way ``delete_all_analyses`` can,
     or deleting one record would silently wipe a sibling record's chat thread.
 
-    The uploaded file under ``runtime/uploads/`` is deliberately left on disk, matching the
-    clear-all path; reaping those is a separate change that should cover both.
+    The upload's stored objects are reaped along with the video row, but only on that same
+    last-analysis condition: a sibling analysis still needs the clip to replay.
     """
     client = _user_client(token)
     found = (
@@ -263,10 +291,22 @@ def delete_analysis(*, token: str, analysis_id: str, user_id: str) -> bool:
         .execute()
     )
     if (siblings.count or 0) == 0:
+        # Read the key before dropping the row that holds it.
+        videos = (
+            client.table("videos")
+            .select("storage_key")
+            .eq("user_id", user_id)
+            .eq("video_id", video_id)
+            .limit(1)
+            .execute()
+        )
+        rows = videos.data or []
+        prefix = rows[0].get("storage_key") if rows else None
         client.table("videos").delete().eq("user_id", user_id).eq("video_id", video_id).execute()
         client.table("conversations").delete().eq("user_id", user_id).eq(
             "video_id", video_id
         ).execute()
+        _reap_objects([prefix] if prefix else [])
     return True
 
 
