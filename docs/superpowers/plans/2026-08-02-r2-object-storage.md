@@ -1519,6 +1519,16 @@ async def analyze(
 ) -> dict:
 ```
 
+> **Superseded during execution (2026-08-02).** "Apply the identical treatment" below produced
+> ~38 lines of verbatim duplication across the two endpoints, which the Task 3 review flagged as
+> Important. The implementer's rationale — that a helper's parameter list would be as large as the
+> duplicated block — was checked and refuted: the two blocks differ only in the analysis call and
+> one log string. The human ruled to extract a shared async helper taking the per-endpoint analysis
+> call as a callable, collapsing each endpoint to a handful of lines. That also fixed a second
+> finding for free: three of this task's four properties were pinned only for `/api/analyze`, while
+> `/api/analyze/pose` ran an independently-untested copy. The steps below describe the pre-refactor
+> shape; the merged code is the shared-helper version.
+
 Apply the identical treatment to `analyze_pose`: add `thumbnail: UploadFile | None = File(None)` to its signature, and replace its body from `data = await file.read()` (line 193) to the end with the same block, substituting the analysis call:
 
 ```python
