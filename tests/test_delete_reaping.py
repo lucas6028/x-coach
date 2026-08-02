@@ -135,6 +135,49 @@ class DeleteAllAnalysesReapsObjectsTests(unittest.TestCase):
                 deleted = store.delete_all_analyses(token="t", user_id="u1")
         self.assertEqual(deleted, 1)
 
+    def test_a_failing_object_store_does_not_escape(self) -> None:
+        """_reap_objects runs after the rows are gone, so a raise here would 500 a delete that
+        already succeeded — including a failure from get_object_store() itself."""
+        log: list[tuple[str, str]] = []
+        responses = {
+            ("analyses", "delete"): _Result(data=[{"id": "a1"}]),
+            ("videos", "select"): _Result(data=[{"storage_key": "uploads/u1/upload_a"}]),
+        }
+        client = _Client(log, responses)
+        with mock.patch.object(store, "_user_client", return_value=client):
+            with mock.patch.object(storage, "get_object_store", side_effect=RuntimeError("boom")):
+                deleted = store.delete_all_analyses(token="t", user_id="u1")
+        self.assertEqual(deleted, 1)
+
+    def test_one_failing_prefix_does_not_stop_the_others(self) -> None:
+        """The try sits INSIDE the loop, so a bad prefix must not abandon the rest."""
+
+        class _PartiallyFailing:
+            def __init__(self):
+                self.deleted: list[str] = []
+
+            def delete_prefix(self, prefix):
+                if prefix.endswith("upload_a"):
+                    raise storage.StorageError("down")
+                self.deleted.append(prefix)
+
+        log: list[tuple[str, str]] = []
+        responses = {
+            ("analyses", "delete"): _Result(data=[{"id": "a1"}, {"id": "a2"}]),
+            ("videos", "select"): _Result(
+                data=[
+                    {"storage_key": "uploads/u1/upload_a"},
+                    {"storage_key": "uploads/u1/upload_b"},
+                ]
+            ),
+        }
+        obj = _PartiallyFailing()
+        client = _Client(log, responses)
+        with mock.patch.object(store, "_user_client", return_value=client):
+            with mock.patch.object(storage, "get_object_store", return_value=obj):
+                store.delete_all_analyses(token="t", user_id="u1")
+        self.assertEqual(obj.deleted, ["uploads/u1/upload_b"])
+
 
 if __name__ == "__main__":
     unittest.main()
