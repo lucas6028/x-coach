@@ -106,10 +106,15 @@ def _staged_upload(video_id: str = "upload_abc", *, owner: str = "anon"):
     # ``store._reap_objects`` is patched for the same "no real object-store I/O" reason: the
     # analyze router now reaps the stored source when an analysis fails, and unpatched that
     # resolves the LIVE object store -- an R2 client, and a real network delete, on a machine
-    # whose env carries R2 credentials.
+    # whose env carries R2 credentials. ``store.get_storage_used`` is patched for the same
+    # reason again: the quota gate reads it for any signed-in user, and unpatched it builds a
+    # LIVE Supabase client. These HTTP-level tests assert on staging/persistence, not the quota
+    # -- 0 used means every upload fits.
     with mock.patch.object(analysis, "stage_upload", return_value=staged) as stage, mock.patch.object(
         analysis, "store_artifacts", return_value=0
-    ), mock.patch.object(analysis, "discard_stage"), mock.patch.object(store, "_reap_objects"):
+    ), mock.patch.object(analysis, "discard_stage"), mock.patch.object(
+        store, "_reap_objects"
+    ), mock.patch.object(store, "get_storage_used", return_value=0):
         yield stage
 
 

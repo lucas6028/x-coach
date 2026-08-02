@@ -151,9 +151,33 @@ async def _stage_analyze_persist(
             detail={"code": "upload_too_large", "limit_mb": _as_mb(max_bytes)},
         )
 
+    owner = user.id if user is not None else "anon"
+    if user is not None:
+        quota = await run_in_threadpool(settings.user_storage_quota_bytes)
+        try:
+            used = await run_in_threadpool(
+                store.get_storage_used, token=user.token, user_id=user.id
+            )
+        except Exception as exc:  # noqa: BLE001 — see below; this must NOT fail open
+            # Treating "cannot determine usage" as "under quota" would turn a database hiccup
+            # into an unbounded write path, which is precisely what the quota exists to stop.
+            # Refusing is the conservative direction and the caller can retry.
+            logger.exception("Failed to read storage usage for %s", user.id)
+            raise HTTPException(
+                status_code=503, detail="Storage is unavailable; please try again."
+            ) from exc
+        if used + len(data) > quota:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "code": "storage_quota_exceeded",
+                    "used_mb": _as_mb(used),
+                    "limit_mb": _as_mb(quota),
+                },
+            )
+
     # Anonymous demo uploads are still stored, under their own key prefix, so both paths behave
     # identically. A bucket lifecycle rule expires `uploads/anon/` — see the design doc.
-    owner = user.id if user is not None else "anon"
     try:
         staged = await run_in_threadpool(analysis.stage_upload, data, suffix=suffix, owner=owner)
     except storage.StorageError as exc:
@@ -161,7 +185,13 @@ async def _stage_analyze_persist(
         raise HTTPException(
             status_code=503, detail="Storage is unavailable; please try again."
         ) from exc
+    # Captured BEFORE the del: this is the source's contribution to the recorded size, and the
+    # quota is checked against it while the derived artifacts do not exist yet. The recorded
+    # total therefore includes derived bytes the check did not see, so a user can finish
+    # marginally over the limit — bounded by one upload, and the next upload is refused.
+    source_size = len(data)
     del data  # bytes are now stored and staged; don't pin the whole video in RAM while queued.
+    derived_size = 0
 
     try:
         async with _ANALYSIS_SEMAPHORE:
@@ -182,7 +212,9 @@ async def _stage_analyze_persist(
         # inside the ``try``) so this holds even if ``store_artifacts`` ever stopped honoring its
         # own never-raises contract -- a raise here must map to 422 by construction, not by
         # accident of where the line sits.
-        await run_in_threadpool(analysis.store_artifacts, staged, thumbnail=thumb)
+        derived_size = await run_in_threadpool(
+            analysis.store_artifacts, staged, thumbnail=thumb
+        )
     finally:
         await run_in_threadpool(analysis.discard_stage, staged)
 
@@ -196,6 +228,7 @@ async def _stage_analyze_persist(
                 source="upload",
                 result=result,
                 storage_key=staged.prefix,
+                size_bytes=source_size + derived_size,
                 filename=file.filename,
             )
         except Exception:  # noqa: BLE001 — never lose a completed analysis to a storage error

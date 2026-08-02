@@ -198,3 +198,82 @@ class PerFileSizeCapTests(_StubbedAnalyzePath):
         with self.assertRaises(HTTPException) as ctx:
             self._run(b"")
         self.assertEqual(ctx.exception.status_code, 400)
+
+
+class _User:
+    """The router only reads ``.id`` and ``.token`` off the current user."""
+
+    id = "u1"
+    token = "jwt"
+
+
+class StorageQuotaTests(_StubbedAnalyzePath):
+    def test_an_anonymous_upload_ignores_the_quota(self) -> None:
+        """Anonymous uploads have no videos row to count and are expired by the lifecycle rule."""
+        with mock.patch.object(runtime_config, "get_overrides",
+                               return_value={"user_storage_quota_bytes": 10 * 1024 * 1024}):
+            with mock.patch.object(store, "get_storage_used") as used:
+                self._run(b"x" * 1024, user=None)
+        used.assert_not_called()
+        self.assertEqual(self.staged_calls, [1024])
+
+    def test_an_upload_that_fits_is_accepted(self) -> None:
+        quota = 10 * 1024 * 1024
+        with mock.patch.object(runtime_config, "get_overrides",
+                               return_value={"user_storage_quota_bytes": quota}):
+            with mock.patch.object(store, "get_storage_used", return_value=quota - 2048):
+                with mock.patch.object(store, "persist_analysis", return_value="a1"):
+                    self._run(b"x" * 1024, user=_User())
+        self.assertEqual(self.staged_calls, [1024])
+
+    def test_an_upload_that_would_exceed_the_quota_is_refused(self) -> None:
+        quota = 10 * 1024 * 1024
+        with mock.patch.object(runtime_config, "get_overrides",
+                               return_value={"user_storage_quota_bytes": quota}):
+            with mock.patch.object(store, "get_storage_used", return_value=quota - 512):
+                with self.assertRaises(HTTPException) as ctx:
+                    self._run(b"x" * 1024, user=_User())
+        self.assertEqual(ctx.exception.status_code, 413)
+        self.assertEqual(ctx.exception.detail["code"], "storage_quota_exceeded")
+        self.assertEqual(ctx.exception.detail["limit_mb"], 10)
+        self.assertEqual(self.staged_calls, [], "a refused upload must write no object")
+
+    def test_a_user_exactly_at_the_quota_is_refused_the_next_upload(self) -> None:
+        quota = 10 * 1024 * 1024
+        with mock.patch.object(runtime_config, "get_overrides",
+                               return_value={"user_storage_quota_bytes": quota}):
+            with mock.patch.object(store, "get_storage_used", return_value=quota):
+                with self.assertRaises(HTTPException) as ctx:
+                    self._run(b"x", user=_User())
+        self.assertEqual(ctx.exception.status_code, 413)
+
+    def test_a_failing_usage_query_refuses_rather_than_passes(self) -> None:
+        """Treating 'cannot determine usage' as 'under quota' would turn a DB hiccup into an
+        unbounded write path — the exact thing this feature exists to prevent."""
+        with mock.patch.object(store, "get_storage_used", side_effect=RuntimeError("db down")):
+            with self.assertRaises(HTTPException) as ctx:
+                self._run(b"x" * 1024, user=_User())
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertEqual(self.staged_calls, [])
+
+
+class RecordedSizeTests(_StubbedAnalyzePath):
+    def test_persists_source_plus_derived_bytes(self) -> None:
+        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: 300
+        seen: list[dict] = []
+        with mock.patch.object(store, "get_storage_used", return_value=0):
+            with mock.patch.object(
+                store, "persist_analysis", side_effect=lambda **kw: seen.append(kw) or "a1"
+            ):
+                self._run(b"x" * 1000, user=_User())
+        self.assertEqual(seen[0]["size_bytes"], 1300)
+
+    def test_records_only_what_stored_when_a_derived_put_failed(self) -> None:
+        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: 0
+        seen: list[dict] = []
+        with mock.patch.object(store, "get_storage_used", return_value=0):
+            with mock.patch.object(
+                store, "persist_analysis", side_effect=lambda **kw: seen.append(kw) or "a1"
+            ):
+                self._run(b"x" * 1000, user=_User())
+        self.assertEqual(seen[0]["size_bytes"], 1000)

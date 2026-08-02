@@ -251,6 +251,13 @@ class AnalyzePoseStorageTests(unittest.TestCase):
         self.reap = reap.start()
         self.addCleanup(reap.stop)
 
+        # KEEP OFFLINE: the quota gate reads the caller's usage for any signed-in user, and
+        # unpatched ``get_storage_used`` builds a LIVE Supabase client. These tests assert on
+        # staging/reaping/persistence, not on the quota — 0 used means every upload fits.
+        used = mock.patch.object(store, "get_storage_used", return_value=0)
+        used.start()
+        self.addCleanup(used.stop)
+
     def tearDown(self) -> None:
         for name, value in self._orig.items():
             setattr(analysis_service, name, value)
