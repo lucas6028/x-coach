@@ -103,9 +103,13 @@ def _staged_upload(video_id: str = "upload_abc", *, owner: str = "anon"):
         video_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}.mp4",
         pose_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}_pose.json",
     )
+    # ``store._reap_objects`` is patched for the same "no real object-store I/O" reason: the
+    # analyze router now reaps the stored source when an analysis fails, and unpatched that
+    # resolves the LIVE object store -- an R2 client, and a real network delete, on a machine
+    # whose env carries R2 credentials.
     with mock.patch.object(analysis, "stage_upload", return_value=staged) as stage, mock.patch.object(
         analysis, "store_artifacts"
-    ), mock.patch.object(analysis, "discard_stage"):
+    ), mock.patch.object(analysis, "discard_stage"), mock.patch.object(store, "_reap_objects"):
         yield stage
 
 
@@ -1123,6 +1127,61 @@ class MainAppTests(_TempConfigBase):
         body = resp.json()
         self.assertFalse(body["auth_configured"])
         self.assertFalse(body["chat_configured"])
+
+    def test_health_reports_storage_configured(self) -> None:
+        """The signal that R2 is actually live. Without it, one typo'd ``R2_*`` var silently
+        drops the app onto an ephemeral local disk AND activates the unauthenticated
+        ``/api/local-object`` dev endpoint, with nothing anywhere saying so."""
+        for configured in (True, False):
+            with self.subTest(storage_configured=configured):
+                with mock.patch(
+                    "backend.app.main.get_settings",
+                    return_value=types.SimpleNamespace(
+                        auth_configured=True,
+                        chat_configured=True,
+                        storage_configured=configured,
+                    ),
+                ):
+                    resp = self.client.get("/api/health")
+                self.assertEqual(resp.json()["storage_configured"], configured)
+
+    def test_health_survives_a_settings_stand_in_without_the_property(self) -> None:
+        """The other health tests patch ``get_settings`` with a SimpleNamespace carrying only the
+        fields they care about; a bare attribute read would 500 every one of them."""
+        with mock.patch(
+            "backend.app.main.get_settings",
+            return_value=types.SimpleNamespace(auth_configured=True, chat_configured=True),
+        ):
+            resp = self.client.get("/api/health")
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["storage_configured"])
+
+    def test_startup_logs_the_selected_storage_backend(self) -> None:
+        """Logged once at startup so a misconfiguration is visible in the deploy log, not only
+        by polling /api/health. The lifespan runs only inside the TestClient context manager."""
+        settings = app_settings.Settings(
+            r2_account_id="acct",
+            r2_access_key_id="key",
+            r2_secret_access_key="secret",
+            r2_bucket="x-coach-uploads",
+        )
+        with mock.patch("backend.app.main.get_settings", return_value=settings):
+            with self.assertLogs("backend.app.main", level="INFO") as logs:
+                with TestClient(app):
+                    pass
+        self.assertTrue(
+            any("Cloudflare R2" in m and "x-coach-uploads" in m for m in logs.output),
+            logs.output,
+        )
+
+    def test_startup_warns_when_storage_falls_back_to_local_disk(self) -> None:
+        with mock.patch(
+            "backend.app.main.get_settings", return_value=app_settings.Settings(r2_bucket="")
+        ):
+            with self.assertLogs("backend.app.main", level="WARNING") as logs:
+                with TestClient(app):
+                    pass
+        self.assertTrue(any("LOCAL FILESYSTEM" in m for m in logs.output), logs.output)
 
 
 # ------------------------------------------------------------------------- settings
