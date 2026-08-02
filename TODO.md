@@ -247,8 +247,8 @@
 
 ### P2：非同步化 + 儲存 — ⏸ 未開始（= 新設計文件的 P0「非同步分析佇列」，優先級提高）
 
-- [ ] 物件儲存（建議 Cloudflare R2）：原始影片、pose JSON、縮圖
-- [ ] presigned URL 直傳：影片不經過 FastAPI（解掉 `await file.read()` 整支進 RAM）
+- [x] 物件儲存（建議 Cloudflare R2）：原始影片、pose JSON、縮圖
+- [x] presigned URL 直傳：影片不經過 FastAPI（解掉 `await file.read()` 整支進 RAM）
 - [ ] Celery + Redis 佇列：上傳→回 job id→worker 處理→輪詢/SSE 取結果
 - [ ] job 狀態機：queued/processing/done/failed、重試退避、dead-letter、timeout
 - [ ] 去重：影片 hash，同人同片回快取、不重算
