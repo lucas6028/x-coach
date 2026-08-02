@@ -94,6 +94,11 @@ but nothing references them after the response. An R2 lifecycle rule expiring
 `uploads/anon/` after 7 days keeps that from accumulating; it is bucket configuration, not
 code.
 
+An anonymous upload has no `videos` row, so **its playback is valid for the presign lifetime
+only — there is deliberately no re-presign path.** If the hour lapses mid-session the video
+stops playing and the user re-uploads. This is a decision, not a gap: the obvious "fix" is an
+unauthenticated presign endpoint, which would reopen exactly the IDOR this change closes.
+
 ## Write path
 
 Both `/api/analyze` and `/api/analyze/pose` follow the same order. `process_video` (OpenCV)
@@ -109,6 +114,11 @@ files remain — they are just no longer the system of record.
 3. Put `pose.json` and `thumb.jpg` to R2, then delete the temp files. A failure here is logged
    and swallowed — never discard a completed (expensive) analysis over a storage hiccup, the
    same policy `persist_analysis` already uses.
+
+   **`pose.json` is uploaded only when the analysis actually produced one.**
+   `analyze_pose_payload` returns the `analysis_pending` skeleton at `analysis.py:171-180`
+   without ever writing a pose JSON, for any movement with no registered detector — which is
+   most of the registry, not an edge case. That branch stores `source` and `thumb.jpg` only.
 4. Attach `video_url` (presigned, 1 hour) to the response so playback works immediately after
    upload.
 
@@ -178,7 +188,9 @@ undeleted. This closes the orphan noted in `delete_analysis`'s own docstring ("T
 file under `runtime/uploads/` is deliberately left on disk").
 
 `delete_all_analyses` currently deletes `videos` rows without reading them; it must select the
-`storage_key`s first so it knows what to reap.
+`storage_key`s **before** issuing either delete, not between them — PostgREST returns nothing
+useful from the bulk delete, so selecting afterwards finds no rows and silently reaps nothing.
+That failure mode passes a mocked test, so the test must assert the call order.
 
 ## Error handling summary
 
