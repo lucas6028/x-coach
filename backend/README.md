@@ -99,7 +99,7 @@ Interactive docs: <http://localhost:8000/docs>.
 ```
 backend/app/
   main.py            FastAPI app, CORS, router wiring, /api/health
-  config.py          repo-root paths + runtime/upload dirs
+  config.py          repo-root paths + the runtime scratch dir
   settings.py        env-driven secrets (Supabase URL / anon key / JWT secret)
   auth.py            Supabase JWT verification + get_current_user / get_optional_user
   services/
@@ -107,10 +107,19 @@ backend/app/
     library.py       list/load precomputed labeled videos + ground-truth labels
     knowledge.py     wrappers over retrieve_graph_context / query_vector_db
     store.py         user-scoped Supabase persistence (videos + analyses, RLS-enforced)
+    storage.py       object storage for uploads (local filesystem or Cloudflare R2)
   routers/           analyze.py, analyses.py, videos.py, knowledge.py
 ```
 
-Uploaded videos and their derived pose JSON land in `data/runtime/` (gitignored).
+Uploaded videos, their derived pose JSON, and a browser-captured thumbnail are stored in
+Cloudflare R2 under `uploads/{owner}/{video_id}/`. With `R2_*` unset the same objects land on
+the local filesystem under `data/runtime/objects/` (gitignored), so no credentials are needed
+for development or CI. The pipeline still needs real file paths, so each upload is staged into
+a temp directory for the duration of its analysis and removed afterwards.
+
+Uploads are read back through `GET /api/uploads/{video_id}/url`, which resolves the storage key
+with the caller's own JWT so Postgres RLS enforces ownership. `GET /api/video-file/{video_id}`
+serves library demo clips only.
 
 ## Tests
 
