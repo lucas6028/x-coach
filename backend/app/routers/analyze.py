@@ -12,7 +12,7 @@ from fastapi.concurrency import run_in_threadpool
 
 from backend.app import config, settings
 from backend.app.auth import CurrentUser, get_optional_user
-from backend.app.services import analysis, store
+from backend.app.services import analysis, storage, store
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,42 @@ router = APIRouter(prefix="/api", tags=["analyze"])
 # await a slot here instead of spawning unbounded worker threads. This is a single-process
 # stop-gap; durable queueing and backpressure move to Celery + Redis later.
 _ANALYSIS_SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_ANALYSES)
+
+# A thumbnail is one downscaled JPEG frame (the browser caps its longest edge at 480px), so
+# anything approaching this is not a thumbnail. Bounds what an upload can push into storage.
+MAX_THUMBNAIL_BYTES = 512 * 1024
+
+
+def _source_url(prefix: str) -> str | None:
+    """A short-lived playback URL for the upload's source object, or None if signing failed.
+
+    Never raises: the analysis has already been produced by the time this is called, so a
+    signing problem degrades playback rather than discarding a completed result.
+    """
+    try:
+        return storage.get_object_store().presigned_url(f"{prefix}/source")
+    except storage.StorageError:
+        logger.exception("Failed to sign a playback URL for %s", prefix)
+        return None
+
+
+async def _read_thumbnail(thumbnail: UploadFile | None) -> bytes | None:
+    """Validate and read the optional browser-captured frame.
+
+    A missing thumbnail is NOT an error — older clients and browsers where frame capture failed
+    must still be able to analyze. Only a wrong type or an implausible size is rejected.
+    """
+    if thumbnail is None:
+        return None
+    content_type = (thumbnail.content_type or "").split(";")[0].strip().lower()
+    if content_type != "image/jpeg":
+        raise HTTPException(status_code=400, detail="Thumbnail must be image/jpeg.")
+    data = await thumbnail.read()
+    if not data:
+        return None
+    if len(data) > MAX_THUMBNAIL_BYTES:
+        raise HTTPException(status_code=400, detail="Thumbnail is too large.")
+    return data
 
 
 def _validated_movement(movement: str) -> str:
@@ -98,6 +134,7 @@ async def analyze(
     file: UploadFile = File(...),
     movement: str = Form(config.DEFAULT_ANALYSIS_MOVEMENT),
     max_reps: int | None = Form(None),
+    thumbnail: UploadFile | None = File(None),
     user: CurrentUser | None = Depends(get_optional_user),
 ) -> dict:
     """Accept a video of a supported movement, extract pose, detect faults, and return the analysis.
@@ -129,20 +166,38 @@ async def analyze(
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    thumb = await _read_thumbnail(thumbnail)
 
-    video_id, saved_path = await run_in_threadpool(analysis.save_upload, data, suffix=suffix)
-    del data  # bytes are now on disk; don't pin the whole video in RAM while queued for a slot.
+    # Anonymous demo uploads are still stored, under their own key prefix, so both paths behave
+    # identically. A bucket lifecycle rule expires `uploads/anon/` — see the design doc.
+    owner = user.id if user is not None else "anon"
+    try:
+        staged = await run_in_threadpool(
+            analysis.stage_upload, data, suffix=suffix, owner=owner
+        )
+    except storage.StorageError as exc:
+        logger.exception("Failed to store upload (owner=%s)", owner)
+        raise HTTPException(
+            status_code=503, detail="Storage is unavailable; please try again."
+        ) from exc
+    del data  # bytes are now stored and staged; don't pin the whole video in RAM while queued.
+
     try:
         async with _ANALYSIS_SEMAPHORE:
             result = await run_in_threadpool(
                 analysis.analyze_video_file,
-                saved_path,
-                video_id=video_id,
+                staged.video_path,
+                video_id=staged.video_id,
+                pose_json_path=staged.pose_path,
                 movement=canonical_movement,
                 max_reps=resolved_max_reps,
             )
+        # Only a SUCCESSFUL analysis has derived artifacts worth keeping.
+        await run_in_threadpool(analysis.store_artifacts, staged, thumbnail=thumb)
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        await run_in_threadpool(analysis.discard_stage, staged)
 
     if user is not None:
         try:
@@ -150,14 +205,22 @@ async def analyze(
                 store.persist_analysis,
                 token=user.token,
                 user_id=user.id,
-                video_id=video_id,
+                video_id=staged.video_id,
                 source="upload",
                 result=result,
+                storage_key=staged.prefix,
                 filename=file.filename,
             )
         except Exception:  # noqa: BLE001 — never lose a completed analysis to a storage error
-            logger.exception("Failed to persist analysis (user=%s video=%s)", user.id, video_id)
+            logger.exception(
+                "Failed to persist analysis (user=%s video=%s)", user.id, staged.video_id
+            )
             result["analysis_id"] = None
+
+    # AFTER the persist, deliberately: `result` is stored verbatim as JSONB, and a presigned URL
+    # written into the history row would already be expired by the time anyone replayed it. The
+    # replay path re-signs through GET /api/uploads/{video_id}/url instead.
+    result["video_url"] = await run_in_threadpool(_source_url, staged.prefix)
     return result
 
 
@@ -167,6 +230,7 @@ async def analyze_pose(
     pose: str = Form(...),
     file: UploadFile = File(...),
     max_reps: int | None = Form(None),
+    thumbnail: UploadFile | None = File(None),
     user: CurrentUser | None = Depends(get_optional_user),
 ) -> dict:
     """Analyze a client-extracted pose JSON (no server-side MediaPipe).
@@ -193,20 +257,38 @@ async def analyze_pose(
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+    thumb = await _read_thumbnail(thumbnail)
 
-    video_id, _saved_path = await run_in_threadpool(analysis.save_upload, data, suffix=suffix)
-    del data
+    # Anonymous demo uploads are still stored, under their own key prefix, so both paths behave
+    # identically. A bucket lifecycle rule expires `uploads/anon/` — see the design doc.
+    owner = user.id if user is not None else "anon"
+    try:
+        staged = await run_in_threadpool(
+            analysis.stage_upload, data, suffix=suffix, owner=owner
+        )
+    except storage.StorageError as exc:
+        logger.exception("Failed to store upload (owner=%s)", owner)
+        raise HTTPException(
+            status_code=503, detail="Storage is unavailable; please try again."
+        ) from exc
+    del data  # bytes are now stored and staged; don't pin the whole video in RAM while queued.
+
     try:
         async with _ANALYSIS_SEMAPHORE:
             result = await run_in_threadpool(
                 analysis.analyze_pose_payload,
                 payload,
                 movement=movement,
-                video_id=video_id,
+                video_id=staged.video_id,
+                pose_json_path=staged.pose_path,
                 max_reps=resolved_max_reps,
             )
+        # Only a SUCCESSFUL analysis has derived artifacts worth keeping.
+        await run_in_threadpool(analysis.store_artifacts, staged, thumbnail=thumb)
     except RuntimeError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        await run_in_threadpool(analysis.discard_stage, staged)
 
     if user is not None:
         try:
@@ -214,12 +296,20 @@ async def analyze_pose(
                 store.persist_analysis,
                 token=user.token,
                 user_id=user.id,
-                video_id=video_id,
+                video_id=staged.video_id,
                 source="upload",
                 result=result,
+                storage_key=staged.prefix,
                 filename=file.filename,
             )
         except Exception:  # noqa: BLE001 — never lose a completed analysis to a storage error
-            logger.exception("Failed to persist pose analysis (user=%s video=%s)", user.id, video_id)
+            logger.exception(
+                "Failed to persist pose analysis (user=%s video=%s)", user.id, staged.video_id
+            )
             result["analysis_id"] = None
+
+    # AFTER the persist, deliberately: `result` is stored verbatim as JSONB, and a presigned URL
+    # written into the history row would already be expired by the time anyone replayed it. The
+    # replay path re-signs through GET /api/uploads/{video_id}/url instead.
+    result["video_url"] = await run_in_threadpool(_source_url, staged.prefix)
     return result

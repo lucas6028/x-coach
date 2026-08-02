@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from contextlib import contextmanager
+from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
@@ -8,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.app.routers.analyze import _validated_movement
+from backend.app.services import analysis
+from backend.app.services import runtime_config
 
 
 def _stub_result(movement: str) -> dict:
@@ -26,9 +31,43 @@ def _stub_result(movement: str) -> dict:
     }
 
 
+@contextmanager
+def _staged_upload(video_id: str = "vid1"):
+    """Patch the analyze router's staging trio for one HTTP-level test.
+
+    These tests exercise the REAL router through ``TestClient``, so ``analysis.discard_stage``
+    genuinely runs unless patched -- and its real body does
+    ``shutil.rmtree(staged.video_path.parent)``. Patching all three keeps these tests on the same
+    "no real disk / object-store I/O" footing as the direct-call tests in
+    ``tests/test_analyze_endpoint.py``. ``video_path`` points at a dedicated scratch subdirectory
+    under the system temp dir (never a bare relative name -- a RELATIVE path's ``.parent``
+    resolves against the CWD, so an accidentally-unpatched ``discard_stage`` would ``rmtree`` the
+    repository root) so a future test that forgets to patch ``discard_stage`` fails loudly on a
+    missing file rather than deleting something real.
+    """
+    staged = analysis.StagedUpload(
+        video_id=video_id,
+        prefix=f"uploads/anon/{video_id}",
+        video_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}.mp4",
+        pose_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}_pose.json",
+    )
+    with patch.object(analysis, "stage_upload", return_value=staged), patch.object(
+        analysis, "store_artifacts"
+    ), patch.object(analysis, "discard_stage"):
+        yield staged
+
+
 class TestAnalyzeMovement(unittest.TestCase):
     def setUp(self) -> None:
         self.client = TestClient(app)
+        # KEEP THESE TESTS OFFLINE. ``analyze`` calls ``settings.allowed_upload_suffixes()``,
+        # which reads the admin overrides via ``runtime_config.get_overrides()`` -- and that does
+        # a REAL Supabase round-trip whenever auth is configured (true on any machine with a
+        # populated ``.env``). ``{}`` is exactly what ``get_overrides`` returns when auth is
+        # unconfigured, so this runs the same code path CI does rather than a bespoke stub.
+        overrides = patch.object(runtime_config, "get_overrides", return_value={})
+        overrides.start()
+        self.addCleanup(overrides.stop)
 
     def _post(self, movement: str | None):
         data = {"movement": movement} if movement is not None else None
@@ -46,11 +85,11 @@ class TestAnalyzeMovement(unittest.TestCase):
     def test_rejects_before_running_the_pipeline(self) -> None:
         """A bad movement must not cost a full MediaPipe pass -- neither the upload write nor
         the analysis may be reached."""
-        with patch("backend.app.services.analysis.save_upload") as save, patch(
-            "backend.app.services.analysis.analyze_video_file"
+        with patch.object(analysis, "stage_upload") as stage, patch.object(
+            analysis, "analyze_video_file"
         ) as run:
             self._post("Cartwheel")
-        save.assert_not_called()
+        stage.assert_not_called()
         run.assert_not_called()
 
     def test_validated_movement_rejects_an_empty_or_whitespace_string(self) -> None:
@@ -66,26 +105,23 @@ class TestAnalyzeMovement(unittest.TestCase):
     def test_rejects_a_whitespace_only_movement_over_http(self) -> None:
         """The one "blank-ish" value an HTTP client can actually deliver as itself (see the unit
         test above for why a literal "" cannot): a whitespace-only movement must 400 and must not
-        reach save_upload or the pipeline, same as any other invalid movement."""
+        reach stage_upload or the pipeline, same as any other invalid movement."""
         resp = self._post("   ")
         self.assertEqual(resp.status_code, 400)
 
-        with patch("backend.app.services.analysis.save_upload") as save, patch(
-            "backend.app.services.analysis.analyze_video_file"
+        with patch.object(analysis, "stage_upload") as stage, patch.object(
+            analysis, "analyze_video_file"
         ) as run:
             self._post("   ")
-        save.assert_not_called()
+        stage.assert_not_called()
         run.assert_not_called()
 
     def test_forwards_a_valid_movement_to_the_pipeline(self) -> None:
         """Pins the canonicalization contract: a non-canonical spelling ("push-up") must
         resolve to the registry's canonical name ("Push-up") before reaching the pipeline, not
         pass the caller's raw string through untouched."""
-        with patch(
-            "backend.app.services.analysis.save_upload", return_value=("vid1", "/tmp/vid1.mp4")
-        ), patch(
-            "backend.app.services.analysis.analyze_video_file",
-            return_value=_stub_result("Push-up"),
+        with _staged_upload(), patch.object(
+            analysis, "analyze_video_file", return_value=_stub_result("Push-up")
         ) as run:
             resp = self._post("push-up")
         self.assertEqual(resp.status_code, 200)
@@ -93,11 +129,8 @@ class TestAnalyzeMovement(unittest.TestCase):
 
     def test_defaults_to_squat_when_the_field_is_omitted(self) -> None:
         """Backward compatible: a caller that has not been updated still works."""
-        with patch(
-            "backend.app.services.analysis.save_upload", return_value=("vid1", "/tmp/vid1.mp4")
-        ), patch(
-            "backend.app.services.analysis.analyze_video_file",
-            return_value=_stub_result("Squat"),
+        with _staged_upload(), patch.object(
+            analysis, "analyze_video_file", return_value=_stub_result("Squat")
         ) as run:
             resp = self._post(None)
         self.assertEqual(resp.status_code, 200)
@@ -106,11 +139,7 @@ class TestAnalyzeMovement(unittest.TestCase):
     def test_accepts_any_registered_movement(self) -> None:
         for movement in ("Squat", "Push-up", "Overhead Press"):
             with self.subTest(movement=movement):
-                with patch(
-                    "backend.app.services.analysis.save_upload",
-                    return_value=("vid1", "/tmp/vid1.mp4"),
-                ), patch(
-                    "backend.app.services.analysis.analyze_video_file",
-                    return_value=_stub_result(movement),
+                with _staged_upload(), patch.object(
+                    analysis, "analyze_video_file", return_value=_stub_result(movement)
                 ):
                     self.assertEqual(self._post(movement).status_code, 200)

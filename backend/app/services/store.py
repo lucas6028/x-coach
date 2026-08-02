@@ -137,14 +137,18 @@ def persist_analysis(
     user_id: str,
     video_id: str,
     source: str,
+    storage_key: str,
     result: dict[str, Any],
     filename: str | None = None,
 ) -> str:
     """Upsert the video row and insert the analysis; return the new analysis id.
 
-    The ``videos`` row carries the (currently trivial) status machine and the storage key,
-    which P2 will repoint at object storage. ``result`` is stored verbatim as JSONB so history
-    replay is self-contained.
+    ``storage_key`` is the object-store key PREFIX holding this upload's artifacts
+    (``uploads/{owner}/{video_id}``), not a single object — the read path signs
+    ``{storage_key}/source`` and ``{storage_key}/thumb.jpg`` off it, and deletion reaps
+    everything under it. ``result`` is stored verbatim as JSONB so history replay is
+    self-contained; note that the caller attaches the presigned ``video_url`` only AFTER this
+    returns, so no expired URL is ever persisted.
     """
     client = _user_client(token)
 
@@ -153,7 +157,7 @@ def persist_analysis(
             "user_id": user_id,
             "video_id": video_id,
             "filename": filename,
-            "storage_key": f"runtime/uploads/{video_id}",
+            "storage_key": storage_key,
             "status": "done",
         },
         on_conflict="user_id,video_id",
