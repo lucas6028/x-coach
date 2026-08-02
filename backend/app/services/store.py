@@ -395,7 +395,11 @@ def get_storage_key(*, token: str, video_id: str) -> str | None:
         .execute()
     )
     rows = resp.data or []
-    return rows[0].get("storage_key") if rows else None
+    # ``or None`` so a row whose ``storage_key`` column is empty answers the same as a missing
+    # row. Returning ``""`` verbatim would send the caller on to presign ``"/source"``, which
+    # fails and surfaces as a 503 — where 404 ("there is no upload here") is the honest answer.
+    # ``get_storage_keys`` already filters falsy keys out; this makes the two agree.
+    return (rows[0].get("storage_key") or None) if rows else None
 
 
 def get_storage_keys(*, token: str, video_ids: list[str]) -> dict[str, str]:
