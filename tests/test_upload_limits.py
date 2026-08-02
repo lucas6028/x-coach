@@ -11,8 +11,11 @@ import unittest
 from unittest import mock
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from starlette.datastructures import UploadFile
 
+from backend.app.auth import CurrentUser, get_optional_user
+from backend.app.main import app
 from backend.app.routers import analyze as analyze_router
 from backend.app.services import analysis as analysis_service
 from backend.app.services import runtime_config
@@ -277,3 +280,53 @@ class RecordedSizeTests(_StubbedAnalyzePath):
             ):
                 self._run(b"x" * 1000, user=_User())
         self.assertEqual(seen[0]["size_bytes"], 1000)
+
+
+class ResponseBodyShapeTests(unittest.TestCase):
+    """The 413 ``detail`` dict has so far only ever been asserted as an in-process
+    ``HTTPException.detail`` (see ``PerFileSizeCapTests`` / ``StorageQuotaTests`` above), which
+    proves what the *router* raises but not what a real HTTP client actually receives.
+    ``frontend/src/api.ts``'s ``uploadLimitError`` parser depends on FastAPI nesting that dict
+    under a top-level ``detail`` key -- i.e. a JSON body shaped ``{"detail": {"code": ...,
+    "limit_mb": ...}}``. These tests go through a genuine ``TestClient`` request against the real
+    app (not a direct router call) to round-trip that assumption through actual ASGI/JSON
+    encoding, for both refusal codes.
+    """
+
+    def setUp(self) -> None:
+        self.client = TestClient(app)
+        # KEEP OFFLINE, same reasoning as ``_StubbedAnalyzePath`` above: unconfigured auth is
+        # exactly what CI runs, and ``{}`` is what ``get_overrides`` returns in that case.
+        overrides = mock.patch.object(runtime_config, "get_overrides", return_value={})
+        overrides.start()
+        self.addCleanup(overrides.stop)
+
+    def test_upload_too_large_413_body_is_a_nested_detail_dict(self) -> None:
+        limit = 1 * 1024 * 1024  # the clamped floor, same as PerFileSizeCapTests above
+        with mock.patch.object(
+            runtime_config, "get_overrides", return_value={"max_upload_bytes": limit}
+        ):
+            resp = self.client.post(
+                "/api/analyze",
+                files={"file": ("clip.mp4", b"x" * (limit + 1), "video/mp4")},
+            )
+        self.assertEqual(resp.status_code, 413)
+        self.assertEqual(resp.json(), {"detail": {"code": "upload_too_large", "limit_mb": 1}})
+
+    def test_storage_quota_exceeded_413_body_is_a_nested_detail_dict(self) -> None:
+        quota = 10 * 1024 * 1024  # the clamped floor
+        app.dependency_overrides[get_optional_user] = lambda: CurrentUser(id="u1", token="jwt")
+        self.addCleanup(app.dependency_overrides.pop, get_optional_user, None)
+        with mock.patch.object(
+            runtime_config, "get_overrides", return_value={"user_storage_quota_bytes": quota}
+        ):
+            with mock.patch.object(store, "get_storage_used", return_value=8 * 1024 * 1024):
+                resp = self.client.post(
+                    "/api/analyze",
+                    files={"file": ("clip.mp4", b"x" * (3 * 1024 * 1024), "video/mp4")},
+                )
+        self.assertEqual(resp.status_code, 413)
+        self.assertEqual(
+            resp.json(),
+            {"detail": {"code": "storage_quota_exceeded", "used_mb": 8, "limit_mb": 10}},
+        )

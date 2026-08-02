@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { api, type Analysis } from "./api";
+import { api, UploadLimitError, type Analysis } from "./api";
 import AppLayout from "./components/AppLayout";
 import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
@@ -112,6 +112,19 @@ export default function App() {
   const movementError =
     !movementsLoaded || known ? "" : t("studio.movementUnavailable", { movement });
 
+  // The server's 413 detail is English and structured; the message the user reads is neither.
+  const errorMessage = useCallback(
+    (e: unknown): string => {
+      if (e instanceof UploadLimitError) {
+        return e.code === "upload_too_large"
+          ? t("upload.tooLarge", { limit: e.limitMb })
+          : t("upload.quotaFull", { used: e.usedMb ?? 0, limit: e.limitMb });
+      }
+      return e instanceof Error ? e.message : String(e);
+    },
+    [t]
+  );
+
   // Client-side capture path: extraction happens in-browser (extractPoseFromBlob), then the pose
   // JSON + original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
   const runPoseAnalysis = useCallback(async (blob: Blob, tier: PoseTier) => {
@@ -137,12 +150,12 @@ export default function App() {
         setSearchParams({ analysis: data.analysis_id }, { replace: true });
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t, setSearchParams, canonicalMovement]);
+  }, [t, setSearchParams, canonicalMovement, errorMessage]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {

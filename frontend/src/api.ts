@@ -415,6 +415,42 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+export type UploadLimitCode = "upload_too_large" | "storage_quota_exceeded";
+
+/**
+ * A 413 from an analyze endpoint: the clip is over the per-file cap, or the user is out of
+ * storage. Typed rather than a plain Error because the message must be LOCALISED at the call
+ * site — this module has no access to the i18n `t()`, and the server's detail is English.
+ */
+export class UploadLimitError extends Error {
+  constructor(
+    readonly code: UploadLimitCode,
+    readonly limitMb: number,
+    readonly usedMb: number | null
+  ) {
+    super(code);
+    this.name = "UploadLimitError";
+  }
+}
+
+/** Parse an analyze failure body into an UploadLimitError, or null if it is not one. */
+function uploadLimitError(status: number, body: unknown): UploadLimitError | null {
+  if (status !== 413) return null;
+  const detail = (body as { detail?: unknown })?.detail as
+    | { code?: string; limit_mb?: number; used_mb?: number }
+    | undefined;
+  if (detail?.code !== "upload_too_large" && detail?.code !== "storage_quota_exceeded") {
+    // A 413 we do not recognise (a proxy's own body, say) falls through to the generic path
+    // rather than being mislabelled as a quota problem.
+    return null;
+  }
+  return new UploadLimitError(
+    detail.code,
+    Number(detail.limit_mb ?? 0),
+    detail.used_mb === undefined ? null : Number(detail.used_mb)
+  );
+}
+
 export const api = {
   health: () => getJSON<HealthResponse>("/api/health"),
 
@@ -664,6 +700,8 @@ export const api = {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
+      const limit = uploadLimitError(res.status, detail);
+      if (limit) throw limit;
       throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
     }
     return (await res.json()) as Analysis;
@@ -688,6 +726,8 @@ export const api = {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
+      const limit = uploadLimitError(res.status, detail);
+      if (limit) throw limit;
       throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
     }
     return (await res.json()) as Analysis;

@@ -188,6 +188,8 @@ const en: Dict = {
   "upload.analysing": "Analysing…",
   "upload.prompt": "Drop a {movement} video or tap to upload",
   "upload.hint": "MP4 / MOV · single athlete · side or rear view",
+  "upload.tooLarge": "That clip is too large — the limit is {limit} MB. Try a shorter recording.",
+  "upload.quotaFull": "Your storage is full ({used} MB of {limit} MB). Delete a saved analysis to make room.",
 
   // Capture studio — input mode + the MediaPipe model-tier picker
   "capture.upload": "Upload video",
@@ -858,6 +860,8 @@ const zhHant: Dict = {
   "upload.analysing": "分析中…",
   "upload.prompt": "拖放{movement}影片或點擊上傳",
   "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
+  "upload.tooLarge": "這支影片太大了,上限是 {limit} MB。請改用較短的片段。",
+  "upload.quotaFull": "儲存空間已滿({used} MB / {limit} MB)。請先刪除一些已存的分析來騰出空間。",
 
   // Capture studio — input mode + the MediaPipe model-tier picker
   "capture.upload": "上傳影片",

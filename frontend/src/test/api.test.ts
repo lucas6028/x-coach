@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { api, ChatError, type ChatContext, type ChatMessage } from "../api";
+import { api, ChatError, UploadLimitError, type ChatContext, type ChatMessage } from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -596,5 +596,51 @@ describe("api.conversations", () => {
   it("putConversation throws on a non-ok response", async () => {
     mockFetch({}, false, 500);
     await expect(api.putConversation("vid", [])).rejects.toThrow(/500/);
+  });
+});
+
+describe("upload limit errors", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("turns a 413 quota body into a typed error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: { code: "storage_quota_exceeded", used_mb: 480, limit_mb: 500 } }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(UploadLimitError);
+    expect(err.code).toBe("storage_quota_exceeded");
+    expect(err.usedMb).toBe(480);
+    expect(err.limitMb).toBe(500);
+  });
+
+  it("turns a 413 file-size body into a typed error with no used figure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: { code: "upload_too_large", limit_mb: 100 } }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(UploadLimitError);
+    expect(err.code).toBe("upload_too_large");
+    expect(err.usedMb).toBeNull();
+  });
+
+  it("leaves a non-413 failure as a plain Error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ detail: "boom" }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(UploadLimitError);
+    expect(err.message).toBe("boom");
   });
 });
