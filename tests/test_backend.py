@@ -2085,6 +2085,31 @@ class RuntimeSettingsGetterTests(unittest.TestCase):
             self.assertEqual(app_settings.kg_hops_default(), 2)
             self.assertEqual(app_settings.kg_seeds_default(), 7)
 
+    def test_upload_limit_defaults_and_overrides(self) -> None:
+        with self._no_overrides():
+            self.assertEqual(app_settings.max_upload_bytes(), 100 * 1024 * 1024)
+            self.assertEqual(app_settings.user_storage_quota_bytes(), 500 * 1024 * 1024)
+        with self._overrides({"max_upload_bytes": 5 * 1024 * 1024,
+                              "user_storage_quota_bytes": 50 * 1024 * 1024}):
+            self.assertEqual(app_settings.max_upload_bytes(), 5 * 1024 * 1024)
+            self.assertEqual(app_settings.user_storage_quota_bytes(), 50 * 1024 * 1024)
+
+    def test_upload_limits_fall_back_on_bad_values(self) -> None:
+        with self._overrides({"max_upload_bytes": "nonsense",
+                              "user_storage_quota_bytes": ""}):
+            self.assertEqual(app_settings.max_upload_bytes(), 100 * 1024 * 1024)
+            self.assertEqual(app_settings.user_storage_quota_bytes(), 500 * 1024 * 1024)
+
+    def test_upload_limits_clamp_out_of_range_overrides(self) -> None:
+        # An out-of-band / direct-DB write must not drive an absurd value downstream: a 0 would
+        # reject every upload, and a petabyte would defeat the point of having a limit.
+        with self._overrides({"max_upload_bytes": 0, "user_storage_quota_bytes": 0}):
+            self.assertEqual(app_settings.max_upload_bytes(), 1 * 1024 * 1024)
+            self.assertEqual(app_settings.user_storage_quota_bytes(), 10 * 1024 * 1024)
+        with self._overrides({"max_upload_bytes": 10**15, "user_storage_quota_bytes": 10**15}):
+            self.assertEqual(app_settings.max_upload_bytes(), 2 * 1024 * 1024 * 1024)
+            self.assertEqual(app_settings.user_storage_quota_bytes(), 100 * 1024 * 1024 * 1024)
+
     def test_chat_temperature_none_default_and_coerced(self) -> None:
         with self._no_overrides():
             self.assertIsNone(app_settings.chat_temperature())
