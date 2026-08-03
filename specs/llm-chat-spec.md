@@ -435,4 +435,204 @@ the request "在每次 LLM 回答後，加入 2 個 follow up questions, 和一�
 
 ## Out of scope (v3)
 
-Tool-calling live RAG, anonymous chat, multi-analysis / cross-thread memory.
+Anonymous chat, multi-analysis / cross-thread memory. (Tool-calling live RAG **moved into v3** —
+see below.)
+
+---
+
+# v3: Tool-calling loop
+
+Status: **specified, not built**. The coach becomes an agent over three server-side tools —
+`get_analysis`, `kg_query`, `rag_search` — instead of a single grounded completion. This is the
+"tool-calling live RAG" line the v2.1 out-of-scope list deferred.
+
+## Objective (v3)
+
+Today the coach can only speak from the compact blob `buildChatContext` shipped: a summarised
+causes/risks/corrections list plus the single top RAG snippet per fault. It cannot answer
+"我第 2 rep 的膝蓋實際幾度" (the full `evidence` dict was compressed away), nor "腳踝活動度不足會怎樣"
+(nothing in the analysis retrieved it). Function calling lets the model **pull** the detail and the
+knowledge it needs, on demand, without widening the prompt for every turn.
+
+## Decisions (settled at design review — these stand)
+
+1. **The fat prompt stays.** `_build_system_prompt` is unchanged; tools are added *alongside* it.
+   The alternative (thin prompt + pull-on-demand) is the bigger token win but rewrites the grounding
+   contract, and the CLEAN REP / NOT MEASURED honesty invariants (`chat.py:148-167`) are built on
+   that prompt. Not worth risking for this iteration.
+2. **`get_analysis` reads from the request, not the DB.** The client already holds the full
+   `Analysis`; `ChatContext` gains a `detail` field carrying it. No `user.token` threading into the
+   service, no new `store` function, no UUID validation, no IDOR surface. It also guarantees the
+   tool and the on-screen analysis are the same document.
+3. **Tool round-trips are ephemeral.** They live and die inside one `/api/chat` request.
+4. **Named tool progress is shown to the user** (`event: tool`), not a generic spinner.
+5. **Tool support is discovered by failure**, not by a capability list or a probe of
+   OpenRouter `/models`.
+
+## Non-goals (v3)
+
+Persisting tool turns; `role:"tool"` in the thread contract; tools on the follow-up path; a
+tool-capability column in the model picker; letting the model reach *other* analyses.
+
+## 1. Transport: refactor under `_stream_completion`, not through it
+
+`_stream_completion` yields `str` and drops `tool_calls`/`finish_reason` (`chat.py:295`). It has 13
+test reference points and is shared with `suggest_followups`, whose ~1.5s chip latency is a measured,
+defended property. So the layer is split **underneath** it and its signature is left alone:
+
+```
+_stream_raw_chunks(...) -> Iterator[dict]   # NEW. httpx + SSE line parsing only; yields parsed chunk dicts.
+_stream_completion(...) -> Iterator[str]    # EXISTING, now a thin shell over the above. Signature, behaviour,
+                                            # and every existing test unchanged.
+_stream_turn(...)       -> TurnResult       # NEW. Consumes raw chunks; streams text deltas out while
+                                            # accumulating tool_calls + finish_reason.
+```
+
+`TurnResult` carries the assistant text, the reassembled `tool_calls`, and `finish_reason`.
+
+**Fragment reassembly is the sharp edge.** Streamed tool calls arrive split: `delta.tool_calls[i]`
+carries `id` and `function.name` typically only on the first chunk, and `function.arguments` as
+successive JSON string fragments. Accumulate keyed by `index`, never by position of arrival. This
+gets its own tests (see §7); it is the single most likely source of a silent bug here.
+
+`_stream_raw_chunks` raises `_LLMError(RuntimeError)` carrying `.status`, so the caller can tell a
+4xx (model rejects `tools`) from a transport failure. `tools`/`tool_choice` are standard
+OpenAI-compatible fields and are **not** gated by `_is_openrouter`; the `provider` routing body still is.
+
+## 2. The loop
+
+Server-side, inside `answer_stream`, entirely within one request:
+
+- **Max 3 tool rounds.** Three tools, one call each, is the realistic ceiling.
+- **Cumulative wall-clock budget = `chat_timeout()`**, shared across all rounds — *not* a fresh
+  budget per round. This endpoint is metered; N rounds must not cost N× the timeout. Each individual
+  upstream request is given a per-request timeout of the *remaining* budget, so the sum of the round
+  timeouts can never exceed the whole. If the remaining budget is exhausted the loop stops rather
+  than issuing a request that is certain to time out.
+- **On hitting either cap, do not error.** Issue one final request with `tools` omitted so the model
+  answers from what it already gathered. The user gets an answer, not a failure.
+- **A tool that raises is not fatal.** Feed the error text back as that tool's result and let the
+  model say it couldn't look it up. The stream never dies over a missing KG file.
+- **An unknown tool name** (model hallucinates one) is handled the same way: an error result, not a
+  crash.
+
+**Degradation for models without function calling.** Always send `tools`. On a 4xx **and only if no
+`delta` has been yielded yet**, retry the request once without `tools`, reverting to today's exact
+behaviour. The "nothing yielded yet" precondition is hard: once streaming starts the HTTP 200 is
+committed and retrying would double-emit. A 400 is raised at request time, before any delta, so the
+retry path is reachable in practice. Zero configuration, self-healing, and no dependency on
+OpenRouter-only metadata (an OpenAI-compatible peer such as NIM has no `/models` capability API).
+
+## 3. Tool catalogue
+
+| Tool | Arguments (all clamped server-side) | Backed by |
+|---|---|---|
+| `get_analysis` | `fault_name: str \| null`, `include: "evidence" \| "knowledge" \| "all"` | pure read of `context.detail` |
+| `kg_query` | `query: str`, `hops: int` (clamped 1–2) | `knowledge.graph_context(..., movement=<thread movement>)` |
+| `rag_search` | `query: str`, `top_k: int` (clamped 1–8) | `knowledge.rag_snippets(...)` |
+
+- **Model-supplied numbers are untrusted input.** Clamp `hops` and `top_k` exactly the way
+  `routers/knowledge.py:20,38` bounds its query params — an unbounded or negative value must not
+  reach retrieval.
+- **`kg_query` is forced to the thread's `movement`.** Without it the KG returns knowledge for a
+  different exercise and the coach will present it as relevant.
+- **Every tool result is truncated** to a per-result character cap before going back into the
+  message array. RAG chunks are full-text and will otherwise blow the context on round 2.
+- `get_analysis`'s `include` selects which half of a fault's detail to return: `"evidence"` is the
+  detection's full `evidence` dict plus its frame/time/severity/confidence fields; `"knowledge"` is
+  that fault's full `retrievals` context (subgraph nodes+edges, all RAG chunks with text and score);
+  `"all"` is both. With `fault_name=null` it returns the analysis-level material instead (metadata,
+  quality, view, and a one-line summary per detection).
+- Both knowledge calls are **synchronous and local**. `StreamingResponse` already runs this
+  non-async generator in a threadpool, so they are called inline; no async plumbing.
+
+## 4. Grounding: the new red line
+
+Live retrieval introduces a failure mode the v1/v2 prompt never had — `kg_query` and `rag_search`
+return knowledge about faults **this rep did not exhibit**. Nothing in the current rules stops the
+model from relaying a retrieved fault as an observation. A rule of the same rank as the existing
+GROUNDING RULES is added:
+
+> Knowledge returned by tools is **reference material, not an observation about this video**. If
+> `kg_query` or `rag_search` mentions a fault, that does **not** mean the user committed it. Only the
+> faults listed in ANALYSIS FACTS were actually detected.
+
+Everything else in `_build_system_prompt` is byte-identical, including the CLEAN REP and NOT MEASURED
+branches and their tests.
+
+## 5. SSE contract (v3 delta)
+
+One new frame; `delta` / `done` / `error` are untouched.
+
+```
+event: tool
+data: {"name": "kg_query", "query": "knee valgus"}
+```
+
+Emitted once per tool call, at call time. No terminating counterpart — the next `delta` implies the
+work finished. `dispatchSSE` (`api.ts:363-379`) is an if/else-if chain that silently ignores unknown
+events, so **the backend can ship before the client**.
+
+## 6. Client
+
+- `ChatStreamHandlers` gains an optional `onTool`.
+- `CoachTray` renders a transient status line above the streaming bubble ("搜尋知識圖譜:knee
+  valgus"), cleared on the first `delta` of the final answer.
+- i18n for the three tool display names; the `query` string is rendered verbatim (model-generated,
+  like the follow-up chips).
+- `buildChatContext` (`lib/grounding.ts`) adds `detail`: the full `detections` + `retrievals`,
+  **excluding `pose`** (the heavy block, and useless to the coach).
+- `ChatContext.detail` is **not persisted** — `upsert_conversation` stores messages + followups only,
+  never the context. The cost of `detail` is HTTP body size, not tokens or storage: it enters the
+  prompt only when a tool actually returns it.
+- `suggest_followups` sends **no** `tools`. Chips stay on the fast pinned model at ~1.5s.
+
+## 7. Testing (v3)
+
+Backend (`tests/test_chat_endpoint.py`, `unittest.TestCase`):
+
+- Fragment reassembly: `arguments` split across chunks; `id`/`name` present only on the first chunk;
+  two concurrent calls interleaved and keyed by `index`.
+- Loop bounds: stops at 3 rounds; the forced final tools-free request is issued; the cumulative
+  timeout trips before a 4th round.
+- Degradation: 4xx before any delta → one retry without `tools`; 4xx *after* a delta → in-band
+  `error`, no retry.
+- Per tool: dispatch, argument clamping (`hops`, `top_k` out of range and non-numeric), unknown tool
+  name, a tool that raises.
+- The `tool` SSE frame shape.
+- `suggest_followups` sends no `tools` (regression lock on the chip path).
+- `_stream_completion`'s existing tests must pass **unmodified** — that is the check that the
+  refactor was non-breaking.
+
+Frontend (`frontend/src/test/`): `dispatchSSE` routes `tool`; an old handler set without `onTool`
+ignores it; `CoachTray` renders and clears the status line; `buildChatContext` emits `detail` and
+omits `pose`.
+
+Gates: `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95`, and
+`yarn test:coverage` with cwd = `frontend/`.
+
+## Success criteria (v3)
+
+1. Asking about a measurement the compact blob dropped ("第 2 rep 膝蓋角度") gets a real number via
+   `get_analysis`, not "分析中沒有測量".
+2. Asking about a topic outside the detected faults gets a `rag_search`/`kg_query`-backed answer that
+   is explicitly framed as general reference, never as an observation about the clip.
+3. A clean rep still gets the CLEAN REP response, and an unmeasurable clip still gets the NOT
+   MEASURED response — unchanged from v2.
+4. A model that rejects `tools` still answers, with no user-visible error.
+5. Follow-up chip latency is unchanged (~1.5s).
+6. Both coverage gates pass.
+
+## Known risks
+
+- **Time-to-first-token regresses** on turns that call tools: an extra LLM round trip plus retrieval
+  before the first word. The `tool` frame is the mitigation (the user sees progress), not a fix.
+- **Default model tool support is unverified.** `LLM_MODELS` defaults to
+  `deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5, minimax/minimax-m3, tencent/hy3-preview`; whether
+  each supports function calling has not been checked against the live API. The 4xx-retry path makes
+  this non-fatal, but if *most* of the picker lacks support the feature is mostly inert — worth
+  measuring live early in implementation.
+- **The red line in §4 is prompt-enforced, not mechanically enforced.** A model can still blur
+  retrieved knowledge into observation. Verify against live models before shipping; if it leaks,
+  the fallback is to tag every tool-returned knowledge block inline with a "REFERENCE ONLY" prefix
+  rather than relying on one system-prompt rule.
