@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
-import { api, ChatError, type Analysis } from "../api";
+import { ChatError, type Analysis } from "../api";
 
 // Mutable auth state so tests can flip signed-in / signed-out (hoisted for the vi.mock factory).
 const h = vi.hoisted(() => ({
@@ -459,21 +459,28 @@ describe("CoachTray — follow-up chat", () => {
     // renders "knee valgus ratio 0.82" on first paint (lib/retrieval.ts keyEvidence), so that text
     // would satisfy findByText immediately — before the tool ever ran — and this test would pass
     // vacuously (releaseTool never actually needed). A collision-free subject forces the assertion
-    // to wait on the real tool line.
+    // to wait on the real tool line. Uses h.chatStream (like every other test in this file), not
+    // vi.spyOn(api, ...) — this file's vi.mock("../api") already makes api.chatStream === h.chatStream,
+    // so spying on api.chatStream would replace that reference for every test that runs after this
+    // one (nothing in setup.ts restores mocks between tests), leaking this implementation forward.
     let releaseTool!: () => void;
     let releaseDelta!: () => void;
-    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      h.onTool?.("kg_query", "zzqury-kg-subject");
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.("kg_query", "zzqury-kg-subject");
       await new Promise<void>((r) => (releaseTool = r)); // assert while the tool is running
-      h.onDelta("Answer");
+      handlers.onDelta("Answer");
       await new Promise<void>((r) => (releaseDelta = r)); // assert while the answer streams
-      h.onDone("m");
+      handlers.onDone("m");
     });
     renderTray();
     void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
 
-    // The tool line is up, naming both the tool and its subject.
-    expect(await screen.findByText(/zzqury-kg-subject/)).toBeTruthy();
+    // The tool line is up, naming BOTH the tool's label and its subject in one node — asserting on
+    // the subject alone would also pass if the label lookup were broken (e.g. hard-coded to the
+    // generic fallback), since the subject would still render.
+    expect(
+      await screen.findByText(/Searching the knowledge graph：zzqury-kg-subject/)
+    ).toBeTruthy();
 
     // The first answer token retires it.
     releaseTool();
@@ -489,11 +496,11 @@ describe("CoachTray — follow-up chat", () => {
     // — a bare "x" is a substring of the KnowledgeGraphWidget caption ("Fault → cause → fix"), which
     // let this assertion pass even before the tool line existed.
     let release!: () => void;
-    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      h.onTool?.("something_else", "zzqux-subject");
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.("something_else", "zzqux-subject");
       await new Promise<void>((r) => (release = r));
-      h.onDelta("A");
-      h.onDone("m");
+      handlers.onDelta("A");
+      handlers.onDone("m");
     });
     renderTray();
     void sendMessage("why?");
@@ -503,12 +510,12 @@ describe("CoachTray — follow-up chat", () => {
   });
 
   it("discards streamed narration when the server sends reset", async () => {
-    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      h.onDelta("Let me check.");
-      h.onReset?.();
-      h.onTool?.("kg_query", "valgus");
-      h.onDelta("Real answer");
-      h.onDone("m");
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onDelta("Let me check.");
+      handlers.onReset?.();
+      handlers.onTool?.("kg_query", "valgus");
+      handlers.onDelta("Real answer");
+      handlers.onDone("m");
     });
     renderTray();
     await sendMessage("why?");
