@@ -51,10 +51,10 @@ class _PoseMultiPartParser(MultiPartParser):
 
     def __init__(self, *args, **kwargs) -> None:
         # Starlette <=0.41 reads the class attribute, while later releases take this as a
-        # keyword-only constructor argument. FastAPI's dependency parser calls Request.form()
-        # without that argument, so install a compatible parser before app routes are created.
+        # keyword-only constructor argument. Newer Request.form() supplies its own 1 MiB default,
+        # so normalize it here before FastAPI asks the parser to process a form.
         if _PARSER_ACCEPTS_MAX_PART_SIZE:
-            kwargs.setdefault("max_part_size", self.max_part_size)
+            kwargs["max_part_size"] = self.max_part_size
         super().__init__(*args, **kwargs)
 
 
