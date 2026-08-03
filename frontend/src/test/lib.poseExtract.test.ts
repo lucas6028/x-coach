@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { landmarksToFrame } from "../lib/poseExtract";
+import { assertPoseAnalysisDuration, landmarksToFrame, MAX_POSE_ANALYSIS_DURATION_SECONDS } from "../lib/poseExtract";
 import { resolveDuration } from "../lib/mediaDuration";
 
 const lm = (n: number) => Array.from({ length: n }, (_, i) => ({ x: i / 100, y: i / 50, z: 0.1, visibility: 0.9 }));
@@ -31,6 +31,13 @@ describe("landmarksToFrame", () => {
     const frame = landmarksToFrame(3, missingZ, missingZ);
     expect(frame.landmarks).toBeNull();
     expect(frame.world_landmarks).toBeNull();
+  });
+});
+
+describe("pose analysis duration guard", () => {
+  it("rejects a clip before expensive frame-by-frame extraction exceeds the pose upload budget", () => {
+    expect(() => assertPoseAnalysisDuration(MAX_POSE_ANALYSIS_DURATION_SECONDS)).not.toThrow();
+    expect(() => assertPoseAnalysisDuration(MAX_POSE_ANALYSIS_DURATION_SECONDS + 0.01)).toThrow("90 seconds");
   });
 });
 

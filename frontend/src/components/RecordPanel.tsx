@@ -38,13 +38,13 @@ export default function RecordPanel({
 
     (async () => {
       try {
-        // The Lite model receives a whole-body image, so 640x480 is sufficient while avoiding
-        // the old 2.25x camera/encoder/texture bandwidth cost of 1280x720.
+        // This stream is also recorded for later Heavy analysis and replay, so do not trade away
+        // stored-video detail for the lighter live-overlay model.
         const stream = await getCameraStream({
           video: {
             facingMode: "user",
-            width: { ideal: 640 },
-            height: { ideal: 480 },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
             frameRate: { ideal: 30 },
           },
           audio: false,
@@ -62,7 +62,10 @@ export default function RecordPanel({
           if (cancelled) return;
           const canvas = canvasRef.current!;
           ctx ??= canvas.getContext("2d");
-          if (!ctx) return;
+          if (!ctx) {
+            raf = requestAnimationFrame(draw);
+            return;
+          }
           if (!shouldRunLivePoseInference(poseSchedule, video.currentTime, performance.now())) {
             raf = requestAnimationFrame(draw);
             return;

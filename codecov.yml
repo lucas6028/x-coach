@@ -25,8 +25,6 @@ ignore:
   # Camera + rAF page shells: impure edges only; their logic is unit-tested in src/lib/*.
   - "frontend/src/pages/SixSeven.tsx"
   - "frontend/src/pages/FruitNinja.tsx"
-  # Offline pose analysis has the same browser-only worker and MediaPipe GPU boundary.
-  # Its compatibility fallback is covered by an isolated unit test.
-  - "frontend/src/lib/poseInference.ts"
+  # The worker entry itself has the browser-only MediaPipe GPU boundary; the runner is tested.
   - "frontend/src/workers/poseInference.worker.ts"
   - "frontend/src/components/poseLandmarker.ts"

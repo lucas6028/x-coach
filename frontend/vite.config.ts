@@ -47,9 +47,8 @@ export default defineConfig({
         // Same impure boundary: the LIFF diag's camera→MediaPipe chain probe needs a real
         // camera + WASM + WebGL.
         "src/lib/poseProbe.ts",
-        // Offline analysis needs browser ImageBitmap/OffscreenCanvas plus MediaPipe GPU.
-        // The compatibility fallback is covered by an isolated unit test.
-        "src/lib/poseInference.ts",
+        // The worker entry itself needs browser ImageBitmap/OffscreenCanvas plus MediaPipe GPU.
+        // The runner is unit-tested with a mock worker and remains included in coverage.
         "src/workers/poseInference.worker.ts",
         "src/components/poseLandmarker.ts",
       ],

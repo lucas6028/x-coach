@@ -720,7 +720,9 @@ export const api = {
   ): Promise<Analysis> {
     const form = new FormData();
     form.append("movement", movement);
-    form.append("pose", JSON.stringify(pose));
+    // A pose can exceed Starlette's small text-field multipart limit after only a few seconds.
+    // Send it as a named JSON file so the API can apply its own endpoint-specific size limit.
+    form.append("pose", new Blob([JSON.stringify(pose)], { type: "application/json" }), "pose.json");
     const ext = video.type.includes("mp4") ? "mp4" : "webm";
     form.append("file", video, `capture.${ext}`);
     if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
@@ -733,7 +735,13 @@ export const api = {
       const detail = await res.json().catch(() => ({}));
       const limit = uploadLimitError(res.status, detail);
       if (limit) throw limit;
-      throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
+      const bodyDetail = (detail as { detail?: unknown }).detail;
+      if (typeof bodyDetail === "string") throw new Error(bodyDetail);
+      if ((bodyDetail as { code?: string } | undefined)?.code === "pose_too_large") {
+        const limitMb = (bodyDetail as { limit_mb?: number }).limit_mb ?? 16;
+        throw new Error(`Pose data is too large (limit ${limitMb} MB).`);
+      }
+      throw new Error(`Analyze failed (${res.status})`);
     }
     return (await res.json()) as Analysis;
   },

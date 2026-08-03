@@ -866,14 +866,14 @@ class AnalyzePoseRouterTests(_TempConfigBase):
     def test_rejects_out_of_range_max_reps(self) -> None:
         response = self.client.post(
             "/api/analyze/pose",
-            data={"movement": "Squat", "pose": json.dumps(_pose_payload()), "max_reps": "99"},
-            files={"file": ("clip.mp4", b"fake", "video/mp4")},
+            data={"movement": "Squat", "max_reps": "99"},
+            files={"pose": ("pose.json", json.dumps(_pose_payload()), "application/json"), "file": ("clip.mp4", b"fake", "video/mp4")},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("max_reps", response.json()["detail"])
 
     def test_accepts_pose_json_larger_than_starlette_default_form_part_limit(self) -> None:
-        """A ten-second, 30 FPS client pose can exceed Starlette's 1 MiB field default.
+        """Pose JSON travels as a file part, avoiding Starlette's 1 MiB text-field default.
 
         ``max_reps=99`` makes the route stop before it stages a file, so this asserts multipart
         parsing itself accepted the large pose part without performing storage or detector work.
@@ -881,8 +881,8 @@ class AnalyzePoseRouterTests(_TempConfigBase):
         large_pose = json.dumps({"frames": [], "padding": "x" * (1024 * 1024)})
         response = self.client.post(
             "/api/analyze/pose",
-            data={"movement": "Squat", "pose": large_pose, "max_reps": "99"},
-            files={"file": ("clip.mp4", b"fake", "video/mp4")},
+            data={"movement": "Squat", "max_reps": "99"},
+            files={"pose": ("pose.json", large_pose, "application/json"), "file": ("clip.mp4", b"fake", "video/mp4")},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("max_reps", response.json()["detail"])
@@ -894,10 +894,9 @@ class AnalyzePoseRouterTests(_TempConfigBase):
                 "/api/analyze/pose",
                 data={
                     "movement": "Squat",
-                    "pose": json.dumps(_pose_payload()),
                     "max_reps": "99",
                 },
-                files={"file": ("clip.mp4", b"fake", "video/mp4")},
+                files={"pose": ("pose.json", json.dumps(_pose_payload()), "application/json"), "file": ("clip.mp4", b"fake", "video/mp4")},
             )
         self.assertEqual(response.status_code, 400)
         mocked_stage.assert_not_called()
