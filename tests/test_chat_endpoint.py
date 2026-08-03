@@ -326,11 +326,17 @@ class ToolLoopTests(unittest.TestCase):
         self.assertIsNotNone(calls[0]["tools"])  # tools were offered on round 1
 
     def test_a_tool_round_emits_a_tool_frame_then_the_answer(self) -> None:
+        dispatched = []
+
+        def dispatch(name, args, ctx):
+            dispatched.append((name, args, ctx))
+            return '{"ok": true}'
+
         fake, calls = self._turns(
             ([], [{"id": "c1", "name": "kg_query", "arguments": '{"query": "valgus"}'}]),
             (["Answer"], []),
         )
-        events = self._run(fake)
+        events = self._run(fake, dispatch=dispatch)
         self.assertEqual(
             events,
             [
@@ -343,6 +349,14 @@ class ToolLoopTests(unittest.TestCase):
         roles = [m["role"] for m in calls[1]["messages"]]
         self.assertEqual(roles[-2:], ["assistant", "tool"])
         self.assertEqual(calls[1]["messages"][-1]["tool_call_id"], "c1")
+        # _dispatch_tool must receive the REQUEST's context (where ChatContext.detail lives), not
+        # the accumulated conversation -- get_analysis exists solely to read it, and this is the
+        # one new wire this task adds with no other lock on it.
+        self.assertEqual(len(dispatched), 1)
+        name, args, ctx = dispatched[0]
+        self.assertEqual(name, "kg_query")
+        self.assertEqual(args, {"query": "valgus"})
+        self.assertIs(ctx, self.CONTEXT)
 
     def test_narration_plus_a_tool_call_is_retracted_with_a_reset_frame(self) -> None:
         fake, _ = self._turns(
@@ -379,6 +393,20 @@ class ToolLoopTests(unittest.TestCase):
         self.assertIsNotNone(calls[2]["tools"])  # round 3 still offers tools
         self.assertIsNone(calls[3]["tools"])  # the forced final round does not
 
+    def test_unsolicited_tool_calls_on_the_forced_final_round_still_produce_an_answer(self) -> None:
+        # The forced round 4 offers no tools (offer_tools=False), but nothing stops a model from
+        # emitting tool_calls anyway. The ``not offer_tools`` disjunct in the break condition exists
+        # exactly for this: without it, a round with BOTH text and tool_calls would fall through to
+        # the tool-dispatch code, find the range exhausted, and exit with no answer at all. Round 4
+        # deliberately narrates too ("Here", not "") -- an all-empty round 4 would produce an empty
+        # answer and read as the guard FAILING (an error frame) rather than holding.
+        call = [{"id": "c", "name": "kg_query", "arguments": "{}"}]
+        fake, calls = self._turns(([], call), ([], call), ([], call), (["Here"], call))
+        events = self._run(fake)
+        self.assertEqual(events[-2:], [("delta", {"text": "Here"}), ("done", {"model": "m"})])
+        self.assertEqual(len(calls), 4)
+        self.assertNotIn("reset", [e for e, _ in events])  # round 4 never reaches the reset check
+
     def test_an_exhausted_time_budget_stops_the_loop(self) -> None:
         # chat_timeout() of 0 means there is no budget left before the first round even starts.
         fake, _ = self._turns((["never"], []))
@@ -411,6 +439,39 @@ class ToolLoopTests(unittest.TestCase):
         self.assertIsNotNone(attempts[0])  # first attempt offered tools
         self.assertIsNone(attempts[1])  # the retry did not
 
+    def test_a_4xx_retry_that_also_fails_is_a_terminal_error(self) -> None:
+        # The retry exists because the first attempt 400'd on ``tools``; the second, tools-free
+        # request can still fail on its own -- a genuine bad request, the provider going down
+        # between the two calls, or the 1.0s floor timing out. It must not be retried again.
+        attempts = []
+
+        def fake(messages, model, *, timeout=None, tools=None):
+            attempts.append(tools)
+            raise chat_service._LLMError("still rejected", status=400)
+            yield  # pragma: no cover — makes this a generator
+
+        events = self._run(fake)
+        self.assertEqual([e for e, _ in events], ["error"])
+        self.assertEqual(len(attempts), 2)  # the original attempt plus the one retry, no more
+
+    def test_a_non_llm_exception_during_the_retry_is_also_a_terminal_error(self) -> None:
+        # The reassembly-crash exposure (see test_a_non_llm_exception_mid_round_...) applies
+        # equally to the retry's own _stream_turn call, not just the first one -- the retry's inner
+        # handler must be widened to Exception too, not left catching only _LLMError, or a crash
+        # here would propagate straight out of the outer except _LLMError block uncaught.
+        attempts = []
+
+        def fake(messages, model, *, timeout=None, tools=None):
+            attempts.append(tools)
+            if len(attempts) == 1:
+                raise chat_service._LLMError("no tool support", status=400)
+            raise TypeError("bad chunk shape")
+            yield  # pragma: no cover — makes this a generator
+
+        events = self._run(fake)
+        self.assertEqual([e for e, _ in events], ["error"])
+        self.assertEqual(len(attempts), 2)
+
     def test_a_4xx_after_a_delta_is_a_terminal_error_with_no_retry(self) -> None:
         attempts = []
 
@@ -434,6 +495,21 @@ class ToolLoopTests(unittest.TestCase):
         events = self._run(fake)
         self.assertEqual([e for e, _ in events], ["error"])
         self.assertEqual(len(attempts), 1)
+
+    def test_a_non_llm_exception_mid_round_yields_one_error_frame_not_a_crash(self) -> None:
+        # _stream_turn's chunk-reassembly loop is NOT itself exception-wrapped (unlike
+        # _stream_raw_chunks' transport, which always raises _LLMError): a chunk that is valid JSON
+        # but the wrong SHAPE (a "tool_calls": 5, a non-string "arguments", ...) crashes with a
+        # plain TypeError/AttributeError/OverflowError. answer_stream is the only frame in the
+        # stack that knows the HTTP 200 is already committed, so it must convert that crash into an
+        # in-band error frame -- not let it escape and kill the stream. This test's own success is
+        # the proof: if the exception weren't caught, this test itself would raise, not fail.
+        def fake(messages, model, *, timeout=None, tools=None):
+            yield "partial"
+            raise TypeError("'int' object is not iterable")
+
+        events = self._run(fake)
+        self.assertEqual([e for e, _ in events], ["delta", "error"])
 
     def test_an_empty_completion_is_still_an_error(self) -> None:
         fake, _ = self._turns(([], []))

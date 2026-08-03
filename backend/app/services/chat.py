@@ -824,8 +824,10 @@ def answer_stream(
     for round_index in range(_MAX_TOOL_ROUNDS + 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            # Nothing has reached the client at this point, ever — see the ``streamed_any`` note
-            # below — so an honest error is the only outcome available here.
+            # No *delta* text has reached the client at this point, ever (streamed_any is False by
+            # the induction above) -- a prior round may still have emitted reset/tool frames, but
+            # those carry no answer content the client could be left holding, so an honest error is
+            # the only outcome available here.
             yield _sse("error", {"detail": "The coach ran out of time before answering."})
             return
 
@@ -861,6 +863,10 @@ def answer_stream(
                 return
             try:
                 for item in _stream_turn(
+                    # The 1.0s floor keeps a non-positive/near-zero remaining budget out of httpx
+                    # (which would reject or instantly time out the retry); it can let the shared
+                    # budget overshoot chat_timeout() by up to 1s on this one retry path, which is
+                    # judged acceptable against failing an otherwise-recoverable request outright.
                     convo, model, timeout=max(deadline - time.monotonic(), 1.0), tools=None
                 ):
                     if isinstance(item, _Turn):
@@ -868,19 +874,47 @@ def answer_stream(
                     else:
                         streamed_any = True
                         yield _sse("delta", {"text": item})
-            except _LLMError as retry_exc:
+            except Exception as retry_exc:  # noqa: BLE001 — same reassembly-crash exposure as the
+                # outer handler below applies to this second call too, not just the first; and the
+                # retry can also fail on its own LLM-request merits -- a genuine bad request, the
+                # provider going down between the two calls, or the 1.0s floor above timing out.
+                # None of that is retryable again (no committed output yet, but a second retry would
+                # just be guessing) -- one error frame, same as any other terminal failure.
+                # Deliberately ``Exception``, not ``BaseException``: GeneratorExit must still
+                # propagate on a client disconnect during the retry.
                 yield _sse("error", {"detail": str(retry_exc)})
                 return
             offer_tools = False  # the retry ran without tools, so this round is final by construction
+        except Exception as exc:  # noqa: BLE001 — see the comment below.
+            # _stream_raw_chunks wraps its own transport in `except Exception -> _LLMError`, but
+            # _stream_turn's chunk-reassembly loop (the `for frag in delta.get("tool_calls")`, the
+            # `int(frag.get("index", ...))`, `fn.get("name")`, `slot["arguments"] +=` block) is NOT
+            # itself exception-wrapped -- a chunk that is valid JSON but the wrong SHAPE (a
+            # "tool_calls": 5, a "function": "kg_query" string, a non-string "arguments") raises a
+            # plain TypeError/AttributeError there, not an _LLMError. This function is the only frame
+            # in the stack that knows the HTTP 200 is already committed, so it is the one place that
+            # can turn that crash into an in-band `error` frame instead of a dead stream. Deliberately
+            # `Exception`, not `BaseException`: GeneratorExit must keep propagating so a client
+            # disconnect still tears this generator down normally. Placed AFTER the `_LLMError`
+            # clause so the 4xx-without-tools retry above still gets first refusal.
+            yield _sse("error", {"detail": f"LLM request failed: {exc}"})
+            return
 
-        if turn is None:  # the round produced no terminal _Turn at all — treat as an empty reply.
+        if turn is None:
+            # Unreachable with the real _stream_turn -- its final `yield _Turn(...)` after the chunk
+            # loop is unconditional, so a round always produces one. Kept as Optional/None-narrowing
+            # for the type checker and as a defensive backstop for a stub/future implementation that
+            # doesn't uphold that contract; the same "no dead branch without a name" rule that this
+            # module holds everywhere else applies to why this guard exists even though it cannot
+            # fire today. Deliberately NOT test-covered (see the coverage-trap note elsewhere in this
+            # module) -- there is no way to reach it without breaking _stream_turn's own contract.
             yield _sse("error", {"detail": "The LLM returned an empty message."})
             return
 
         # ``not offer_tools`` closes the door on a model that emits tool_calls it was never offered:
         # without it such a round would loop until the range is exhausted and fall out with no answer.
         if not turn.tool_calls or not offer_tools:
-            answer += turn.text
+            answer = turn.text  # the FINAL round's text only; no cross-round accumulation happens.
             break
 
         if narrated:
