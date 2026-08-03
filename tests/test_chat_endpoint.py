@@ -16,6 +16,7 @@ mirroring ``test_analyze_endpoint.py``. They lock in the things that matter for 
 from __future__ import annotations
 
 import asyncio
+import json
 import types
 import unittest
 from unittest import mock
@@ -755,6 +756,177 @@ class StreamTurnTests(unittest.TestCase):
         ) as raw:
             list(chat_service._stream_turn([], "m", tools=None))
         self.assertIsNone(raw.call_args.kwargs["extra_body"])
+
+
+class ToolDispatchTests(unittest.TestCase):
+    """The three tools: argument clamping, routing, and total failure containment."""
+
+    DETAIL = {
+        "metadata": {"fps": 30.0, "total_frames": 120},
+        "quality": {"valid_frame_ratio": 0.9},
+        "view": {"view_type": "side"},
+        "detections": [
+            {
+                "fault_id": "f1",
+                "fault_name": "Insufficient Depth",
+                "phase": "bottom",
+                "severity": 0.7,
+                "confidence": 0.9,
+                "observability": "clear",
+                "start_time": 1.0,
+                "end_time": 2.0,
+                "start_frame": 30,
+                "end_frame": 60,
+                "peak_frame": 45,
+                "evidence": {"hip_knee_delta_deg": 12.5},
+                "rep_index": 2,
+                "occurred_reps": [2],
+                "rep_count": 1,
+            }
+        ],
+        "retrievals": [
+            {"fault_id": "f1", "context": {"results": [{"text": "squat depth passage"}]}},
+            {"fault_id": "other", "context": {"results": [{"text": "unrelated"}]}},
+        ],
+    }
+
+    def _ctx(self):
+        return {"movement": "Squat", "detail": self.DETAIL}
+
+    def test_clamp_int_bounds_coerces_and_falls_back(self) -> None:
+        self.assertEqual(chat_service._clamp_int(9, low=1, high=2, default=1), 2)
+        self.assertEqual(chat_service._clamp_int(-4, low=1, high=8, default=5), 1)
+        self.assertEqual(chat_service._clamp_int("3", low=1, high=8, default=5), 3)
+        self.assertEqual(chat_service._clamp_int("lots", low=1, high=8, default=5), 5)
+        self.assertEqual(chat_service._clamp_int(None, low=1, high=8, default=5), 5)
+
+    def test_clamp_int_falls_back_on_a_non_finite_float(self) -> None:
+        # A genuine defect this task's brief warned against: json.loads accepts bare Infinity as
+        # an extension, so a model can hand this function an actual float('inf'), and
+        # int(float('inf')) raises OverflowError -- not TypeError/ValueError, the tuple the brief
+        # shipped verbatim. Added beyond the brief's own tests to give the fix real coverage.
+        self.assertEqual(chat_service._clamp_int(float("inf"), low=1, high=8, default=5), 5)
+        self.assertEqual(chat_service._clamp_int(float("-inf"), low=1, high=8, default=5), 5)
+
+    def test_parse_tool_args_tolerates_missing_and_malformed_json(self) -> None:
+        self.assertEqual(chat_service._parse_tool_args('{"a": 1}'), {"a": 1})
+        self.assertEqual(chat_service._parse_tool_args(""), {})
+        self.assertEqual(chat_service._parse_tool_args("{not json"), {})
+        self.assertEqual(chat_service._parse_tool_args("[1,2]"), {})  # not an object
+
+    def test_get_analysis_without_a_fault_name_returns_clip_level_material(self) -> None:
+        out = json.loads(chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx()))
+        self.assertEqual(out["quality"], {"valid_frame_ratio": 0.9})
+        self.assertEqual(out["view"], {"view_type": "side"})
+        self.assertEqual([d["fault_name"] for d in out["detections"]], ["Insufficient Depth"])
+        self.assertNotIn("evidence", out["detections"][0])  # summary only, not the full dict
+
+    def test_get_analysis_evidence_carries_the_rep_attribution(self) -> None:
+        # Per-rep identity is what makes "第 2 rep 膝蓋幾度" answerable; it exists on the detection
+        # but not in the compact blob the prompt is built from, so this tool is the only path to it.
+        out = json.loads(
+            chat_service._dispatch_tool(
+                "get_analysis",
+                {"fault_name": "Insufficient Depth", "include": "evidence"},
+                self._ctx(),
+            )
+        )
+        self.assertEqual(out["measured"]["rep_index"], 2)
+        self.assertEqual(out["measured"]["rep_count"], 1)
+
+    def test_get_analysis_evidence_returns_measurements_and_no_knowledge(self) -> None:
+        out = json.loads(
+            chat_service._dispatch_tool(
+                "get_analysis",
+                {"fault_name": "insufficient depth", "include": "evidence"},  # case-insensitive
+                self._ctx(),
+            )
+        )
+        self.assertEqual(out["evidence"], {"hip_knee_delta_deg": 12.5})
+        self.assertEqual(out["measured"]["peak_frame"], 45)
+        self.assertNotIn("knowledge", out)
+
+    def test_get_analysis_knowledge_returns_only_that_faults_retrievals(self) -> None:
+        out = json.loads(
+            chat_service._dispatch_tool(
+                "get_analysis",
+                {"fault_name": "Insufficient Depth", "include": "knowledge"},
+                self._ctx(),
+            )
+        )
+        self.assertEqual(out["knowledge"], [{"results": [{"text": "squat depth passage"}]}])
+        self.assertNotIn("evidence", out)
+
+    def test_get_analysis_unknown_fault_names_what_was_detected(self) -> None:
+        out = json.loads(
+            chat_service._dispatch_tool(
+                "get_analysis", {"fault_name": "Butt Wink", "include": "all"}, self._ctx()
+            )
+        )
+        self.assertIn("error", out)
+        self.assertEqual(out["detected_faults"], ["Insufficient Depth"])
+
+    def test_kg_query_clamps_hops_and_forces_the_thread_movement(self) -> None:
+        from backend.app.services import knowledge as knowledge_service
+
+        with mock.patch.object(
+            knowledge_service, "graph_context", return_value={"ok": True}
+        ) as gc:
+            chat_service._dispatch_tool("kg_query", {"query": "valgus", "hops": 99}, self._ctx())
+        self.assertEqual(gc.call_args.args[0], "valgus")
+        self.assertEqual(gc.call_args.kwargs["hops"], 2)  # clamped from 99
+        self.assertEqual(gc.call_args.kwargs["movement"], "Squat")
+
+    def test_rag_search_clamps_top_k(self) -> None:
+        from backend.app.services import knowledge as knowledge_service
+
+        with mock.patch.object(
+            knowledge_service, "rag_snippets", return_value={"results": []}
+        ) as rs:
+            chat_service._dispatch_tool("rag_search", {"query": "ankle", "top_k": 500}, self._ctx())
+        self.assertEqual(rs.call_args.kwargs["top_k"], 8)  # clamped from 500
+
+    def test_unknown_tool_name_is_an_error_payload_not_an_exception(self) -> None:
+        out = json.loads(chat_service._dispatch_tool("launch_missiles", {}, self._ctx()))
+        self.assertIn("error", out)
+
+    def test_a_raising_tool_becomes_an_error_payload(self) -> None:
+        # A missing KG file must not kill an otherwise-fine answer stream.
+        from backend.app.services import knowledge as knowledge_service
+
+        with mock.patch.object(
+            knowledge_service, "graph_context", side_effect=FileNotFoundError("no graphml")
+        ):
+            out = json.loads(chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()))
+        self.assertIn("error", out)
+        self.assertIn("no graphml", out["error"])
+
+    def test_a_huge_tool_result_is_truncated(self) -> None:
+        from backend.app.services import knowledge as knowledge_service
+
+        with mock.patch.object(
+            knowledge_service, "rag_snippets", return_value={"results": ["x" * 50_000]}
+        ):
+            out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+        self.assertLessEqual(len(out), chat_service._MAX_TOOL_RESULT_CHARS + 32)
+        self.assertTrue(out.endswith("…[truncated]"))
+
+    def test_query_label_picks_the_right_argument_per_tool(self) -> None:
+        self.assertEqual(
+            chat_service._tool_query_label("kg_query", {"query": "knee valgus"}), "knee valgus"
+        )
+        self.assertEqual(
+            chat_service._tool_query_label("get_analysis", {"fault_name": "Depth"}), "Depth"
+        )
+        self.assertEqual(chat_service._tool_query_label("get_analysis", {}), "")
+
+    def test_tool_schemas_are_the_three_expected_functions(self) -> None:
+        names = [t["function"]["name"] for t in chat_service._TOOLS]
+        self.assertEqual(names, ["get_analysis", "kg_query", "rag_search"])
+        for tool in chat_service._TOOLS:
+            self.assertEqual(tool["type"], "function")
+            self.assertIn("description", tool["function"])
+            self.assertIn("properties", tool["function"]["parameters"])
 
 
 # --------------------------------------------------------------------- router contract
