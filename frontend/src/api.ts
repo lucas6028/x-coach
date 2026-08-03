@@ -32,6 +32,14 @@ export interface Detection {
   peak_frame: number;
   phase: string;
   evidence: Record<string, number | string>;
+  /** Per-rep attribution (`PoseRuleDetection`, src/pose/pose_rule_detector.py:105-107), the seam
+   *  that makes "第 2 rep 膝蓋幾度" answerable via the backend's `get_analysis` tool. Optional,
+   *  same as `movement` above: analyses predating per-rep detection carry no per-rep attribution at
+   *  all, and the whole-clip fallback path sets these to their zero/empty defaults rather than
+   *  omitting them, so `undefined` here means "an older client/analysis", not "measured as zero". */
+  rep_index?: number;
+  occurred_reps?: number[];
+  rep_count?: number;
 }
 
 export interface SubgraphNode {

@@ -131,6 +131,13 @@ describe("buildChatContext detail", () => {
         peak_frame: 45,
         phase: "bottom",
         evidence: { hip_knee_delta_deg: 12.5 },
+        // Per-rep attribution (FIX 4, whole-branch review): must survive `buildChatContext`'s
+        // `detail` untouched, matching the backend fixture in
+        // tests/test_chat_endpoint.py::ToolDispatchTests.DETAIL exactly, since the backend test
+        // locks these against a hand-built fixture but this one didn't carry them at all.
+        rep_index: 2,
+        occurred_reps: [2],
+        rep_count: 1,
       },
     ],
     retrievals: [
@@ -146,6 +153,9 @@ describe("buildChatContext detail", () => {
     expect((detail.detections as unknown[])[0]).toMatchObject({
       evidence: { hip_knee_delta_deg: 12.5 },
       peak_frame: 45,
+      rep_index: 2,
+      occurred_reps: [2],
+      rep_count: 1,
     });
     expect(detail.retrievals).toHaveLength(1);
     expect(detail.quality).toEqual({ valid_frame_ratio: 0.9 });

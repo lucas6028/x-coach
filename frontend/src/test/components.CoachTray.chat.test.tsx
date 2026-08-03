@@ -220,6 +220,32 @@ describe("CoachTray — follow-up chat", () => {
     expect(h.putConversation).not.toHaveBeenCalled();
   });
 
+  it("rolls back and does not persist when the stream ends without done or error", async () => {
+    // FIX 1 (whole-branch review): api.chatStream resolves normally the instant the reader drains,
+    // regardless of which frame (if any) was last seen -- a dropped connection / proxy idle-timeout
+    // looks exactly like success here unless the component checks that `done` actually arrived.
+    // Without that check this would commit `{ role: "assistant", content: acc }` (here, a truncated
+    // partial answer) and persist it via putConversation.
+    h.chatStream.mockImplementation(
+      async (_m: unknown, _c: unknown, handlers: { onDelta: (t: string) => void }) => {
+        handlers.onDelta("Drive your kne");
+        // Resolves WITHOUT ever calling onDone or onError.
+      }
+    );
+    renderTray();
+
+    const box = screen.getByPlaceholderText(/Ask a follow-up/i) as HTMLInputElement;
+    await userEvent.type(box, "why?");
+    await userEvent.keyboard("{Enter}");
+
+    await screen.findByRole("alert");
+    // No assistant turn committed, and the (rolled-back) user turn isn't left orphaned either.
+    expect(screen.queryByText("Drive your kne")).not.toBeInTheDocument();
+    expect(screen.queryByText("why?")).not.toBeInTheDocument();
+    expect(box.value).toBe("why?"); // restored for retry
+    expect(h.putConversation).not.toHaveBeenCalled();
+  });
+
   it("sends a starter suggestion directly when its chip is clicked", async () => {
     h.chatStream.mockImplementation(streamReply("Fix your knees first."));
     renderTray();
@@ -478,8 +504,10 @@ describe("CoachTray — follow-up chat", () => {
     // The tool line is up, naming BOTH the tool's label and its subject in one node — asserting on
     // the subject alone would also pass if the label lookup were broken (e.g. hard-coded to the
     // generic fallback), since the subject would still render.
+    // Separator now goes through t("chat.tool.sep") (FIX 5, whole-branch review) -- English renders
+    // ": " (halfwidth), not the fullwidth "：" that used to be hard-coded regardless of language.
     expect(
-      await screen.findByText(/Searching the knowledge graph：zzqury-kg-subject/)
+      await screen.findByText(/Searching the knowledge graph: zzqury-kg-subject/)
     ).toBeTruthy();
 
     // The first answer token retires it.

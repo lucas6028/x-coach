@@ -167,6 +167,16 @@ export default function CoachTray({
     const mySeq = ++followupSeq.current; // this turn owns the next suggestion result
     let acc = "";
     let inbandError = "";
+    // True only once the stream's `done` frame has actually been seen. `api.chatStream` resolves
+    // the instant the reader drains, regardless of which frame (if any) was last — so a connection
+    // that dies mid-flight with neither `done` nor `error` looks exactly like success here. That
+    // window is widest right after `onReset` clears `acc` to "": the very next thing the server
+    // does is `_dispatch_tool`, a graphml load plus a vector query, the slowest blocking work in
+    // the request, and a proxy idle-timeout there would otherwise commit and persist an EMPTY
+    // assistant turn. That is unrecoverable — `ChatRequest.messages` requires `content` to be
+    // non-empty, so the thread could never be posted to again. Checked before `inbandError` so an
+    // unterminated stream is never mistaken for clean just because no error frame happened to fire.
+    let finished = false;
     try {
       await api.chatStream(
         next,
@@ -177,7 +187,9 @@ export default function CoachTray({
             setStreaming(acc);
             setTool(null); // the answer is arriving; any tool work is done.
           },
-          onDone: () => undefined,
+          onDone: () => {
+            finished = true;
+          },
           onTool: (name, query) => setTool({ name, query }),
           // The round that produced this text also called a tool, so it was narration, not the
           // answer. Drop it — `acc` is what gets committed when the stream ends.
@@ -193,6 +205,7 @@ export default function CoachTray({
         },
         getStoredModel(), // the user's Settings choice; server validates against its allowlist
       );
+      if (!finished) throw new ChatError("The coach connection ended unexpectedly.", 502);
       if (inbandError) throw new ChatError(inbandError, 502);
       const thread: ChatMessage[] = [...next, { role: "assistant", content: acc }];
       setMessages(thread);
@@ -450,7 +463,7 @@ export default function CoachTray({
                       {TOOL_LABEL_KEYS.includes(tool.name as (typeof TOOL_LABEL_KEYS)[number])
                         ? t(`chat.tool.${tool.name}` as never)
                         : t("chat.tool.generic")}
-                      {tool.query ? `：${tool.query}` : ""}
+                      {tool.query ? `${t("chat.tool.sep")}${tool.query}` : ""}
                     </span>
                   </div>
                 )}
