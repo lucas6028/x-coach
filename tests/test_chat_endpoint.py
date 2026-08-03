@@ -577,6 +577,132 @@ class StreamCompletionTests(unittest.TestCase):
         self.assertIsNone(ctx.exception.status)
 
 
+class StreamTurnTests(unittest.TestCase):
+    """One model round: text passthrough plus reassembly of fragmented streamed tool calls."""
+
+    def _settings(self):
+        return types.SimpleNamespace(
+            llm_api_key="sk-or-test",
+            llm_base_url="https://openrouter.ai/api/v1",
+        )
+
+    def _run(self, chunks, **kwargs):
+        """Drive _stream_turn over a canned chunk list; return (text_deltas, turn)."""
+        with mock.patch.object(chat_service, "_stream_raw_chunks", return_value=iter(chunks)):
+            items = list(chat_service._stream_turn([{"role": "user", "content": "hi"}], "m", **kwargs))
+        turn = items[-1]
+        self.assertIsInstance(turn, chat_service._Turn)
+        return [i for i in items[:-1]], turn
+
+    def test_text_only_round_yields_deltas_then_a_turn(self) -> None:
+        deltas, turn = self._run(
+            [
+                {"choices": [{"delta": {"content": "Hel"}}]},
+                {"choices": [{"delta": {"content": "lo"}}]},
+                {"choices": [{"delta": {}, "finish_reason": "stop"}]},
+            ]
+        )
+        self.assertEqual(deltas, ["Hel", "lo"])
+        self.assertEqual(turn.text, "Hello")
+        self.assertEqual(turn.tool_calls, [])
+        self.assertEqual(turn.finish_reason, "stop")
+
+    def test_tool_call_arguments_split_across_chunks_are_reassembled(self) -> None:
+        # ``id``/``name`` arrive only on the first fragment; ``arguments`` streams in pieces.
+        _, turn = self._run(
+            [
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "id": "call_a", "function": {"name": "kg_query", "arguments": ""}}
+                ]}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "function": {"arguments": '{"que'}}
+                ]}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "function": {"arguments": 'ry": "knee valgus"}'}}
+                ]}}]},
+                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+        self.assertEqual(
+            turn.tool_calls,
+            [{"id": "call_a", "name": "kg_query", "arguments": '{"query": "knee valgus"}'}],
+        )
+        self.assertEqual(turn.finish_reason, "tool_calls")
+
+    def test_two_interleaved_tool_calls_are_keyed_by_index_not_arrival(self) -> None:
+        # Fragments for index 1 arrive before index 0 finishes; accumulation must key on ``index``.
+        _, turn = self._run(
+            [
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "id": "a", "function": {"name": "kg_query", "arguments": '{"q'}}
+                ]}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 1, "id": "b", "function": {"name": "rag_search", "arguments": '{"x'}}
+                ]}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "function": {"arguments": 'uery": "a"}'}}
+                ]}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 1, "function": {"arguments": '": "b"}'}}
+                ]}}]},
+                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+        self.assertEqual(
+            turn.tool_calls,
+            [
+                {"id": "a", "name": "kg_query", "arguments": '{"query": "a"}'},
+                {"id": "b", "name": "rag_search", "arguments": '{"x": "b"}'},
+            ],
+        )
+
+    def test_narration_and_a_tool_call_in_one_round_are_both_captured(self) -> None:
+        deltas, turn = self._run(
+            [
+                {"choices": [{"delta": {"content": "Let me look that up."}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "id": "c", "function": {"name": "rag_search", "arguments": "{}"}}
+                ]}}]},
+                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+        self.assertEqual(deltas, ["Let me look that up."])
+        self.assertEqual(turn.text, "Let me look that up.")
+        self.assertEqual(len(turn.tool_calls), 1)
+
+    def test_malformed_chunk_shapes_are_tolerated(self) -> None:
+        # Shape tolerance lives HERE, not in the raw layer: usage-only frames, a non-dict choice, a
+        # non-dict delta, and a non-dict tool_calls entry must all be skipped without aborting the
+        # round.
+        deltas, turn = self._run(
+            [
+                {"usage": {"total_tokens": 7}},  # no ``choices``
+                {"choices": []},  # empty ``choices``
+                {"choices": ["not-a-dict"]},  # non-dict choice
+                {"choices": [{"delta": None}]},  # non-dict delta
+                {"choices": [{"delta": {"tool_calls": ["not-a-dict"]}}]},
+                {"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]},
+            ]
+        )
+        self.assertEqual(deltas, ["ok"])
+        self.assertEqual(turn.tool_calls, [])
+
+    def test_tools_are_sent_as_extra_body_only_when_offered(self) -> None:
+        with mock.patch.object(
+            chat_service, "_stream_raw_chunks", return_value=iter([])
+        ) as raw:
+            list(chat_service._stream_turn([], "m", tools=[{"type": "function"}]))
+        self.assertEqual(
+            raw.call_args.kwargs["extra_body"],
+            {"tools": [{"type": "function"}], "tool_choice": "auto"},
+        )
+        with mock.patch.object(
+            chat_service, "_stream_raw_chunks", return_value=iter([])
+        ) as raw:
+            list(chat_service._stream_turn([], "m", tools=None))
+        self.assertIsNone(raw.call_args.kwargs["extra_body"])
+
+
 # --------------------------------------------------------------------- router contract
 
 
