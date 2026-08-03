@@ -382,8 +382,8 @@ def _stream_turn(
     ``index`` field — never by arrival order, never by position in the incoming list.
 
     Shape tolerance lives here (``_stream_raw_chunks`` owns only JSON parsing, spec v3 section 7): a
-    usage-only frame, an empty ``choices``, a non-dict ``delta``, or a non-dict ``tool_calls`` entry
-    are each skipped without aborting the round.
+    usage-only frame, an empty ``choices``, a non-dict ``choice``, a non-dict ``delta``, or a
+    non-dict ``tool_calls`` entry are each skipped without aborting the round.
     """
     parts: list[str] = []
     acc: dict[int, dict[str, Any]] = {}
@@ -411,7 +411,17 @@ def _stream_turn(
         for frag in delta.get("tool_calls") or []:
             if not isinstance(frag, dict):
                 continue
-            slot = acc.setdefault(frag.get("index", 0), {"id": "", "name": "", "arguments": ""})
+            # ``index`` is provider-supplied, not a value this module controls -- a peer could send
+            # it as a numeric JSON string instead of an int. ``acc`` must have homogeneous key types
+            # or the final ``sorted(acc)`` raises ``TypeError`` (str vs int), which is not a
+            # ``RuntimeError``/``_LLMError`` and would escape this generator mid-stream, *after* the
+            # HTTP 200 is already committed to the client. Coerce defensively; an unparseable index
+            # folds into slot 0 rather than crashing the round.
+            try:
+                index = int(frag.get("index", 0))
+            except (TypeError, ValueError):
+                index = 0
+            slot = acc.setdefault(index, {"id": "", "name": "", "arguments": ""})
             if frag.get("id"):
                 slot["id"] = frag["id"]
             fn = frag.get("function") or {}

@@ -670,6 +670,60 @@ class StreamTurnTests(unittest.TestCase):
         self.assertEqual(turn.text, "Let me look that up.")
         self.assertEqual(len(turn.tool_calls), 1)
 
+    def test_nameless_slot_is_dropped_as_a_stray_fragment(self) -> None:
+        # A fragment can carry an ``index``/``id``/``arguments`` but never a ``function.name`` (e.g.
+        # a truncated stream). The slot never became a real call and must not be dispatched.
+        _, turn = self._run(
+            [
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 5, "id": "x", "function": {"arguments": "{}"}}
+                ]}}]},
+                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+        self.assertEqual(turn.tool_calls, [])
+
+    def test_mixed_string_and_int_index_are_coerced_to_the_same_slot(self) -> None:
+        # ``index`` is provider-supplied and not guaranteed to be an int; a numeric-string index for
+        # the same logical call must still land in the same accumulator slot as a later int index,
+        # and the round must complete rather than raise out of ``sorted(acc)``.
+        _, turn = self._run(
+            [
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": "0", "id": "a", "function": {"name": "kg_query", "arguments": '{"q'}}
+                ]}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "function": {"arguments": 'uery": "x"}'}}
+                ]}}]},
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": 1, "id": "b", "function": {"name": "rag_search", "arguments": "{}"}}
+                ]}}]},
+                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+        self.assertEqual(
+            turn.tool_calls,
+            [
+                {"id": "a", "name": "kg_query", "arguments": '{"query": "x"}'},
+                {"id": "b", "name": "rag_search", "arguments": "{}"},
+            ],
+        )
+
+    def test_unparseable_index_falls_back_to_slot_zero(self) -> None:
+        # A provider-supplied ``index`` that isn't coercible to int (not a numeric string, e.g.) must
+        # not crash the round via ``sorted(acc)``; it folds into slot 0 instead.
+        _, turn = self._run(
+            [
+                {"choices": [{"delta": {"tool_calls": [
+                    {"index": "not-a-number", "id": "z", "function": {"name": "kg_query", "arguments": "{}"}}
+                ]}}]},
+                {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+            ]
+        )
+        self.assertEqual(
+            turn.tool_calls, [{"id": "z", "name": "kg_query", "arguments": "{}"}]
+        )
+
     def test_malformed_chunk_shapes_are_tolerated(self) -> None:
         # Shape tolerance lives HERE, not in the raw layer: usage-only frames, a non-dict choice, a
         # non-dict delta, and a non-dict tool_calls entry must all be skipped without aborting the
