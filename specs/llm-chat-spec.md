@@ -484,11 +484,24 @@ defended property. So the layer is split **underneath** it and its signature is 
 _stream_raw_chunks(...) -> Iterator[dict]   # NEW. httpx + SSE line parsing only; yields parsed chunk dicts.
 _stream_completion(...) -> Iterator[str]    # EXISTING, now a thin shell over the above. Signature, behaviour,
                                             # and every existing test unchanged.
-_stream_turn(...)       -> TurnResult       # NEW. Consumes raw chunks; streams text deltas out while
-                                            # accumulating tool_calls + finish_reason.
+_stream_turn(...)       -> TurnResult       # NEW. Consumes raw chunks; accumulates assistant text,
+                                            # tool_calls, and finish_reason for ONE round.
 ```
 
 `TurnResult` carries the assistant text, the reassembled `tool_calls`, and `finish_reason`.
+
+**Only the final round emits `delta` frames.** A round whose `finish_reason` is `tool_calls` may
+*also* have produced prose — many models narrate before calling ("讓我查一下知識圖譜…"). That text must
+**not** reach the client: `delta` frames cannot be retracted, so streaming it would concatenate the
+narration with the real answer the model writes after the tool result, both on screen and in the
+persisted assistant turn. Non-final rounds therefore buffer their text and put it into the message
+array as the assistant turn preceding the `tool` results — which is what the OpenAI-compatible
+contract expects anyway — and emit nothing to the client but the `event: tool` frames. The one round
+that ends without tool calls is the only one that streams.
+
+This also makes §2's "no `delta` has been yielded yet" retry precondition **trivially true for every
+round but the last**, which is stronger than a runtime check: the retry path is reachable throughout
+the loop, and only the final round can be past the point of no return.
 
 **Fragment reassembly is the sharp edge.** Streamed tool calls arrive split: `delta.tool_calls[i]`
 carries `id` and `function.name` typically only on the first chunk, and `function.arguments` as
@@ -585,6 +598,11 @@ events, so **the backend can ship before the client**.
 - `ChatContext.detail` is **not persisted** — `upsert_conversation` stores messages + followups only,
   never the context. The cost of `detail` is HTTP body size, not tokens or storage: it enters the
   prompt only when a tool actually returns it.
+- **`/api/chat/followups` sends `detail: undefined`.** It shares `ChatRequest`, so it would otherwise
+  re-upload the whole blob — dominated by `retrievals[].context.results[].text` (full RAG chunks,
+  the bulk of the payload on a multi-fault clip) — on a fire-and-forget call that can never use it.
+  `detail` is optional on the model precisely so this call can omit it. Chip latency is a defended
+  property; nothing gets added to that path.
 - `suggest_followups` sends **no** `tools`. Chips stay on the fast pinned model at ~1.5s.
 
 ## 7. Testing (v3)
@@ -599,10 +617,26 @@ Backend (`tests/test_chat_endpoint.py`, `unittest.TestCase`):
   `error`, no retry.
 - Per tool: dispatch, argument clamping (`hops`, `top_k` out of range and non-numeric), unknown tool
   name, a tool that raises.
+- Narration on a tool round is **not** streamed: a round returning both prose and `tool_calls` emits
+  zero `delta` frames, and its text appears only in the message array handed to the next round.
 - The `tool` SSE frame shape.
 - `suggest_followups` sends no `tools` (regression lock on the chip path).
-- `_stream_completion`'s existing tests must pass **unmodified** — that is the check that the
-  refactor was non-breaking.
+- `_stream_completion`'s existing tests must pass **unmodified**. Necessary but *not sufficient*:
+  four of them (`test_chat_endpoint.py:409,439,462,484,492`) mock `httpx.stream`, so they sit above
+  the new split and would still pass over a raw layer that silently dropped frames the old parser
+  handled. The raw layer therefore gets its own direct tests for the three behaviours currently
+  fused into `chat.py:288-299`: the `[DONE]` terminator, non-`data:` keep-alive/comment lines
+  skipped, and malformed-frame tolerance.
+
+**Decide where malformed-frame tolerance lives, and write it down.** Today the
+`except (JSONDecodeError, KeyError, IndexError, TypeError): continue` guard sits in the *same* `try`
+as content extraction, so "unparseable JSON" and "well-formed chunk with no content" are handled
+identically. After the split they must not be: `_stream_raw_chunks` owns **only** JSON-level
+tolerance (skip a chunk that will not parse), and `_stream_turn` owns shape tolerance (a parsed chunk
+with no `choices`, no `delta`, or neither `content` nor `tool_calls`). If the raw layer silently
+swallows a partially-delivered chunk instead, a dropped `tool_calls` fragment corrupts the
+reassembly with no error anywhere — and the §7 reassembly tests will not catch it, because they feed
+well-formed fragments. Test the raw layer with a truncated/garbage `data:` line explicitly.
 
 Frontend (`frontend/src/test/`): `dispatchSSE` routes `tool`; an old handler set without `onTool`
 ignores it; `CoachTray` renders and clears the status line; `buildChatContext` emits `detail` and
@@ -620,7 +654,9 @@ Gates: `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95
 3. A clean rep still gets the CLEAN REP response, and an unmeasurable clip still gets the NOT
    MEASURED response — unchanged from v2.
 4. A model that rejects `tools` still answers, with no user-visible error.
-5. Follow-up chip latency is unchanged (~1.5s).
+5. Follow-up chip latency is unchanged (~1.5s). **Live measurement, not a suite gate** — the unit
+   tests can only lock that the chip path sends no `tools` and no `detail`; the timing itself has to
+   be checked against the real endpoint, the way v2.1's ~1.5s figure was.
 6. Both coverage gates pass.
 
 ## Known risks
