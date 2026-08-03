@@ -180,14 +180,17 @@ class AnswerStreamTests(unittest.TestCase):
     def test_yields_deltas_then_done_and_prepends_system_prompt(self) -> None:
         seen: dict[str, object] = {}
 
-        def fake_stream(messages, model):
+        def fake_turn(messages, model, *, timeout=None, tools=None):
             seen["messages"] = messages
             seen["model"] = model
             yield "Drive "
             yield "knees out"
+            yield chat_service._Turn(
+                text="Drive knees out", tool_calls=[], finish_reason="stop"
+            )
 
         history = [{"role": "user", "content": "why did my knees cave?"}]
-        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
             frames = "".join(
                 chat_service.answer_stream(messages=history, context=_FAULT_CTX, model="vendor/m-x")
             )
@@ -198,20 +201,18 @@ class AnswerStreamTests(unittest.TestCase):
         self.assertIn("event: done", frames)
         self.assertIn("vendor/m-x", frames)  # the actually-used model rides the done frame
         self.assertNotIn("event: error", frames)
-        # The chosen model is passed straight to the transport.
         self.assertEqual(seen["model"], "vendor/m-x")
-        # The grounded system prompt is prepended; the user history follows untouched.
         sent = seen["messages"]
         self.assertEqual(sent[0]["role"], "system")
         self.assertIn("knees_inward", sent[0]["content"])
-        self.assertEqual(sent[1:], history)
+        self.assertEqual(sent[1:], history)  # user history still follows the system turn untouched
 
     def test_midstream_failure_yields_error_frame_and_no_done(self) -> None:
-        def fake_stream(messages, model):
+        def fake_turn(messages, model, *, timeout=None, tools=None):
             yield "partial answer"
-            raise RuntimeError("LLM request failed: connection reset")
+            raise chat_service._LLMError("LLM request failed: connection reset")
 
-        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
             frames = "".join(
                 chat_service.answer_stream(
                     messages=[{"role": "user", "content": "hi"}], context=_FAULT_CTX, model="m"
@@ -224,12 +225,13 @@ class AnswerStreamTests(unittest.TestCase):
         self.assertNotIn("event: done", frames)
 
     def test_empty_completion_yields_error_not_done(self) -> None:
-        # The v1 empty-completion invariant survives into streaming: a blank accumulation must emit
-        # an error, never a done, so the client never keeps an empty assistant turn.
-        def fake_stream(messages, model):
+        # The v1 empty-completion invariant survives into the tool loop: a blank accumulation must
+        # emit an error, never a done, so the client never keeps an empty assistant turn.
+        def fake_turn(messages, model, *, timeout=None, tools=None):
             yield "   "  # whitespace only -> strips to empty
+            yield chat_service._Turn(text="   ", tool_calls=[], finish_reason="stop")
 
-        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
             frames = "".join(
                 chat_service.answer_stream(
                     messages=[{"role": "user", "content": "hi"}], context=_CLEAN_CTX, model="m"
@@ -241,12 +243,15 @@ class AnswerStreamTests(unittest.TestCase):
         self.assertNotIn("event: done", frames)
 
     def test_answer_stream_carries_no_followups(self) -> None:
-        # Follow-ups are a SEPARATE endpoint now (suggest_followups); the answer stream must stay the
-        # clean delta/done contract and never carry a followups frame.
-        def fake_stream(messages, model):
+        # Follow-ups are a SEPARATE endpoint (suggest_followups); the answer stream must never carry
+        # a followups frame, tool loop or not.
+        def fake_turn(messages, model, *, timeout=None, tools=None):
             yield "Drive knees out."
+            yield chat_service._Turn(
+                text="Drive knees out.", tool_calls=[], finish_reason="stop"
+            )
 
-        with mock.patch.object(chat_service, "_stream_completion", fake_stream):
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
             frames = "".join(
                 chat_service.answer_stream(
                     messages=[{"role": "user", "content": "why?"}], context=_FAULT_CTX, model="m"
@@ -256,6 +261,192 @@ class AnswerStreamTests(unittest.TestCase):
         self.assertIn("Drive knees out.", frames)
         self.assertNotIn("event: followups", frames)
         self.assertIn("event: done", frames)
+
+
+class ToolLoopTests(unittest.TestCase):
+    """The answer loop: tool rounds, retraction, round/time caps, and tools-unsupported fallback."""
+
+    CONTEXT = {"movement": "Squat", "faults": [], "quality": {"valid_frame_ratio": 0.9}}
+
+    def _turns(self, *rounds):
+        """Build a _stream_turn stub that replays one canned round per call.
+
+        Each ``round`` is ``(text_deltas, tool_calls)``; the stub yields the deltas then a _Turn.
+        """
+        calls = []
+
+        def fake(messages, model, *, timeout=None, tools=None):
+            calls.append({"messages": [dict(m) for m in messages], "tools": tools})
+            deltas, tool_calls = rounds[len(calls) - 1]
+            for d in deltas:
+                yield d
+            yield chat_service._Turn(
+                text="".join(deltas),
+                tool_calls=list(tool_calls),
+                finish_reason="tool_calls" if tool_calls else "stop",
+            )
+
+        return fake, calls
+
+    @staticmethod
+    def _events(frames):
+        """Parse rendered SSE frames into [(event, data), ...]."""
+        out = []
+        for frame in "".join(frames).split("\n\n"):
+            if not frame.strip():
+                continue
+            lines = frame.split("\n")
+            event = lines[0][len("event:") :].strip()
+            data = json.loads(lines[1][len("data:") :].strip())
+            out.append((event, data))
+        return out
+
+    def _run(self, fake_turn, dispatch=None):
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn), mock.patch.object(
+            chat_service, "_dispatch_tool", dispatch or (lambda n, a, c: '{"ok": true}')
+        ), mock.patch.object(chat_service, "chat_timeout", return_value=60.0):
+            return self._events(
+                list(
+                    chat_service.answer_stream(
+                        messages=[{"role": "user", "content": "hi"}],
+                        context=self.CONTEXT,
+                        model="m",
+                    )
+                )
+            )
+
+    def test_a_plain_turn_streams_deltas_with_no_tool_or_reset_frames(self) -> None:
+        # Regression lock: the common path (no tool call) must stream token-by-token exactly as it
+        # does today -- not be buffered and flushed at the end.
+        fake, calls = self._turns((["Hel", "lo"], []))
+        events = self._run(fake)
+        self.assertEqual(
+            events, [("delta", {"text": "Hel"}), ("delta", {"text": "lo"}), ("done", {"model": "m"})]
+        )
+        self.assertIsNotNone(calls[0]["tools"])  # tools were offered on round 1
+
+    def test_a_tool_round_emits_a_tool_frame_then_the_answer(self) -> None:
+        fake, calls = self._turns(
+            ([], [{"id": "c1", "name": "kg_query", "arguments": '{"query": "valgus"}'}]),
+            (["Answer"], []),
+        )
+        events = self._run(fake)
+        self.assertEqual(
+            events,
+            [
+                ("tool", {"name": "kg_query", "query": "valgus"}),
+                ("delta", {"text": "Answer"}),
+                ("done", {"model": "m"}),
+            ],
+        )
+        # Round 2 saw the assistant tool_calls turn plus the tool result appended.
+        roles = [m["role"] for m in calls[1]["messages"]]
+        self.assertEqual(roles[-2:], ["assistant", "tool"])
+        self.assertEqual(calls[1]["messages"][-1]["tool_call_id"], "c1")
+
+    def test_narration_plus_a_tool_call_is_retracted_with_a_reset_frame(self) -> None:
+        fake, _ = self._turns(
+            (["Let me check."], [{"id": "c1", "name": "rag_search", "arguments": '{"query": "x"}'}]),
+            (["Real answer"], []),
+        )
+        events = self._run(fake)
+        self.assertEqual(
+            events,
+            [
+                ("delta", {"text": "Let me check."}),
+                ("reset", {}),
+                ("tool", {"name": "rag_search", "query": "x"}),
+                ("delta", {"text": "Real answer"}),
+                ("done", {"model": "m"}),
+            ],
+        )
+
+    def test_a_tool_round_with_no_narration_emits_no_reset(self) -> None:
+        fake, _ = self._turns(
+            ([], [{"id": "c1", "name": "kg_query", "arguments": "{}"}]),
+            (["A"], []),
+        )
+        self.assertNotIn("reset", [e for e, _ in self._run(fake)])
+
+    def test_the_loop_stops_after_three_tool_rounds_and_forces_a_toolless_answer(self) -> None:
+        call = [{"id": "c", "name": "kg_query", "arguments": "{}"}]
+        fake, calls = self._turns(
+            ([], call), ([], call), ([], call), (["Forced"], [])
+        )
+        events = self._run(fake)
+        self.assertEqual(events[-2:], [("delta", {"text": "Forced"}), ("done", {"model": "m"})])
+        self.assertEqual(len(calls), 4)
+        self.assertIsNotNone(calls[2]["tools"])  # round 3 still offers tools
+        self.assertIsNone(calls[3]["tools"])  # the forced final round does not
+
+    def test_an_exhausted_time_budget_stops_the_loop(self) -> None:
+        # chat_timeout() of 0 means there is no budget left before the first round even starts.
+        fake, _ = self._turns((["never"], []))
+        with mock.patch.object(chat_service, "_stream_turn", fake), mock.patch.object(
+            chat_service, "chat_timeout", return_value=0.0
+        ):
+            events = self._events(
+                list(
+                    chat_service.answer_stream(
+                        messages=[{"role": "user", "content": "hi"}],
+                        context=self.CONTEXT,
+                        model="m",
+                    )
+                )
+            )
+        self.assertEqual([e for e, _ in events], ["error"])
+
+    def test_a_4xx_before_any_delta_retries_once_without_tools(self) -> None:
+        attempts = []
+
+        def fake(messages, model, *, timeout=None, tools=None):
+            attempts.append(tools)
+            if len(attempts) == 1:
+                raise chat_service._LLMError("no tool support", status=400)
+            yield "Plain"
+            yield chat_service._Turn(text="Plain", tool_calls=[], finish_reason="stop")
+
+        events = self._run(fake)
+        self.assertEqual(events, [("delta", {"text": "Plain"}), ("done", {"model": "m"})])
+        self.assertIsNotNone(attempts[0])  # first attempt offered tools
+        self.assertIsNone(attempts[1])  # the retry did not
+
+    def test_a_4xx_after_a_delta_is_a_terminal_error_with_no_retry(self) -> None:
+        attempts = []
+
+        def fake(messages, model, *, timeout=None, tools=None):
+            attempts.append(tools)
+            yield "partial"
+            raise chat_service._LLMError("died mid-stream", status=400)
+
+        events = self._run(fake)
+        self.assertEqual([e for e, _ in events], ["delta", "error"])
+        self.assertEqual(len(attempts), 1)  # committed output -> no retry
+
+    def test_a_transport_failure_is_never_retried(self) -> None:
+        attempts = []
+
+        def fake(messages, model, *, timeout=None, tools=None):
+            attempts.append(tools)
+            raise chat_service._LLMError("connection reset")  # status=None
+            yield  # pragma: no cover — makes this a generator
+
+        events = self._run(fake)
+        self.assertEqual([e for e, _ in events], ["error"])
+        self.assertEqual(len(attempts), 1)
+
+    def test_an_empty_completion_is_still_an_error(self) -> None:
+        fake, _ = self._turns(([], []))
+        events = self._run(fake)
+        self.assertEqual([e for e, _ in events], ["error"])
+
+    def test_the_tool_grounding_rule_is_in_the_system_prompt(self) -> None:
+        fake, calls = self._turns((["ok"], []))
+        self._run(fake)
+        system = calls[0]["messages"][0]["content"]
+        self.assertEqual(calls[0]["messages"][0]["role"], "system")
+        self.assertIn("REFERENCE MATERIAL", system)
+        self.assertIn("ANALYSIS FACTS", system)  # the v2 prompt is still there, unchanged
 
 
 # --------------------------------------------------------------- service: follow-up parsing
@@ -1077,6 +1268,13 @@ class ChatRouterTests(unittest.TestCase):
         self.assertEqual(resp.questions, ["Widen my stance?", "Go lower next rep?"])
         self.assertEqual(captured["messages"][-1]["role"], "assistant")  # thread ends on the answer
         self.assertEqual(captured["model"], "openai/gpt-oss-120b")  # pinned, not "minimax/minimax-m3"
+
+    def test_chat_context_accepts_a_detail_blob(self) -> None:
+        from backend.app.routers.chat import ChatContext
+
+        ctx = ChatContext(fault_count=0, detail={"detections": [], "retrievals": []})
+        self.assertEqual(ctx.model_dump()["detail"], {"detections": [], "retrievals": []})
+        self.assertIsNone(ChatContext(fault_count=0).model_dump()["detail"])  # optional
 
 
 def _fake_models(models: str, followup: str = "openai/gpt-oss-120b"):

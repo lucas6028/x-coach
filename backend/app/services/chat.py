@@ -26,6 +26,7 @@ corrupt the answer — and the answer stream stays the clean ``delta``/``done``/
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -93,6 +94,22 @@ def _followup_instruction(movement: str) -> str:
 # a cue to run the task — so the ask is restated as the final user turn (the conventional "do X over
 # this conversation" shape); the grounding + detailed instruction still live in the system prompt.
 _FOLLOWUP_NUDGE = "Now output ONLY the JSON array of exactly two follow-up questions."
+
+# The honesty rule that live retrieval makes necessary, and that v1/v2 never needed. kg_query and
+# rag_search return knowledge about faults THIS REP DID NOT EXHIBIT; nothing in the v2 GROUNDING
+# RULES stops a model from relaying a retrieved fault as an observation, because before v3 there was
+# no channel through which one could arrive. Appended to (never woven into) _build_system_prompt, so
+# the CLEAN REP / NOT MEASURED branches and their tests stay byte-identical.
+_TOOL_GROUNDING_RULE = (
+    "\nTOOL RULES:\n"
+    "- You may call tools to look things up before answering.\n"
+    "- `get_analysis` returns MORE DETAIL ABOUT THIS VIDEO. It is as authoritative as the facts "
+    "above — it is the same analysis, just uncompressed.\n"
+    "- Knowledge returned by `kg_query` and `rag_search` is REFERENCE MATERIAL, NOT AN OBSERVATION "
+    "ABOUT THIS VIDEO. If they mention a fault, that does NOT mean the user committed it. Only the "
+    "faults listed in ANALYSIS FACTS were actually detected. When you use retrieved knowledge, say "
+    "plainly that it is general reference rather than something measured in this rep.\n"
+)
 
 # Extra OpenRouter body for the follow-up call: route to the lowest-latency provider for the pinned
 # model. Measured to be the real fix for the 3–10s chip-latency variance — without it, OpenRouter can
@@ -445,6 +462,10 @@ def _stream_turn(
 # window on round 2 — so every result is truncated to this budget before it goes back to the model.
 _MAX_TOOL_RESULT_CHARS = 4000
 
+# Three tools, one call each, is the realistic ceiling for a coaching follow-up; beyond that the
+# model is looping rather than researching. The (N+1)th round is the forced tools-free one.
+_MAX_TOOL_ROUNDS = 3
+
 # The tool catalogue, in the OpenAI-compatible ``tools`` schema. The descriptions do real work here:
 # they are the only place the model learns that kg_query/rag_search return GENERAL knowledge rather
 # than observations about this clip, which is the honesty risk live retrieval introduces (spec v3
@@ -764,28 +785,138 @@ def suggest_followups(
 def answer_stream(
     *, messages: list[dict[str, str]], context: dict[str, Any], model: str
 ) -> Iterator[str]:
-    """Stream a grounded coaching reply for ``messages`` as SSE frames.
+    """Stream a grounded coaching reply for ``messages`` as SSE frames, running tools as needed.
 
     ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last; the
     backend prepends the grounded system prompt. ``model`` is the already-resolved (allow-listed)
-    provider slug. Yields zero or more ``delta`` frames, then exactly one terminator: ``done``
-    (carrying the model actually used) on success, or ``error`` on any transport failure or an empty
-    completion. The empty-completion guard preserves the v1 invariant — the client must never keep an
-    empty assistant turn, which the next send's ``content min_length=1`` would reject. Follow-up
-    suggestions are intentionally NOT part of this stream (see ``suggest_followups``): the answer path
-    stays clean and closes the moment the answer is done, so nothing delays it.
-    """
-    system = _build_system_prompt(context)
-    parts: list[str] = []
-    try:
-        for chunk in _stream_completion([{"role": "system", "content": system}, *messages], model):
-            parts.append(chunk)
-            yield _sse("delta", {"text": chunk})
-    except RuntimeError as exc:
-        yield _sse("error", {"detail": str(exc)})
-        return
+    provider slug. Yields ``delta`` frames, optional ``tool``/``reset`` frames, then exactly one
+    terminator: ``done`` (carrying the model used) or ``error``.
 
-    if not "".join(parts).strip():
+    TOOL ROUND-TRIPS NEVER LEAVE THIS FUNCTION. ``ChatMessage.role`` is ``Literal["user",
+    "assistant"]``, the client holds the conversation, and ``store.upsert_conversation`` persists it
+    — so a ``role:"tool"`` turn has nowhere to live. The loop therefore runs entirely server-side
+    inside one request and only the final assistant text is streamed and persisted (spec v3
+    decision 3).
+
+    RETRACTION, NOT BUFFERING (spec v3 section 1). A round streams its text the moment it arrives,
+    because ``finish_reason`` only lands at the *end* of a round — "stream only the final round"
+    is undecidable in flight and degenerates into buffering every round, which would cost
+    token-by-token streaming on the commonest path of all, the turn that calls no tools. Instead, if
+    a round turns out to have produced BOTH text and tool calls, a ``reset`` frame tells the client
+    to discard what it has. That is safe because the client commits the assistant turn only after
+    the stream ends.
+
+    THE TIME BUDGET IS SHARED, NOT PER-ROUND. This endpoint is metered; N rounds must not cost N×
+    ``chat_timeout()``. Each round is given only what is left.
+    """
+    system = _build_system_prompt(context) + _TOOL_GROUNDING_RULE
+    convo: list[dict[str, Any]] = [{"role": "system", "content": system}, *messages]
+    deadline = time.monotonic() + chat_timeout()
+    # True once the HTTP 200 has carried output, which makes a retry illegal (it would double-emit).
+    # NOTE it is always False at the TOP of an iteration, by induction: it starts False, and reaching
+    # the next iteration requires tool calls, after which a round that narrated has emitted ``reset``
+    # and cleared it while a round that did not never set it. That is why the timeout branch above
+    # cannot have an "already streamed" case — do not add one back; it would be dead code and would
+    # show up as a partial branch under the 95% coverage gate.
+    streamed_any = False
+    answer = ""
+
+    for round_index in range(_MAX_TOOL_ROUNDS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            # Nothing has reached the client at this point, ever — see the ``streamed_any`` note
+            # below — so an honest error is the only outcome available here.
+            yield _sse("error", {"detail": "The coach ran out of time before answering."})
+            return
+
+        # The extra final iteration never offers tools: it is the "answer from what you gathered"
+        # round the caps fall through to, so the user gets prose instead of a failure.
+        offer_tools = round_index < _MAX_TOOL_ROUNDS
+        turn: _Turn | None = None
+        narrated = False
+
+        try:
+            for item in _stream_turn(
+                convo, model, timeout=remaining, tools=_TOOLS if offer_tools else None
+            ):
+                if isinstance(item, _Turn):
+                    turn = item
+                else:
+                    narrated = True
+                    streamed_any = True
+                    yield _sse("delta", {"text": item})
+        except _LLMError as exc:
+            # A 4xx *before anything reached the client* is the signature of a model that rejects the
+            # ``tools`` field. Retry this same round once, plainly, so an unsupported model degrades
+            # to today's behaviour instead of failing visibly. A transport failure (status None)
+            # cannot be retried into working, and once output is committed a retry would double-emit.
+            retryable = (
+                offer_tools
+                and not streamed_any
+                and exc.status is not None
+                and 400 <= exc.status < 500
+            )
+            if not retryable:
+                yield _sse("error", {"detail": str(exc)})
+                return
+            try:
+                for item in _stream_turn(
+                    convo, model, timeout=max(deadline - time.monotonic(), 1.0), tools=None
+                ):
+                    if isinstance(item, _Turn):
+                        turn = item
+                    else:
+                        streamed_any = True
+                        yield _sse("delta", {"text": item})
+            except _LLMError as retry_exc:
+                yield _sse("error", {"detail": str(retry_exc)})
+                return
+            offer_tools = False  # the retry ran without tools, so this round is final by construction
+
+        if turn is None:  # the round produced no terminal _Turn at all — treat as an empty reply.
+            yield _sse("error", {"detail": "The LLM returned an empty message."})
+            return
+
+        # ``not offer_tools`` closes the door on a model that emits tool_calls it was never offered:
+        # without it such a round would loop until the range is exhausted and fall out with no answer.
+        if not turn.tool_calls or not offer_tools:
+            answer += turn.text
+            break
+
+        if narrated:
+            # This round narrated AND called a tool. The narration is not the answer — retract it,
+            # and re-arm the retry precondition, since the client is back to a clean slate.
+            yield _sse("reset", {})
+            streamed_any = False
+
+        convo.append(
+            {
+                "role": "assistant",
+                "content": turn.text,
+                "tool_calls": [
+                    {
+                        "id": c["id"] or f"call_{i}",
+                        "type": "function",
+                        "function": {"name": c["name"], "arguments": c["arguments"]},
+                    }
+                    for i, c in enumerate(turn.tool_calls)
+                ],
+            }
+        )
+        for i, call in enumerate(turn.tool_calls):
+            args = _parse_tool_args(call["arguments"])
+            yield _sse("tool", {"name": call["name"], "query": _tool_query_label(call["name"], args)})
+            convo.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call["id"] or f"call_{i}",
+                    "content": _dispatch_tool(call["name"], args, context),
+                }
+            )
+
+    if not answer.strip():
+        # Preserves the v1 invariant: the client must never keep an empty assistant turn, which the
+        # next send's ``content min_length=1`` would reject.
         yield _sse("error", {"detail": "The LLM returned an empty message."})
         return
 
