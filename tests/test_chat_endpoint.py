@@ -832,6 +832,7 @@ class ToolDispatchTests(unittest.TestCase):
             )
         )
         self.assertEqual(out["measured"]["rep_index"], 2)
+        self.assertEqual(out["measured"]["occurred_reps"], [2])
         self.assertEqual(out["measured"]["rep_count"], 1)
 
     def test_get_analysis_evidence_returns_measurements_and_no_knowledge(self) -> None:
@@ -910,6 +911,48 @@ class ToolDispatchTests(unittest.TestCase):
             out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
         self.assertLessEqual(len(out), chat_service._MAX_TOOL_RESULT_CHARS + 32)
         self.assertTrue(out.endswith("…[truncated]"))
+
+    def test_a_result_with_a_non_string_dict_key_does_not_raise(self) -> None:
+        # json.dumps' `default` hook is never consulted for dict KEYS -- only values -- so a
+        # non-string/int/float/bool/None key raises TypeError regardless of `default=str`. This
+        # must be caught the same as a tool call raising, not escape as an unhandled exception.
+        from backend.app.services import knowledge as knowledge_service
+
+        with mock.patch.object(
+            knowledge_service, "rag_snippets", return_value={("a", "b"): "value"}
+        ):
+            out = json.loads(chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()))
+        self.assertIn("error", out)
+        self.assertIn("rag_search failed", out["error"])
+
+    def test_a_circular_result_does_not_raise(self) -> None:
+        # json's own cycle detector raises ValueError before `default` is ever reached, so
+        # `default=str` cannot rescue a self-referencing structure either.
+        from backend.app.services import knowledge as knowledge_service
+
+        circular: dict[str, Any] = {}
+        circular["self"] = circular
+        with mock.patch.object(knowledge_service, "graph_context", return_value=circular):
+            out = json.loads(chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()))
+        self.assertIn("error", out)
+        self.assertIn("kg_query failed", out["error"])
+
+    def test_a_value_whose_str_raises_does_not_raise(self) -> None:
+        # `default=str` calls str(obj) on an otherwise-unserialisable value; if that object's own
+        # __str__ raises, json.dumps propagates whatever it raised -- this is the third of the
+        # three `default=str` failure modes, distinct from the key and cycle cases above.
+        from backend.app.services import knowledge as knowledge_service
+
+        class _Explodes:
+            def __str__(self) -> str:
+                raise RuntimeError("boom")
+
+        with mock.patch.object(
+            knowledge_service, "rag_snippets", return_value={"bad": _Explodes()}
+        ):
+            out = json.loads(chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()))
+        self.assertIn("error", out)
+        self.assertIn("rag_search failed", out["error"])
 
     def test_query_label_picks_the_right_argument_per_tool(self) -> None:
         self.assertEqual(
