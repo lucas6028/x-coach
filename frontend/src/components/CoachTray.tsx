@@ -14,6 +14,11 @@ import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
 import { LumenAvatar, LumenLoader } from "./LumenLoader";
 import Markdown from "./Markdown";
 
+// The tools we have i18n labels for. A name outside this list falls back to the generic label —
+// `t()` returns the key itself on a miss (i18n.tsx:1421), so an unguarded lookup would render a raw
+// key like "chat.tool.something_else" into the tray.
+const TOOL_LABEL_KEYS = ["get_analysis", "kg_query", "rag_search"] as const;
+
 interface Props {
   analysis: Analysis;
   currentTime: number;
@@ -55,6 +60,9 @@ export default function CoachTray({
   // below the committed thread while loading; committed into `messages` on a clean `done`, or
   // discarded on an error (the optimistic user turn is rolled back alongside it).
   const [streaming, setStreaming] = useState("");
+  // The tool the coach is currently running, shown as a transient status line. Cleared the moment
+  // the real answer starts streaming — the tool work is finished by then, by construction.
+  const [tool, setTool] = useState<{ name: string; query: string } | null>(null);
   // Two grounded next-question suggestions the coach offers after an answer. Captured per answer and
   // persisted alongside the thread (only the latest set), so a reload restores the chips, not just
   // the response; cleared on a new send / analysis.
@@ -153,6 +161,7 @@ export default function CoachTray({
     setError("");
     setLoading(true);
     setStreaming("");
+    setTool(null);
     setFollowups([]); // drop the previous answer's suggestions while this one streams
     stickToBottom.current = true; // a fresh send re-engages auto-follow (user is acting at the foot)
     const mySeq = ++followupSeq.current; // this turn owns the next suggestion result
@@ -166,8 +175,16 @@ export default function CoachTray({
           onDelta: (tkn) => {
             acc += tkn;
             setStreaming(acc);
+            setTool(null); // the answer is arriving; any tool work is done.
           },
           onDone: () => undefined,
+          onTool: (name, query) => setTool({ name, query }),
+          // The round that produced this text also called a tool, so it was narration, not the
+          // answer. Drop it — `acc` is what gets committed when the stream ends.
+          onReset: () => {
+            acc = "";
+            setStreaming("");
+          },
           // An in-band error (LLM provider connect/mid-stream/empty) isn't thrown — capture it and
           // rethrow below so success and failure share one rollback path.
           onError: (detail) => {
@@ -207,6 +224,7 @@ export default function CoachTray({
     } finally {
       setLoading(false);
       setStreaming("");
+      setTool(null);
     }
   }
 
@@ -423,8 +441,21 @@ export default function CoachTray({
                     <Markdown>{streaming}</Markdown>
                   </div>
                 )}
+                {/* A tool is running: name what the coach is looking up, and what for. The project's
+                    whole thesis is explainability, so the query is shown, not just a spinner. */}
+                {tool && !streaming && (
+                  <div className="flex items-center gap-2 text-xs text-muted">
+                    <LumenLoader variant="dots" />
+                    <span>
+                      {TOOL_LABEL_KEYS.includes(tool.name as (typeof TOOL_LABEL_KEYS)[number])
+                        ? t(`chat.tool.${tool.name}` as never)
+                        : t("chat.tool.generic")}
+                      {tool.query ? `：${tool.query}` : ""}
+                    </span>
+                  </div>
+                )}
                 {/* Lumen's dots only until the first token lands; then the streaming text carries it. */}
-                {loading && !streaming && (
+                {loading && !streaming && !tool && (
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <LumenLoader variant="dots" />
                     {t("chat.thinking")}
