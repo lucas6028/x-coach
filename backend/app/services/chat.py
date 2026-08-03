@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 from backend.app import config
@@ -345,6 +346,87 @@ def _stream_completion(
             continue
         if delta:
             yield delta
+
+
+@dataclass
+class _Turn:
+    """Everything one model round produced: its text, its tool calls, and why it stopped.
+
+    ``tool_calls`` entries are the *reassembled* form — ``{"id", "name", "arguments"}`` with
+    ``arguments`` as the concatenated JSON string, not yet parsed (parsing is the dispatcher's job,
+    and a model can emit malformed JSON there).
+    """
+
+    text: str
+    tool_calls: list[dict[str, Any]]
+    finish_reason: str | None
+
+
+def _stream_turn(
+    messages: list[dict[str, Any]],
+    model: str,
+    *,
+    timeout: float | None = None,
+    tools: list[dict[str, Any]] | None = None,
+) -> Iterator[str | _Turn]:
+    """Run ONE model round: yield each text delta as it arrives, then exactly one ``_Turn`` last.
+
+    The odd ``str | _Turn`` shape exists because the caller is itself a generator streaming SSE to a
+    live client: it has to forward text the instant it arrives *and* receive the round's summary at
+    the end, and a plain return value cannot do both. The ``_Turn`` is always the final item.
+
+    STREAMED TOOL CALLS ARRIVE FRAGMENTED, and this is the sharp edge of the whole feature.
+    ``delta.tool_calls[i]`` carries ``id`` and ``function.name`` typically only on the *first* chunk
+    that mentions index ``i``, then ``function.arguments`` as successive string fragments. Two calls
+    can interleave freely. Everything is therefore accumulated in a dict keyed by the fragment's own
+    ``index`` field — never by arrival order, never by position in the incoming list.
+
+    Shape tolerance lives here (``_stream_raw_chunks`` owns only JSON parsing, spec v3 section 7): a
+    usage-only frame, an empty ``choices``, a non-dict ``delta``, or a non-dict ``tool_calls`` entry
+    are each skipped without aborting the round.
+    """
+    parts: list[str] = []
+    acc: dict[int, dict[str, Any]] = {}
+    finish_reason: str | None = None
+    # ``tools``/``tool_choice`` are standard OpenAI-compatible fields, so unlike the ``provider``
+    # routing body they are NOT gated on ``_is_openrouter`` — any peer speaking the dialect takes them.
+    extra_body = {"tools": tools, "tool_choice": "auto"} if tools else None
+
+    for chunk in _stream_raw_chunks(messages, model, timeout=timeout, extra_body=extra_body):
+        try:
+            choice = chunk["choices"][0]
+        except (KeyError, IndexError, TypeError):
+            continue  # usage-only frame or an unexpected envelope — nothing to fold in.
+        if not isinstance(choice, dict):
+            continue
+        if choice.get("finish_reason"):
+            finish_reason = choice["finish_reason"]
+        delta = choice.get("delta")
+        if not isinstance(delta, dict):
+            continue
+        text = delta.get("content")
+        if text:
+            parts.append(text)
+            yield text
+        for frag in delta.get("tool_calls") or []:
+            if not isinstance(frag, dict):
+                continue
+            slot = acc.setdefault(frag.get("index", 0), {"id": "", "name": "", "arguments": ""})
+            if frag.get("id"):
+                slot["id"] = frag["id"]
+            fn = frag.get("function") or {}
+            if fn.get("name"):
+                slot["name"] = fn["name"]
+            if fn.get("arguments"):
+                slot["arguments"] += fn["arguments"]
+
+    # A slot with no name never became a real call (a stray fragment) — drop it rather than dispatch
+    # an unnamed tool. Ordering is by ``index`` so the tool messages match the assistant turn's list.
+    yield _Turn(
+        text="".join(parts),
+        tool_calls=[acc[i] for i in sorted(acc) if acc[i]["name"]],
+        finish_reason=finish_reason,
+    )
 
 
 def _parse_followups(text: str) -> list[str]:
