@@ -236,21 +236,39 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _stream_completion(
-    messages: list[dict[str, str]],
+class _LLMError(RuntimeError):
+    """An upstream LLM failure, carrying the HTTP status when the request got that far.
+
+    ``status`` is the upstream response code for a non-2xx reply, or ``None`` for a transport-level
+    failure (connect / read / timeout). The tool loop needs that distinction: a 4xx means *this
+    model rejects the ``tools`` field* and the round can be retried plainly, while a dead provider
+    cannot be retried into working. Subclasses ``RuntimeError`` so every pre-existing
+    ``except RuntimeError`` in this module and its tests keeps catching it unchanged.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+def _stream_raw_chunks(
+    messages: list[dict[str, Any]],
     model: str,
     timeout: float | None = None,
     extra_body: dict[str, Any] | None = None,
-) -> Iterator[str]:
-    """Stream reply-text chunks from the configured provider's OpenAI-compatible chat-completions API.
+) -> Iterator[dict[str, Any]]:
+    """Stream *parsed chunk dicts* from the provider's OpenAI-compatible chat-completions API.
 
-    Isolated (and network-deferred) so tests patch this seam. Parses the OpenAI SSE shape
-    (``data: {choices:[{delta:{content}}]}`` lines, ``data: [DONE]`` terminator) and yields each
-    non-empty ``delta.content``. ``model`` is the already-resolved provider slug; ``timeout`` is the
-    per-request budget (the follow-up call passes a tighter one); ``extra_body`` merges extra request
-    fields (the follow-up call passes provider-routing preferences). Raises ``RuntimeError`` on any
-    transport/HTTP failure so the caller can surface it (an in-band ``error`` for the answer stream, or
-    an empty suggestion list for the best-effort follow-up call).
+    The transport half of what ``_stream_completion`` used to do alone: HTTP, SSE line framing, and
+    JSON parsing — and deliberately nothing else. It does not reach into ``choices``/``delta``,
+    because the answer path now needs ``tool_calls`` and ``finish_reason`` as much as ``content``,
+    and the shape of a chunk is the caller's business.
+
+    TOLERANCE OWNERSHIP (spec v3 section 7). This layer skips only what it cannot *parse* — a
+    truncated or garbage ``data:`` payload. It never drops a well-formed chunk for lacking a field:
+    a chunk with no ``content`` may still carry a ``tool_calls`` fragment, and swallowing it here
+    would corrupt the caller's reassembly with no error raised anywhere. Shape tolerance is the
+    caller's job.
     """
     import httpx  # deferred: only needed on a live request, keeps router import light.
 
@@ -292,13 +310,41 @@ def _stream_completion(
                 if payload == "[DONE]":
                     break
                 try:
-                    delta = json.loads(payload)["choices"][0]["delta"].get("content")
-                except (json.JSONDecodeError, KeyError, IndexError, TypeError):
-                    continue  # a partial/keep-alive/unexpected frame — skip, don't abort.
-                if delta:
-                    yield delta
-    except Exception as exc:  # noqa: BLE001 — any failure here is an upstream/transport problem.
-        raise RuntimeError(f"LLM request failed: {exc}") from exc
+                    chunk = json.loads(payload)
+                except (json.JSONDecodeError, ValueError):
+                    continue  # a partial/garbage frame — skip, don't abort the stream.
+                if isinstance(chunk, dict):
+                    yield chunk
+    except httpx.HTTPStatusError as exc:
+        raise _LLMError(
+            f"LLM request failed: {exc}", status=exc.response.status_code
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 — anything else here is a transport problem.
+        raise _LLMError(f"LLM request failed: {exc}") from exc
+
+
+def _stream_completion(
+    messages: list[dict[str, str]],
+    model: str,
+    timeout: float | None = None,
+    extra_body: dict[str, Any] | None = None,
+) -> Iterator[str]:
+    """Stream reply-*text* chunks — the v1/v2 seam, unchanged in signature and behaviour.
+
+    Now a thin shell over ``_stream_raw_chunks``, which owns the transport. This layer keeps the
+    text-only contract that ``suggest_followups`` (and its measured ~1.5s chip latency) depends on,
+    so the follow-up path is byte-for-byte what it was. Raises ``RuntimeError`` — specifically
+    ``_LLMError`` — on any transport/HTTP failure.
+    """
+    for chunk in _stream_raw_chunks(messages, model, timeout=timeout, extra_body=extra_body):
+        try:
+            delta = chunk["choices"][0]["delta"].get("content")
+        except (KeyError, IndexError, TypeError, AttributeError):
+            # a keep-alive/unexpected shape — skip, don't abort. AttributeError covers a
+            # ``"delta": null`` chunk: ``None.get`` is an attribute miss, not a TypeError.
+            continue
+        if delta:
+            yield delta
 
 
 def _parse_followups(text: str) -> list[str]:
