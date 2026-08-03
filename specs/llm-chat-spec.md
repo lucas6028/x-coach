@@ -529,14 +529,26 @@ OpenAI-compatible fields and are **not** gated by `_is_openrouter`; the `provide
 
 Server-side, inside `answer_stream`, entirely within one request:
 
-- **Max 3 tool rounds.** Three tools, one call each, is the realistic ceiling.
+- **Max 3 tool rounds.** Three tools, one call each, is the realistic ceiling. **Hitting this cap does
+  not error.** Issue one final request with `tools` omitted so the model answers in prose from
+  whatever it already gathered — the user gets an answer, not a failure. That extra request is cheap
+  (no `tools` field, no further round-trips possible after it) and there is always budget for it: it
+  runs before the time cap below, never after.
 - **Cumulative wall-clock budget = `chat_timeout()`**, shared across all rounds — *not* a fresh
   budget per round. This endpoint is metered; N rounds must not cost N× the timeout. Each individual
   upstream request is given a per-request timeout of the *remaining* budget, so the sum of the round
-  timeouts can never exceed the whole. If the remaining budget is exhausted the loop stops rather
-  than issuing a request that is certain to time out.
-- **On hitting either cap, do not error.** Issue one final request with `tools` omitted so the model
-  answers from what it already gathered. The user gets an answer, not a failure.
+  timeouts can never exceed the whole. **Hitting this cap DOES error.** If the remaining budget is
+  exhausted before the next round can even start, the loop stops with an honest in-band `error`
+  rather than issuing a request that is certain to time out.
+
+  **The two caps behave differently, and that is deliberate, not an oversight.** The round cap always
+  has a cheap, fast answer waiting on the other side of one more request — `tools=None` costs nothing
+  extra and cannot itself trigger another round, so there is no way for the forced round to blow the
+  budget. The time cap has, by construction, no budget left for that same request: issuing it anyway
+  would not buy an answer, only spend more of a metered budget on a call already destined to time out
+  — trading an honest, immediate failure for a slower one that still fails, and costs more. Do not
+  "fix" this into a single rule that always issues a final request; that would restore the guaranteed
+  timeout this section exists to avoid.
 - **A tool that raises is not fatal.** Feed the error text back as that tool's result and let the
   model say it couldn't look it up. The stream never dies over a missing KG file.
 - **An unknown tool name** (model hallucinates one) is handled the same way: an error result, not a

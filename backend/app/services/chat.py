@@ -109,6 +109,22 @@ _TOOL_GROUNDING_RULE = (
     "ABOUT THIS VIDEO. If they mention a fault, that does NOT mean the user committed it. Only the "
     "faults listed in ANALYSIS FACTS were actually detected. When you use retrieved knowledge, say "
     "plainly that it is general reference rather than something measured in this rep.\n"
+    "- If ANALYSIS FACTS says this clip could not be measured, NO retrieved reference material "
+    "changes that. Do not turn a `kg_query`/`rag_search` lookup into coaching feedback about this "
+    "rep — general knowledge about the movement is not a substitute for a measurement that never "
+    "happened.\n"
+)
+
+# The spec's stated fallback for its honesty red line (section 4): if the single system-prompt
+# sentence above is ever not enough on its own, prefix retrieved knowledge inline, next to the data
+# itself, so the honesty constraint survives even a model that pays more attention to the tool
+# result than to its instructions. Shipped now rather than left as a future decision point, because
+# the live check that would have settled "is the sentence enough" is blocked on the user and may
+# never happen. `get_analysis` is deliberately excluded: it IS an observation about this video, and
+# prefixing it here would contradict `_TOOL_GROUNDING_RULE`'s own claim that it is as authoritative
+# as ANALYSIS FACTS.
+_REFERENCE_ONLY_PREFIX = (
+    "REFERENCE ONLY — general knowledge, NOT measured in this video:\n"
 )
 
 # Extra OpenRouter body for the follow-up call: route to the lowest-latency provider for the pinned
@@ -686,7 +702,10 @@ def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> 
     vector db) or a hallucinated tool name becomes an ``{"error": ...}`` payload the model can read
     and account for out loud. The alternative — letting it propagate — kills an answer stream that
     was otherwise fine, and the HTTP 200 is already committed by then so the user would just see it
-    die. The result is finally truncated to ``_MAX_TOOL_RESULT_CHARS``.
+    die. ``kg_query``/``rag_search`` results get ``_REFERENCE_ONLY_PREFIX`` stamped on before
+    truncation (never ``get_analysis`` — see that constant's docstring), so the honesty rule lives
+    next to the data itself, not only in one system-prompt sentence a model could pay less attention
+    to. The result is finally truncated to ``_MAX_TOOL_RESULT_CHARS``.
 
     THE FINAL ``json.dumps`` CAN FAIL TOO, and that must not escape either, for the same
     committed-200 reason as the tool call itself. ``default=str`` does not make it safe: a
@@ -724,6 +743,13 @@ def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> 
         # kill the answer stream. See the docstring for why THIS json.dumps call cannot fail the
         # same way the one above just did.
         text = json.dumps({"error": f"{name} failed: {exc}"}, ensure_ascii=False)
+
+    if name in ("kg_query", "rag_search"):
+        # The marker lives on EVERY result from these two tools, success or error — an error payload
+        # ("no graphml found") is still general-knowledge-shaped, not an observation about this
+        # video, so it gets the same honesty prefix. Applied here, before the truncation below, so
+        # the prefix is never the part that gets cut off a long result.
+        text = _REFERENCE_ONLY_PREFIX + text
 
     if len(text) > _MAX_TOOL_RESULT_CHARS:  # a plain str op — cannot raise.
         text = text[:_MAX_TOOL_RESULT_CHARS] + "…[truncated]"
@@ -783,6 +809,35 @@ def suggest_followups(
 
 
 def answer_stream(
+    *, messages: list[dict[str, str]], context: dict[str, Any], model: str
+) -> Iterator[str]:
+    """Thin outer shell around ``_answer_stream_inner``: the last line of defence for the SSE contract.
+
+    THIS IS THE ONE FRAME IN THE STACK THAT MUST NEVER LET AN EXCEPTION ESCAPE, because it is the
+    only frame that knows the HTTP 200 is already committed by the time it runs (``routers/chat.py``
+    hands this generator straight to ``StreamingResponse``) — there is no status code left to change,
+    only the choice between an honest in-band ``error`` frame and a silently truncated response the
+    client can't distinguish from a network blip. ``_answer_stream_inner`` already wraps its OWN
+    round loop carefully (see its docstring), but that carefulness is scoped to what happens *inside*
+    one round; a statement that runs between rounds and outside that inner try — a deferred import in
+    ``_dispatch_tool``, an ``f"...{exc}"`` interpolation calling a foreign ``__str__`` — is invisible
+    to it by construction. Patching each such site as it's found is a losing game (the whole point of
+    Python exceptions is that new ones can originate anywhere); catching once at the true boundary is
+    not. ``type(exc).__name__`` only, never ``{exc}`` — interpolating the exception's message here
+    would reintroduce, one level up, the exact ``str(args[0])`` crash surface this wrapper exists to
+    close. ``Exception``, never ``BaseException``: ``GeneratorExit`` must keep propagating so a client
+    disconnect still tears this generator down normally instead of being reported as a chat failure.
+    Every error path inside ``_answer_stream_inner`` already ``return``s after its own ``error``
+    frame, so this ``except`` firing too would require a SECOND, unrelated failure — there is no
+    double-frame risk on the ordinary paths.
+    """
+    try:
+        yield from _answer_stream_inner(messages=messages, context=context, model=model)
+    except Exception as exc:  # noqa: BLE001 — see the docstring: this is the outermost frame.
+        yield _sse("error", {"detail": type(exc).__name__})
+
+
+def _answer_stream_inner(
     *, messages: list[dict[str, str]], context: dict[str, Any], model: str
 ) -> Iterator[str]:
     """Stream a grounded coaching reply for ``messages`` as SSE frames, running tools as needed.

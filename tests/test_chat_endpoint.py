@@ -523,6 +523,27 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(calls[0]["messages"][0]["role"], "system")
         self.assertIn("REFERENCE MATERIAL", system)
         self.assertIn("ANALYSIS FACTS", system)  # the v2 prompt is still there, unchanged
+        # FIX 7 (whole-branch review): a lookup on an unmeasurable clip must not be laundered into
+        # coaching feedback about this rep just because it's technically framed as "general reference".
+        self.assertIn("NO retrieved reference material", system)
+
+    def test_a_dispatch_tool_crash_yields_exactly_one_error_frame_and_no_done(self) -> None:
+        # FIX 3 (whole-branch review): _dispatch_tool is called OUTSIDE _stream_turn's own
+        # try/except, in the loop body of _answer_stream_inner. A crash there (not one of the
+        # failure modes _dispatch_tool's own try already contains) must still surface as a single
+        # in-band error frame through the answer_stream outer wrapper -- never an unhandled
+        # exception that kills the stream after the HTTP 200 is already committed.
+        fake, _ = self._turns(
+            (["let me check"], [{"id": "1", "name": "kg_query", "arguments": '{"query":"x"}'}])
+        )
+
+        def crashing_dispatch(name, args, context):
+            raise RuntimeError("boom")
+
+        events = self._run(fake, dispatch=crashing_dispatch)
+        event_names = [e for e, _ in events]
+        self.assertEqual(event_names.count("error"), 1)
+        self.assertNotIn("done", event_names)
 
 
 # --------------------------------------------------------------- service: follow-up parsing
@@ -1165,7 +1186,10 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "graph_context", side_effect=FileNotFoundError("no graphml")
         ):
-            out = json.loads(chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()))
+            raw = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx())
+        # kg_query results (error or not) carry the REFERENCE ONLY marker ahead of the JSON payload
+        # -- see test_reference_only_prefix_*  below -- so it must be stripped before parsing here.
+        out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
         self.assertIn("error", out)
         self.assertIn("no graphml", out["error"])
 
@@ -1188,7 +1212,8 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "rag_snippets", return_value={("a", "b"): "value"}
         ):
-            out = json.loads(chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()))
+            raw = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+        out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
         self.assertIn("error", out)
         self.assertIn("rag_search failed", out["error"])
 
@@ -1200,7 +1225,8 @@ class ToolDispatchTests(unittest.TestCase):
         circular: dict[str, Any] = {}
         circular["self"] = circular
         with mock.patch.object(knowledge_service, "graph_context", return_value=circular):
-            out = json.loads(chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()))
+            raw = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx())
+        out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
         self.assertIn("error", out)
         self.assertIn("kg_query failed", out["error"])
 
@@ -1217,9 +1243,29 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "rag_snippets", return_value={"bad": _Explodes()}
         ):
-            out = json.loads(chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()))
+            raw = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+        out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
         self.assertIn("error", out)
         self.assertIn("rag_search failed", out["error"])
+
+    def test_reference_only_prefix_marks_knowledge_tools_but_not_get_analysis(self) -> None:
+        # FIX 2 (whole-branch review): the honesty rule for retrieved knowledge lives on a single
+        # system-prompt sentence today (_TOOL_GROUNDING_RULE); this puts a marker on the data itself
+        # so it survives even if a model pays less attention to instructions than to tool results.
+        from backend.app.services import knowledge as knowledge_service
+
+        with mock.patch.object(knowledge_service, "graph_context", return_value={"ok": True}):
+            kg_out = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx())
+        with mock.patch.object(knowledge_service, "rag_snippets", return_value={"results": []}):
+            rag_out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+        analysis_out = chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx())
+
+        self.assertTrue(kg_out.startswith(chat_service._REFERENCE_ONLY_PREFIX))
+        self.assertTrue(rag_out.startswith(chat_service._REFERENCE_ONLY_PREFIX))
+        # get_analysis IS an observation about this video (_TOOL_GROUNDING_RULE says so explicitly)
+        # -- prefixing it here would contradict that claim.
+        self.assertFalse(analysis_out.startswith("REFERENCE ONLY"))
+        self.assertNotIn("REFERENCE ONLY", analysis_out)
 
     def test_query_label_picks_the_right_argument_per_tool(self) -> None:
         self.assertEqual(
