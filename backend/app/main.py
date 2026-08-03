@@ -8,6 +8,7 @@ Launch from the repository root so ``from src... import`` resolves:
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,6 +16,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.formparsers import MultiPartParser
+from starlette import requests as starlette_requests
 
 from backend.app import config
 from backend.app.routers import (
@@ -38,7 +40,25 @@ logger = logging.getLogger(__name__)
 # 33-landmark recording reaches that in roughly ten seconds and is rejected before the route can
 # return a useful error. Keep a bounded server-wide allowance for this legitimate payload while
 # the separately enforced video upload limit continues to protect file storage.
-MultiPartParser.max_part_size = 16 * 1024 * 1024
+_MAX_MULTIPART_FIELD_BYTES = 16 * 1024 * 1024
+_PARSER_ACCEPTS_MAX_PART_SIZE = "max_part_size" in inspect.signature(MultiPartParser.__init__).parameters
+
+
+class _PoseMultiPartParser(MultiPartParser):
+    """Use the same non-file-part limit on both Starlette multipart parser APIs."""
+
+    max_part_size = _MAX_MULTIPART_FIELD_BYTES
+
+    def __init__(self, *args, **kwargs) -> None:
+        # Starlette <=0.41 reads the class attribute, while later releases take this as a
+        # keyword-only constructor argument. FastAPI's dependency parser calls Request.form()
+        # without that argument, so install a compatible parser before app routes are created.
+        if _PARSER_ACCEPTS_MAX_PART_SIZE:
+            kwargs.setdefault("max_part_size", self.max_part_size)
+        super().__init__(*args, **kwargs)
+
+
+starlette_requests.MultiPartParser = _PoseMultiPartParser
 
 
 def _log_storage_backend() -> None:
