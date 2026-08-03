@@ -666,6 +666,16 @@ def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> 
     and account for out loud. The alternative — letting it propagate — kills an answer stream that
     was otherwise fine, and the HTTP 200 is already committed by then so the user would just see it
     die. The result is finally truncated to ``_MAX_TOOL_RESULT_CHARS``.
+
+    THE FINAL ``json.dumps`` CAN FAIL TOO, and that must not escape either, for the same
+    committed-200 reason as the tool call itself. ``default=str`` does not make it safe: a
+    non-string dict key skips ``default`` entirely and raises ``TypeError``; a circular structure
+    is caught by json's own cycle detector before ``default`` is ever consulted, raising
+    ``ValueError``; and ``default=str`` calling a value's own broken ``__str__`` propagates
+    whatever THAT raises. So the serialisation lives inside the same ``try`` as the tool call, and
+    the fallback below is built as a FRESH dict with only a string key and a string value — which
+    cannot fail the same three ways, so this second ``json.dumps`` call is not "re-entering
+    something that just failed".
     """
     from backend.app.services import knowledge  # deferred: the KG/RAG import chain is heavy.
 
@@ -688,11 +698,13 @@ def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> 
             )
         else:
             result = {"error": f"Unknown tool {name!r}."}
-    except Exception as exc:  # noqa: BLE001 — a tool failure must never kill the answer stream.
-        result = {"error": f"{name} failed: {exc}"}
+        text = json.dumps(result, ensure_ascii=False, default=str)
+    except Exception as exc:  # noqa: BLE001 — a tool-call OR serialisation failure must never
+        # kill the answer stream. See the docstring for why THIS json.dumps call cannot fail the
+        # same way the one above just did.
+        text = json.dumps({"error": f"{name} failed: {exc}"}, ensure_ascii=False)
 
-    text = json.dumps(result, ensure_ascii=False, default=str)
-    if len(text) > _MAX_TOOL_RESULT_CHARS:
+    if len(text) > _MAX_TOOL_RESULT_CHARS:  # a plain str op — cannot raise.
         text = text[:_MAX_TOOL_RESULT_CHARS] + "…[truncated]"
     return text
 
