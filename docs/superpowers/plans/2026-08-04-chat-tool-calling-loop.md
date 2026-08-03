@@ -19,7 +19,8 @@
 - Frontend commands: `yarn test` (vitest run), `yarn test:coverage`, `yarn build`.
 - Backend tests are `unittest.TestCase` classes under `tests/`; frontend tests are vitest files under `frontend/src/test/`.
 - ML/backend modules favour a local-first, dependency-light style (stdlib + numpy/networkx). **Do not add any new dependency in this plan** — everything needed is already imported somewhere in the repo.
-- `_stream_completion`'s existing tests in `tests/test_chat_endpoint.py` must pass **unmodified** throughout. If a step requires editing one of them, the refactor is wrong — stop and reconsider.
+- The **`StreamCompletionTests`** class in `tests/test_chat_endpoint.py` (line 379) must pass **unmodified** throughout. It is the transport contract; if a step requires editing one of its tests, the refactor is wrong — stop and reconsider. The same goes for `SystemPromptTests`, `ParseFollowupsTests`, and `SuggestFollowupsTests`: the v3 grounding rule is appended in `answer_stream`, not inside `_build_system_prompt`, and `suggest_followups` still calls `_stream_completion`, so none of those three should need a single edit.
+- **`AnswerStreamTests` (line 178) is the one exception, and Task 4 owns it.** Its four tests patch `_stream_completion` to drive `answer_stream`; after Task 4 `answer_stream` calls `_stream_turn` instead, so they must be migrated. That is expected and correct, not a sign the refactor went wrong.
 - The follow-up chip path (`suggest_followups`, `POST /api/chat/followups`) must never send `tools` and never send `detail`. Its ~1.5s latency is a defended, measured property.
 - Comment density in `backend/app/services/chat.py` is high and explanatory — match it. Every non-obvious constant and guard in that file carries a *why*.
 
@@ -1432,15 +1433,120 @@ In `backend/app/routers/chat.py`, add to the `ChatContext` model (after the `fau
     detail: dict[str, Any] | None = None
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 6: Migrate `AnswerStreamTests` to the new seam**
+
+`AnswerStreamTests` (`tests/test_chat_endpoint.py:178`) has four tests that patch `_stream_completion`
+to drive `answer_stream`. `answer_stream` now calls `_stream_turn`, so all four must be repointed —
+this is expected (see Global Constraints), not a sign the refactor went wrong. The behaviours they
+lock are all still required and must keep being asserted; only the seam changes.
+
+The stub must accept `_stream_turn`'s signature (`messages, model, *, timeout=None, tools=None`) and
+yield a `_Turn` as its final item. Rewrite each of the four as follows, changing nothing else about
+what they assert:
+
+```python
+    def test_yields_deltas_then_done_and_prepends_system_prompt(self) -> None:
+        seen: dict[str, object] = {}
+
+        def fake_turn(messages, model, *, timeout=None, tools=None):
+            seen["messages"] = messages
+            seen["model"] = model
+            yield "Drive "
+            yield "knees out"
+            yield chat_service._Turn(
+                text="Drive knees out", tool_calls=[], finish_reason="stop"
+            )
+
+        history = [{"role": "user", "content": "why did my knees cave?"}]
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
+            frames = "".join(
+                chat_service.answer_stream(messages=history, context=_FAULT_CTX, model="vendor/m-x")
+            )
+
+        self.assertIn("event: delta", frames)
+        self.assertIn("Drive ", frames)
+        self.assertIn("knees out", frames)
+        self.assertIn("event: done", frames)
+        self.assertIn("vendor/m-x", frames)  # the actually-used model rides the done frame
+        self.assertNotIn("event: error", frames)
+        self.assertEqual(seen["model"], "vendor/m-x")
+        sent = seen["messages"]
+        self.assertEqual(sent[0]["role"], "system")
+        self.assertIn("knees_inward", sent[0]["content"])
+        self.assertEqual(sent[1:], history)  # user history still follows the system turn untouched
+
+    def test_midstream_failure_yields_error_frame_and_no_done(self) -> None:
+        def fake_turn(messages, model, *, timeout=None, tools=None):
+            yield "partial answer"
+            raise chat_service._LLMError("LLM request failed: connection reset")
+
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
+            frames = "".join(
+                chat_service.answer_stream(
+                    messages=[{"role": "user", "content": "hi"}], context=_FAULT_CTX, model="m"
+                )
+            )
+
+        self.assertIn("partial answer", frames)  # deltas already flushed are kept
+        self.assertIn("event: error", frames)
+        self.assertIn("connection reset", frames)
+        self.assertNotIn("event: done", frames)
+
+    def test_empty_completion_yields_error_not_done(self) -> None:
+        # The v1 empty-completion invariant survives into the tool loop: a blank accumulation must
+        # emit an error, never a done, so the client never keeps an empty assistant turn.
+        def fake_turn(messages, model, *, timeout=None, tools=None):
+            yield "   "  # whitespace only -> strips to empty
+            yield chat_service._Turn(text="   ", tool_calls=[], finish_reason="stop")
+
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
+            frames = "".join(
+                chat_service.answer_stream(
+                    messages=[{"role": "user", "content": "hi"}], context=_CLEAN_CTX, model="m"
+                )
+            )
+
+        self.assertIn("event: error", frames)
+        self.assertIn("empty", frames.lower())
+        self.assertNotIn("event: done", frames)
+
+    def test_answer_stream_carries_no_followups(self) -> None:
+        # Follow-ups are a SEPARATE endpoint (suggest_followups); the answer stream must never carry
+        # a followups frame, tool loop or not.
+        def fake_turn(messages, model, *, timeout=None, tools=None):
+            yield "Drive knees out."
+            yield chat_service._Turn(
+                text="Drive knees out.", tool_calls=[], finish_reason="stop"
+            )
+
+        with mock.patch.object(chat_service, "_stream_turn", fake_turn):
+            frames = "".join(
+                chat_service.answer_stream(
+                    messages=[{"role": "user", "content": "why?"}], context=_FAULT_CTX, model="m"
+                )
+            )
+
+        self.assertIn("Drive knees out.", frames)
+        self.assertNotIn("event: followups", frames)
+        self.assertIn("event: done", frames)
+```
+
+Note `test_midstream_failure_yields_error_frame_and_no_done` now raises `_LLMError` with no
+`status`, which is what a transport failure looks like — and it must NOT be retried, since output
+was already committed. That is the same behaviour `ToolLoopTests.test_a_transport_failure_is_never_retried`
+locks from the other direction.
+
+- [ ] **Step 7: Run the tests to verify they pass**
 
 ```
 .venv\Scripts\python.exe -m pytest tests/test_chat_endpoint.py -v
 ```
 
-Expected: PASS, including every pre-existing test in the file.
+Expected: PASS — every class in the file. `StreamCompletionTests`, `SystemPromptTests`,
+`ParseFollowupsTests` and `SuggestFollowupsTests` must still be **unedited**; only `AnswerStreamTests`
+changed, and only its stubs.
 
-- [ ] **Step 7: Run the full backend suite and the coverage gate**
+- [ ] **Step 8: Run the full backend suite and the coverage gate**
 
 ```
 .venv\Scripts\python.exe -m pytest tests/
@@ -1449,7 +1555,7 @@ Expected: PASS, including every pre-existing test in the file.
 
 Expected: both PASS. If coverage on `chat.py` dropped, add tests for the uncovered branches — do not lower the gate.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add backend/app/services/chat.py backend/app/routers/chat.py tests/test_chat_endpoint.py
@@ -2034,7 +2140,7 @@ git commit -m "docs: v3 build notes — live model and grounding verification"
 
 ## Self-Review
 
-**Spec coverage.** v3 §1 transport split → Tasks 1–2. §2 loop, caps, degradation → Task 4. §3 tool catalogue and clamping → Task 3. §4 red line → Task 4 Step 3, verified live in Task 7 Step 3. §5 SSE contract → Task 4 (emit) + Task 5 (consume). §6 client → Tasks 5–6. §7 testing → tests in every task, gates in Task 4 Step 7 and Task 6 Step 6. Success criteria 1–4 → Task 7 Steps 2–4; criterion 5 (chip latency, flagged in the spec as a live measurement) → Task 7 Step 5; criterion 6 (coverage gates) → Task 4 Step 7 and Task 6 Step 6. Known risks → Task 7.
+**Spec coverage.** v3 §1 transport split → Tasks 1–2. §2 loop, caps, degradation → Task 4. §3 tool catalogue and clamping → Task 3. §4 red line → Task 4 Step 3, verified live in Task 7 Step 3. §5 SSE contract → Task 4 (emit) + Task 5 (consume). §6 client → Tasks 5–6. §7 testing → tests in every task, gates in Task 4 Step 8 and Task 6 Step 6. Success criteria 1–4 → Task 7 Steps 2–4; criterion 5 (chip latency, flagged in the spec as a live measurement) → Task 7 Step 5; criterion 6 (coverage gates) → Task 4 Step 8 and Task 6 Step 6. Known risks → Task 7.
 
 **Type consistency.** `_Turn` fields (`text`, `tool_calls`, `finish_reason`) are used identically in Tasks 2 and 4. `tool_calls` entries are `{"id", "name", "arguments"}` in both `_stream_turn`'s output and `answer_stream`'s consumption. `_dispatch_tool(name, args, context)` has the same signature in Task 3's definition, Task 3's tests, and Task 4's call site. `_clamp_int` is keyword-only for `low`/`high`/`default` everywhere. `ChatContext.detail` is `dict[str, Any] | None` in Python and `Record<string, unknown> | undefined` in TypeScript, and the keys `buildChatContext` emits (`metadata`, `quality`, `view`, `detections`, `retrievals`) are exactly the keys `_tool_get_analysis` reads.
 
@@ -2048,7 +2154,7 @@ criterion 1 is supported by the data — Task 3 puts those fields in `measured` 
 criterion verbatim rather than a weaker substitute.
 
 **Two coverage traps deliberately pre-empted**, because the 95% gate in Task 4 Step 7 would
-otherwise stall on them. (1) `answer_stream`'s timeout branch has no "already streamed" case:
+otherwise stall on them (see also Task 4 Step 8). (1) `answer_stream`'s timeout branch has no "already streamed" case:
 `streamed_any` is provably False at the top of every iteration, so such a case would be dead code
 and a partial branch. (2) `_stream_completion`'s shape-tolerance `except` loses its only driver in
 Task 1 — `data: not-json` moves to the raw layer — so Task 1 adds a test that patches
