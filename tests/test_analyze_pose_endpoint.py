@@ -105,6 +105,20 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
             )
         self.assertEqual(ctx.exception.status_code, 400)
 
+    def test_rejects_oversized_pose_upload_before_staging(self) -> None:
+        with self.assertRaises(HTTPException) as ctx:
+            asyncio.run(
+                analyze_router.analyze_pose(
+                    "Squat",
+                    _upload("pose.json", b"x" * (analyze_router.MAX_POSE_JSON_BYTES + 1)),
+                    _upload(),
+                    max_reps=None,
+                    thumbnail=None,
+                    user=None,
+                )
+            )
+        self.assertEqual(ctx.exception.status_code, 413)
+
     def test_rejects_pose_without_frames_list(self) -> None:
         with self.assertRaises(HTTPException) as ctx:
             asyncio.run(

@@ -27,6 +27,10 @@ _ANALYSIS_SEMAPHORE = asyncio.Semaphore(config.MAX_CONCURRENT_ANALYSES)
 # A thumbnail is one downscaled JPEG frame (the browser caps its longest edge at 480px), so
 # anything approaching this is not a thumbnail. Bounds what an upload can push into storage.
 MAX_THUMBNAIL_BYTES = 512 * 1024
+# Client pose data is sent as a JSON file part rather than a regular form field: Starlette applies
+# a small in-memory default to text parts before this endpoint is reached. Keep an explicit,
+# endpoint-local limit on the file part instead.
+MAX_POSE_JSON_BYTES = 16 * 1024 * 1024
 
 
 def _as_mb(value: int) -> int:
@@ -318,6 +322,31 @@ def _validate_pose_landmarks(payload: dict) -> None:
                 raise HTTPException(status_code=400, detail="Malformed pose landmarks.")
 
 
+async def _parse_pose_upload(pose: str | UploadFile) -> dict[str, Any]:
+    """Decode a bounded client pose payload.
+
+    ``str`` remains accepted for direct unit calls; HTTP clients use an UploadFile so this route
+    does not need to raise the multipart parser's process-wide text-field ceiling.
+    """
+    if isinstance(pose, str):
+        raw = pose.encode("utf-8")
+    else:
+        raw = await pose.read(MAX_POSE_JSON_BYTES + 1)
+    if len(raw) > MAX_POSE_JSON_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={"code": "pose_too_large", "limit_mb": _as_mb(MAX_POSE_JSON_BYTES)},
+        )
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail="Malformed pose JSON.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list):
+        raise HTTPException(status_code=400, detail="Pose JSON must have a 'frames' list.")
+    _validate_pose_landmarks(payload)
+    return payload
+
+
 @router.post("/analyze")
 async def analyze(
     file: UploadFile = File(...),
@@ -375,7 +404,7 @@ async def analyze(
 @router.post("/analyze/pose")
 async def analyze_pose(
     movement: str = Form(...),
-    pose: str = Form(...),
+    pose: UploadFile = File(...),
     file: UploadFile = File(...),
     max_reps: int | None = Form(None),
     thumbnail: UploadFile | None = File(None),
@@ -394,13 +423,7 @@ async def analyze_pose(
 
     resolved_max_reps = _validated_max_reps(max_reps)
 
-    try:
-        payload = json.loads(pose)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="Malformed pose JSON.") from exc
-    if not isinstance(payload, dict) or not isinstance(payload.get("frames"), list):
-        raise HTTPException(status_code=400, detail="Pose JSON must have a 'frames' list.")
-    _validate_pose_landmarks(payload)
+    payload = await _parse_pose_upload(pose)
 
     thumb = await _read_thumbnail(thumbnail)
 

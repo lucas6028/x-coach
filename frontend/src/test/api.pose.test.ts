@@ -15,7 +15,7 @@ describe("api.analyzePose", () => {
     const [, init] = fetchMock.mock.calls[0];
     const form = init!.body as FormData;
     expect(form.get("movement")).toBe("Squat");
-    expect(JSON.parse(form.get("pose") as string).metadata.fps).toBe(30);
+    expect(JSON.parse(await (form.get("pose") as Blob).text()).metadata.fps).toBe(30);
     expect(form.get("file")).toBeInstanceOf(Blob);
   });
 
@@ -24,6 +24,13 @@ describe("api.analyzePose", () => {
       new Response(JSON.stringify({ detail: "Pose JSON must have a 'frames' list." }), { status: 400 })
     );
     await expect(api.analyzePose("Squat", pose as never, new Blob(["x"]))).rejects.toThrow("frames");
+  });
+
+  it("surfaces the endpoint-specific pose payload limit", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: { code: "pose_too_large", limit_mb: 16 } }), { status: 413 })
+    );
+    await expect(api.analyzePose("Squat", pose as never, new Blob(["x"]))).rejects.toThrow("16 MB");
   });
 });
 

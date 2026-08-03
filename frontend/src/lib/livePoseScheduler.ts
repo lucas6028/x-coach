@@ -19,11 +19,11 @@ export function shouldRunLivePoseInference(
   now: number,
   targetFps = LIVE_POSE_FPS
 ): boolean {
-  if (!Number.isFinite(videoTime) || videoTime <= schedule.lastVideoTime) return false;
-  // Record skipped frames too: a paused frame must never be inferred later just because the
-  // inference budget has elapsed.
-  schedule.lastVideoTime = videoTime;
+  // `currentTime` can legitimately jump backwards when a media element restarts. Only an
+  // already-inferred frame is stale; a frame rejected by the cadence budget remains eligible.
+  if (!Number.isFinite(videoTime) || videoTime === schedule.lastVideoTime) return false;
   if (now - schedule.lastInferenceAt < 1000 / Math.max(1, targetFps)) return false;
+  schedule.lastVideoTime = videoTime;
   schedule.lastInferenceAt = now;
   return true;
 }

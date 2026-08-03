@@ -13,6 +13,14 @@ describe("live pose scheduler", () => {
     expect(shouldRunLivePoseInference(schedule, 2 / 60, 34, 30)).toBe(true);
   });
 
+  it("re-offers a fresh frame that arrived just before the cadence budget opened", () => {
+    const schedule = createLivePoseSchedule();
+
+    expect(shouldRunLivePoseInference(schedule, 0, 0, 30)).toBe(true);
+    expect(shouldRunLivePoseInference(schedule, 1 / 30, 33, 30)).toBe(false);
+    expect(shouldRunLivePoseInference(schedule, 1 / 30, 34, 30)).toBe(true);
+  });
+
   it("does not infer the same paused frame twice", () => {
     const schedule = createLivePoseSchedule();
 
@@ -20,11 +28,11 @@ describe("live pose scheduler", () => {
     expect(shouldRunLivePoseInference(schedule, 1, 100)).toBe(false);
   });
 
-  it("rejects stale and invalid timestamps", () => {
+  it("accepts a media restart but rejects repeated and invalid timestamps", () => {
     const schedule = createLivePoseSchedule();
 
     expect(shouldRunLivePoseInference(schedule, 2, 0)).toBe(true);
-    expect(shouldRunLivePoseInference(schedule, 1, 40)).toBe(false);
+    expect(shouldRunLivePoseInference(schedule, 1, 40)).toBe(true);
     expect(shouldRunLivePoseInference(schedule, Number.NaN, 80)).toBe(false);
   });
 });

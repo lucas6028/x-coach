@@ -8,15 +8,12 @@ Launch from the repository root so ``from src... import`` resolves:
 
 from __future__ import annotations
 
-import inspect
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.formparsers import MultiPartParser
-from starlette import requests as starlette_requests
 
 from backend.app import config
 from backend.app.routers import (
@@ -34,32 +31,6 @@ from backend.app.routers import (
 from backend.app.settings import chat_models, default_chat_model, get_settings
 
 logger = logging.getLogger(__name__)
-
-# Pose extraction is intentionally client-side, then its JSON is posted as a multipart form field
-# alongside the source video. Starlette's default for *non-file* parts is only 1 MiB; a 30 FPS
-# 33-landmark recording reaches that in roughly ten seconds and is rejected before the route can
-# return a useful error. Keep a bounded server-wide allowance for this legitimate payload while
-# the separately enforced video upload limit continues to protect file storage.
-_MAX_MULTIPART_FIELD_BYTES = 16 * 1024 * 1024
-_PARSER_ACCEPTS_MAX_PART_SIZE = "max_part_size" in inspect.signature(MultiPartParser.__init__).parameters
-
-
-class _PoseMultiPartParser(MultiPartParser):
-    """Use the same non-file-part limit on both Starlette multipart parser APIs."""
-
-    max_part_size = _MAX_MULTIPART_FIELD_BYTES
-
-    def __init__(self, *args, **kwargs) -> None:
-        # Starlette <=0.41 reads the class attribute, while later releases take this as a
-        # keyword-only constructor argument. Newer Request.form() supplies its own 1 MiB default,
-        # so normalize it here before FastAPI asks the parser to process a form.
-        if _PARSER_ACCEPTS_MAX_PART_SIZE:
-            kwargs["max_part_size"] = self.max_part_size
-        super().__init__(*args, **kwargs)
-
-
-starlette_requests.MultiPartParser = _PoseMultiPartParser
-
 
 def _log_storage_backend() -> None:
     """Announce which object store this process selected, once, at startup.
