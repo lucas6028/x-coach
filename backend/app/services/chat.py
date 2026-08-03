@@ -37,6 +37,7 @@ from backend.app.settings import (
     chat_timeout,
     followup_timeout,
     get_settings,
+    kg_seeds_default,
 )
 
 # Fallback LLM round-trip budgets (seconds). The effective values now come from the override-aware
@@ -437,6 +438,263 @@ def _stream_turn(
         tool_calls=[acc[i] for i in sorted(acc) if acc[i]["name"]],
         finish_reason=finish_reason,
     )
+
+
+# Tool results are pasted back into the next round's context verbatim. RAG hits carry full passage
+# text and a 5-hit result can run to tens of kilobytes, which would dominate (or overflow) the
+# window on round 2 — so every result is truncated to this budget before it goes back to the model.
+_MAX_TOOL_RESULT_CHARS = 4000
+
+# The tool catalogue, in the OpenAI-compatible ``tools`` schema. The descriptions do real work here:
+# they are the only place the model learns that kg_query/rag_search return GENERAL knowledge rather
+# than observations about this clip, which is the honesty risk live retrieval introduces (spec v3
+# section 4). Keep that framing in any future edit.
+_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_analysis",
+            "description": (
+                "Read the FULL detail of THIS video's analysis — the exact measured values and the "
+                "complete retrieved reference text that the summary in your instructions "
+                "compressed away. Use it when the user asks for a specific number, frame, or the "
+                "full source passage behind a detected fault."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fault_name": {
+                        "type": ["string", "null"],
+                        "description": (
+                            "The detected fault to expand, named exactly as in ANALYSIS FACTS. "
+                            "Pass null for clip-level information instead (video metadata, quality, "
+                            "camera view, and a one-line summary of every detection)."
+                        ),
+                    },
+                    "include": {
+                        "type": "string",
+                        "enum": ["evidence", "knowledge", "all"],
+                        "description": (
+                            "'evidence' = the measured values and the frame/time window; "
+                            "'knowledge' = the retrieved subgraph and full reference passages; "
+                            "'all' = both."
+                        ),
+                    },
+                },
+                "required": ["include"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "kg_query",
+            "description": (
+                "Search the movement knowledge graph for causes, injury risks, and corrective cues "
+                "related to a term. Returns GENERAL REFERENCE knowledge about the movement — it "
+                "says nothing about what happened in this video, and a fault it mentions was NOT "
+                "necessarily committed by this user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "A fault, joint, or biomechanical concept, in English.",
+                    },
+                    "hops": {
+                        "type": "integer",
+                        "description": "Graph traversal depth, 1 or 2. Defaults to 1.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rag_search",
+            "description": (
+                "Search the indexed sports-science literature for passages about a topic. Returns "
+                "GENERAL REFERENCE knowledge — it says nothing about what happened in this video, "
+                "and a fault it mentions was NOT necessarily committed by this user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The topic to look up, in English.",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "How many passages to return, 1 to 8. Defaults to 5.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+]
+
+
+def _clamp_int(value: Any, *, low: int, high: int, default: int) -> int:
+    """Coerce a MODEL-SUPPLIED number into ``[low, high]``, falling back to ``default``.
+
+    Tool arguments are untrusted input in exactly the way ``routers/knowledge.py``'s query params
+    are: an unbounded ``hops`` drives needlessly expensive traversal and a negative ``top_k`` is an
+    invalid slice. Unlike the router this cannot answer 422 — the model is mid-conversation and
+    there is no one to return a status to — so a bad value is silently clamped instead. Models emit
+    ``"2"`` about as often as ``2``, and occasionally prose, so a non-numeric value falls back to
+    the default rather than raising.
+    """
+    try:
+        n = int(value)
+    except (TypeError, ValueError, OverflowError):
+        # ``OverflowError`` is the extra case beyond the brief's own tuple: ``json.loads`` accepts
+        # bare ``Infinity``/``-Infinity`` as an extension, so a model argument can arrive as an
+        # actual ``float('inf')`` — and ``int(float('inf'))`` raises ``OverflowError``, not
+        # ``ValueError``. Caught here rather than relying on ``_dispatch_tool``'s blanket
+        # ``except Exception`` so this function's own contract ("never raises, always returns an
+        # int in range") holds regardless of what wraps the call.
+        return default
+    return max(low, min(high, n))
+
+
+def _parse_tool_args(raw: str) -> dict[str, Any]:
+    """Parse a tool call's accumulated ``arguments`` JSON, tolerating nothing and tolerating junk.
+
+    A model can stream truncated or malformed JSON here, and a round is too expensive to throw away
+    over it: an empty dict lets each tool fall back to its own defaults and produce *something* the
+    model can react to. A non-object payload (a bare array, a string) is treated the same way.
+    """
+    try:
+        data = json.loads(raw or "{}")
+    except (json.JSONDecodeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _tool_query_label(name: str, args: dict[str, Any]) -> str:
+    """The human-readable subject of a tool call, for the ``tool`` SSE frame the tray displays."""
+    if name == "get_analysis":
+        return str(args.get("fault_name") or "")
+    return str(args.get("query") or "")
+
+
+def _tool_get_analysis(detail: dict[str, Any], args: dict[str, Any]) -> Any:
+    """The ``get_analysis`` tool: read ``ChatContext.detail`` — the client's own analysis document.
+
+    Reads the request payload, never the database (spec v3 decision 2). The client already holds the
+    analysis it is asking about, so shipping it removes the entire auth/ownership surface a DB
+    lookup would add — no token threading into this service, no UUID validation against a
+    model-fabricated id, no IDOR — and guarantees the tool and the on-screen analysis are literally
+    the same document.
+    """
+    include = args.get("include") or "all"
+    name = args.get("fault_name")
+    detections = detail.get("detections") or []
+    retrievals = detail.get("retrievals") or []
+
+    if not name:
+        return {
+            "metadata": detail.get("metadata"),
+            "quality": detail.get("quality"),
+            "view": detail.get("view"),
+            "detections": [
+                {
+                    "fault_name": d.get("fault_name"),
+                    "phase": d.get("phase"),
+                    "severity": d.get("severity"),
+                    "start_time": d.get("start_time"),
+                    "end_time": d.get("end_time"),
+                }
+                for d in detections
+            ],
+        }
+
+    # Match case-insensitively: the model is quoting a name back out of the prompt and will not
+    # always preserve casing. An unmatched name lists what *was* detected rather than returning
+    # nothing, so the model can correct itself instead of guessing again.
+    matches = [d for d in detections if str(d.get("fault_name", "")).lower() == str(name).lower()]
+    if not matches:
+        return {
+            "error": f"No detected fault named {name!r} in this analysis.",
+            "detected_faults": [d.get("fault_name") for d in detections],
+        }
+
+    d = matches[0]
+    out: dict[str, Any] = {"fault_name": d.get("fault_name")}
+    if include in ("evidence", "all"):
+        out["evidence"] = d.get("evidence")
+        # The rep fields are the whole reason "第 2 rep 膝蓋幾度" is answerable at all: per-rep
+        # attribution lives on the detection (`pose_rule_detector.py:105-107`) and survives
+        # `asdict` into the payload, but it is absent from the compact blob the prompt is built
+        # from. Dropping it here would silently downgrade the feature to whole-clip answers.
+        # They sit at their zero defaults on the whole-clip fallback path, which is honest: the
+        # model then sees rep_count 0 and knows there was no per-rep segmentation to speak of.
+        out["measured"] = {
+            k: d.get(k)
+            for k in (
+                "phase",
+                "severity",
+                "confidence",
+                "observability",
+                "start_time",
+                "end_time",
+                "start_frame",
+                "end_frame",
+                "peak_frame",
+                "rep_index",
+                "occurred_reps",
+                "rep_count",
+            )
+        }
+    if include in ("knowledge", "all"):
+        out["knowledge"] = [
+            r.get("context") for r in retrievals if r.get("fault_id") == d.get("fault_id")
+        ]
+    return out
+
+
+def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> str:
+    """Run one tool call; return its result as the string content of a ``role:"tool"`` message.
+
+    NOTHING RAISES OUT OF HERE, deliberately. A failing tool (a missing KG graphml, an unbuilt RAG
+    vector db) or a hallucinated tool name becomes an ``{"error": ...}`` payload the model can read
+    and account for out loud. The alternative — letting it propagate — kills an answer stream that
+    was otherwise fine, and the HTTP 200 is already committed by then so the user would just see it
+    die. The result is finally truncated to ``_MAX_TOOL_RESULT_CHARS``.
+    """
+    from backend.app.services import knowledge  # deferred: the KG/RAG import chain is heavy.
+
+    try:
+        if name == "get_analysis":
+            result: Any = _tool_get_analysis(context.get("detail") or {}, args)
+        elif name == "kg_query":
+            result = knowledge.graph_context(
+                str(args.get("query") or ""),
+                hops=_clamp_int(args.get("hops"), low=1, high=2, default=1),
+                max_seeds=kg_seeds_default(),
+                # Forced to the thread's movement: without it the KG happily returns knowledge for a
+                # different exercise, which the coach would then present as relevant to this clip.
+                movement=_resolve_movement(context),
+            )
+        elif name == "rag_search":
+            result = knowledge.rag_snippets(
+                str(args.get("query") or ""),
+                top_k=_clamp_int(args.get("top_k"), low=1, high=8, default=5),
+            )
+        else:
+            result = {"error": f"Unknown tool {name!r}."}
+    except Exception as exc:  # noqa: BLE001 — a tool failure must never kill the answer stream.
+        result = {"error": f"{name} failed: {exc}"}
+
+    text = json.dumps(result, ensure_ascii=False, default=str)
+    if len(text) > _MAX_TOOL_RESULT_CHARS:
+        text = text[:_MAX_TOOL_RESULT_CHARS] + "…[truncated]"
+    return text
 
 
 def _parse_followups(text: str) -> list[str]:
