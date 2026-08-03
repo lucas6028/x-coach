@@ -98,6 +98,28 @@ Append to `tests/test_chat_endpoint.py`, inside the same class that holds the ex
         self.assertEqual(ctx.exception.status, 400)
         self.assertIsInstance(ctx.exception, RuntimeError)  # existing callers still catch it
 
+    def test_completion_shell_skips_chunks_with_no_usable_choice(self) -> None:
+        # After the split the shell's own ``except (KeyError, IndexError, TypeError)`` has nothing
+        # driving it from the SSE-level tests: ``data: not-json`` is now swallowed by the raw layer,
+        # and a well-formed empty delta returns None from ``.get("content")`` without ever raising.
+        # Drive it directly, or the branch goes uncovered under the 95% gate.
+        with mock.patch.object(
+            chat_service,
+            "_stream_raw_chunks",
+            return_value=iter(
+                [
+                    {"choices": []},  # IndexError
+                    {"usage": {"total_tokens": 3}},  # KeyError
+                    {"choices": [{"delta": None}]},  # TypeError (None has no .get)
+                    {"choices": [{"delta": {"content": "ok"}}]},
+                ]
+            ),
+        ):
+            self.assertEqual(
+                list(chat_service._stream_completion([{"role": "user", "content": "hi"}], "m")),
+                ["ok"],
+            )
+
     def test_raw_chunks_transport_failure_has_no_status(self) -> None:
         with mock.patch.object(
             chat_service, "get_settings", return_value=self._settings()
@@ -110,7 +132,7 @@ Append to `tests/test_chat_endpoint.py`, inside the same class that holds the ex
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```
-.venv\Scripts\python.exe -m pytest tests/test_chat_endpoint.py -k raw_chunks -v
+.venv\Scripts\python.exe -m pytest tests/test_chat_endpoint.py -k "raw_chunks or completion_shell" -v
 ```
 
 Expected: FAIL — `AttributeError: module 'backend.app.services.chat' has no attribute '_stream_raw_chunks'`.
@@ -561,6 +583,9 @@ class ToolDispatchTests(unittest.TestCase):
                 "end_frame": 60,
                 "peak_frame": 45,
                 "evidence": {"hip_knee_delta_deg": 12.5},
+                "rep_index": 2,
+                "occurred_reps": [2],
+                "rep_count": 1,
             }
         ],
         "retrievals": [
@@ -591,6 +616,19 @@ class ToolDispatchTests(unittest.TestCase):
         self.assertEqual(out["view"], {"view_type": "side"})
         self.assertEqual([d["fault_name"] for d in out["detections"]], ["Insufficient Depth"])
         self.assertNotIn("evidence", out["detections"][0])  # summary only, not the full dict
+
+    def test_get_analysis_evidence_carries_the_rep_attribution(self) -> None:
+        # Per-rep identity is what makes "第 2 rep 膝蓋幾度" answerable; it exists on the detection
+        # but not in the compact blob the prompt is built from, so this tool is the only path to it.
+        out = json.loads(
+            chat_service._dispatch_tool(
+                "get_analysis",
+                {"fault_name": "Insufficient Depth", "include": "evidence"},
+                self._ctx(),
+            )
+        )
+        self.assertEqual(out["measured"]["rep_index"], 2)
+        self.assertEqual(out["measured"]["rep_count"], 1)
 
     def test_get_analysis_evidence_returns_measurements_and_no_knowledge(self) -> None:
         out = json.loads(
@@ -884,6 +922,12 @@ def _tool_get_analysis(detail: dict[str, Any], args: dict[str, Any]) -> Any:
     out: dict[str, Any] = {"fault_name": d.get("fault_name")}
     if include in ("evidence", "all"):
         out["evidence"] = d.get("evidence")
+        # The rep fields are the whole reason "第 2 rep 膝蓋幾度" is answerable at all: per-rep
+        # attribution lives on the detection (`pose_rule_detector.py:105-107`) and survives
+        # `asdict` into the payload, but it is absent from the compact blob the prompt is built
+        # from. Dropping it here would silently downgrade the feature to whole-clip answers.
+        # They sit at their zero defaults on the whole-clip fallback path, which is honest: the
+        # model then sees rep_count 0 and knows there was no per-rep segmentation to speak of.
         out["measured"] = {
             k: d.get(k)
             for k in (
@@ -896,6 +940,9 @@ def _tool_get_analysis(detail: dict[str, Any], args: dict[str, Any]) -> Any:
                 "start_frame",
                 "end_frame",
                 "peak_frame",
+                "rep_index",
+                "occurred_reps",
+                "rep_count",
             )
         }
     if include in ("knowledge", "all"):
@@ -1259,14 +1306,20 @@ def answer_stream(
     system = _build_system_prompt(context) + _TOOL_GROUNDING_RULE
     convo: list[dict[str, Any]] = [{"role": "system", "content": system}, *messages]
     deadline = time.monotonic() + chat_timeout()
-    streamed_any = False  # once true the HTTP 200 has carried output; a retry would double-emit.
+    # True once the HTTP 200 has carried output, which makes a retry illegal (it would double-emit).
+    # NOTE it is always False at the TOP of an iteration, by induction: it starts False, and reaching
+    # the next iteration requires tool calls, after which a round that narrated has emitted ``reset``
+    # and cleared it while a round that did not never set it. That is why the timeout branch above
+    # cannot have an "already streamed" case — do not add one back; it would be dead code and would
+    # show up as a partial branch under the 95% coverage gate.
+    streamed_any = False
     answer = ""
 
     for round_index in range(_MAX_TOOL_ROUNDS + 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            if streamed_any:
-                break  # the user already has an answer on screen; stop rather than hang.
+            # Nothing has reached the client at this point, ever — see the ``streamed_any`` note
+            # below — so an honest error is the only outcome available here.
             yield _sse("error", {"detail": "The coach ran out of time before answering."})
             return
 
@@ -1696,31 +1749,52 @@ runs no tools and its ~1.5s latency is a defended property."
 
 Add to `frontend/src/test/components.CoachTray.chat.test.tsx`:
 
+**The stream must be held open across these assertions.** `send`'s `finally` clears both `tool` and
+`streaming` the moment `chatStream` resolves. A mock that resolves immediately would make the
+"shows the line" test fail (the line is already gone) and make the "clears the line" test pass
+*vacuously* — it would pass even if `onDelta` cleared nothing. So the mock parks on a promise the
+test releases:
+
 ```tsx
-  it("shows a named tool status line while the coach looks something up", async () => {
+  it("shows a named tool status line, then clears it when the answer streams", async () => {
+    let releaseTool!: () => void;
+    let releaseDelta!: () => void;
     vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
       h.onTool?.("kg_query", "knee valgus");
-      await Promise.resolve();
+      await new Promise<void>((r) => (releaseTool = r)); // assert while the tool is running
       h.onDelta("Answer");
+      await new Promise<void>((r) => (releaseDelta = r)); // assert while the answer streams
       h.onDone("m");
     });
     renderTray();
-    await sendMessage("why?");
+    void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
+
+    // The tool line is up, naming both the tool and its subject.
     expect(await screen.findByText(/knee valgus/)).toBeTruthy();
+
+    // The first answer token retires it.
+    releaseTool();
+    expect(await screen.findByText("Answer")).toBeTruthy();
+    expect(screen.queryByText(/knee valgus/)).toBeNull();
+
+    releaseDelta();
   });
 
-  it("clears the tool status line once the answer starts streaming", async () => {
-    let handlers: ChatStreamHandlers | null = null;
+  it("falls back to a generic label for a tool it has no i18n string for", async () => {
+    // `t()` returns the key itself on a miss (i18n.tsx:1421), so an unguarded lookup would render
+    // "chat.tool.something_else" straight into the tray.
+    let release!: () => void;
     vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      handlers = h;
-      h.onTool?.("rag_search", "ankle mobility");
-      h.onDelta("Answer");
+      h.onTool?.("something_else", "x");
+      await new Promise<void>((r) => (release = r));
+      h.onDelta("A");
       h.onDone("m");
     });
     renderTray();
-    await sendMessage("why?");
-    expect(screen.queryByText(/ankle mobility/)).toBeNull();
-    expect(handlers).not.toBeNull();
+    void sendMessage("why?");
+    expect(await screen.findByText(/x/)).toBeTruthy();
+    expect(screen.queryByText(/chat\.tool\./)).toBeNull();
+    release();
   });
 
   it("discards streamed narration when the server sends reset", async () => {
@@ -1738,7 +1812,10 @@ Add to `frontend/src/test/components.CoachTray.chat.test.tsx`:
   });
 ```
 
-Reuse the file's existing `renderTray` / `sendMessage` helpers and its `api` import; import `ChatStreamHandlers` from `../api` if it is not already imported.
+The `reset` test *can* await `sendMessage`, unlike the two above: it asserts on the **committed**
+assistant turn, which survives the `finally`.
+
+Reuse the file's existing `renderTray` / `sendMessage` helpers and its `api` import.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1934,7 +2011,8 @@ If either leaks — if retrieved knowledge is relayed as an observation — appl
 
 - [ ] **Step 4: Verify the detail path and the retraction path**
 
-- Ask **"我的第一個錯誤,詳細的量測數字是多少?"** — expect a `get_analysis` tool frame and a real number from `evidence`, not "分析中沒有測量".
+- Ask the spec's success criterion 1 verbatim — **"我第 2 rep 的膝蓋角度是多少?"** — on a multi-rep clip. Expect a `get_analysis` tool frame and a real number, not "分析中沒有測量". This is answerable because `rep_index`/`occurred_reps`/`rep_count` reach the payload via `asdict` (`pose_rule_detector.py:105-107, 664`) and Task 3 puts them in `measured`; if the answer comes back rep-agnostic, check that whitelist first.
+- On a clip that fell back to whole-clip detection (`rep_count` 0), ask the same question. The coach must say per-rep attribution is unavailable rather than inventing a rep number.
 - Watch for a turn where the coach narrates before calling a tool. If the narration ever remains on screen next to the final answer, `reset` is not reaching the client — check the frame ordering in `answer_stream` (the `reset` must precede the `tool` frames).
 
 - [ ] **Step 5: Re-measure follow-up chip latency**
@@ -1963,7 +2041,24 @@ git commit -m "docs: v3 build notes — live model and grounding verification"
 **Verified while writing, not assumed.** `i18n.tsx:1421` resolves a missing key to the key string
 (`DICTS[lang][key] ?? en[key] ?? key`), so Task 6's tool label needs the explicit whitelist rather
 than a falsy-fallback — the plan states this as fact, not as a choice. `tests/test_chat_endpoint.py`
-imports `types`/`unittest`/`mock` but not `json`, so Task 3 adds it.
+imports `types`/`unittest`/`mock` but not `json`, so Task 3 adds it. Per-rep attribution
+(`rep_index`, `occurred_reps`, `rep_count`) exists on the detection dataclass
+(`pose_rule_detector.py:105-107`) and reaches the payload through `asdict` (`:664`), so spec success
+criterion 1 is supported by the data — Task 3 puts those fields in `measured` and Task 7 asks the
+criterion verbatim rather than a weaker substitute.
+
+**Two coverage traps deliberately pre-empted**, because the 95% gate in Task 4 Step 7 would
+otherwise stall on them. (1) `answer_stream`'s timeout branch has no "already streamed" case:
+`streamed_any` is provably False at the top of every iteration, so such a case would be dead code
+and a partial branch. (2) `_stream_completion`'s shape-tolerance `except` loses its only driver in
+Task 1 — `data: not-json` moves to the raw layer — so Task 1 adds a test that patches
+`_stream_raw_chunks` directly.
+
+**Three async-timing traps in Task 6.** `send`'s `finally` clears `tool` and `streaming` as soon as
+`chatStream` resolves, so a mock that resolves immediately makes the "shows the tool line" assertion
+fail and makes a naive "clears the tool line" assertion pass vacuously. Task 6's mocks park on a
+test-released promise and do not await `sendMessage`; only the `reset` test awaits it, because that
+one asserts on committed content.
 
 **Known soft spot.** Task 5's `stubFetchStream` helper is written defensively because the existing
 `api.test.ts` may already define an equivalent under another name; the step says to reuse the file's

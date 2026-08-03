@@ -690,6 +690,12 @@ Gates: `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95
 
 - **Time-to-first-token regresses** on turns that call tools: an extra LLM round trip plus retrieval
   before the first word. The `tool` frame is the mitigation (the user sees progress), not a fix.
+- **The tool schemas are the real recurring token cost**, not `detail`. `detail` never enters the
+  prompt unless a tool returns part of it, but `_TOOLS` — three function schemas with the
+  descriptions that carry the reference-vs-observation framing — is ~400–600 tokens sent on *every*
+  round of *every* turn, including turns that call nothing. That is the standing price of v3, and
+  it is charged against a metered endpoint. If it needs cutting later, the lever is trimming the
+  descriptions, not dropping `detail`.
 - **Default model tool support is unverified.** `LLM_MODELS` defaults to
   `deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5, minimax/minimax-m3, tencent/hy3-preview`; whether
   each supports function calling has not been checked against the live API. The 4xx-retry path makes
