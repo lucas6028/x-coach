@@ -2,7 +2,7 @@
 // something to show. The pure sizing/timing decisions are exported and unit-tested; the <video>
 // and canvas glue below them cannot run under jsdom and is coverage-excluded, matching the split
 // in lib/poseExtract.ts.
-import { resolveDuration } from "./poseExtract";
+import { resolveDuration } from "./mediaDuration";
 
 /** Longest edge of the stored thumbnail. A history card renders it at ~40px; 480 covers a
  *  retina card and any future larger use without approaching the backend's 512KB cap. */

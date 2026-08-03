@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.formparsers import MultiPartParser
 
 from backend.app import config
 from backend.app.routers import (
@@ -31,6 +32,13 @@ from backend.app.routers import (
 from backend.app.settings import chat_models, default_chat_model, get_settings
 
 logger = logging.getLogger(__name__)
+
+# Pose extraction is intentionally client-side, then its JSON is posted as a multipart form field
+# alongside the source video. Starlette's default for *non-file* parts is only 1 MiB; a 30 FPS
+# 33-landmark recording reaches that in roughly ten seconds and is rejected before the route can
+# return a useful error. Keep a bounded server-wide allowance for this legitimate payload while
+# the separately enforced video upload limit continues to protect file storage.
+MultiPartParser.max_part_size = 16 * 1024 * 1024
 
 
 def _log_storage_backend() -> None:

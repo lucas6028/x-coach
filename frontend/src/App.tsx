@@ -7,7 +7,6 @@ import CoachTray from "./components/CoachTray";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import ResizeHandle from "./components/ResizeHandle";
-import { extractPoseFromBlob } from "./lib/poseExtract";
 import { captureThumbnail } from "./lib/thumbnail";
 import type { PoseTier } from "./lib/poseTier";
 import { useI18n } from "./lib/i18n";
@@ -133,6 +132,8 @@ export default function App() {
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
     try {
+      // MediaPipe is a cold path: defer its WASM graph until the user explicitly supplies video.
+      const { extractPoseFromBlob } = await import("./lib/poseExtract");
       const pose = await extractPoseFromBlob(blob, tier);
       // Captured from the same blob the browser just decoded for MediaPipe, so it costs one
       // extra seek. Resolves to null on any failure — a missing thumbnail never blocks analysis.

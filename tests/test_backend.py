@@ -872,6 +872,21 @@ class AnalyzePoseRouterTests(_TempConfigBase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("max_reps", response.json()["detail"])
 
+    def test_accepts_pose_json_larger_than_starlette_default_form_part_limit(self) -> None:
+        """A ten-second, 30 FPS client pose can exceed Starlette's 1 MiB field default.
+
+        ``max_reps=99`` makes the route stop before it stages a file, so this asserts multipart
+        parsing itself accepted the large pose part without performing storage or detector work.
+        """
+        large_pose = json.dumps({"frames": [], "padding": "x" * (1024 * 1024)})
+        response = self.client.post(
+            "/api/analyze/pose",
+            data={"movement": "Squat", "pose": large_pose, "max_reps": "99"},
+            files={"file": ("clip.mp4", b"fake", "video/mp4")},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("max_reps", response.json()["detail"])
+
     def test_rejects_max_reps_before_stage_upload(self) -> None:
         """Same no-compute-on-rejection guarantee as /api/analyze, for the pose-upload path."""
         with mock.patch.object(analysis, "stage_upload") as mocked_stage:

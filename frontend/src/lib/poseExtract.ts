@@ -2,12 +2,15 @@
 // and emit pose JSON byte-compatible with src/pose/process_videos.py so the backend detector is
 // untouched. The pure serializer (landmarksToFrame) is unit-tested; the <video>/rVFC/WASM glue
 // in extractPoseFromBlob is impure and coverage-excluded like the other detector boundaries.
-import { createPoseLandmarker } from "../components/poseLandmarker";
 import type { PoseTier } from "./poseTier";
+import { createPoseInferenceRunner } from "./poseInference";
 
 const LANDMARK_COUNT = 33;
 
-interface MpLandmark { x: number; y: number; z: number; visibility?: number }
+// The task API normally supplies every coordinate, but worker structured-clone results from
+// some WebViews can omit optional fields. Never serialize a partial landmark: JSON.stringify
+// would drop that key and the server correctly rejects the whole pose payload as malformed.
+interface MpLandmark { x?: number; y?: number; z?: number; visibility?: number }
 export interface PoseJsonLandmark { x: number; y: number; z: number; visibility: number }
 export interface PoseJsonFrame {
   frame_index: number;
@@ -19,10 +22,23 @@ export interface PoseJson {
   frames: PoseJsonFrame[];
 }
 
-const toPts = (lms?: MpLandmark[]): PoseJsonLandmark[] | null =>
-  lms && lms.length >= LANDMARK_COUNT
-    ? lms.map((l) => ({ x: l.x, y: l.y, z: l.z, visibility: l.visibility ?? 0 }))
-    : null;
+const isFiniteCoordinate = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const toPts = (lms?: MpLandmark[]): PoseJsonLandmark[] | null => {
+  if (!lms || lms.length < LANDMARK_COUNT) return null;
+
+  // Treat a damaged MediaPipe result as a no-pose frame. This is safe for the detector and
+  // guarantees every non-null frame conforms to the API's x/y/z/visibility contract.
+  if (!lms.every((l) =>
+    isFiniteCoordinate(l.x) &&
+    isFiniteCoordinate(l.y) &&
+    isFiniteCoordinate(l.z) &&
+    (l.visibility === undefined || isFiniteCoordinate(l.visibility))
+  )) return null;
+
+  return lms.map((l) => ({ x: l.x!, y: l.y!, z: l.z!, visibility: l.visibility ?? 0 }));
+};
 
 export function landmarksToFrame(
   frameIndex: number,
@@ -122,7 +138,7 @@ export async function extractPoseFromBlob(
   // `await metadataReady` below still sees it.
   metadataReady.catch(() => undefined);
   video.src = url;
-  const landmarker = await createPoseLandmarker(tier);
+  const landmarker = await createPoseInferenceRunner(tier);
   const frames: PoseJsonFrame[] = [];
   try {
     await metadataReady;
@@ -136,8 +152,8 @@ export async function extractPoseFromBlob(
     for (let t = 0; t < duration; t += 1 / fps) {
       video.currentTime = t;
       await new Promise<void>((r) => { video.onseeked = () => r(); });
-      const result = landmarker.detectForVideo(video, Math.round(t * 1000));
-      frames.push(landmarksToFrame(i, result.landmarks?.[0], result.worldLandmarks?.[0]));
+      const result = await landmarker.detect(video, Math.round(t * 1000));
+      frames.push(landmarksToFrame(i, result.landmarks ?? undefined, result.worldLandmarks ?? undefined));
       i += 1;
       onProgress?.(duration ? Math.min(1, t / duration) : 1);
     }

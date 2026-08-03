@@ -13,6 +13,7 @@ import { loadLeaderboard, saveScore, type NinjaEntry } from "../lib/ninja/leader
 import { estimateKcal, EFFORT } from "../lib/calories";
 import { addCalories } from "../lib/calorieStore";
 import { waitForVideoFrame } from "../lib/videoFrame";
+import { createLivePoseSchedule, shouldRunLivePoseInference } from "../lib/livePoseScheduler";
 import { CameraError, getCameraStream } from "../lib/camera";
 import { isInLiffClient } from "../lib/liff";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
@@ -64,7 +65,7 @@ export default function FruitNinja() {
   const g = useRef({
     running: false,
     last: 0,
-    lastVideoTime: -1,
+    poseSchedule: createLivePoseSchedule(),
     lastUi: 0,
     game: createGameState(0) as GameState,
     prev: [null, null] as (Point | null)[],
@@ -129,8 +130,8 @@ export default function FruitNinja() {
 
     const now = performance.now();
 
-    if (video.currentTime !== s.lastVideoTime) {
-      s.lastVideoTime = video.currentTime;
+    // Keep GPU inference tied to useful camera cadence instead of the 60/120 Hz display rate.
+    if (shouldRunLivePoseInference(s.poseSchedule, video.currentTime, now)) {
       // dt spans the interval between *detection* frames (camera fps), not rAF ticks. Measuring it
       // here — where the wrist positions actually update — keeps wrist speed and physics on the
       // same clock; measuring across rAF inflated speed ~2× and let a still hand's jitter slice.
@@ -238,7 +239,7 @@ export default function FruitNinja() {
         const s = g.current;
         s.running = true;
         s.last = 0;
-        s.lastVideoTime = -1;
+        s.poseSchedule = createLivePoseSchedule();
         s.lastUi = 0;
         s.game = createGameState(now);
         s.prev = [null, null];
@@ -275,7 +276,14 @@ export default function FruitNinja() {
       // Timeout-wrapped: inside the LINE (LIFF) in-app browser on iOS getUserMedia can hang
       // forever — the wrapper turns that into a catchable error (see lib/camera).
       const stream = await getCameraStream({
-        video: { facingMode: "user", width: 640, height: 480 },
+        // Match the 30fps inference budget so the camera ISP/decoder does not produce frames
+        // that this interaction can never consume.
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 30 },
+        },
         audio: false,
       });
       // getUserMedia resolved after an unmount — stop the orphaned track and bail. Also close the
