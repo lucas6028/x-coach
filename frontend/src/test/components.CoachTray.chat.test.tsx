@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
-import { ChatError, type Analysis } from "../api";
+import { api, ChatError, type Analysis } from "../api";
 
 // Mutable auth state so tests can flip signed-in / signed-out (hoisted for the vi.mock factory).
 const h = vi.hoisted(() => ({
@@ -74,6 +74,13 @@ function renderTray() {
       </I18nProvider>
     </MemoryRouter>
   );
+}
+
+// Types a follow-up into the composer and sends it — the common "user acts" prelude shared by tests
+// that need to observe in-flight stream state (deliberately not awaited by some callers; see below).
+async function sendMessage(text: string) {
+  await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), text);
+  await userEvent.click(screen.getByLabelText(/Send message/i));
 }
 
 describe("CoachTray — follow-up chat", () => {
@@ -445,5 +452,67 @@ describe("CoachTray — follow-up chat", () => {
     expect(scrollTo.mock.calls.length).toBe(beforeChips);
 
     Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+  });
+
+  it("shows a named tool status line, then clears it when the answer streams", async () => {
+    // Subject is deliberately NOT "knee valgus": the fixture's own FaultCard evidence already
+    // renders "knee valgus ratio 0.82" on first paint (lib/retrieval.ts keyEvidence), so that text
+    // would satisfy findByText immediately — before the tool ever ran — and this test would pass
+    // vacuously (releaseTool never actually needed). A collision-free subject forces the assertion
+    // to wait on the real tool line.
+    let releaseTool!: () => void;
+    let releaseDelta!: () => void;
+    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
+      h.onTool?.("kg_query", "zzqury-kg-subject");
+      await new Promise<void>((r) => (releaseTool = r)); // assert while the tool is running
+      h.onDelta("Answer");
+      await new Promise<void>((r) => (releaseDelta = r)); // assert while the answer streams
+      h.onDone("m");
+    });
+    renderTray();
+    void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
+
+    // The tool line is up, naming both the tool and its subject.
+    expect(await screen.findByText(/zzqury-kg-subject/)).toBeTruthy();
+
+    // The first answer token retires it.
+    releaseTool();
+    expect(await screen.findByText("Answer")).toBeTruthy();
+    expect(screen.queryByText(/zzqury-kg-subject/)).toBeNull();
+
+    releaseDelta();
+  });
+
+  it("falls back to a generic label for a tool it has no i18n string for", async () => {
+    // `t()` returns the key itself on a miss (i18n.tsx:1421), so an unguarded lookup would render
+    // "chat.tool.something_else" straight into the tray. The subject is deliberately unique gibberish
+    // — a bare "x" is a substring of the KnowledgeGraphWidget caption ("Fault → cause → fix"), which
+    // let this assertion pass even before the tool line existed.
+    let release!: () => void;
+    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
+      h.onTool?.("something_else", "zzqux-subject");
+      await new Promise<void>((r) => (release = r));
+      h.onDelta("A");
+      h.onDone("m");
+    });
+    renderTray();
+    void sendMessage("why?");
+    expect(await screen.findByText(/zzqux-subject/)).toBeTruthy();
+    expect(screen.queryByText(/chat\.tool\./)).toBeNull();
+    release();
+  });
+
+  it("discards streamed narration when the server sends reset", async () => {
+    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
+      h.onDelta("Let me check.");
+      h.onReset?.();
+      h.onTool?.("kg_query", "valgus");
+      h.onDelta("Real answer");
+      h.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    expect(await screen.findByText("Real answer")).toBeTruthy();
+    expect(screen.queryByText(/Let me check/)).toBeNull();
   });
 });
