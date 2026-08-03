@@ -108,3 +108,51 @@ describe("buildChatContext", () => {
     expect(withoutMovement.movement).toBeUndefined();
   });
 });
+
+describe("buildChatContext detail", () => {
+  const ANALYSIS = {
+    video_id: "v1",
+    metadata: { fps: 30, width: 1, height: 1, total_frames: 10 },
+    view: { view_type: "side", view_confidence: 0.9 },
+    quality: { valid_frame_ratio: 0.9 },
+    detections: [
+      {
+        fault_id: "f1",
+        fault_name: "Insufficient Depth",
+        kg_query: "depth",
+        retrieval_mode: "kg",
+        severity: 0.7,
+        confidence: 0.9,
+        observability: "clear",
+        start_time: 1,
+        end_time: 2,
+        start_frame: 30,
+        end_frame: 60,
+        peak_frame: 45,
+        phase: "bottom",
+        evidence: { hip_knee_delta_deg: 12.5 },
+      },
+    ],
+    retrievals: [
+      { fault_id: "f1", fault_name: "Insufficient Depth", query_text: "d", retrieval_mode: "kg", context: {} },
+    ],
+    pose: { fps: 30, width: 1, height: 1, frames: [{ i: 0, lm: null }] },
+    source: "upload",
+    movement: "Squat",
+  } as unknown as Analysis;
+
+  it("ships the full detections and retrievals for the get_analysis tool", () => {
+    const detail = buildChatContext(ANALYSIS).detail as Record<string, unknown>;
+    expect((detail.detections as unknown[])[0]).toMatchObject({
+      evidence: { hip_knee_delta_deg: 12.5 },
+      peak_frame: 45,
+    });
+    expect(detail.retrievals).toHaveLength(1);
+    expect(detail.quality).toEqual({ valid_frame_ratio: 0.9 });
+  });
+
+  it("omits the heavy pose block", () => {
+    const detail = buildChatContext(ANALYSIS).detail as Record<string, unknown>;
+    expect(detail.pose).toBeUndefined();
+  });
+});
