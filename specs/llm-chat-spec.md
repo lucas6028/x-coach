@@ -490,18 +490,31 @@ _stream_turn(...)       -> TurnResult       # NEW. Consumes raw chunks; accumula
 
 `TurnResult` carries the assistant text, the reassembled `tool_calls`, and `finish_reason`.
 
-**Only the final round emits `delta` frames.** A round whose `finish_reason` is `tool_calls` may
-*also* have produced prose — many models narrate before calling ("讓我查一下知識圖譜…"). That text must
-**not** reach the client: `delta` frames cannot be retracted, so streaming it would concatenate the
-narration with the real answer the model writes after the tool result, both on screen and in the
-persisted assistant turn. Non-final rounds therefore buffer their text and put it into the message
-array as the assistant turn preceding the `tool` results — which is what the OpenAI-compatible
-contract expects anyway — and emit nothing to the client but the `event: tool` frames. The one round
-that ends without tool calls is the only one that streams.
+**A round that narrates *and* calls a tool must retract its narration.** Many models emit prose
+before a tool call ("讓我查一下知識圖譜…"). If that text is streamed as `delta` frames it gets
+concatenated with the real answer the model writes after the tool result — on screen and in the
+persisted assistant turn.
 
-This also makes §2's "no `delta` has been yielded yet" retry precondition **trivially true for every
-round but the last**, which is stronger than a runtime check: the retry path is reachable throughout
-the loop, and only the final round can be past the point of no return.
+The obvious fix — "only the final round streams" — **does not work**, because `finish_reason` only
+arrives at the *end* of a round. Whether a round is final is undecidable while it is in flight, so
+that rule degenerates into "buffer every round and flush at the end", which costs token-by-token
+streaming on the **most common path of all**: the turn that calls no tools. That is a worse
+regression than the bug it fixes.
+
+So: **stream optimistically, and retract on the rare collision.** A round emits `delta` frames as
+text arrives. If that same round turns out to have produced `tool_calls`, the server emits a
+`reset` frame (§5) before the `tool` frames; the client clears its accumulator and the streaming
+bubble, and the narration goes into the message array as the assistant turn preceding the tool
+results — which is what the OpenAI-compatible contract expects anyway. Normal turns stream exactly
+as they do today; only the narrate-then-call collision pays anything.
+
+`reset` is safe because the client's streaming buffer is transient: `CoachTray` commits the
+assistant turn only after the stream ends, so nothing user-visible has been persisted at retraction
+time.
+
+Consequence for §2's retry precondition: "no `delta` has been yielded yet" becomes a genuine runtime
+check rather than a structural guarantee, and a `reset` re-arms it (after retraction the client is
+back to a clean slate, so a retry is legal again).
 
 **Fragment reassembly is the sharp edge.** Streamed tool calls arrive split: `delta.tool_calls[i]`
 carries `id` and `function.name` typically only on the first chunk, and `function.arguments` as
@@ -575,22 +588,33 @@ branches and their tests.
 
 ## 5. SSE contract (v3 delta)
 
-One new frame; `delta` / `done` / `error` are untouched.
+Two new frames; `delta` / `done` / `error` are untouched.
 
 ```
 event: tool
 data: {"name": "kg_query", "query": "knee valgus"}
+
+event: reset
+data: {}
 ```
 
-Emitted once per tool call, at call time. No terminating counterpart — the next `delta` implies the
-work finished. `dispatchSSE` (`api.ts:363-379`) is an if/else-if chain that silently ignores unknown
-events, so **the backend can ship before the client**.
+`tool` is emitted once per tool call, at call time. No terminating counterpart — the next `delta`
+implies the work finished.
+
+`reset` tells the client to discard everything streamed so far this turn (see §1). It is emitted
+only when a round produced both text and tool calls, immediately before that round's `tool` frames.
+
+`dispatchSSE` (`api.ts:363-379`) is an if/else-if chain that silently ignores unknown events, so an
+old client tolerates both frames without crashing. Note the caveat: an old client that ignores
+`reset` would render the narration concatenated with the answer on a collision turn, so **ship the
+client change in the same release**, even though the wire format itself is backward-compatible.
 
 ## 6. Client
 
-- `ChatStreamHandlers` gains an optional `onTool`.
+- `ChatStreamHandlers` gains an optional `onTool` and an optional `onReset`.
 - `CoachTray` renders a transient status line above the streaming bubble ("搜尋知識圖譜:knee
-  valgus"), cleared on the first `delta` of the final answer.
+  valgus"), cleared on the first `delta` of the final answer. `onReset` clears both the local
+  accumulator and the `streaming` state.
 - i18n for the three tool display names; the `query` string is rendered verbatim (model-generated,
   like the follow-up chips).
 - `buildChatContext` (`lib/grounding.ts`) adds `detail`: the full `detections` + `retrievals`,
@@ -617,8 +641,11 @@ Backend (`tests/test_chat_endpoint.py`, `unittest.TestCase`):
   `error`, no retry.
 - Per tool: dispatch, argument clamping (`hops`, `top_k` out of range and non-numeric), unknown tool
   name, a tool that raises.
-- Narration on a tool round is **not** streamed: a round returning both prose and `tool_calls` emits
-  zero `delta` frames, and its text appears only in the message array handed to the next round.
+- Narration on a collision round is retracted: a round returning both prose and `tool_calls` emits
+  its `delta` frames, then a `reset` **before** the `tool` frames, and its text lands in the message
+  array handed to the next round. A round with tool calls but no prose emits **no** `reset`.
+- A normal no-tool turn emits its `delta` frames and no `reset` (regression lock: streaming is not
+  buffered on the common path).
 - The `tool` SSE frame shape.
 - `suggest_followups` sends no `tools` (regression lock on the chip path).
 - `_stream_completion`'s existing tests must pass **unmodified**. Necessary but *not sufficient*:
