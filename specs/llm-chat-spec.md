@@ -696,12 +696,94 @@ Gates: `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95
   round of *every* turn, including turns that call nothing. That is the standing price of v3, and
   it is charged against a metered endpoint. If it needs cutting later, the lever is trimming the
   descriptions, not dropping `detail`.
-- **Default model tool support is unverified.** `LLM_MODELS` defaults to
-  `deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5, minimax/minimax-m3, tencent/hy3-preview`; whether
-  each supports function calling has not been checked against the live API. The 4xx-retry path makes
-  this non-fatal, but if *most* of the picker lacks support the feature is mostly inert — worth
-  measuring live early in implementation.
+- ~~**Default model tool support is unverified.**~~ **RESOLVED by live probe, 2026-08-04.** Note the
+  risk as originally written named the `.env.example` defaults, which are *not* what this deployment
+  runs. The real configuration is **NVIDIA NIM** (`LLM_BASE_URL=https://integrate.api.nvidia.com/v1`),
+  not OpenRouter, with `LLM_MODELS=openai/gpt-oss-120b, openai/gpt-oss-20b, minimaxai/minimax-m2.7`.
+  Probed each with a live tool-enabled streaming request:
+
+  | Model | Result |
+  |---|---|
+  | `openai/gpt-oss-120b` | **tool call**, `finish_reason=tool_calls` |
+  | `openai/gpt-oss-20b` | **tool call**, `finish_reason=tool_calls` |
+  | `minimaxai/minimax-m2.7` | **HTTP 410 Gone** — end-of-life 2026-07-27 |
+
+  So v3 is not inert: both live models genuinely emit tool calls. Because the base URL is NIM rather
+  than OpenRouter, `_is_openrouter` is False throughout, so the attribution headers and the
+  `provider` routing body are correctly omitted — and `tools`/`tool_choice`, being standard
+  OpenAI-compatible fields, are sent regardless. That is the intended behaviour.
+
+- **`minimaxai/minimax-m2.7` is dead and still in the picker — a PRE-EXISTING bug, not introduced by
+  v3.** It returns HTTP 410 for *every* request, tools or not, so any user who selects it gets a
+  failed chat today. v3's degradation path handles it correctly but cannot rescue it: 410 is a 4xx,
+  so the loop retries once without `tools`, gets 410 again, and emits a single in-band `error`
+  frame — honest, at the cost of one wasted round trip. **Fix by removing it from `LLM_MODELS`**;
+  that is a config change, independent of this branch.
 - **The red line in §4 is prompt-enforced, not mechanically enforced.** A model can still blur
   retrieved knowledge into observation. Verify against live models before shipping; if it leaks,
   the fallback is to tag every tool-returned knowledge block inline with a "REFERENCE ONLY" prefix
   rather than relying on one system-prompt rule.
+
+## Build notes (v3)
+
+Kept alive the way v2 and v2.1 were.
+
+- **Implemented across 6 commits** on `feat/chat-tool-calling`: transport split → `_stream_turn` →
+  tool catalogue → the loop → client wiring → tray UI. Backend coverage 96.8% (gate 95%),
+  `chat.py` 98%.
+- **Model support — measured, not assumed** (see Known risks above): both live NIM models emit real
+  tool calls. The third entry in `LLM_MODELS` is end-of-life and 410s; that is a pre-existing config
+  bug this branch merely surfaces.
+- **Six defects were found during implementation, and every one was a guard that did not cover the
+  input space it claimed to.** Recording them because the pattern is the lesson, not the individual
+  bugs:
+  1. `(KeyError, IndexError, TypeError)` does not catch `None.get(...)` — that is `AttributeError`.
+  2. A provider-supplied `tool_calls[].index` was trusted to be an int; a mixed str/int set made
+     `sorted()` raise `TypeError`.
+  3. `_clamp_int` missed `OverflowError`: `json.loads` accepts a bare `Infinity` literal and
+     `int(float('inf'))` overflows.
+  4. `json.dumps` sat *outside* the `try` whose docstring promised "nothing raises out of here" —
+     and `default=str` rescues neither a non-string dict key (never consulted for keys), a circular
+     reference (cycle detection fires first), nor a value whose `__str__` raises.
+  5. `answer_stream` caught only `_LLMError`, but `_stream_raw_chunks` wraps only the *transport* in
+     `except Exception → _LLMError`; `_stream_turn`'s reassembly is unwrapped, so five distinct
+     valid-JSON-but-misshapen chunk shapes raised straight out of the generator.
+  6. `_stream_turn`'s nameless-slot filter had no test driving its false branch.
+
+  All six share one failure mode, and it is the exact one this spec's error model exists to prevent:
+  they escape as exception types nobody catches, out of a generator whose **HTTP 200 is already
+  committed**, so the client sees a dead stream instead of an `error` frame. The structural fix was
+  an `except Exception` in `answer_stream` — the only frame in the stack that knows the 200 is
+  committed and can convert a crash into an in-band frame. Note a sibling `except` clause never
+  catches what is raised inside *another* clause's body, so the retry call needed its own.
+- **Correction to §1's framing.** The 200 is committed *earlier* than "the first frame is yielded":
+  Starlette sends `http.response.start` before it ever enters the body iterator. Every statement in
+  `answer_stream` is therefore in scope, including those before the first `yield`.
+- **Three findings were invisible to coverage**, which is worth internalising before trusting a
+  coverage number again: coverage.py does not split a one-line comprehension `if` or a one-line
+  `or` into separate branch arcs, and it never models an argument's *value*. Concretely — deleting
+  the `not offer_tools` disjunct left the whole suite green, and swapping `_dispatch_tool`'s third
+  argument from `context` to `convo` also left it green while `get_analysis` would have been
+  silently dead forever. Both are now covered by tests verified to fail against exactly those
+  mutations.
+- **The frontend coverage gate is red on the dev machine, and was already red on `main`** (3
+  failures there, 4 on this branch, all `Test timed out in 5000ms` in components this branch never
+  touches). `yarn test` without coverage passes 90/90 cleanly. Cause is vitest's default 5s
+  `testTimeout` losing races under coverage instrumentation on a slow machine (~490s wall,
+  ~3340s cumulative import). Raising `testTimeout` in `vite.config.ts` is the obvious fix but edits
+  shared CI config, so it was deliberately left out of this branch.
+
+### Still outstanding — needs a signed-in session and human judgement
+
+These are the parts of the plan's Task 7 that cannot be settled from a probe, because they need real
+analyses, a Supabase session, and a person reading the coach's answers:
+
+1. **The §4 red line under live models** — ask about a topic outside the detected faults (e.g. ankle
+   mobility on a clean rep) and confirm the coach frames retrieved knowledge as general reference,
+   never as an observation about the clip. This is the one risk that can damage the product's
+   credibility; if it leaks, the fallback is to prefix every tool-returned knowledge block inline
+   with `REFERENCE ONLY — not measured in this video:` in `_dispatch_tool`.
+2. **The `get_analysis` detail path** — "我第 2 rep 的膝蓋角度是多少?" should return a real number.
+3. **The retraction path** — watch for a turn where the model narrates before calling a tool, and
+   confirm the narration disappears rather than sitting beside the answer.
+4. **Follow-up chip latency** — the v2.1 baseline is ~1.5s.
