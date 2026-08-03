@@ -491,6 +491,91 @@ class StreamCompletionTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 list(chat_service._stream_completion([{"role": "user", "content": "hi"}], "m"))
 
+    def test_raw_chunks_yield_parsed_dicts_and_skip_unparseable(self) -> None:
+        # The raw layer owns JSON-level tolerance ONLY: a truncated/garbage payload is skipped, but a
+        # well-formed chunk is yielded whole even when it carries no ``content`` -- it may hold a
+        # ``tool_calls`` fragment, and silently dropping it would corrupt the caller's reassembly.
+        fake_resp = mock.Mock()
+        fake_resp.raise_for_status.return_value = None
+        fake_resp.iter_lines.return_value = iter(
+            [
+                ": keep-alive ping",  # SSE comment -> skip
+                'data: {"choices":[{"delta":{"content":"Hi"}}]}',
+                "data: {broken",  # truncated JSON -> skip
+                'data: {"choices":[{"delta":{}}]}',  # no content, but still a real chunk -> KEPT
+                "data: [DONE]",
+                'data: {"choices":[{"delta":{"content":"unreached"}}]}',
+            ]
+        )
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = fake_resp
+        cm.__exit__.return_value = False
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch("httpx.stream", return_value=cm):
+            chunks = list(
+                chat_service._stream_raw_chunks([{"role": "user", "content": "hi"}], "m")
+            )
+        self.assertEqual(
+            chunks,
+            [
+                {"choices": [{"delta": {"content": "Hi"}}]},
+                {"choices": [{"delta": {}}]},
+            ],
+        )
+
+    def test_raw_chunks_http_status_error_carries_the_status(self) -> None:
+        # A 4xx must be distinguishable from a transport failure: the tool loop retries without
+        # ``tools`` on a 4xx (the model rejects the field) but not on a dead provider.
+        import httpx
+
+        request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+        response = httpx.Response(400, request=request)
+        fake_resp = mock.Mock()
+        fake_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "400", request=request, response=response
+        )
+        cm = mock.MagicMock()
+        cm.__enter__.return_value = fake_resp
+        cm.__exit__.return_value = False
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch("httpx.stream", return_value=cm):
+            with self.assertRaises(chat_service._LLMError) as ctx:
+                list(chat_service._stream_raw_chunks([{"role": "user", "content": "hi"}], "m"))
+        self.assertEqual(ctx.exception.status, 400)
+        self.assertIsInstance(ctx.exception, RuntimeError)  # existing callers still catch it
+
+    def test_completion_shell_skips_chunks_with_no_usable_choice(self) -> None:
+        # After the split the shell's own ``except (KeyError, IndexError, TypeError)`` has nothing
+        # driving it from the SSE-level tests: ``data: not-json`` is now swallowed by the raw layer,
+        # and a well-formed empty delta returns None from ``.get("content")`` without ever raising.
+        # Drive it directly, or the branch goes uncovered under the 95% gate.
+        with mock.patch.object(
+            chat_service,
+            "_stream_raw_chunks",
+            return_value=iter(
+                [
+                    {"choices": []},  # IndexError
+                    {"usage": {"total_tokens": 3}},  # KeyError
+                    {"choices": [{"delta": None}]},  # AttributeError (None has no .get)
+                    {"choices": [{"delta": {"content": "ok"}}]},
+                ]
+            ),
+        ):
+            self.assertEqual(
+                list(chat_service._stream_completion([{"role": "user", "content": "hi"}], "m")),
+                ["ok"],
+            )
+
+    def test_raw_chunks_transport_failure_has_no_status(self) -> None:
+        with mock.patch.object(
+            chat_service, "get_settings", return_value=self._settings()
+        ), mock.patch("httpx.stream", side_effect=Exception("connection reset")):
+            with self.assertRaises(chat_service._LLMError) as ctx:
+                list(chat_service._stream_raw_chunks([{"role": "user", "content": "hi"}], "m"))
+        self.assertIsNone(ctx.exception.status)
+
 
 # --------------------------------------------------------------------- router contract
 
