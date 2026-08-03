@@ -171,6 +171,9 @@ export interface ChatContext {
   quality: Record<string, number>;
   faults: ChatFaultContext[];
   movement?: string;
+  // The full analysis document (detections + retrievals, no `pose`), read server-side by the
+  // `get_analysis` tool. Never persisted, and never sent on the followups call.
+  detail?: Record<string, unknown>;
 }
 
 // Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
@@ -181,6 +184,12 @@ export interface ChatStreamHandlers {
   onDelta: (text: string) => void;
   onDone: (model: string) => void;
   onError: (detail: string) => void;
+  // The coach called a tool. Optional so a caller that doesn't surface tool progress is unaffected.
+  onTool?: (name: string, query: string) => void;
+  // Discard everything streamed so far this turn: the round that produced it also called a tool, so
+  // its text was narration ("let me look that up"), not the answer. Safe because the caller commits
+  // the assistant turn only once the stream ends.
+  onReset?: () => void;
 }
 
 // A persisted chat thread for one analysed video (one per user+video_id). Restored on history-replay.
@@ -368,13 +377,15 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
   }
   if (!event) return;
-  let data: { text?: string; model?: string; detail?: string };
+  let data: { text?: string; model?: string; detail?: string; name?: string; query?: string };
   try {
     data = JSON.parse(dataLines.join("\n"));
   } catch {
     return;
   }
   if (event === "delta") handlers.onDelta(data.text ?? "");
+  else if (event === "tool") handlers.onTool?.(data.name ?? "", data.query ?? "");
+  else if (event === "reset") handlers.onReset?.();
   else if (event === "done") handlers.onDone(data.model ?? "");
   else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
 }
@@ -657,10 +668,16 @@ export const api = {
     context: ChatContext,
     model?: string
   ): Promise<string[]> {
+    // Strip `detail`: it is the bulk of the payload (full RAG passage text for every fault) and this
+    // fire-and-forget call can never use it — the followups endpoint runs no tools. Chip latency is
+    // a defended ~1.5s and nothing gets added to this path.
+    const { detail: _unused, ...lean } = context;
     const res = await fetch("/api/chat/followups", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
-      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+      body: JSON.stringify(
+        model ? { messages, context: lean, model } : { messages, context: lean }
+      ),
     });
     if (!res.ok) return [];
     const data = (await res.json().catch(() => ({}))) as { questions?: string[] };
