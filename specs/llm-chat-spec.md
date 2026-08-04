@@ -785,17 +785,33 @@ Kept alive the way v2 and v2.1 were.
   ~3340s cumulative import). Raising `testTimeout` in `vite.config.ts` is the obvious fix but edits
   shared CI config, so it was deliberately left out of this branch.
 
-### Still outstanding — needs a signed-in session and human judgement
+### Live verification results (2026-08-04, `openai/gpt-oss-120b` on NIM)
 
-These are the parts of the plan's Task 7 that cannot be settled from a probe, because they need real
-analyses, a Supabase session, and a person reading the coach's answers:
+Run via `scripts/chat/try_tools.py`, which drives `answer_stream` directly — real loop, real tools,
+real model, no browser or Supabase session needed.
 
-1. **The §4 red line under live models** — ask about a topic outside the detected faults (e.g. ankle
-   mobility on a clean rep) and confirm the coach frames retrieved knowledge as general reference,
-   never as an observation about the clip. This is the one risk that can damage the product's
-   credibility; if it leaks, the fallback is to prefix every tool-returned knowledge block inline
-   with `REFERENCE ONLY — not measured in this video:` in `_dispatch_tool`.
-2. **The `get_analysis` detail path** — "我第 2 rep 的膝蓋角度是多少?" should return a real number.
-3. **The retraction path** — watch for a turn where the model narrates before calling a tool, and
-   confirm the narration disappears rather than sitting beside the answer.
-4. **Follow-up chip latency** — the v2.1 baseline is ~1.5s.
+| Check | Result |
+|---|---|
+| **Criterion 1 — `get_analysis` detail path** | **PASS.** "所有量測數值 + 第幾個 rep" returned `min_knee_angle_deg 104.7`, `hip_depth_ratio 0.83`, `torso_lean_deg 41.2`, `peak_frame 108`, `rep_index 2`, `confidence 0.88` — every one present ONLY in `detail`, never in the prompt. |
+| **Criterion 2 — `rag_search`** | **PASS.** Returned real corpus citations (Lee et al. 2019 JSC 33(3); Human Kinetics), framed as 「在一般文獻中」. |
+| **`kg_query`** | **PASS**, but only fires on a graph-shaped question. For ordinary knowledge questions the model consistently prefers `rag_search`. Not a defect; worth knowing the tool is not dead, just narrowly selected. |
+| **Criterion 3 — §4 red line, undetected fault** | **PASS.** Asked "我有 butt wink 嗎?" (a real KG fault, not detected). Opened with 「這次的分析並沒有偵測到 butt wink」 and labelled the retrieved knowledge 「參考一般文獻,未在此影片中測得」. |
+| **Criterion 3 — §4 red line, NOT MEASURED clip** | **PASS, and this is the one that mattered.** On a 0%-measurable clip it refused to judge depth (「系統無法對任何畫格進行分析,也就無法判斷您的深蹲深度是否足夠」), told the user to re-record, and labelled the literature 「**並非從您的影片中觀測到的問題**」. FIX 7's clause plus the REFERENCE ONLY prefix held — the escape hatch is closed in practice, not just on paper. |
+
+**The real cost, and it is not small: time-to-first-token on a tool turn is 31–36s.** A non-tool turn
+on the same model is ~4.7s. So a tool round costs roughly **+27s** — partly `gpt-oss-120b` being a
+reasoning model that thinks before both the tool call and the answer, partly the round trip plus
+retrieval. The `tool` status frame makes the wait legible rather than blank, but it does not make it
+short. This is materially worse than the spec's Known-risks section anticipated and is the strongest
+argument for pinning a faster model for tool turns, the way v2.1 pinned one for the follow-up chips.
+
+### Still outstanding
+
+Two items still need the browser, because they are about the tray's rendering rather than the loop:
+
+1. **The retraction path.** `gpt-oss-120b` did not narrate before calling a tool in any of the five
+   runs above, so no `reset` frame was observed in the wild. The behaviour is unit-tested on both
+   sides; what remains unverified is only that a real narrate-then-call turn *looks* right in the
+   tray. A model more prone to narrating (or a deliberately provocative prompt) would surface it.
+2. **Follow-up chip latency** — the v2.1 baseline is ~1.5s. Unchanged by this work in principle, since
+   the chip path sends neither `tools` nor `detail`, but not re-measured live.
