@@ -443,6 +443,8 @@ Replace lines 212-215 (the `thread` construction) with:
 
 In `frontend/src/test/components.CoachTray.chat.test.tsx`, every `handlers.onTool?.(name, query, sources)` becomes `handlers.onTool?.(<id>, name, query)` followed by `handlers.onToolDone?.(<id>, sources)`. Ids number from 0 within each mock implementation. Precisely:
 
+**Work this table bottom-up, or match on the unique `zzq-` subject string instead of the line number.** Every replacement turns one line into two, so the moment you edit the first row top-down every line number below it is off by one.
+
 | Line (pre-edit) | Replace with |
 |---|---|
 | 495 | `handlers.onTool?.(0, "kg_query", "zzqury-kg-subject");` then, on the next line, `handlers.onToolDone?.(0, []);` |
@@ -659,6 +661,8 @@ yarn test src/test/components.ToolRunList.test.tsx
 ```
 Expected: FAIL — no button role exists (sources render as plain divs), and `.lm-dots` is never rendered.
 
+**On the `getByRole(…, { name })` regexes:** accessible-name computation drops the `aria-hidden` chevron but can leave leading/interior whitespace, and testing-library's name matching may normalize case. The regexes here are unanchored and the two labels share no substring, so both cases are safe — but if one fails, read the actual "Here are the accessible roles" dump vitest prints and fix from that, do not adjust the regex by inspection.
+
 - [ ] **Step 3: Swap the i18n keys**
 
 In `frontend/src/lib/i18n.tsx`, replace lines 107-108 (the `en` dict) with:
@@ -735,14 +739,22 @@ function ToolRunRow({ run }: { run: DisplayToolRun }) {
   const sources = Array.isArray(run.sources) ? run.sources : [];
   const isConcept = sources.some((s) => s.kind === "concept");
   return (
-    <div className="text-xs text-muted">
+    <div className="text-xs text-muted" aria-busy={!!run.pending}>
       {/* The label, the query, and the pending marker share ONE element: the marker is an element
           child, which testing-library's text matcher ignores, so the line still matches by text and
           still parents the source block below it. */}
       <div className="flex items-center gap-2">
         {known ? t(`chat.tool.${run.name}`) : t("chat.tool.generic")}
         {run.query ? `${t("chat.tool.sep")}${run.query}` : ""}
-        {run.pending && <LumenLoader variant="dots" />}
+        {run.pending && (
+          // aria-hidden because LumenLoader's dots carry role="status": today exactly one exists at
+          // a time (CoachTray's, gated on toolRuns.length === 0), but a three-tool turn would mount
+          // three simultaneous live regions all announcing the same string. `aria-busy` on the row
+          // states the same thing once, in the right place.
+          <span aria-hidden="true" className="inline-flex">
+            <LumenLoader variant="dots" />
+          </span>
+        )}
       </div>
       {sources.length > 0 && (
         <div className="mt-1 flex flex-col gap-0.5 pl-3">

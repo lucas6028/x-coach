@@ -1073,13 +1073,21 @@ type LiveToolRun = ToolRun & { id: number; pending: boolean };
 `sources`, and clears `pending`. A `tool_done` whose `id` matches nothing is **dropped** — silently
 mis-attributing a citation is worse than losing one.
 
-**Pending must settle on stream termination, not only on error.** On `done`, on `error`, and on the
-stream ending by any other means, every still-pending run resolves to "finished, no sources". This
-is a backstop, not a nicety: per v2 §1's error model, Starlette has already committed HTTP 200
-before the body iterator runs, so an exception escaping the generator — including one raised while
-serialising `tool_done` itself — produces a dead stream with no `error` frame. Without this rule the
-row spins forever with nothing to explain it. The same rule covers a dropped frame and a client
-disconnect, so no audit of backend serialisability is required.
+**No pending run may outlive the turn.** This matters because a lost `tool_done` is a real path, not
+a hypothetical: per v2 §1's error model Starlette has already committed HTTP 200 before the body
+iterator runs, so an exception escaping the generator — including one raised while serialising
+`tool_done` itself — produces a dead stream with no `error` frame at all. A dropped or
+uncorrelatable frame does the same thing more quietly.
+
+It needs no separate settle step, and deliberately does not get one. Both exits already cover it:
+the commit path rebuilds each run from an allow-list, which drops `pending` along with `id`, so a
+never-resolved run commits as "finished, cited nothing"; the rollback path clears the live list
+wholesale. The invariant is therefore structural rather than a rule someone must remember to apply,
+and no audit of backend serialisability is required.
+
+The one case left open: a stream that neither ends nor errors holds its row pending indefinitely.
+That is a hung connection — v3.1's thinking dots hung identically and the whole turn is stuck
+regardless — so v3.2 adds no new failure mode.
 
 **`id` and `pending` are stripped at commit**, alongside nothing else — the message keeps
 `{name, query, sources}`. This is the same reasoning as v3.1 §5's "strip before sending rather than
@@ -1103,7 +1111,11 @@ expanded   檢索文獻:ankle dorsiflexion
 - **The pending marker reuses `<LumenLoader variant="dots" />`.** It is now the *only* signal that
   anything is happening across a retrieval that can run minutes, so it must animate; a static `⋯` is
   a much weaker signal than the dots it replaces. Reusing the existing primitive rather than
-  inventing a second spinner idiom is deliberate — it already carries `role="status"`.
+  inventing a second spinner idiom is deliberate. **But it must be wrapped `aria-hidden`**: the dots
+  carry `role="status"`, and today exactly one exists at a time (CoachTray's, gated on
+  `toolRuns.length === 0`). A three-tool turn would otherwise mount three simultaneous live regions
+  all announcing the same string. The row instead carries `aria-busy`, which states the same thing
+  once, in the right place.
 - **A run with no sources renders no summary row at all**, collapsed or otherwise. `get_analysis`
   therefore looks exactly as it does today once complete.
 - **The summary row is a `<button>` with `aria-expanded`**, not a clickable `div`.
