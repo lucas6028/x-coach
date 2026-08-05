@@ -1131,12 +1131,25 @@ def _answer_stream_inner(
         )
         for i, call in enumerate(turn.tool_calls):
             args = _parse_tool_args(call["arguments"])
-            yield _sse("tool", {"name": call["name"], "query": _tool_query_label(call["name"], args)})
+            # Dispatch BEFORE the frame: the frame carries the sources, which only exist once the
+            # tool has run. The cost is that the tray's status line appears after the retrieval
+            # rather than before it — acceptable, because the sources are the point of the frame,
+            # and the loop already blocks on this call either way.
+            outcome = _dispatch_tool(call["name"], args, context)
+            frame: dict[str, Any] = {
+                "name": call["name"],
+                "query": _tool_query_label(call["name"], args),
+            }
+            if outcome.sources:
+                # Omitted rather than [] so a client can tell "this tool has nothing to cite"
+                # (get_analysis) from "this tool cited nothing".
+                frame["sources"] = outcome.sources
+            yield _sse("tool", frame)
             convo.append(
                 {
                     "role": "tool",
                     "tool_call_id": call["id"] or f"call_{i}",
-                    "content": _dispatch_tool(call["name"], args, context).text,
+                    "content": outcome.text,
                 }
             )
 

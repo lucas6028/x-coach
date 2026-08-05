@@ -547,6 +547,50 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(event_names.count("error"), 1)
         self.assertNotIn("done", event_names)
 
+    def test_the_tool_frame_carries_sources(self) -> None:
+        fake, _ = self._turns(
+            ([], [{"id": "c1", "name": "rag_search", "arguments": '{"query": "ankle"}'}]),
+            (["Answer"], []),
+        )
+        result = chat_service._ToolResult(
+            text='{"ok": true}',
+            sources=[{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}],
+        )
+        events = self._run(fake, dispatch=lambda n, a, c: result)
+        tool_frames = [d for e, d in events if e == "tool"]
+        self.assertEqual(
+            tool_frames,
+            [
+                {
+                    "name": "rag_search",
+                    "query": "ankle",
+                    "sources": [{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}],
+                }
+            ],
+        )
+
+    def test_the_tool_frame_omits_sources_when_there_are_none(self) -> None:
+        # get_analysis has no outside source to credit; the key is absent, not an empty array, so a
+        # client can tell "nothing to cite" from "cited nothing".
+        fake, _ = self._turns(
+            ([], [{"id": "c1", "name": "get_analysis", "arguments": '{"include": "all"}'}]),
+            (["Answer"], []),
+        )
+        result = chat_service._ToolResult(text='{"ok": true}', sources=[])
+        events = self._run(fake, dispatch=lambda n, a, c: result)
+        tool_frames = [d for e, d in events if e == "tool"]
+        self.assertEqual(tool_frames, [{"name": "get_analysis", "query": ""}])
+
+    def test_the_tool_message_content_is_the_result_text(self) -> None:
+        # Regression lock: the model must receive `.text`, never a repr of the _ToolResult.
+        fake, calls = self._turns(
+            ([], [{"id": "c1", "name": "kg_query", "arguments": "{}"}]),
+            (["A"], []),
+        )
+        result = chat_service._ToolResult(text='{"marker": 1}', sources=[{"label": "L", "kind": "concept"}])
+        self._run(fake, dispatch=lambda n, a, c: result)
+        self.assertEqual(calls[1]["messages"][-1]["content"], '{"marker": 1}')
+
 
 # --------------------------------------------------------------- service: follow-up parsing
 
