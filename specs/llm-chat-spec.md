@@ -834,7 +834,8 @@ wire at all: **which sources the retrieval actually returned**.
 
 ## Decisions (settled at design review)
 
-1. Tool records live **above the answer**, in call order, **expanded by default** — the Claude Code
+1. Tool records live **above the answer**, in call order, **expanded by default** *(the source list's
+   default is reversed to collapsed by v3.2 Decision 2; the tool line itself stays visible)* — the Claude Code
    shape, so the reasoning chain reads top-to-bottom: what was looked up, what came back, what the
    coach concluded.
 2. They **persist across reload and history replay**, stored alongside the answer text.
@@ -897,7 +898,8 @@ Common rules:
 
 ## 3. SSE contract (v3.1 delta)
 
-The `tool` frame gains one field; no new frame types.
+The `tool` frame gains one field; no new frame types. *(Superseded by v3.2 §1, which splits this
+into `tool` + `tool_done` so the status line can appear before the tool runs.)*
 
 ```
 event: tool
@@ -996,3 +998,158 @@ Four things the build changed relative to the text above:
 Not carried out, deliberately, and worth knowing: `_tool_sources` failing degrades to "no citations"
 indistinguishably from "nothing to cite", with nothing logged — `chat.py` has no logger at all, so
 fixing it means introducing logging to a module that has none.
+
+---
+
+# v3.2: Live tool status, condensed sources
+
+Status: **designed** (approved at design review 2026-08-05; not built). Requested as "我想要像
+Claude Code 一樣搜尋的時候顯示,搜尋完成後只顯示部分或濃縮的結果,而不是整個完整的標題".
+
+## Objective (v3.2)
+
+v3.1 bought provenance at the cost of live feedback and screen space, and both bills are now due:
+
+- **The tray goes silent during retrieval.** `## Build notes (v3.1)` item 2 records the tradeoff —
+  the `tool` frame moved *after* dispatch because it carries the sources, so the user sees generic
+  thinking dots for the whole lookup, measured past two minutes on a cold RAG process. v3 named the
+  lookup; v3.1 stopped doing so. v3.2 restores it without giving back the sources.
+- **Every source is rendered in full, always.** Three `rag_search` hits push the answer down the
+  tray behind a wall of document titles the user did not ask to read. Provenance should be
+  *available*, not *unavoidable*.
+
+v3.2 splits the tool frame in two and collapses the source list to a count.
+
+## Decisions (settled at design review)
+
+1. **Two frames per tool call**: one when it starts, one when it finishes.
+2. **Sources render collapsed by default**, as a count, expandable on click. This **reverses v3.1
+   Decision 1's "expanded by default"** for the source list specifically — the tool line itself
+   (name + query) stays always-visible, which is the part v3.1 got right.
+3. `kg_query` keeps its own heading when collapsed. §1 of v3.1 is not relaxed by counting.
+
+## 1. SSE contract (v3.2 delta)
+
+`tool` reverts to being yielded **before** dispatch and loses `sources`; a new `tool_done` carries
+them. Both frames carry an `id`.
+
+```
+event: tool       data: {"id":0,"name":"rag_search","query":"ankle dorsiflexion"}
+                  ... the tool actually runs here ...
+event: tool_done  data: {"id":0,"sources":[{"label":"...","kind":"encyclopedia"}]}
+```
+
+Three properties, each load-bearing:
+
+**`tool_done` is sent unconditionally, including with no sources.** It is the *completion* signal,
+not the *sources* signal — that is why it is not named `tool_sources`. `get_analysis` never has
+sources (v3.1 §1) and would otherwise sit on screen as "still running" forever. `sources` is omitted
+rather than `[]` when empty, preserving v3.1's "nothing to cite" / "cited nothing" distinction.
+
+**`id` is a counter monotonic across the entire `_answer_stream_inner` call, not per round.** The
+loop runs up to `_MAX_TOOL_ROUNDS = 3` rounds (chat.py:1018) and `enumerate(turn.tool_calls)`
+restarts at 0 in each, so a per-round index collides across rounds — as would matching on `name`,
+the moment two rounds both call `rag_search`, which is the *expected* shape of a multi-round
+conversation rather than a hypothetical. The counter makes correlation exact and independent of
+dispatch ordering, so it also survives a future parallel dispatch that "last pending run" would not.
+(The pre-existing `tool_call_id` fallback `f"call_{i}"` has the same latent per-round collision. Out
+of scope — do not chase it.)
+
+**A new event name, not a `done: true` flag on `tool`.** An older client's `dispatchSSE` chain
+(api.ts:421-425 — one site, verify it is still the only one) silently ignores an unknown event and
+leaves a row that never resolves; a flag on `tool` would render a duplicate row instead. Both are
+wrong, but a stuck row is the smaller lie.
+
+## 2. Client state
+
+`ToolRun` — the persisted shape — is **unchanged**: `{name, query, sources?}`. The two new fields
+live only in memory:
+
+```ts
+type LiveToolRun = ToolRun & { id: number; pending: boolean };
+```
+
+`onTool` appends with `pending: true`; `onToolDone` finds the run with the matching `id`, writes
+`sources`, and clears `pending`. A `tool_done` whose `id` matches nothing is **dropped** — silently
+mis-attributing a citation is worse than losing one.
+
+**Pending must settle on stream termination, not only on error.** On `done`, on `error`, and on the
+stream ending by any other means, every still-pending run resolves to "finished, no sources". This
+is a backstop, not a nicety: per v2 §1's error model, Starlette has already committed HTTP 200
+before the body iterator runs, so an exception escaping the generator — including one raised while
+serialising `tool_done` itself — produces a dead stream with no `error` frame. Without this rule the
+row spins forever with nothing to explain it. The same rule covers a dropped frame and a client
+disconnect, so no audit of backend serialisability is required.
+
+**`id` and `pending` are stripped at commit**, alongside nothing else — the message keeps
+`{name, query, sources}`. This is the same reasoning as v3.1 §5's "strip before sending rather than
+relying on Pydantic dropping unknown fields": the backend's `ToolRun` model would ignore them, but
+that backstop is coincidental and must not become the mechanism. **No backend model changes in
+v3.2** — `conversations.py` is untouched.
+
+## 3. Rendering
+
+```
+running    檢索文獻:ankle dorsiflexion  ⋯
+done       檢索文獻:ankle dorsiflexion
+              › 引用來源 3 筆
+expanded   檢索文獻:ankle dorsiflexion
+              ⌄ 引用來源 3 筆
+                Wikipedia: Squat (exercise)
+                Lee et al. 2019
+                Human Kinetics: Strength Training
+```
+
+- **The pending marker reuses `<LumenLoader variant="dots" />`.** It is now the *only* signal that
+  anything is happening across a retrieval that can run minutes, so it must animate; a static `⋯` is
+  a much weaker signal than the dots it replaces. Reusing the existing primitive rather than
+  inventing a second spinner idiom is deliberate — it already carries `role="status"`.
+- **A run with no sources renders no summary row at all**, collapsed or otherwise. `get_analysis`
+  therefore looks exactly as it does today once complete.
+- **The summary row is a `<button>` with `aria-expanded`**, not a clickable `div`.
+- `ToolRunList` gains a `ToolRunRow` child holding the expanded state — a hook cannot live inside
+  the `.map`. State is ephemeral and per-row.
+- **The heading still comes from `kind`, not from the tool name** (v3.1 Build note 3). Collapsed,
+  that is "知識圖譜概念 N 筆" vs "引用來源 N 筆". Counting must not flatten the distinction that v3.1
+  §1 exists to enforce.
+- **Known and accepted:** expanded rows collapse when the turn commits, because the live list is
+  replaced by the committed message's own list. Preserving it means hoisting row state into
+  `CoachTray` and keying it across both render paths — not worth it for a state the user usually
+  enters after reading.
+
+New i18n keys in **both** `en` and `zhHant` (`lib.i18n.test.ts` enforces parity), using the existing
+brace convention (`"video.faultMany": "{count} faults detected"`):
+
+```
+"chat.tool.sourcesN":  "{n} sources"    / "引用來源 {n} 筆"
+"chat.tool.conceptsN": "{n} concepts"   / "知識圖譜概念 {n} 筆"
+```
+
+`chat.tool.sources` / `chat.tool.concepts` remain in use as the expanded-state headings.
+
+## 4. Testing (v3.2)
+
+Backend — the `tool` frame is yielded **before** the tool runs (assert ordering against a dispatch
+that records when it was called); `tool_done` is emitted even when the tool yields no sources; ids
+are unique across a **two-round** turn.
+
+Frontend, the load-bearing four:
+
+1. `get_analysis` does not stay pending — a `tool_done` with no `sources` clears it.
+2. **The same tool called twice in one turn lands its sources on the right rows.** This is what
+   actually exercises correlation, and it is reachable today, not hypothetically.
+3. A `tool_done` with an unknown `id` is dropped rather than attached to anything.
+4. A stream that ends without `tool_done` (error, or `done` alone) leaves no pending row.
+
+Plus: collapsed `kg_query` says concepts, not sources; the expand toggle reveals the labels; and the
+committed message's `tools` contains neither `id` nor `pending`.
+
+## Success criteria (v3.2)
+
+1. During a slow retrieval the tray names the tool and the query, and shows it as running.
+2. When it completes, the sources appear as a count on one line; clicking reveals them.
+3. `get_analysis` completes visibly and shows no source row.
+4. Two `rag_search` calls in one turn each show their own sources.
+5. A stream that dies mid-tool leaves no row claiming to still be running.
+6. Nothing v3.1 pinned regresses: records still persist, no server path is visible, graph concepts
+   are still not called citations.
