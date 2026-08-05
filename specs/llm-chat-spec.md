@@ -442,7 +442,7 @@ see below.)
 
 # v3: Tool-calling loop
 
-Status: **specified, not built**. The coach becomes an agent over three server-side tools —
+Status: **built** (branch `feat/chat-tool-calling`). The coach becomes an agent over three server-side tools —
 `get_analysis`, `kg_query`, `rag_search` — instead of a single grounded completion. This is the
 "tool-calling live RAG" line the v2.1 out-of-scope list deferred.
 
@@ -820,7 +820,8 @@ Two items still need the browser, because they are about the tray's rendering ra
 
 # v3.1: Persistent tool records with citations
 
-Status: **specified, not built**. Requested as "tool calling 的紀錄像 Claude Code 一樣,不會開始回答
+Status: **built** (branch `feat/chat-tool-calling`; see `## Build notes (v3.1)` at the end of this
+section). Requested as "tool calling 的紀錄像 Claude Code 一樣,不會開始回答
 就消失,也可以讓使用者知道引用了哪些".
 
 ## Objective (v3.1)
@@ -956,3 +957,42 @@ and `/api/chat/followups` are sent messages with `tools` stripped.
 4. Reloading the page, or replaying the analysis from history, restores the tool records.
 5. A narrate-then-call turn retracts the narration but keeps the tool record.
 6. Both coverage gates still pass.
+
+## Build notes (v3.1)
+
+Built across 9 commits (`461f93ea`..`4d889920`). Backend 1558 passed / 1 xfailed, coverage 97.0%
+against the 95% gate (`chat.py` 99%, `conversations.py` 100%); frontend 90/90 files, 818/818 tests,
+`yarn build` clean. Criteria 1-5 are pinned by tests; criterion 6 holds for the backend gate, and the
+frontend gate is `yarn test` — `yarn test:coverage` is red on this machine for reasons that predate
+this work (vitest's default 5s `testTimeout` under coverage instrumentation) and `main` fails
+identically.
+
+Four things the build changed relative to the text above:
+
+1. **§2's `_dispatch_tool` split shipped with a stronger never-raises guarantee than v3 had.** The
+   handler that formats a failed tool's message is itself wrapped, because `f"{exc}"` calls
+   `BaseException.__str__`, which returns `str(args[0])` — so an exception carrying an object whose
+   own `__str__` raises would raise *inside the handler*. That is a live path: the same reasoning had
+   already been applied to `json.dumps`'s fallback and not to this one.
+
+2. **§3's frame is now yielded *after* the tool runs, not before.** The frame carries the sources, and
+   those only exist once the tool has returned. The cost is real and was accepted: the tray shows
+   generic "thinking" dots through the whole retrieval instead of naming the lookup, and on a cold RAG
+   process that silence ran past two minutes in measurement. The fix, if it bites: yield `name`/`query`
+   before dispatch as v3 did, then a second frame whose sources attach to the last-appended run — no
+   correlation key needed, since the loop yields strictly sequentially.
+
+3. **§1's mechanism is now real rather than declared.** The spec said `kind` is what the renderer keys
+   off to keep graph nodes out of the citation slot; the first implementation keyed off the tool
+   *name* and rendered `kind` nowhere, leaving the stated safety mechanism inert — a fourth tool
+   returning concept-kind sources would have been headed "Sources". The renderer now derives the
+   heading from `kind`, so the guarantee travels with the data.
+
+4. **§4's list is rendered under a shared byline block.** The in-flight and committed turns render
+   `coachTag → ToolRunList → content` identically, so nothing shifts at commit and a tool record shows
+   its byline from the moment it lands — before the first token, which is exactly when a record is
+   most likely to be the only thing on screen.
+
+Not carried out, deliberately, and worth knowing: `_tool_sources` failing degrades to "no citations"
+indistinguishably from "nothing to cite", with nothing logged — `chat.py` has no logger at all, so
+fixing it means introducing logging to a module that has none.
