@@ -29,7 +29,7 @@ export function ToolRunList({ runs }: { runs: ToolRun[] }) {
               {known ? t(`chat.tool.${run.name}` as never) : t("chat.tool.generic")}
               {run.query ? `${t("chat.tool.sep")}${run.query}` : ""}
             </div>
-            {run.sources && run.sources.length > 0 && (
+            {Array.isArray(run.sources) && run.sources.length > 0 && (
               <div className="mt-1 pl-3 flex flex-col gap-0.5">
                 <div className="text-faint">{heading}</div>
                 {run.sources.map((s, j) => (

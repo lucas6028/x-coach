@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
-import { api, ChatError, type Analysis } from "../api";
+import { ChatError, type Analysis } from "../api";
 
 // Mutable auth state so tests can flip signed-in / signed-out (hoisted for the vi.mock factory).
 const h = vi.hoisted(() => ({
@@ -557,10 +557,45 @@ describe("CoachTray — follow-up chat", () => {
   });
 
   it("keeps tool records visible after the answer starts streaming", async () => {
-    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      h.onTool?.("rag_search", "zzq-ankle-subject", [{ label: "zzq-Wiki-Source", kind: "encyclopedia" }]);
-      h.onDelta("Real answer");
-      h.onDone("m");
+    // Live-state assertion (parked, NOT awaited): sendMessage is deliberately left in flight so this
+    // is the sole guard against a reintroduced `setToolRuns([])` in `onDelta` — every other new test
+    // in this block awaits `sendMessage` and therefore only ever sees committed state. (This test
+    // owns the name that best describes it; the sibling below the record surviving into the
+    // committed message is a related but distinct guarantee.)
+    let release!: () => void;
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(
+        "rag_search",
+        "zzq-live-subject",
+        [{ label: "zzq-Live-Source", kind: "encyclopedia" }]
+      );
+      handlers.onDelta("Real ans");
+      await new Promise<void>((r) => (release = r)); // assert while still streaming, pre-commit
+      handlers.onDone("m");
+    });
+    const { container } = renderTray();
+    void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
+    expect(await screen.findByText("Real ans")).toBeTruthy();
+    expect(screen.getByText(/zzq-live-subject/)).toBeTruthy();
+    expect(screen.getByText("zzq-Live-Source")).toBeTruthy();
+    // The record sits ABOVE the streamed answer text, matching where it lands on the committed
+    // message once the turn commits (nothing should shift at commit time) — the layout decision the
+    // whole feature was specified around ("答案上方,預設展開").
+    const text = container.textContent ?? "";
+    expect(text.indexOf("zzq-live-subject")).toBeGreaterThan(-1);
+    expect(text.indexOf("zzq-live-subject")).toBeLessThan(text.indexOf("Real ans"));
+    release();
+  });
+
+  it("keeps tool records on the committed assistant message once the turn completes", async () => {
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(
+        "rag_search",
+        "zzq-ankle-subject",
+        [{ label: "zzq-Wiki-Source", kind: "encyclopedia" }]
+      );
+      handlers.onDelta("Real answer");
+      handlers.onDone("m");
     });
     renderTray();
     await sendMessage("why?");
@@ -571,11 +606,11 @@ describe("CoachTray — follow-up chat", () => {
   });
 
   it("appends successive tool calls instead of replacing them", async () => {
-    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      h.onTool?.("kg_query", "zzq-first-subject", []);
-      h.onTool?.("rag_search", "zzq-second-subject", []);
-      h.onDelta("A");
-      h.onDone("m");
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.("kg_query", "zzq-first-subject", []);
+      handlers.onTool?.("rag_search", "zzq-second-subject", []);
+      handlers.onDelta("A");
+      handlers.onDone("m");
     });
     renderTray();
     await sendMessage("why?");
@@ -589,13 +624,13 @@ describe("CoachTray — follow-up chat", () => {
     // answer — erasing them would misreport the reasoning chain. The tool call fires BEFORE the
     // reset (a realistic round-1-tool, round-2-narrate-then-reset sequence) so that a handler which
     // clears `runs` inside `onReset` is actually caught: clearing an empty list would be unobservable.
-    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      h.onTool?.("kg_query", "zzq-early-subject", []);
-      h.onDelta("zzq-narration");
-      h.onReset?.();
-      h.onTool?.("rag_search", "zzq-kept-subject", []);
-      h.onDelta("Real answer");
-      h.onDone("m");
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.("kg_query", "zzq-early-subject", []);
+      handlers.onDelta("zzq-narration");
+      handlers.onReset?.();
+      handlers.onTool?.("rag_search", "zzq-kept-subject", []);
+      handlers.onDelta("Real answer");
+      handlers.onDone("m");
     });
     renderTray();
     await sendMessage("why?");
@@ -606,23 +641,22 @@ describe("CoachTray — follow-up chat", () => {
   });
 
   it("persists tool records with the committed turn", async () => {
-    const put = vi.spyOn(api, "putConversation").mockResolvedValue(undefined as never);
-    vi.spyOn(api, "chatStream").mockImplementation(async (_m, _c, h) => {
-      h.onTool?.("rag_search", "ankle", [{ label: "zzq-Persisted-Source", kind: "paper" }]);
-      h.onDelta("A");
-      h.onDone("m");
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.("rag_search", "ankle", [{ label: "zzq-Persisted-Source", kind: "paper" }]);
+      handlers.onDelta("A");
+      handlers.onDone("m");
     });
     renderTray();
     await sendMessage("why?");
     await screen.findByText("A");
-    const thread = put.mock.calls[0][1] as Array<{ role: string; tools?: unknown[] }>;
+    const thread = h.putConversation.mock.calls[0][1] as Array<{ role: string; tools?: unknown[] }>;
     expect(thread[thread.length - 1].tools).toEqual([
       { name: "rag_search", query: "ankle", sources: [{ label: "zzq-Persisted-Source", kind: "paper" }] },
     ]);
   });
 
   it("restores tool records from a stored conversation", async () => {
-    vi.spyOn(api, "getConversation").mockResolvedValue({
+    h.getConversation.mockResolvedValue({
       video_id: "v1",
       messages: [
         { role: "user", content: "why?" },
@@ -633,7 +667,7 @@ describe("CoachTray — follow-up chat", () => {
         },
       ],
       followups: [],
-    } as never);
+    });
     renderTray();
     expect(await screen.findByText("stored answer")).toBeTruthy();
     expect(screen.getByText(/zzq-restored-subject/)).toBeTruthy();
