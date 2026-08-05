@@ -619,6 +619,38 @@ describe("CoachTray — follow-up chat", () => {
     expect(screen.getByText(/zzq-second-subject/)).toBeTruthy();
   });
 
+  it("heads a kg_query source block \"Knowledge-graph concepts\" and a rag_search block \"Sources\", keyed by kind not tool name", async () => {
+    // The spec's whole point (v3.1): a knowledge-graph node carries no citation anywhere in the
+    // graph, so it must never render under the same heading as a retrieved paper. ToolRunList keys
+    // the heading off each source's `kind` field, not off `run.name === "kg_query"` — this test is
+    // the one place that actually exercises a kg_query run WITH sources (every other test in this
+    // file passes `sources: []` for kg_query, so the concepts branch never renders elsewhere).
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.("kg_query", "zzq-concept-subject", [
+        { label: "zzq-Concept-Label", kind: "concept" },
+      ]);
+      handlers.onTool?.("rag_search", "zzq-paper-subject", [
+        { label: "zzq-Paper-Label", kind: "paper" },
+      ]);
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    expect(await screen.findByText("A")).toBeTruthy();
+
+    const conceptsHeading = screen.getByText("Knowledge-graph concepts");
+    const sourcesHeading = screen.getByText("Sources");
+
+    // Each block lists only its own tool's source label, under its own heading — not the other's.
+    const conceptBlock = conceptsHeading.parentElement as HTMLElement;
+    const sourcesBlock = sourcesHeading.parentElement as HTMLElement;
+    expect(conceptBlock.textContent).toContain("zzq-Concept-Label");
+    expect(conceptBlock.textContent).not.toContain("zzq-Paper-Label");
+    expect(sourcesBlock.textContent).toContain("zzq-Paper-Label");
+    expect(sourcesBlock.textContent).not.toContain("zzq-Concept-Label");
+  });
+
   it("keeps tool records when the server retracts narration with reset", async () => {
     // reset retracts the model's narration, but the tool calls really happened and really fed the
     // answer — erasing them would misreport the reasoning chain. The tool call fires BEFORE the

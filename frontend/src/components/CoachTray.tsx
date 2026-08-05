@@ -92,6 +92,7 @@ export default function CoachTray({
     setMessages([]);
     setError("");
     setFollowups([]);
+    setToolRuns([]);
     followupSeq.current++; // invalidate any in-flight suggestion from the previous analysis
     if (!isWorking) return;
     let active = true;

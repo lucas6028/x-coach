@@ -506,7 +506,7 @@ function uploadLimitError(status: number, body: unknown): UploadLimitError | nul
 // persistence concern only: the backend's ChatMessage is {role, content}, so Pydantic would drop
 // them anyway — but relying on implicit stripping still re-uploads the whole array every turn, and
 // on a multi-tool thread that is not small.
-function leanMessages(messages: ChatMessage[]): Array<{ role: string; content: string }> {
+function leanMessages(messages: ChatMessage[]): Array<Pick<ChatMessage, "role" | "content">> {
   return messages.map(({ role, content }) => ({ role, content }));
 }
 

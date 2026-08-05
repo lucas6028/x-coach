@@ -784,12 +784,11 @@ def _tool_sources(name: str, result: Any) -> list[dict[str, str]]:
     * ``rag_search`` returns real literature, so ``kind`` carries the corpus's own ``source_type``.
     * ``kg_query`` returns GRAPH NODES, which carry no source field anywhere in the subgraph — only
       ``node_id``/``name``/``label``. Its ``kind`` is therefore the literal ``"concept"``. The
-      renderer actually keys its heading off the tool *name* (``kg_query``), not off ``kind`` — the
-      two are equivalent today because only ``kg_query`` ever emits ``"concept"``, but a future tool
-      that also returns concept-kind sources would need the renderer's condition updated, not just
-      this docstring. Either way, this is what keeps a graph node out of the citation slot: rendering
-      one beside a cited paper would tell the user a concept is a source, exactly the false authority
-      this feature exists to prevent.
+      renderer (``ToolRunList.tsx``) keys its heading off this ``kind`` field, not off the tool
+      *name* — so a future tool that also returns concept-kind sources gets the same safe heading
+      automatically, no renderer change needed. This is what keeps a graph node out of the citation
+      slot: rendering one beside a cited paper would tell the user a concept is a source, exactly the
+      false authority this feature exists to prevent.
     * ``get_analysis`` reads the user's own analysis. There is no outside source to credit, so it
       reports none and the client omits the block.
 
