@@ -511,6 +511,57 @@ describe("chat SSE tool frames", () => {
     expect(sent.context.detail).toBeUndefined();
     expect(sent.context.fault_count).toBe(0);
   });
+
+  it("passes tool sources to onTool, and an empty array when the frame omits them", async () => {
+    const seen: Array<[string, string, unknown]> = [];
+    mockStream([
+      'event: tool\ndata: {"name":"rag_search","query":"ankle","sources":[{"label":"Wikipedia: Squat (exercise)","kind":"encyclopedia"}]}\n\n',
+      'event: tool\ndata: {"name":"get_analysis","query":"Depth"}\n\n',
+      'event: delta\ndata: {"text":"A"}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onTool: (n, q, s) => seen.push([n, q, s]),
+    });
+    expect(seen).toEqual([
+      ["rag_search", "ankle", [{ label: "Wikipedia: Squat (exercise)", kind: "encyclopedia" }]],
+      ["get_analysis", "Depth", []],
+    ]);
+  });
+
+  it("strips tools from messages on both chat endpoints", async () => {
+    const thread = [
+      { role: "user" as const, content: "hi" },
+      {
+        role: "assistant" as const,
+        content: "answer",
+        tools: [{ name: "rag_search", query: "ankle", sources: [{ label: "L", kind: "paper" }] }],
+      },
+    ];
+    const ctx = { fault_count: 0, quality: {}, faults: [] };
+
+    // Uses the file's `mockFetch` helper (a `vi.spyOn`, like every other test here) rather than
+    // `vi.stubGlobal` directly: a raw global stub isn't undone by this describe block's
+    // `afterEach(() => vi.restoreAllMocks())` and would leak a stubbed `fetch` into every test
+    // that runs after this one in the file.
+    const followupFetch = mockFetch({ questions: [] });
+    await api.chatFollowups(thread, ctx);
+    const followupBody = JSON.parse((followupFetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(followupBody.messages[1].tools).toBeUndefined();
+    expect(followupBody.messages[1].content).toBe("answer");
+
+    const streamSpy = mockStream(['event: done\ndata: {"model":"m"}\n\n']);
+    await api.chatStream(thread, ctx, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+    });
+    const chatBody = JSON.parse((streamSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(chatBody.messages[1].tools).toBeUndefined();
+  });
 });
 
 describe("api.analyzeUpload thumbnail", () => {
