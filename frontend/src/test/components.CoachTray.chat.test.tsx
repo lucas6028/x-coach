@@ -578,6 +578,8 @@ describe("CoachTray — follow-up chat", () => {
     void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
     expect(await screen.findByText("Real ans")).toBeTruthy();
     expect(screen.getByText(/zzq-live-subject/)).toBeTruthy();
+    // Collapsed by default (v3.2) — the count is what shows; the label is one click away.
+    await userEvent.click(screen.getByRole("button", { name: /Sources · 1/ }));
     expect(screen.getByText("zzq-Live-Source")).toBeTruthy();
     // The record sits ABOVE the streamed answer text, matching where it lands on the committed
     // message once the turn commits (nothing should shift at commit time) — the layout decision the
@@ -600,6 +602,7 @@ describe("CoachTray — follow-up chat", () => {
     // Committed, so this survives the finally — the whole point of v3.1.
     expect(await screen.findByText("Real answer")).toBeTruthy();
     expect(screen.getByText(/zzq-ankle-subject/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Sources · 1/ }));
     expect(screen.getByText("zzq-Wiki-Source")).toBeTruthy();
   });
 
@@ -619,12 +622,9 @@ describe("CoachTray — follow-up chat", () => {
     expect(screen.getByText(/zzq-second-subject/)).toBeTruthy();
   });
 
-  it("heads a kg_query source block \"Knowledge-graph concepts\" and a rag_search block \"Sources\", keyed by kind not tool name", async () => {
-    // The spec's whole point (v3.1): a knowledge-graph node carries no citation anywhere in the
-    // graph, so it must never render under the same heading as a retrieved paper. ToolRunList keys
-    // the heading off each source's `kind` field, not off `run.name === "kg_query"` — this test is
-    // the one place that actually exercises a kg_query run WITH sources (every other test in this
-    // file passes `sources: []` for kg_query, so the concepts branch never renders elsewhere).
+  it("counts a kg_query run as concepts and a rag_search run as sources, keyed by kind not tool name", async () => {
+    // v3.1's red line, carried through the v3.2 collapse: a knowledge-graph node carries no citation
+    // anywhere in the graph, so it must never be counted under the same word as a retrieved paper.
     h.chatStream.mockImplementation(async (_m, _c, handlers) => {
       handlers.onTool?.(0, "kg_query", "zzq-concept-subject");
       handlers.onToolDone?.(0, [{ label: "zzq-Concept-Label", kind: "concept" }]);
@@ -637,16 +637,18 @@ describe("CoachTray — follow-up chat", () => {
     await sendMessage("why?");
     expect(await screen.findByText("A")).toBeTruthy();
 
-    const conceptsHeading = screen.getByText("Knowledge-graph concepts");
-    const sourcesHeading = screen.getByText("Sources");
+    const conceptToggle = screen.getByRole("button", { name: /Knowledge-graph concepts · 1/ });
+    const sourceToggle = screen.getByRole("button", { name: /Sources · 1/ });
+    await userEvent.click(conceptToggle);
+    await userEvent.click(sourceToggle);
 
-    // Each block lists only its own tool's source label, under its own heading — not the other's.
-    const conceptBlock = conceptsHeading.parentElement as HTMLElement;
-    const sourcesBlock = sourcesHeading.parentElement as HTMLElement;
+    // Each row lists only its own tool's label, under its own count — not the other's.
+    const conceptBlock = conceptToggle.parentElement as HTMLElement;
+    const sourceBlock = sourceToggle.parentElement as HTMLElement;
     expect(conceptBlock.textContent).toContain("zzq-Concept-Label");
     expect(conceptBlock.textContent).not.toContain("zzq-Paper-Label");
-    expect(sourcesBlock.textContent).toContain("zzq-Paper-Label");
-    expect(sourcesBlock.textContent).not.toContain("zzq-Concept-Label");
+    expect(sourceBlock.textContent).toContain("zzq-Paper-Label");
+    expect(sourceBlock.textContent).not.toContain("zzq-Concept-Label");
   });
 
   it("keeps tool records when the server retracts narration with reset", async () => {
