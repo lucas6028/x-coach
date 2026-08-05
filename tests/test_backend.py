@@ -1939,26 +1939,32 @@ class ConversationsRouterTests(unittest.TestCase):
             {"role": "user", "content": "why did my knees cave?"},
             {"role": "assistant", "content": "drive knees out"},
         ]
+        # ConversationMessage.model_dump() fills in the (omitted) tools field, so the persisted
+        # and echoed shape has one more key per message than the raw request body.
+        dumped_msgs = [{**m, "tools": []} for m in msgs]
         fups = ["Should I widen my stance?", "How low should I go?"]
         with mock.patch.object(store, "upsert_conversation") as up:
             resp = self.client.put(
                 "/api/conversations/vid", json={"messages": msgs, "followups": fups}
             )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json(), {"video_id": "vid", "messages": msgs, "followups": fups})
+        self.assertEqual(
+            resp.json(), {"video_id": "vid", "messages": dumped_msgs, "followups": fups}
+        )
         up.assert_called_once_with(
-            token="tok", user_id="u1", video_id="vid", messages=msgs, followups=fups
+            token="tok", user_id="u1", video_id="vid", messages=dumped_msgs, followups=fups
         )
 
     def test_put_defaults_followups_to_empty_when_omitted(self) -> None:
         # A PUT without `followups` is a valid clear, not a 422.
         msgs = [{"role": "user", "content": "hi"}]
+        dumped_msgs = [{**m, "tools": []} for m in msgs]
         with mock.patch.object(store, "upsert_conversation") as up:
             resp = self.client.put("/api/conversations/vid", json={"messages": msgs})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["followups"], [])
         up.assert_called_once_with(
-            token="tok", user_id="u1", video_id="vid", messages=msgs, followups=[]
+            token="tok", user_id="u1", video_id="vid", messages=dumped_msgs, followups=[]
         )
 
     def test_get_restores_the_thread(self) -> None:
@@ -1987,6 +1993,26 @@ class ConversationsRouterTests(unittest.TestCase):
         app.dependency_overrides.clear()  # drop the override -> real dependency runs
         resp = self.client.get("/api/conversations/vid")
         self.assertEqual(resp.status_code, 401)
+
+    def test_conversation_message_accepts_and_round_trips_tools(self) -> None:
+        from backend.app.routers.conversations import ConversationMessage
+
+        m = ConversationMessage(
+            role="assistant",
+            content="…",
+            tools=[
+                {
+                    "name": "rag_search",
+                    "query": "ankle",
+                    "sources": [{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}],
+                }
+            ],
+        )
+        dumped = m.model_dump()
+        self.assertEqual(dumped["tools"][0]["name"], "rag_search")
+        self.assertEqual(dumped["tools"][0]["sources"][0]["kind"], "encyclopedia")
+        # Absent is the common case (every user turn, and every pre-v3.1 stored row).
+        self.assertEqual(ConversationMessage(role="user", content="hi").model_dump()["tools"], [])
 
 
 # ---------------------------------------------------------- services.runtime_config (P2 overrides)
