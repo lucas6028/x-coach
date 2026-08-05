@@ -151,9 +151,29 @@ export interface StoredAnalysis {
 
 // ---- Conversational coaching (LLM chat, grounded in an analysis) --------------------------
 
+// One provenance entry under a tool call. `kind` is a corpus source_type for rag_search but the
+// literal "concept" for kg_query, whose knowledge-graph nodes carry no source field at all — the
+// renderer keys off it so a graph concept is never shown as a literature citation.
+export interface ToolSource {
+  label: string;
+  kind: string;
+}
+
+// One tool call the coach made while answering. `sources` is absent when the tool has nothing to
+// cite (get_analysis reads the user's own analysis), which is distinct from citing nothing.
+export interface ToolRun {
+  name: string;
+  query: string;
+  sources?: ToolSource[];
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  // The tool calls that produced this answer. Rendered above the message and persisted with it, so
+  // a reload restores the answer's provenance. Stripped before either chat endpoint is called — the
+  // LLM has no use for it and it would be re-uploaded every turn.
+  tools?: ToolRun[];
 }
 
 // One detected fault plus its retrieved knowledge, as the frontend already derives it for the
@@ -193,7 +213,7 @@ export interface ChatStreamHandlers {
   onDone: (model: string) => void;
   onError: (detail: string) => void;
   // The coach called a tool. Optional so a caller that doesn't surface tool progress is unaffected.
-  onTool?: (name: string, query: string) => void;
+  onTool?: (name: string, query: string, sources: ToolSource[]) => void;
   // Discard everything streamed so far this turn: the round that produced it also called a tool, so
   // its text was narration ("let me look that up"), not the answer. Safe because the caller commits
   // the assistant turn only once the stream ends.
@@ -385,14 +405,21 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
   }
   if (!event) return;
-  let data: { text?: string; model?: string; detail?: string; name?: string; query?: string };
+  let data: {
+    text?: string;
+    model?: string;
+    detail?: string;
+    name?: string;
+    query?: string;
+    sources?: ToolSource[];
+  };
   try {
     data = JSON.parse(dataLines.join("\n"));
   } catch {
     return;
   }
   if (event === "delta") handlers.onDelta(data.text ?? "");
-  else if (event === "tool") handlers.onTool?.(data.name ?? "", data.query ?? "");
+  else if (event === "tool") handlers.onTool?.(data.name ?? "", data.query ?? "", data.sources ?? []);
   else if (event === "reset") handlers.onReset?.();
   else if (event === "done") handlers.onDone(data.model ?? "");
   else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
@@ -473,6 +500,14 @@ function uploadLimitError(status: number, body: unknown): UploadLimitError | nul
     Number(detail.limit_mb ?? 0),
     detail.used_mb === undefined ? null : Number(detail.used_mb)
   );
+}
+
+// Both chat endpoints get the conversation with `tools` removed. The records are a rendering and
+// persistence concern only: the backend's ChatMessage is {role, content}, so Pydantic would drop
+// them anyway — but relying on implicit stripping still re-uploads the whole array every turn, and
+// on a multi-tool thread that is not small.
+function leanMessages(messages: ChatMessage[]): Array<{ role: string; content: string }> {
+  return messages.map(({ role, content }) => ({ role, content }));
 }
 
 export const api = {
@@ -639,7 +674,11 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
       // The server validates `model` against its allowlist; omit it to use the server default.
-      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+      body: JSON.stringify(
+        model
+          ? { messages: leanMessages(messages), context, model }
+          : { messages: leanMessages(messages), context }
+      ),
     });
     if (!res.ok || !res.body) {
       const detail = await res.json().catch(() => ({}));
@@ -680,11 +719,12 @@ export const api = {
     // fire-and-forget call can never use it — the followups endpoint runs no tools. Chip latency is
     // a defended ~1.5s and nothing gets added to this path.
     const { detail: _unused, ...lean } = context;
+    const leanMsgs = leanMessages(messages);
     const res = await fetch("/api/chat/followups", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
       body: JSON.stringify(
-        model ? { messages, context: lean, model } : { messages, context: lean }
+        model ? { messages: leanMsgs, context: lean, model } : { messages: leanMsgs, context: lean }
       ),
     });
     if (!res.ok) return [];
