@@ -875,11 +875,24 @@ wave's finding). The 21 test call sites gain `.text` — mechanical.
 {"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}
 ```
 
-- `label` from `metadata.reference`; when absent, the basename of `metadata.source` with directories stripped.
-- `kind` from `metadata.source_type` (`encyclopedia`, `paper`, ...), used only to pick an icon or style.
+Per tool, precisely:
+
+- **`rag_search`** — one entry per retrieved chunk. `label` from `metadata.reference`; when that is
+  absent, the basename of `metadata.source` with directories stripped. `kind` from
+  `metadata.source_type` (`encyclopedia`, `paper`, ...).
+- **`kg_query`** — one entry per `matched_nodes` entry plus the 1-hop `subgraph.nodes` names.
+  `label` is the node `name` with any `Movement:` prefix stripped (`Squat:Insufficient Depth` renders
+  as `Insufficient Depth`). **`kind` is the literal string `"concept"`** — never a `source_type` —
+  because that is what §1 requires the renderer to key off to keep graph nodes out of the citation
+  slot. The node `label` field (`QualityDimension`, …) is an internal taxonomy and is not sent.
+- **`get_analysis`** — the key is omitted entirely.
+
+Common rules:
+
 - **`metadata.source` is NEVER sent.** It is a server filesystem path (`data\rag\docs\squat_wiki.txt`)
   — useless to a user and a gratuitous internals leak.
-- Deduplicated by `label` (one document yields many chunks), capped at **5** per tool call.
+- Deduplicated by `label` (one document yields many chunks; a KG node can be both matched and 1-hop),
+  capped at **5** per tool call, preserving first-seen order.
 
 ## 3. SSE contract (v3.1 delta)
 
