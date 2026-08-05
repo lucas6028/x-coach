@@ -1252,6 +1252,29 @@ class ToolDispatchTests(unittest.TestCase):
         self.assertIn("error", out)
         self.assertIn("rag_search failed", out["error"])
 
+    def test_a_raising_tool_whose_exception_arg_has_a_broken_str_does_not_raise(self) -> None:
+        # _run_tool's own except block builds "{name} failed: {exc}", and f"{exc}" calls
+        # str(exc) -- BaseException.__str__ returns str(args[0]) for a single-arg exception, so an
+        # exception constructed AROUND an object whose own __str__ raises (a ValueError wrapping a
+        # bad value, say) makes that interpolation raise too, from inside the except block that was
+        # supposed to be the safety net. Pins the nested try added to _run_tool in review.
+        from backend.app.services import knowledge as knowledge_service
+
+        class _Explodes:
+            def __str__(self) -> str:
+                raise RuntimeError("boom")
+
+        with mock.patch.object(
+            knowledge_service, "graph_context", side_effect=ValueError(_Explodes())
+        ):
+            raw = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()).text
+        out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
+        self.assertIn("error", out)
+        # Degrades to the exception's CLASS NAME (not the ordinary "{name} failed: {exc}" message)
+        # only in this one case -- the ordinary path is pinned by the tests just above.
+        self.assertIn("kg_query failed", out["error"])
+        self.assertIn("ValueError", out["error"])
+
     def test_reference_only_prefix_marks_knowledge_tools_but_not_get_analysis(self) -> None:
         # FIX 2 (whole-branch review): the honesty rule for retrieved knowledge lives on a single
         # system-prompt sentence today (_TOOL_GROUNDING_RULE); this puts a marker on the data itself
@@ -1351,6 +1374,29 @@ class ToolDispatchTests(unittest.TestCase):
         self.assertIn("Ankle Mobility", labels)
         self.assertNotIn("QualityDimension", labels)  # internal taxonomy is not a source
 
+    def test_kg_sources_drop_labels_that_are_blank_after_stripping(self) -> None:
+        # Review fix: a matched node id of "Squat:" (nothing after the movement prefix) used to
+        # survive filtering because the filter checked the PRE-split id, not the label actually
+        # emitted -- producing a blank chip that still consumed one of the five dedupe slots. A
+        # subgraph node with a blank/whitespace name is the same bug on the other branch.
+        from backend.app.services import knowledge as knowledge_service
+
+        payload = {
+            "matched_nodes": ["Squat:", "Squat:Insufficient Depth"],
+            "subgraph": {
+                "nodes": [
+                    {"node_id": "Blank", "name": "   ", "label": "Concept"},
+                    {"node_id": "Ankle", "name": "Ankle Mobility", "label": "Concept"},
+                ],
+                "edges": [],
+            },
+        }
+        with mock.patch.object(knowledge_service, "graph_context", return_value=payload):
+            out = chat_service._dispatch_tool("kg_query", {"query": "depth"}, self._ctx())
+        labels = [s["label"] for s in out.sources]
+        self.assertNotIn("", labels)
+        self.assertEqual(labels, ["Insufficient Depth", "Ankle Mobility"])
+
     def test_get_analysis_reports_no_sources(self) -> None:
         out = chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx())
         self.assertEqual(out.sources, [])
@@ -1387,7 +1433,9 @@ class ToolDispatchTests(unittest.TestCase):
         # _tool_sources runs inside the never-raises path, so it must survive any shape a tool or a
         # future provider could hand it.
         for junk in (None, 42, "text", [], {"results": "not-a-list"}, {"results": [None, 7]},
-                     {"subgraph": None}, {"subgraph": {"nodes": "nope"}}, {"matched_nodes": 5}):
+                     {"results": [{"metadata": "not-a-dict"}]},
+                     {"subgraph": None}, {"subgraph": {"nodes": "nope"}}, {"subgraph": {"nodes": [42]}},
+                     {"matched_nodes": 5}):
             for name in ("rag_search", "kg_query", "get_analysis"):
                 self.assertIsInstance(chat_service._tool_sources(name, junk), list)
 
