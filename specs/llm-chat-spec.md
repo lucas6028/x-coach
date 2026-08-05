@@ -1121,11 +1121,12 @@ New i18n keys in **both** `en` and `zhHant` (`lib.i18n.test.ts` enforces parity)
 brace convention (`"video.faultMany": "{count} faults detected"`):
 
 ```
-"chat.tool.sourcesN":  "{n} sources"    / "引用來源 {n} 筆"
-"chat.tool.conceptsN": "{n} concepts"   / "知識圖譜概念 {n} 筆"
+"chat.tool.sourcesN":  "Sources · {n}"                   / "引用來源 {n} 筆"
+"chat.tool.conceptsN": "Knowledge-graph concepts · {n}"  / "知識圖譜概念 {n} 筆"
 ```
 
-`chat.tool.sources` / `chat.tool.concepts` remain in use as the expanded-state headings.
+`chat.tool.sources` / `chat.tool.concepts` become **unused** — the count row *is* the heading, and a
+second heading under it would be redundant — and are deleted from both dictionaries.
 
 ## 4. Testing (v3.2)
 
