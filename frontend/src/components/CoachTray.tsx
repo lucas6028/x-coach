@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, CheckCircle, PaperPlaneTilt, SignIn, Warning } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import { api, ChatError, type Analysis, type ChatMessage, type ToolRun } from "../api";
+import { api, ChatError, type Analysis, type ChatMessage, type LiveToolRun, type ToolRun } from "../api";
 import { buildChatContext } from "../lib/grounding";
 import { retrievalByFault } from "../lib/retrieval";
 import { wasMeasured } from "../lib/quality";
@@ -58,7 +58,7 @@ export default function CoachTray({
   const [streaming, setStreaming] = useState("");
   // Every tool call this turn, in order. Unlike v3's single transient line these are NOT cleared
   // when the answer starts: the record is the answer's provenance and belongs beside it.
-  const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
+  const [toolRuns, setToolRuns] = useState<LiveToolRun[]>([]);
   // Two grounded next-question suggestions the coach offers after an answer. Captured per answer and
   // persisted alongside the thread (only the latest set), so a reload restores the chips, not just
   // the response; cleared on a new send / analysis.
@@ -163,7 +163,7 @@ export default function CoachTray({
     stickToBottom.current = true; // a fresh send re-engages auto-follow (user is acting at the foot)
     const mySeq = ++followupSeq.current; // this turn owns the next suggestion result
     let acc = "";
-    let runs: ToolRun[] = [];
+    let runs: LiveToolRun[] = [];
     let inbandError = "";
     // True only once the stream's `done` frame has actually been seen. `api.chatStream` resolves
     // the instant the reader drains, regardless of which frame (if any) was last — so a connection
@@ -188,8 +188,18 @@ export default function CoachTray({
           onDone: () => {
             finished = true;
           },
-          onTool: (name, query, sources) => {
-            runs = [...runs, { name, query, ...(sources.length ? { sources } : {}) }];
+          onTool: (id, name, query) => {
+            runs = [...runs, { id, name, query, pending: true }];
+            setToolRuns(runs);
+          },
+          // Match on `id`, and only while still pending: a duplicate or replayed frame must not
+          // overwrite a run that has already settled.
+          onToolDone: (id, sources) => {
+            runs = runs.map((r) =>
+              r.id === id && r.pending
+                ? { ...r, pending: false, ...(sources.length ? { sources } : {}) }
+                : r,
+            );
             setToolRuns(runs);
           },
           // The round that produced this text also called a tool, so it was narration, not the
@@ -209,9 +219,19 @@ export default function CoachTray({
       );
       if (!finished) throw new ChatError("The coach connection ended unexpectedly.", 502);
       if (inbandError) throw new ChatError(inbandError, 502);
+      // Strip the in-memory transport/UI fields by REBUILDING each run from an allow-list rather
+      // than destructuring them away: a field added to LiveToolRun later must not silently ride
+      // along into stored jsonb. This also settles any run still pending because its `tool_done`
+      // was lost or uncorrelatable — the committed record simply shows no sources, which is the
+      // truth, instead of a row that claims to still be running.
+      const committed: ToolRun[] = runs.map((r) => ({
+        name: r.name,
+        query: r.query,
+        ...(r.sources?.length ? { sources: r.sources } : {}),
+      }));
       const thread: ChatMessage[] = [
         ...next,
-        { role: "assistant", content: acc, ...(runs.length ? { tools: runs } : {}) },
+        { role: "assistant", content: acc, ...(committed.length ? { tools: committed } : {}) },
       ];
       setMessages(thread);
       // Persist the completed turn (fire-and-forget — a save failure must not disrupt the chat). Chips
