@@ -742,7 +742,19 @@ def _run_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> Any:
             )
         return {"error": f"Unknown tool {name!r}."}
     except Exception as exc:  # noqa: BLE001 — a tool failure must never kill the answer stream.
-        return {"error": f"{name} failed: {exc}"}
+        # `f"{exc}"` calls `str(exc)`, which for a single-arg exception is `str(args[0])` --
+        # if the caught exception itself carries an object whose own `__str__` raises (a
+        # ValueError wrapping a broken value, say), interpolating it here would raise a SECOND
+        # time, from inside this handler, and that one has no outer guard left to catch it. So
+        # the interpolation gets its own nested try, degrading to the exception's CLASS NAME only
+        # in that one case -- never on the ordinary path, which is what the pre-existing
+        # test_a_raising_tool_becomes_an_error_payload test (asserting the real message text)
+        # still needs.
+        try:
+            detail = f"{name} failed: {exc}"
+        except Exception:  # noqa: BLE001 — a foreign __str__ must not raise from inside the handler.
+            detail = f"{name} failed: {type(exc).__name__}"
+        return {"error": detail}
 
 
 def _dedupe_cap(sources: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -808,23 +820,30 @@ def _tool_sources(name: str, result: Any) -> list[dict[str, str]]:
         return _dedupe_cap(out)
 
     if name == "kg_query":
-        names: list[str] = []
+        labels: list[str] = []
         matched = result.get("matched_nodes")
         # Same isinstance guard as above: a hand-crafted or malformed payload could put a
         # non-iterable (an int) here, which `or []` would not catch since a nonzero int is truthy.
+        #
+        # Matched nodes are stored movement-qualified ("Squat:Insufficient Depth"); the movement is
+        # already established by the thread, so showing it again is noise -- the colon is stripped
+        # HERE ONLY. Subgraph node names below carry no such prefix (they are plain concept names,
+        # e.g. "Ankle Mobility") and are used as-is: stripping there would silently truncate any
+        # concept name that happens to contain a colon of its own.
         for node in matched if isinstance(matched, list) else []:
-            names.append(str(node))
+            label = str(node).split(":", 1)[-1].strip()
+            if label:  # filter the label actually shown, not the pre-split id -- a bare "Squat:"
+                labels.append(label)  # would otherwise survive as an empty chip.
         subgraph = result.get("subgraph")
         if isinstance(subgraph, dict):
             nodes = subgraph.get("nodes")
             for node in nodes if isinstance(nodes, list) else []:
-                if isinstance(node, dict) and node.get("name"):
-                    names.append(str(node["name"]))
-        # Matched nodes are stored movement-qualified ("Squat:Insufficient Depth"); the movement is
-        # already established by the thread, so showing it again is noise.
-        return _dedupe_cap(
-            [{"label": n.split(":", 1)[-1].strip(), "kind": "concept"} for n in names if n.strip()]
-        )
+                if not isinstance(node, dict):
+                    continue
+                label = str(node.get("name") or "").strip()
+                if label:
+                    labels.append(label)
+        return _dedupe_cap([{"label": label, "kind": "concept"} for label in labels])
 
     return []  # get_analysis, and any tool added later without its own extractor.
 
