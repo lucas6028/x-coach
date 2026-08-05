@@ -437,7 +437,10 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     handlers.onTool?.(typeof data.id === "number" ? data.id : -1, data.name ?? "", data.query ?? "");
   // An uncorrelatable tool_done is dropped, not defaulted: mis-attributing a citation is worse than
   // losing one. A `tool` with no id still renders (id -1) and simply never resolves — it settles
-  // when the turn commits, since `pending` is stripped there.
+  // when the turn commits, since `pending` is stripped there. Theoretical consequence, unreachable
+  // against the current backend (which always sends an id): two id-less `tool` frames in one turn
+  // would both land as -1, and a `tool_done` carrying `id: -1` would then write to both rows. Not
+  // worth defensive code for a case the server never produces.
   else if (event === "tool_done" && typeof data.id === "number")
     handlers.onToolDone?.(data.id, data.sources ?? []);
   else if (event === "reset") handlers.onReset?.();

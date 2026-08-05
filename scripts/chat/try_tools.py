@@ -199,6 +199,9 @@ def main() -> int:
         elif event == "tool":
             tools_called.append(data["name"])
             print(f"\n  \033[36m[tool] {data['name']}({data['query']!r})\033[0m", flush=True)
+        elif event == "tool_done":
+            n = len(data.get("sources", []))
+            print(f"  \033[36m[done] {n} sources\033[0m", flush=True)
         elif event == "reset":
             # The round narrated AND called a tool; everything printed above was retracted.
             answer.clear()
