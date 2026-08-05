@@ -1014,6 +1014,11 @@ def _answer_stream_inner(
     # show up as a partial branch under the 95% coverage gate.
     streamed_any = False
     answer = ""
+    # Correlates each `tool` frame with its later `tool_done`. Monotonic across ALL rounds, not the
+    # per-round enumerate index: `enumerate(turn.tool_calls)` restarts at 0 each round, so a
+    # per-round index would collide as soon as two rounds each call a tool. Unrelated to the
+    # `f"call_{i}"` tool_call_id fallback below, which stays as it is.
+    tool_seq = 0
 
     for round_index in range(_MAX_TOOL_ROUNDS + 1):
         remaining = deadline - time.monotonic()
@@ -1133,20 +1138,24 @@ def _answer_stream_inner(
         )
         for i, call in enumerate(turn.tool_calls):
             args = _parse_tool_args(call["arguments"])
-            # Dispatch BEFORE the frame: the frame carries the sources, which only exist once the
-            # tool has run. The cost is that the tray's status line appears after the retrieval
-            # rather than before it — acceptable, because the sources are the point of the frame,
-            # and the loop already blocks on this call either way.
+            # Frame BEFORE dispatch: the lookup can take minutes on a cold RAG process, and naming
+            # it while it runs is the point of v3.2. The sources cannot ride along, so they follow
+            # in `tool_done` -- which is emitted unconditionally, even with no sources, because it
+            # is the COMPLETION signal. A tool with nothing to cite (get_analysis) would otherwise
+            # render as still-running forever.
+            uid = tool_seq
+            tool_seq += 1
+            yield _sse(
+                "tool",
+                {"id": uid, "name": call["name"], "query": _tool_query_label(call["name"], args)},
+            )
             outcome = _dispatch_tool(call["name"], args, context)
-            frame: dict[str, Any] = {
-                "name": call["name"],
-                "query": _tool_query_label(call["name"], args),
-            }
+            finished: dict[str, Any] = {"id": uid}
             if outcome.sources:
                 # Omitted rather than [] so a client can tell "this tool has nothing to cite"
                 # (get_analysis) from "this tool cited nothing".
-                frame["sources"] = outcome.sources
-            yield _sse("tool", frame)
+                finished["sources"] = outcome.sources
+            yield _sse("tool_done", finished)
             convo.append(
                 {
                     "role": "tool",

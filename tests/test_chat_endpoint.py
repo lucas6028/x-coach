@@ -342,7 +342,8 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(
             events,
             [
-                ("tool", {"name": "kg_query", "query": "valgus"}),
+                ("tool", {"id": 0, "name": "kg_query", "query": "valgus"}),
+                ("tool_done", {"id": 0}),
                 ("delta", {"text": "Answer"}),
                 ("done", {"model": "m"}),
             ],
@@ -371,7 +372,8 @@ class ToolLoopTests(unittest.TestCase):
             [
                 ("delta", {"text": "Let me check."}),
                 ("reset", {}),
-                ("tool", {"name": "rag_search", "query": "x"}),
+                ("tool", {"id": 0, "name": "rag_search", "query": "x"}),
+                ("tool_done", {"id": 0}),
                 ("delta", {"text": "Real answer"}),
                 ("done", {"model": "m"}),
             ],
@@ -547,7 +549,7 @@ class ToolLoopTests(unittest.TestCase):
         self.assertEqual(event_names.count("error"), 1)
         self.assertNotIn("done", event_names)
 
-    def test_the_tool_frame_carries_sources(self) -> None:
+    def test_the_tool_done_frame_carries_sources(self) -> None:
         fake, _ = self._turns(
             ([], [{"id": "c1", "name": "rag_search", "arguments": '{"query": "ankle"}'}]),
             (["Answer"], []),
@@ -557,19 +559,21 @@ class ToolLoopTests(unittest.TestCase):
             sources=[{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}],
         )
         events = self._run(fake, dispatch=lambda n, a, c: result)
-        tool_frames = [d for e, d in events if e == "tool"]
         self.assertEqual(
-            tool_frames,
+            [d for e, d in events if e == "tool"],
+            [{"id": 0, "name": "rag_search", "query": "ankle"}],
+        )
+        self.assertEqual(
+            [d for e, d in events if e == "tool_done"],
             [
                 {
-                    "name": "rag_search",
-                    "query": "ankle",
+                    "id": 0,
                     "sources": [{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}],
                 }
             ],
         )
 
-    def test_the_tool_frame_omits_sources_when_there_are_none(self) -> None:
+    def test_the_tool_done_frame_omits_sources_when_there_are_none(self) -> None:
         # get_analysis has no outside source to credit; the key is absent, not an empty array, so a
         # client can tell "nothing to cite" from "cited nothing".
         fake, _ = self._turns(
@@ -578,8 +582,7 @@ class ToolLoopTests(unittest.TestCase):
         )
         result = chat_service._ToolResult(text='{"ok": true}', sources=[])
         events = self._run(fake, dispatch=lambda n, a, c: result)
-        tool_frames = [d for e, d in events if e == "tool"]
-        self.assertEqual(tool_frames, [{"name": "get_analysis", "query": ""}])
+        self.assertEqual([d for e, d in events if e == "tool_done"], [{"id": 0}])
 
     def test_the_tool_message_content_is_the_result_text(self) -> None:
         # Regression lock: the model must receive `.text`, never a repr of the _ToolResult.
@@ -590,6 +593,73 @@ class ToolLoopTests(unittest.TestCase):
         result = chat_service._ToolResult(text='{"marker": 1}', sources=[{"label": "L", "kind": "concept"}])
         self._run(fake, dispatch=lambda n, a, c: result)
         self.assertEqual(calls[1]["messages"][-1]["content"], '{"marker": 1}')
+
+    def test_the_tool_frame_is_yielded_before_the_tool_runs(self) -> None:
+        # The whole point of v3.2: v3.1 dispatched first so the frame could carry sources, which
+        # left the tray silent for the entire retrieval (past two minutes on a cold RAG process).
+        # Asserting frame content is not enough -- only the ORDER proves the user sees the lookup
+        # named while it is still running, so the dispatch stub records the frames emitted so far.
+        seen_at_dispatch: list[list[str]] = []
+        emitted: list[str] = []
+
+        fake, _ = self._turns(
+            ([], [{"id": "c1", "name": "rag_search", "arguments": '{"query": "ankle"}'}]),
+            (["Answer"], []),
+        )
+
+        def dispatch(name, args, ctx):
+            seen_at_dispatch.append(list(emitted))
+            return chat_service._ToolResult(text='{"ok": true}', sources=[])
+
+        with mock.patch.object(chat_service, "_stream_turn", fake), mock.patch.object(
+            chat_service, "_dispatch_tool", dispatch
+        ), mock.patch.object(chat_service, "chat_timeout", return_value=60.0):
+            for frame in chat_service.answer_stream(
+                messages=[{"role": "user", "content": "hi"}], context=self.CONTEXT, model="m"
+            ):
+                emitted.append(frame.split("\n")[0][len("event:") :].strip())
+
+        self.assertEqual(seen_at_dispatch, [["tool"]])
+
+    def test_tool_done_is_emitted_even_when_the_tool_yields_no_sources(self) -> None:
+        # get_analysis never has an outside source to credit. If tool_done were conditional on
+        # sources, its row would sit on screen as "still running" for the rest of the session.
+        fake, _ = self._turns(
+            ([], [{"id": "c1", "name": "get_analysis", "arguments": '{"include": "all"}'}]),
+            (["Answer"], []),
+        )
+        result = chat_service._ToolResult(text='{"ok": true}', sources=[])
+        events = self._run(fake, dispatch=lambda n, a, c: result)
+        self.assertEqual(
+            events,
+            [
+                ("tool", {"id": 0, "name": "get_analysis", "query": ""}),
+                ("tool_done", {"id": 0}),
+                ("delta", {"text": "Answer"}),
+                ("done", {"model": "m"}),
+            ],
+        )
+
+    def test_tool_ids_are_unique_across_rounds(self) -> None:
+        # enumerate(turn.tool_calls) restarts at 0 every round, so a per-round index would collide
+        # the moment two rounds each call a tool -- which is the NORMAL shape of a multi-round
+        # conversation, not an edge case. Two rounds, two calls in the first, one in the second.
+        fake, _ = self._turns(
+            (
+                [],
+                [
+                    {"id": "c1", "name": "kg_query", "arguments": '{"query": "a"}'},
+                    {"id": "c2", "name": "rag_search", "arguments": '{"query": "b"}'},
+                ],
+            ),
+            ([], [{"id": "c3", "name": "kg_query", "arguments": '{"query": "c"}'}]),
+            (["Answer"], []),
+        )
+        events = self._run(fake)
+        starts = [d["id"] for e, d in events if e == "tool"]
+        dones = [d["id"] for e, d in events if e == "tool_done"]
+        self.assertEqual(starts, [0, 1, 2])
+        self.assertEqual(dones, [0, 1, 2])
 
 
 # --------------------------------------------------------------- service: follow-up parsing
