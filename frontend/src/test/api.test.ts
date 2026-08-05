@@ -465,7 +465,7 @@ describe("chat SSE tool frames", () => {
   it("routes tool and reset frames to their handlers", async () => {
     const seen: string[] = [];
     const body = [
-      'event: tool\ndata: {"name":"kg_query","query":"knee valgus"}\n\n',
+      'event: tool\ndata: {"id":0,"name":"kg_query","query":"knee valgus"}\n\n',
       'event: delta\ndata: {"text":"hm"}\n\n',
       "event: reset\ndata: {}\n\n",
       'event: delta\ndata: {"text":"answer"}\n\n',
@@ -476,7 +476,7 @@ describe("chat SSE tool frames", () => {
       onDelta: (t) => seen.push(`delta:${t}`),
       onDone: () => seen.push("done"),
       onError: () => seen.push("error"),
-      onTool: (n, q) => seen.push(`tool:${n}:${q}`),
+      onTool: (_id, n, q) => seen.push(`tool:${n}:${q}`),
       onReset: () => seen.push("reset"),
     });
     expect(seen).toEqual([
@@ -512,11 +512,13 @@ describe("chat SSE tool frames", () => {
     expect(sent.context.fault_count).toBe(0);
   });
 
-  it("passes tool sources to onTool, and an empty array when the frame omits them", async () => {
-    const seen: Array<[string, string, unknown]> = [];
+  it("routes tool_done sources to onToolDone, and an empty array when the frame omits them", async () => {
+    const seen: Array<[number, unknown]> = [];
     mockStream([
-      'event: tool\ndata: {"name":"rag_search","query":"ankle","sources":[{"label":"Wikipedia: Squat (exercise)","kind":"encyclopedia"}]}\n\n',
-      'event: tool\ndata: {"name":"get_analysis","query":"Depth"}\n\n',
+      'event: tool\ndata: {"id":0,"name":"rag_search","query":"ankle"}\n\n',
+      'event: tool_done\ndata: {"id":0,"sources":[{"label":"Wikipedia: Squat (exercise)","kind":"encyclopedia"}]}\n\n',
+      'event: tool\ndata: {"id":1,"name":"get_analysis","query":"Depth"}\n\n',
+      'event: tool_done\ndata: {"id":1}\n\n',
       'event: delta\ndata: {"text":"A"}\n\n',
       'event: done\ndata: {"model":"m"}\n\n',
     ]);
@@ -524,12 +526,29 @@ describe("chat SSE tool frames", () => {
       onDelta: () => undefined,
       onDone: () => undefined,
       onError: () => undefined,
-      onTool: (n, q, s) => seen.push([n, q, s]),
+      onToolDone: (id, s) => seen.push([id, s]),
     });
     expect(seen).toEqual([
-      ["rag_search", "ankle", [{ label: "Wikipedia: Squat (exercise)", kind: "encyclopedia" }]],
-      ["get_analysis", "Depth", []],
+      [0, [{ label: "Wikipedia: Squat (exercise)", kind: "encyclopedia" }]],
+      [1, []],
     ]);
+  });
+
+  it("drops a tool_done frame whose id is not a number", async () => {
+    // A citation attached to the wrong tool is a worse failure than a citation lost: this feature
+    // exists to make provenance trustworthy, so an uncorrelatable frame is discarded outright.
+    const seen: unknown[] = [];
+    mockStream([
+      'event: tool_done\ndata: {"sources":[{"label":"L","kind":"paper"}]}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onToolDone: (id, s) => seen.push([id, s]),
+    });
+    expect(seen).toEqual([]);
   });
 
   it("strips tools from messages on both chat endpoints", async () => {

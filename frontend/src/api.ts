@@ -167,6 +167,15 @@ export interface ToolRun {
   sources?: ToolSource[];
 }
 
+// One tool call as the client tracks it WHILE the turn streams. `id` correlates the `tool` frame
+// with the `tool_done` that follows it; `pending` is true until that frame arrives. Both are
+// transport/UI state — they are stripped when the run is committed to a ChatMessage, so the
+// persisted shape stays exactly `ToolRun`.
+export interface LiveToolRun extends ToolRun {
+  id: number;
+  pending: boolean;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -212,8 +221,12 @@ export interface ChatStreamHandlers {
   onDelta: (text: string) => void;
   onDone: (model: string) => void;
   onError: (detail: string) => void;
-  // The coach called a tool. Optional so a caller that doesn't surface tool progress is unaffected.
-  onTool?: (name: string, query: string, sources: ToolSource[]) => void;
+  // The coach started a tool call. Fires BEFORE the tool runs, so the UI can name the lookup while
+  // it is still in flight. Optional so a caller that doesn't surface tool progress is unaffected.
+  onTool?: (id: number, name: string, query: string) => void;
+  // That tool call finished. Always fires once per `onTool`, even with no sources — it is the
+  // completion signal, not the sources signal, so a tool with nothing to cite still settles.
+  onToolDone?: (id: number, sources: ToolSource[]) => void;
   // Discard everything streamed so far this turn: the round that produced it also called a tool, so
   // its text was narration ("let me look that up"), not the answer. Safe because the caller commits
   // the assistant turn only once the stream ends.
@@ -412,6 +425,7 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     name?: string;
     query?: string;
     sources?: ToolSource[];
+    id?: number;
   };
   try {
     data = JSON.parse(dataLines.join("\n"));
@@ -419,7 +433,13 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     return;
   }
   if (event === "delta") handlers.onDelta(data.text ?? "");
-  else if (event === "tool") handlers.onTool?.(data.name ?? "", data.query ?? "", data.sources ?? []);
+  else if (event === "tool")
+    handlers.onTool?.(typeof data.id === "number" ? data.id : -1, data.name ?? "", data.query ?? "");
+  // An uncorrelatable tool_done is dropped, not defaulted: mis-attributing a citation is worse than
+  // losing one. A `tool` with no id still renders (id -1) and simply never resolves — it settles
+  // when the turn commits, since `pending` is stripped there.
+  else if (event === "tool_done" && typeof data.id === "number")
+    handlers.onToolDone?.(data.id, data.sources ?? []);
   else if (event === "reset") handlers.onReset?.();
   else if (event === "done") handlers.onDone(data.model ?? "");
   else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
