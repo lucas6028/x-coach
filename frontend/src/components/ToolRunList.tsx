@@ -11,9 +11,13 @@ const TOOL_LABEL_KEYS = ["get_analysis", "kg_query", "rag_search"] as const;
  * Used twice: for a committed assistant message (from `message.tools`) and for the turn currently
  * streaming (from live state). Same markup both times, so nothing shifts when the turn commits.
  *
- * `kg_query`'s entries are headed differently from the other tools' on purpose. Its "sources" are
- * knowledge-graph concepts, which carry no citation anywhere in the graph; showing them under the
- * same heading as a retrieved document would tell the user a concept is a source.
+ * A source's `kind` decides its heading, not the tool that produced it. `kg_query`'s entries come
+ * back with `kind: "concept"` because knowledge-graph nodes carry no citation anywhere in the
+ * graph; showing them under the same heading as a retrieved document would tell the user a concept
+ * is a source. Keying off `kind` rather than `run.name === "kg_query"` means a future tool that
+ * also returns concept-kind sources gets the same safe heading automatically, no renderer change
+ * needed. Today `kg_query` is still the only emitter of `"concept"`, so the rendered output is
+ * unchanged from before this rewire.
  */
 export function ToolRunList({ runs }: { runs: ToolRun[] }) {
   const { t } = useI18n();
@@ -22,11 +26,12 @@ export function ToolRunList({ runs }: { runs: ToolRun[] }) {
     <div className="flex flex-col gap-2">
       {runs.map((run, i) => {
         const known = TOOL_LABEL_KEYS.includes(run.name as (typeof TOOL_LABEL_KEYS)[number]);
-        const heading = run.name === "kg_query" ? t("chat.tool.concepts") : t("chat.tool.sources");
+        const isConcept = run.sources?.some((s) => s.kind === "concept") ?? false;
+        const heading = isConcept ? t("chat.tool.concepts") : t("chat.tool.sources");
         return (
           <div key={i} className="text-xs text-muted">
             <div>
-              {known ? t(`chat.tool.${run.name}` as never) : t("chat.tool.generic")}
+              {known ? t(`chat.tool.${run.name}`) : t("chat.tool.generic")}
               {run.query ? `${t("chat.tool.sep")}${run.query}` : ""}
             </div>
             {Array.isArray(run.sources) && run.sources.length > 0 && (
