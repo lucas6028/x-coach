@@ -815,3 +815,131 @@ Two items still need the browser, because they are about the tray's rendering ra
    tray. A model more prone to narrating (or a deliberately provocative prompt) would surface it.
 2. **Follow-up chip latency** — the v2.1 baseline is ~1.5s. Unchanged by this work in principle, since
    the chip path sends neither `tools` nor `detail`, but not re-measured live.
+
+---
+
+# v3.1: Persistent tool records with citations
+
+Status: **specified, not built**. Requested as "tool calling 的紀錄像 Claude Code 一樣,不會開始回答
+就消失,也可以讓使用者知道引用了哪些".
+
+## Objective (v3.1)
+
+v3 shows a **transient** tool status line that is cleared on the first `delta`. So the moment the
+answer starts, the evidence for it disappears — the user sees a claim with no visible provenance,
+which is the opposite of what a product whose thesis is explainability should do. v3.1 makes the
+tool record **persist beside the answer it produced**, and adds the one thing v3 never put on the
+wire at all: **which sources the retrieval actually returned**.
+
+## Decisions (settled at design review)
+
+1. Tool records live **above the answer**, in call order, **expanded by default** — the Claude Code
+   shape, so the reasoning chain reads top-to-bottom: what was looked up, what came back, what the
+   coach concluded.
+2. They **persist across reload and history replay**, stored alongside the answer text.
+3. **`reset` does NOT clear them.** See §4 — this is an honesty decision, not a technical one.
+
+## 1. The three tools do not have comparable "sources", and the UI must not pretend they do
+
+Measured against the live data, not assumed:
+
+| Tool | What it can cite | Nature |
+|---|---|---|
+| `rag_search` | `metadata.reference` + `metadata.source_type`, e.g. `Wikipedia: Squat (exercise)` / `encyclopedia` | a **real literature citation** |
+| `kg_query` | `matched_nodes` and the 1-hop node names — nothing else | **graph nodes, NOT citations.** Verified: KG nodes carry only `node_id`, `name`, `label`; there is no source/reference/citation field anywhere in the subgraph |
+| `get_analysis` | nothing external | it reads the user's own analysis; there is no outside source to credit |
+
+So the UI **labels `kg_query`'s sources as knowledge-graph concepts, never as references**. Rendering
+a graph node in the same visual slot as a cited paper would tell the user a concept is a source —
+manufacturing exactly the false authority this feature exists to prevent. `get_analysis` shows its
+subject (the fault name) and no source list.
+
+## 2. Where the sources come from — and why the split is required, not cosmetic
+
+`_dispatch_tool` currently fuses four steps: run, prefix, serialise, truncate. Sources must be
+derived from the **raw** result, *before* truncation, or a large `rag_search` hit gets its citations
+sliced off by `_MAX_TOOL_RESULT_CHARS` — the exact results where provenance matters most.
+
+```
+_run_tool(name, args, context) -> Any            # the raw result; the never-raises try moves here
+_tool_sources(name, result) -> list[dict]        # pure; derives citations from the RAW result
+_dispatch_tool(...) -> _ToolResult(text, sources)
+```
+
+`_dispatch_tool`'s never-raises contract is unchanged and still covers serialisation (the v3 fix
+wave's finding). The 21 test call sites gain `.text` — mechanical.
+
+**The wire shape is deliberately narrow:**
+
+```json
+{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}
+```
+
+- `label` from `metadata.reference`; when absent, the basename of `metadata.source` with directories stripped.
+- `kind` from `metadata.source_type` (`encyclopedia`, `paper`, ...), used only to pick an icon or style.
+- **`metadata.source` is NEVER sent.** It is a server filesystem path (`data\rag\docs\squat_wiki.txt`)
+  — useless to a user and a gratuitous internals leak.
+- Deduplicated by `label` (one document yields many chunks), capped at **5** per tool call.
+
+## 3. SSE contract (v3.1 delta)
+
+The `tool` frame gains one field; no new frame types.
+
+```
+event: tool
+data: {"name":"rag_search","query":"ankle dorsiflexion","sources":[{"label":"...","kind":"encyclopedia"}]}
+```
+
+Backward compatible: a client reading only `name`/`query` is unaffected, and `sources` is absent
+rather than `[]` for tools that have none to give.
+
+## 4. Client state — the actual behaviour change
+
+`tool: {name, query} | null` becomes `toolRuns: ToolRun[]`: **appended, never replaced**, and **not
+cleared on the first `delta`**.
+
+**`reset` does not clear `toolRuns`.** The retraction exists because a round's *narration* was not
+the answer — but the tool calls in that round genuinely happened, and their results genuinely fed
+the next round. Erasing them alongside the narration would misreport the reasoning chain, showing an
+answer whose real inputs are invisible. `reset` therefore clears only `acc`/`streaming`, exactly as
+in v3.
+
+`toolRuns` clears on: a new send, an analysis switch, and the error rollback path.
+
+## 5. Persistence — no migration needed
+
+`conversations.messages` is `jsonb` with no per-element constraint, so the storage side is free:
+
+- Frontend type: `ChatMessage.tools?: ToolRun[]`.
+- Backend: `ConversationMessage` (the **conversations** router) gains `tools`.
+- **`/api/chat`'s `ChatMessage` stays `{role, content}`.** Pydantic drops unknown fields, so the tool
+  records can never reach the LLM prompt — but the client should still strip them before sending, the
+  way it strips `detail`, rather than re-uploading them every turn and relying on implicit stripping.
+
+## 6. Rendering
+
+One component, two callers: a committed assistant message renders its own `tools`; the in-flight turn
+renders the live `toolRuns`. Both sit above the content, so nothing moves when the turn commits.
+
+`get_analysis` renders as subject-only. `rag_search` renders its citation list. `kg_query` renders its
+matched concepts under a label that says they are graph concepts.
+
+## 7. Testing (v3.1)
+
+Backend: `_tool_sources` per tool (RAG with and without `reference`; KG; `get_analysis` yields `[]`);
+`metadata.source` never appears in any frame; dedupe; the 5-cap; and the load-bearing one — **a
+result large enough to be truncated still yields its sources**, which is the regression that proves
+extraction happens before truncation.
+
+Frontend: `onTool` appends rather than replaces; a `reset` leaves `toolRuns` intact while clearing the
+streamed text; commit attaches `tools` to the message; a reload restores them; and both `/api/chat`
+and `/api/chat/followups` are sent messages with `tools` stripped.
+
+## Success criteria (v3.1)
+
+1. After an answer completes, the tools that produced it are still on screen, in call order.
+2. A `rag_search` turn names the documents it retrieved; no server path is visible anywhere.
+3. A `kg_query` turn's concepts are not presented as literature citations.
+4. Reloading the page, or replaying the analysis from history, restores the tool records.
+5. A narrate-then-call turn retracts the narration but keeps the tool record.
+6. Both coverage gates still pass.
