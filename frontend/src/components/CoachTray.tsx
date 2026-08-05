@@ -453,6 +453,10 @@ export default function CoachTray({
                     </motion.div>
                   ),
                 )}
+                {/* Tool records for the turn in flight, above the streamed text — same position
+                    (above the content) as the committed message's ToolRunList above, so nothing
+                    shifts when the turn commits. */}
+                {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
                 {/* Live assistant turn: the streamed answer as tokens arrive, same styling as a
                     committed coach turn so it doesn't jump on completion. */}
                 {streaming && (
@@ -461,7 +465,6 @@ export default function CoachTray({
                     <Markdown>{streaming}</Markdown>
                   </div>
                 )}
-                {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
                 {/* Lumen's dots only until the first token lands; then the streaming text carries it. */}
                 {loading && !streaming && toolRuns.length === 0 && (
                   <div className="flex items-center gap-2 text-xs text-muted">
