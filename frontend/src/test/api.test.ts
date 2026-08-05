@@ -488,6 +488,18 @@ describe("chat SSE tool frames", () => {
     ]);
   });
 
+  it("falls back to id -1 for a tool frame that omits its id", async () => {
+    const seen: number[] = [];
+    mockStream(['event: tool\ndata: {"name":"kg_query","query":"x"}\n\n', 'event: done\ndata: {"model":"m"}\n\n']);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onTool: (id) => seen.push(id),
+    });
+    expect(seen).toEqual([-1]);
+  });
+
   it("ignores tool and reset frames when the handlers are absent", async () => {
     const seen: string[] = [];
     mockStream([

@@ -499,7 +499,7 @@ describe("CoachTray — follow-up chat", () => {
       await new Promise<void>((r) => (releaseDelta = r)); // assert while the answer streams
       handlers.onDone("m");
     });
-    renderTray();
+    const { container } = renderTray();
     void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
 
     // The tool line is up, naming BOTH the tool's label and its subject in one node — asserting on
@@ -510,6 +510,13 @@ describe("CoachTray — follow-up chat", () => {
     expect(
       await screen.findByText(/Searching the knowledge graph: zzqury-kg-subject/)
     ).toBeTruthy();
+
+    // onToolDone already fired (with an empty `sources`, as get_analysis always does) and must have
+    // cleared `pending` on this run. CoachTray's own thinking dots are suppressed once a tool row
+    // exists (toolRuns.length === 0 gate), so the only ".lm-dots" left in the tree would be this
+    // row's own pending marker — its absence proves the empty-sources tool_done actually resolved
+    // the row instead of leaving it spinning forever (the exact failure this feature prevents).
+    expect(container.querySelector(".lm-dots")).toBeNull();
 
     // Unlike v3, the record is NOT cleared once the answer starts streaming — it is the answer's
     // provenance and belongs beside it (v3.1).

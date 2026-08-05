@@ -983,8 +983,8 @@ def _answer_stream_inner(
 
     ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last; the
     backend prepends the grounded system prompt. ``model`` is the already-resolved (allow-listed)
-    provider slug. Yields ``delta`` frames, optional ``tool``/``reset`` frames, then exactly one
-    terminator: ``done`` (carrying the model used) or ``error``.
+    provider slug. Yields ``delta`` frames, optional ``tool``/``tool_done``/``reset`` frames, then
+    exactly one terminator: ``done`` (carrying the model used) or ``error``.
 
     TOOL ROUND-TRIPS NEVER LEAVE THIS FUNCTION. ``ChatMessage.role`` is ``Literal["user",
     "assistant"]``, the client holds the conversation, and ``store.upsert_conversation`` persists it
