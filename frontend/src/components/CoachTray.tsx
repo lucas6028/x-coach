@@ -453,19 +453,21 @@ export default function CoachTray({
                     </motion.div>
                   ),
                 )}
-                {/* Tool records for the turn in flight, above the streamed text — same position
-                    (above the content) as the committed message's ToolRunList above, so nothing
-                    shifts when the turn commits. */}
-                {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
-                {/* Live assistant turn: the streamed answer as tokens arrive, same styling as a
-                    committed coach turn so it doesn't jump on completion. */}
-                {streaming && (
+                {/* The turn in flight shares ONE byline block with tool records and the streamed
+                    answer — coachTag, then ToolRunList, then content — the same order as a committed
+                    message above, so nothing shifts when the turn commits. Rendered as soon as EITHER
+                    exists, so a tool record shows the coach's byline from the moment it lands, not
+                    just once the first token streams (which is exactly when a record is most likely
+                    to be the only thing on screen). */}
+                {(toolRuns.length > 0 || streaming) && (
                   <div>
                     {coachTag}
-                    <Markdown>{streaming}</Markdown>
+                    {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
+                    {streaming && <Markdown>{streaming}</Markdown>}
                   </div>
                 )}
-                {/* Lumen's dots only until the first token lands; then the streaming text carries it. */}
+                {/* Lumen's dots only until either a tool record or the first token lands; then the
+                    byline block above carries it. */}
                 {loading && !streaming && toolRuns.length === 0 && (
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <LumenLoader variant="dots" />
