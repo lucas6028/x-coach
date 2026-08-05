@@ -303,7 +303,9 @@ class ToolLoopTests(unittest.TestCase):
 
     def _run(self, fake_turn, dispatch=None):
         with mock.patch.object(chat_service, "_stream_turn", fake_turn), mock.patch.object(
-            chat_service, "_dispatch_tool", dispatch or (lambda n, a, c: '{"ok": true}')
+            chat_service,
+            "_dispatch_tool",
+            dispatch or (lambda n, a, c: chat_service._ToolResult(text='{"ok": true}', sources=[])),
         ), mock.patch.object(chat_service, "chat_timeout", return_value=60.0):
             return self._events(
                 list(
@@ -330,7 +332,7 @@ class ToolLoopTests(unittest.TestCase):
 
         def dispatch(name, args, ctx):
             dispatched.append((name, args, ctx))
-            return '{"ok": true}'
+            return chat_service._ToolResult(text='{"ok": true}', sources=[])
 
         fake, calls = self._turns(
             ([], [{"id": "c1", "name": "kg_query", "arguments": '{"query": "valgus"}'}]),
@@ -1103,7 +1105,9 @@ class ToolDispatchTests(unittest.TestCase):
         self.assertEqual(chat_service._parse_tool_args("[1,2]"), {})  # not an object
 
     def test_get_analysis_without_a_fault_name_returns_clip_level_material(self) -> None:
-        out = json.loads(chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx()))
+        out = json.loads(
+            chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx()).text
+        )
         self.assertEqual(out["quality"], {"valid_frame_ratio": 0.9})
         self.assertEqual(out["view"], {"view_type": "side"})
         self.assertEqual([d["fault_name"] for d in out["detections"]], ["Insufficient Depth"])
@@ -1117,7 +1121,7 @@ class ToolDispatchTests(unittest.TestCase):
                 "get_analysis",
                 {"fault_name": "Insufficient Depth", "include": "evidence"},
                 self._ctx(),
-            )
+            ).text
         )
         self.assertEqual(out["measured"]["rep_index"], 2)
         self.assertEqual(out["measured"]["occurred_reps"], [2])
@@ -1129,7 +1133,7 @@ class ToolDispatchTests(unittest.TestCase):
                 "get_analysis",
                 {"fault_name": "insufficient depth", "include": "evidence"},  # case-insensitive
                 self._ctx(),
-            )
+            ).text
         )
         self.assertEqual(out["evidence"], {"hip_knee_delta_deg": 12.5})
         self.assertEqual(out["measured"]["peak_frame"], 45)
@@ -1141,7 +1145,7 @@ class ToolDispatchTests(unittest.TestCase):
                 "get_analysis",
                 {"fault_name": "Insufficient Depth", "include": "knowledge"},
                 self._ctx(),
-            )
+            ).text
         )
         self.assertEqual(out["knowledge"], [{"results": [{"text": "squat depth passage"}]}])
         self.assertNotIn("evidence", out)
@@ -1150,7 +1154,7 @@ class ToolDispatchTests(unittest.TestCase):
         out = json.loads(
             chat_service._dispatch_tool(
                 "get_analysis", {"fault_name": "Butt Wink", "include": "all"}, self._ctx()
-            )
+            ).text
         )
         self.assertIn("error", out)
         self.assertEqual(out["detected_faults"], ["Insufficient Depth"])
@@ -1161,7 +1165,7 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "graph_context", return_value={"ok": True}
         ) as gc:
-            chat_service._dispatch_tool("kg_query", {"query": "valgus", "hops": 99}, self._ctx())
+            chat_service._dispatch_tool("kg_query", {"query": "valgus", "hops": 99}, self._ctx()).text
         self.assertEqual(gc.call_args.args[0], "valgus")
         self.assertEqual(gc.call_args.kwargs["hops"], 2)  # clamped from 99
         self.assertEqual(gc.call_args.kwargs["movement"], "Squat")
@@ -1172,11 +1176,11 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "rag_snippets", return_value={"results": []}
         ) as rs:
-            chat_service._dispatch_tool("rag_search", {"query": "ankle", "top_k": 500}, self._ctx())
+            chat_service._dispatch_tool("rag_search", {"query": "ankle", "top_k": 500}, self._ctx()).text
         self.assertEqual(rs.call_args.kwargs["top_k"], 8)  # clamped from 500
 
     def test_unknown_tool_name_is_an_error_payload_not_an_exception(self) -> None:
-        out = json.loads(chat_service._dispatch_tool("launch_missiles", {}, self._ctx()))
+        out = json.loads(chat_service._dispatch_tool("launch_missiles", {}, self._ctx()).text)
         self.assertIn("error", out)
 
     def test_a_raising_tool_becomes_an_error_payload(self) -> None:
@@ -1186,7 +1190,7 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "graph_context", side_effect=FileNotFoundError("no graphml")
         ):
-            raw = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx())
+            raw = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()).text
         # kg_query results (error or not) carry the REFERENCE ONLY marker ahead of the JSON payload
         # -- see test_reference_only_prefix_*  below -- so it must be stripped before parsing here.
         out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
@@ -1199,7 +1203,7 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "rag_snippets", return_value={"results": ["x" * 50_000]}
         ):
-            out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+            out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()).text
         self.assertLessEqual(len(out), chat_service._MAX_TOOL_RESULT_CHARS + 32)
         self.assertTrue(out.endswith("…[truncated]"))
 
@@ -1212,7 +1216,7 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "rag_snippets", return_value={("a", "b"): "value"}
         ):
-            raw = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+            raw = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()).text
         out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
         self.assertIn("error", out)
         self.assertIn("rag_search failed", out["error"])
@@ -1225,7 +1229,7 @@ class ToolDispatchTests(unittest.TestCase):
         circular: dict[str, Any] = {}
         circular["self"] = circular
         with mock.patch.object(knowledge_service, "graph_context", return_value=circular):
-            raw = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx())
+            raw = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()).text
         out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
         self.assertIn("error", out)
         self.assertIn("kg_query failed", out["error"])
@@ -1243,7 +1247,7 @@ class ToolDispatchTests(unittest.TestCase):
         with mock.patch.object(
             knowledge_service, "rag_snippets", return_value={"bad": _Explodes()}
         ):
-            raw = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+            raw = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()).text
         out = json.loads(raw[len(chat_service._REFERENCE_ONLY_PREFIX) :])
         self.assertIn("error", out)
         self.assertIn("rag_search failed", out["error"])
@@ -1255,10 +1259,10 @@ class ToolDispatchTests(unittest.TestCase):
         from backend.app.services import knowledge as knowledge_service
 
         with mock.patch.object(knowledge_service, "graph_context", return_value={"ok": True}):
-            kg_out = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx())
+            kg_out = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx()).text
         with mock.patch.object(knowledge_service, "rag_snippets", return_value={"results": []}):
-            rag_out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
-        analysis_out = chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx())
+            rag_out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx()).text
+        analysis_out = chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx()).text
 
         self.assertTrue(kg_out.startswith(chat_service._REFERENCE_ONLY_PREFIX))
         self.assertTrue(rag_out.startswith(chat_service._REFERENCE_ONLY_PREFIX))
@@ -1266,6 +1270,138 @@ class ToolDispatchTests(unittest.TestCase):
         # -- prefixing it here would contradict that claim.
         self.assertFalse(analysis_out.startswith("REFERENCE ONLY"))
         self.assertNotIn("REFERENCE ONLY", analysis_out)
+
+    def test_rag_sources_use_reference_and_source_type(self) -> None:
+        from backend.app.services import knowledge as knowledge_service
+
+        payload = {
+            "query": "ankle",
+            "results": [
+                {
+                    "text": "…",
+                    "metadata": {
+                        "reference": "Wikipedia: Squat (exercise)",
+                        "source_type": "encyclopedia",
+                        "source": r"data\rag\docs\squat_wiki.txt",
+                    },
+                }
+            ],
+        }
+        with mock.patch.object(knowledge_service, "rag_snippets", return_value=payload):
+            out = chat_service._dispatch_tool("rag_search", {"query": "ankle"}, self._ctx())
+        self.assertEqual(
+            out.sources, [{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}]
+        )
+
+    def test_rag_sources_never_leak_the_server_path(self) -> None:
+        # metadata.source is a server filesystem path. It must not reach the client in ANY field,
+        # including as the fallback label — the fallback is the BASENAME only.
+        from backend.app.services import knowledge as knowledge_service
+
+        payload = {
+            "results": [
+                {"text": "…", "metadata": {"source": r"data\rag\docs\squat_wiki.txt"}},
+                {"text": "…", "metadata": {"source": "/srv/x-coach/data/rag/docs/ohp.pdf"}},
+            ]
+        }
+        with mock.patch.object(knowledge_service, "rag_snippets", return_value=payload):
+            out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+        labels = [s["label"] for s in out.sources]
+        self.assertEqual(labels, ["squat_wiki.txt", "ohp.pdf"])
+        blob = json.dumps(out.sources)
+        self.assertNotIn("data", blob.replace("squat_wiki", "").replace("ohp", ""))
+        self.assertNotIn("srv", blob)
+
+    def test_rag_sources_are_deduped_and_capped(self) -> None:
+        from backend.app.services import knowledge as knowledge_service
+
+        results = [
+            {"metadata": {"reference": f"Doc {i // 3}", "source_type": "paper"}} for i in range(24)
+        ]
+        with mock.patch.object(
+            knowledge_service, "rag_snippets", return_value={"results": results}
+        ):
+            out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+        labels = [s["label"] for s in out.sources]
+        self.assertEqual(len(labels), chat_service._MAX_TOOL_SOURCES)
+        self.assertEqual(len(set(labels)), chat_service._MAX_TOOL_SOURCES)  # deduped
+        self.assertEqual(labels[0], "Doc 0")  # first-seen order preserved
+
+    def test_kg_sources_are_concepts_not_citations(self) -> None:
+        # A KG node has no source field anywhere, so its `kind` is the literal "concept" — that is
+        # what the renderer keys off to keep graph nodes out of the citation slot.
+        from backend.app.services import knowledge as knowledge_service
+
+        payload = {
+            "matched_nodes": ["Squat:Insufficient Depth"],
+            "subgraph": {
+                "nodes": [
+                    {"node_id": "Depth", "name": "Depth", "label": "QualityDimension"},
+                    {"node_id": "Ankle", "name": "Ankle Mobility", "label": "Concept"},
+                ],
+                "edges": [],
+            },
+        }
+        with mock.patch.object(knowledge_service, "graph_context", return_value=payload):
+            out = chat_service._dispatch_tool("kg_query", {"query": "depth"}, self._ctx())
+        self.assertEqual({s["kind"] for s in out.sources}, {"concept"})
+        labels = [s["label"] for s in out.sources]
+        self.assertIn("Insufficient Depth", labels)  # the "Squat:" prefix is stripped
+        self.assertNotIn("Squat:Insufficient Depth", labels)
+        self.assertIn("Ankle Mobility", labels)
+        self.assertNotIn("QualityDimension", labels)  # internal taxonomy is not a source
+
+    def test_get_analysis_reports_no_sources(self) -> None:
+        out = chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx())
+        self.assertEqual(out.sources, [])
+
+    def test_a_failing_tool_reports_no_sources(self) -> None:
+        from backend.app.services import knowledge as knowledge_service
+
+        with mock.patch.object(
+            knowledge_service, "graph_context", side_effect=FileNotFoundError("no graphml")
+        ):
+            out = chat_service._dispatch_tool("kg_query", {"query": "x"}, self._ctx())
+        self.assertEqual(out.sources, [])
+        self.assertIn("no graphml", out.text)
+
+    def test_sources_survive_truncation_of_a_huge_result(self) -> None:
+        # THE LOAD-BEARING TEST. Sources are derived from the RAW result, before truncation — a hit
+        # big enough to be cut is exactly the one whose provenance matters most.
+        from backend.app.services import knowledge as knowledge_service
+
+        payload = {
+            "results": [
+                {
+                    "text": "x" * 60_000,
+                    "metadata": {"reference": "Big Review 2026", "source_type": "paper"},
+                }
+            ]
+        }
+        with mock.patch.object(knowledge_service, "rag_snippets", return_value=payload):
+            out = chat_service._dispatch_tool("rag_search", {"query": "x"}, self._ctx())
+        self.assertTrue(out.text.endswith("…[truncated]"))
+        self.assertEqual(out.sources, [{"label": "Big Review 2026", "kind": "paper"}])
+
+    def test_tool_sources_is_total_over_garbage(self) -> None:
+        # _tool_sources runs inside the never-raises path, so it must survive any shape a tool or a
+        # future provider could hand it.
+        for junk in (None, 42, "text", [], {"results": "not-a-list"}, {"results": [None, 7]},
+                     {"subgraph": None}, {"subgraph": {"nodes": "nope"}}, {"matched_nodes": 5}):
+            for name in ("rag_search", "kg_query", "get_analysis"):
+                self.assertIsInstance(chat_service._tool_sources(name, junk), list)
+
+    def test_dispatch_survives_tool_sources_itself_raising(self) -> None:
+        # _tool_sources is total against every SHAPE a tool result can take (see the test above),
+        # but it still calls str() on values it does not own. _dispatch_tool wraps the call anyway,
+        # on the same "never trust a helper to be as total as it claims" principle as the json.dumps
+        # guard just below it -- provenance is a nice-to-have and must never sink a good answer.
+        with mock.patch.object(
+            chat_service, "_tool_sources", side_effect=RuntimeError("boom")
+        ):
+            out = chat_service._dispatch_tool("get_analysis", {"include": "all"}, self._ctx())
+        self.assertEqual(out.sources, [])
+        self.assertIn("quality", out.text)  # the tool itself still succeeded
 
     def test_query_label_picks_the_right_argument_per_tool(self) -> None:
         self.assertEqual(

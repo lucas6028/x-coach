@@ -695,35 +695,39 @@ def _tool_get_analysis(detail: dict[str, Any], args: dict[str, Any]) -> Any:
     return out
 
 
-def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> str:
-    """Run one tool call; return its result as the string content of a ``role:"tool"`` message.
+# One document yields many RAG chunks and a KG node can be both matched and 1-hop, so the list is
+# deduped; the cap then keeps a wide retrieval from turning the tray into a bibliography.
+_MAX_TOOL_SOURCES = 5
 
-    NOTHING RAISES OUT OF HERE, deliberately. A failing tool (a missing KG graphml, an unbuilt RAG
-    vector db) or a hallucinated tool name becomes an ``{"error": ...}`` payload the model can read
-    and account for out loud. The alternative — letting it propagate — kills an answer stream that
-    was otherwise fine, and the HTTP 200 is already committed by then so the user would just see it
-    die. ``kg_query``/``rag_search`` results get ``_REFERENCE_ONLY_PREFIX`` stamped on before
-    truncation (never ``get_analysis`` — see that constant's docstring), so the honesty rule lives
-    next to the data itself, not only in one system-prompt sentence a model could pay less attention
-    to. The result is finally truncated to ``_MAX_TOOL_RESULT_CHARS``.
 
-    THE FINAL ``json.dumps`` CAN FAIL TOO, and that must not escape either, for the same
-    committed-200 reason as the tool call itself. ``default=str`` does not make it safe: a
-    non-string dict key skips ``default`` entirely and raises ``TypeError``; a circular structure
-    is caught by json's own cycle detector before ``default`` is ever consulted, raising
-    ``ValueError``; and ``default=str`` calling a value's own broken ``__str__`` propagates
-    whatever THAT raises. So the serialisation lives inside the same ``try`` as the tool call, and
-    the fallback below is built as a FRESH dict with only a string key and a string value — which
-    cannot fail the same three ways, so this second ``json.dumps`` call is not "re-entering
-    something that just failed".
+@dataclass
+class _ToolResult:
+    """One tool call's outcome: what the MODEL reads, and what the USER is shown.
+
+    ``text`` is the ``role:"tool"`` message content — prefixed and truncated. ``sources`` is the
+    provenance the client renders, derived from the RAW result *before* truncation, because a hit
+    big enough to be cut is exactly the one whose citations matter most.
+    """
+
+    text: str
+    sources: list[dict[str, str]]
+
+
+def _run_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> Any:
+    """Run one tool call and return its RAW, unserialised result. NEVER RAISES.
+
+    A failing tool (a missing KG graphml, an unbuilt RAG vector db) or a hallucinated tool name
+    becomes an ``{"error": ...}`` payload the model can read and account for out loud. Letting it
+    propagate would kill an answer stream that was otherwise fine, and the HTTP 200 is already
+    committed by then, so the user would just see it die.
     """
     from backend.app.services import knowledge  # deferred: the KG/RAG import chain is heavy.
 
     try:
         if name == "get_analysis":
-            result: Any = _tool_get_analysis(context.get("detail") or {}, args)
-        elif name == "kg_query":
-            result = knowledge.graph_context(
+            return _tool_get_analysis(context.get("detail") or {}, args)
+        if name == "kg_query":
+            return knowledge.graph_context(
                 str(args.get("query") or ""),
                 hops=_clamp_int(args.get("hops"), low=1, high=2, default=1),
                 max_seeds=kg_seeds_default(),
@@ -731,18 +735,132 @@ def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> 
                 # different exercise, which the coach would then present as relevant to this clip.
                 movement=_resolve_movement(context),
             )
-        elif name == "rag_search":
-            result = knowledge.rag_snippets(
+        if name == "rag_search":
+            return knowledge.rag_snippets(
                 str(args.get("query") or ""),
                 top_k=_clamp_int(args.get("top_k"), low=1, high=8, default=5),
             )
-        else:
-            result = {"error": f"Unknown tool {name!r}."}
+        return {"error": f"Unknown tool {name!r}."}
+    except Exception as exc:  # noqa: BLE001 — a tool failure must never kill the answer stream.
+        return {"error": f"{name} failed: {exc}"}
+
+
+def _dedupe_cap(sources: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Drop repeat labels (first-seen wins) and cap the list. Order is preserved deliberately —
+    it is retrieval rank, which is the most useful order to show."""
+    seen: set[str] = set()
+    out: list[dict[str, str]] = []
+    for s in sources:
+        if s["label"] in seen:
+            continue
+        seen.add(s["label"])
+        out.append(s)
+        if len(out) >= _MAX_TOOL_SOURCES:
+            break
+    return out
+
+
+def _tool_sources(name: str, result: Any) -> list[dict[str, str]]:
+    """The provenance to show the user for one tool call, as ``[{"label", "kind"}]``.
+
+    TOTAL BY CONSTRUCTION — it runs inside the never-raises path, so every access is guarded and any
+    shape it does not recognise yields ``[]`` rather than an exception.
+
+    THE THREE TOOLS DO NOT HAVE COMPARABLE PROVENANCE, and this function is where that is enforced
+    (spec v3.1 section 1):
+
+    * ``rag_search`` returns real literature, so ``kind`` carries the corpus's own ``source_type``.
+    * ``kg_query`` returns GRAPH NODES, which carry no source field anywhere in the subgraph — only
+      ``node_id``/``name``/``label``. Its ``kind`` is therefore the literal ``"concept"``, which is
+      what the renderer keys off to keep a graph node out of the citation slot. Rendering one beside
+      a cited paper would tell the user a concept is a source: exactly the false authority this
+      feature exists to prevent.
+    * ``get_analysis`` reads the user's own analysis. There is no outside source to credit, so it
+      reports none and the client omits the block.
+
+    ``metadata["source"]`` is NEVER emitted: it is a server filesystem path
+    (``data\\rag\\docs\\squat_wiki.txt``), useless to a user and a gratuitous internals leak. It is
+    used only as a last-resort label, and then only its basename.
+    """
+    if not isinstance(result, dict) or result.get("error"):
+        return []  # a failed tool retrieved nothing, so it cites nothing.
+
+    if name == "rag_search":
+        out: list[dict[str, str]] = []
+        results = result.get("results")
+        # isinstance, not `or []`: a non-list truthy value (an int, a bare string) would otherwise
+        # be handed straight to the for-loop, and a string iterates into characters that happen to
+        # fail the dict check below by luck rather than guarantee -- an int would raise outright.
+        for hit in results if isinstance(results, list) else []:
+            if not isinstance(hit, dict):
+                continue
+            meta = hit.get("metadata")
+            if not isinstance(meta, dict):
+                continue
+            label = str(meta.get("reference") or "").strip()
+            if not label:
+                # Basename only — never the directories. Split on both separators: the corpus is
+                # indexed on Windows, so stored paths use backslashes even on a POSIX host.
+                raw = str(meta.get("source") or "").strip()
+                label = raw.replace("\\", "/").rstrip("/").split("/")[-1]
+            if label:
+                out.append({"label": label, "kind": str(meta.get("source_type") or "document")})
+        return _dedupe_cap(out)
+
+    if name == "kg_query":
+        names: list[str] = []
+        matched = result.get("matched_nodes")
+        # Same isinstance guard as above: a hand-crafted or malformed payload could put a
+        # non-iterable (an int) here, which `or []` would not catch since a nonzero int is truthy.
+        for node in matched if isinstance(matched, list) else []:
+            names.append(str(node))
+        subgraph = result.get("subgraph")
+        if isinstance(subgraph, dict):
+            nodes = subgraph.get("nodes")
+            for node in nodes if isinstance(nodes, list) else []:
+                if isinstance(node, dict) and node.get("name"):
+                    names.append(str(node["name"]))
+        # Matched nodes are stored movement-qualified ("Squat:Insufficient Depth"); the movement is
+        # already established by the thread, so showing it again is noise.
+        return _dedupe_cap(
+            [{"label": n.split(":", 1)[-1].strip(), "kind": "concept"} for n in names if n.strip()]
+        )
+
+    return []  # get_analysis, and any tool added later without its own extractor.
+
+
+def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> _ToolResult:
+    """Run one tool call; return what the model reads plus what the user is shown.
+
+    NOTHING RAISES OUT OF HERE, deliberately — see ``_run_tool``. THE SERIALISATION IS PART OF THAT
+    GUARANTEE, which is easy to miss: ``default=str`` does not make ``json.dumps`` safe. A
+    non-string dict key skips ``default`` entirely and raises ``TypeError``; a circular structure is
+    caught by json's own cycle detector before ``default`` is ever consulted, raising ``ValueError``;
+    and ``default=str`` calling a value's own broken ``__str__`` propagates whatever THAT raises. So
+    it gets its own guard, whose fallback is a FRESH dict with a literal string key and a value
+    built from the exception's CLASS NAME — not ``str(exc)``, because ``BaseException.__str__``
+    returns ``str(args[0])`` for a single argument, so an exception carrying the very object whose
+    ``__str__`` just failed would re-raise here, one level deeper.
+
+    ``kg_query``/``rag_search`` results get ``_REFERENCE_ONLY_PREFIX`` stamped on before truncation
+    (never ``get_analysis`` — see that constant's docstring), so the honesty rule lives next to the
+    data itself, not only in one system-prompt sentence a model could pay less attention to.
+    """
+    result = _run_tool(name, args, context)  # cannot raise
+    try:
+        # _tool_sources is total against every SHAPE tested in test_tool_sources_is_total_over_garbage
+        # (wrong container types), but it does call str() on values it does not own (a KG node name,
+        # a RAG reference string) -- a value with a hostile __str__ is the same footgun _dispatch_tool
+        # already guards against for json.dumps below, so it gets the same guard here rather than
+        # trusting an internal service to never hand back something adversarial.
+        sources = _tool_sources(name, result)  # derived BEFORE truncation
+    except Exception:  # noqa: BLE001 — provenance is a nice-to-have; it must never sink the answer.
+        sources = []
+
+    try:
         text = json.dumps(result, ensure_ascii=False, default=str)
-    except Exception as exc:  # noqa: BLE001 — a tool-call OR serialisation failure must never
-        # kill the answer stream. See the docstring for why THIS json.dumps call cannot fail the
-        # same way the one above just did.
-        text = json.dumps({"error": f"{name} failed: {exc}"}, ensure_ascii=False)
+    except Exception as exc:  # noqa: BLE001 — see the docstring: default=str is not a safety net.
+        text = json.dumps({"error": f"{name} failed: {type(exc).__name__}"}, ensure_ascii=False)
 
     if name in ("kg_query", "rag_search"):
         # The marker lives on EVERY result from these two tools, success or error — an error payload
@@ -753,7 +871,7 @@ def _dispatch_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> 
 
     if len(text) > _MAX_TOOL_RESULT_CHARS:  # a plain str op — cannot raise.
         text = text[:_MAX_TOOL_RESULT_CHARS] + "…[truncated]"
-    return text
+    return _ToolResult(text=text, sources=sources)
 
 
 def _parse_followups(text: str) -> list[str]:
@@ -999,7 +1117,7 @@ def _answer_stream_inner(
                 {
                     "role": "tool",
                     "tool_call_id": call["id"] or f"call_{i}",
-                    "content": _dispatch_tool(call["name"], args, context),
+                    "content": _dispatch_tool(call["name"], args, context).text,
                 }
             )
 
