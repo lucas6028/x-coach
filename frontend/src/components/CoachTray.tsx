@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, CheckCircle, PaperPlaneTilt, SignIn, Warning } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import { api, ChatError, type Analysis, type ChatMessage } from "../api";
+import { api, ChatError, type Analysis, type ChatMessage, type ToolRun } from "../api";
 import { buildChatContext } from "../lib/grounding";
 import { retrievalByFault } from "../lib/retrieval";
 import { wasMeasured } from "../lib/quality";
@@ -13,11 +13,7 @@ import FaultCard from "./FaultCard";
 import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
 import { LumenAvatar, LumenLoader } from "./LumenLoader";
 import Markdown from "./Markdown";
-
-// The tools we have i18n labels for. A name outside this list falls back to the generic label —
-// `t()` returns the key itself on a miss (i18n.tsx:1421), so an unguarded lookup would render a raw
-// key like "chat.tool.something_else" into the tray.
-const TOOL_LABEL_KEYS = ["get_analysis", "kg_query", "rag_search"] as const;
+import { ToolRunList } from "./ToolRunList";
 
 interface Props {
   analysis: Analysis;
@@ -60,9 +56,9 @@ export default function CoachTray({
   // below the committed thread while loading; committed into `messages` on a clean `done`, or
   // discarded on an error (the optimistic user turn is rolled back alongside it).
   const [streaming, setStreaming] = useState("");
-  // The tool the coach is currently running, shown as a transient status line. Cleared the moment
-  // the real answer starts streaming — the tool work is finished by then, by construction.
-  const [tool, setTool] = useState<{ name: string; query: string } | null>(null);
+  // Every tool call this turn, in order. Unlike v3's single transient line these are NOT cleared
+  // when the answer starts: the record is the answer's provenance and belongs beside it.
+  const [toolRuns, setToolRuns] = useState<ToolRun[]>([]);
   // Two grounded next-question suggestions the coach offers after an answer. Captured per answer and
   // persisted alongside the thread (only the latest set), so a reload restores the chips, not just
   // the response; cleared on a new send / analysis.
@@ -161,11 +157,12 @@ export default function CoachTray({
     setError("");
     setLoading(true);
     setStreaming("");
-    setTool(null);
+    setToolRuns([]);
     setFollowups([]); // drop the previous answer's suggestions while this one streams
     stickToBottom.current = true; // a fresh send re-engages auto-follow (user is acting at the foot)
     const mySeq = ++followupSeq.current; // this turn owns the next suggestion result
     let acc = "";
+    let runs: ToolRun[] = [];
     let inbandError = "";
     // True only once the stream's `done` frame has actually been seen. `api.chatStream` resolves
     // the instant the reader drains, regardless of which frame (if any) was last — so a connection
@@ -185,14 +182,18 @@ export default function CoachTray({
           onDelta: (tkn) => {
             acc += tkn;
             setStreaming(acc);
-            setTool(null); // the answer is arriving; any tool work is done.
+            // NOTE: unlike v3, the tool records are deliberately NOT cleared here.
           },
           onDone: () => {
             finished = true;
           },
-          onTool: (name, query) => setTool({ name, query }),
+          onTool: (name, query, sources) => {
+            runs = [...runs, { name, query, ...(sources.length ? { sources } : {}) }];
+            setToolRuns(runs);
+          },
           // The round that produced this text also called a tool, so it was narration, not the
-          // answer. Drop it — `acc` is what gets committed when the stream ends.
+          // answer. Drop the text — but NOT `runs`: those calls really happened and really fed the
+          // answer, so erasing them would misreport the reasoning chain.
           onReset: () => {
             acc = "";
             setStreaming("");
@@ -207,7 +208,10 @@ export default function CoachTray({
       );
       if (!finished) throw new ChatError("The coach connection ended unexpectedly.", 502);
       if (inbandError) throw new ChatError(inbandError, 502);
-      const thread: ChatMessage[] = [...next, { role: "assistant", content: acc }];
+      const thread: ChatMessage[] = [
+        ...next,
+        { role: "assistant", content: acc, ...(runs.length ? { tools: runs } : {}) },
+      ];
       setMessages(thread);
       // Persist the completed turn (fire-and-forget — a save failure must not disrupt the chat). Chips
       // are written empty here (clearing the previous answer's), then re-persisted below once this
@@ -237,7 +241,7 @@ export default function CoachTray({
     } finally {
       setLoading(false);
       setStreaming("");
-      setTool(null);
+      setToolRuns([]);
     }
   }
 
@@ -442,6 +446,9 @@ export default function CoachTray({
                       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                     >
                       {coachTag}
+                      {m.role === "assistant" && m.tools && m.tools.length > 0 && (
+                        <ToolRunList runs={m.tools} />
+                      )}
                       <Markdown>{m.content}</Markdown>
                     </motion.div>
                   ),
@@ -454,21 +461,9 @@ export default function CoachTray({
                     <Markdown>{streaming}</Markdown>
                   </div>
                 )}
-                {/* A tool is running: name what the coach is looking up, and what for. The project's
-                    whole thesis is explainability, so the query is shown, not just a spinner. */}
-                {tool && !streaming && (
-                  <div className="flex items-center gap-2 text-xs text-muted">
-                    <LumenLoader variant="dots" />
-                    <span>
-                      {TOOL_LABEL_KEYS.includes(tool.name as (typeof TOOL_LABEL_KEYS)[number])
-                        ? t(`chat.tool.${tool.name}` as never)
-                        : t("chat.tool.generic")}
-                      {tool.query ? `${t("chat.tool.sep")}${tool.query}` : ""}
-                    </span>
-                  </div>
-                )}
+                {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
                 {/* Lumen's dots only until the first token lands; then the streaming text carries it. */}
-                {loading && !streaming && !tool && (
+                {loading && !streaming && toolRuns.length === 0 && (
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <LumenLoader variant="dots" />
                     {t("chat.thinking")}

@@ -104,6 +104,8 @@ const en: Dict = {
   // valgus"). Localised because zh-Hant wants the fullwidth "：" — the only user-facing string on this
   // branch that isn't already routed through t(), before this fix.
   "chat.tool.sep": ": ",
+  "chat.tool.sources": "Sources",
+  "chat.tool.concepts": "Knowledge-graph concepts",
   "chat.signIn": "Sign in to chat with Lumen about this analysis.",
   "chat.error": "Couldn't reach Lumen. Please try again.",
   "chat.sessionExpired": "Your session expired. Please sign in again to keep chatting.",
@@ -788,6 +790,8 @@ const zhHant: Dict = {
   "chat.tool.rag_search": "查詢文獻",
   "chat.tool.generic": "查詢中",
   "chat.tool.sep": "：",
+  "chat.tool.sources": "引用來源",
+  "chat.tool.concepts": "知識圖譜概念",
   "chat.signIn": "登入即可就本次分析與 Lumen 對話。",
   "chat.error": "無法連線至 Lumen，請再試一次。",
   "chat.sessionExpired": "登入階段已過期，請重新登入以繼續對話。",
