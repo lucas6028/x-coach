@@ -24,20 +24,34 @@ describe("StudioTitleBar", () => {
     expect(screen.getByText("Push-up Analysis")).toBeInTheDocument();
   });
 
-  it("exposes the movement picker as a labelled select", async () => {
+  // The picker is a menu of `menuitemradio`s (the pattern the theme and language pickers use),
+  // not a native <select> — a native one opens a browser-drawn list that ignores the palette.
+  // The trigger announces both the label and the current value.
+  it("exposes the movement picker as a labelled menu, and reports the choice", async () => {
     const onMovementChange = vi.fn();
     renderWithProviders(<StudioTitleBar {...base} onMovementChange={onMovementChange} />);
-    const select = screen.getByLabelText(/movement/i) as HTMLSelectElement;
-    expect(select.value).toBe("Squat");
-    await userEvent.selectOptions(select, "Push-up");
+    const trigger = screen.getByLabelText("Movement: Squat");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+    await userEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    // The open menu marks the current value, so the checked item is a real assertion, not decor.
+    expect(screen.getByRole("menuitemradio", { name: /Squat/ })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+
+    await userEvent.click(screen.getByRole("menuitemradio", { name: /Push-up/ }));
     expect(onMovementChange).toHaveBeenCalledWith("Push-up");
+    // Choosing closes it — the menu is not left hanging over the page.
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   // A URL-supplied movement the catalog does not list must stay visible rather than snapping the
   // control to something the user did not choose.
   it("keeps an unknown movement as an option of its own", () => {
     renderWithProviders(<StudioTitleBar {...base} movement="Lunge" />);
-    expect((screen.getByLabelText(/movement/i) as HTMLSelectElement).value).toBe("Lunge");
+    expect(screen.getByLabelText("Movement: Lunge")).toBeInTheDocument();
   });
 
   it("tags an unvalidated movement as Beta, and a validated one not at all", () => {
@@ -51,7 +65,8 @@ describe("StudioTitleBar", () => {
   it("persists a tier change through its callback", async () => {
     const onTierChange = vi.fn();
     renderWithProviders(<StudioTitleBar {...base} onTierChange={onTierChange} />);
-    await userEvent.selectOptions(screen.getByLabelText(/precision|tier|effort/i), "lite");
+    await userEvent.click(screen.getByLabelText("Precision: Heavy"));
+    await userEvent.click(screen.getByRole("menuitemradio", { name: /Lite/ }));
     expect(onTierChange).toHaveBeenCalledWith("lite");
   });
 

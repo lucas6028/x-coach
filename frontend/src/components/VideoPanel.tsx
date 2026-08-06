@@ -180,7 +180,7 @@ export default function VideoPanel({
         <button
           onClick={toggleFullscreen}
           aria-label={t("a11y.fullscreen")}
-          className="absolute right-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-[#3a3d4d]/70 text-white shadow-[0_10px_24px_rgba(20,24,60,0.28)] transition-colors hover:bg-[#2a2d3d]/90"
+          className="absolute right-4 top-4 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-white/20 bg-[#3a3d4d]/85 text-white shadow-[0_10px_24px_rgba(20,24,60,0.28)] transition-colors hover:bg-[#2a2d3d]/90"
         >
           <CornersOut size={16} />
         </button>
@@ -216,7 +216,7 @@ export default function VideoPanel({
         {/* Dark glass: translucent enough that the clip reads through it, which is legible here
             because everything on this bar is white-on-dark — the inverse of the light cards on
             the right, which have to stay opaque. Still no blur; this is the hot path. */}
-        <div className="absolute inset-x-3 bottom-3 z-20 flex items-center gap-3 rounded-full border border-white/15 bg-[#373a4a]/70 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_10px_28px_rgba(0,0,0,0.32)]">
+        <div className="absolute inset-x-3 bottom-3 z-20 flex items-center gap-3 rounded-full border border-white/15 bg-[#373a4a]/85 px-3 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_10px_28px_rgba(0,0,0,0.32)]">
           <button
             onClick={togglePlay}
             aria-label={playing ? t("a11y.pause") : t("a11y.play")}

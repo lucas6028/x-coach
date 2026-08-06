@@ -36,14 +36,12 @@ describe("studio movement selection", () => {
 
   it("preselects the movement from the URL", async () => {
     renderWithProviders(<App />, { route: "/app?movement=Push-up" });
-    const select = (await screen.findByLabelText(/movement/i)) as HTMLSelectElement;
-    expect(select.value).toBe("Push-up");
+    expect(await screen.findByLabelText("Movement: Push-up")).toBeInTheDocument();
   });
 
   it("defaults to Squat when the URL says nothing", async () => {
     renderWithProviders(<App />, { route: "/app" });
-    const select = (await screen.findByLabelText(/movement/i)) as HTMLSelectElement;
-    expect(select.value).toBe("Squat");
+    expect(await screen.findByLabelText("Movement: Squat")).toBeInTheDocument();
   });
 
   it("sends the selected movement with the upload", async () => {
@@ -113,11 +111,10 @@ describe("studio movement selection", () => {
         .mockResolvedValue({ ...mockAnalysis, video_id: "v1", movement: "Push-up" });
       renderWithProviders(<App />, { route: `/app?movement=${encodeURIComponent(param)}` });
 
-      const select = (await screen.findByLabelText(/movement/i)) as HTMLSelectElement;
-      // Canonicalized, not merely accepted: the <select> value, the i18n label and the Beta badge
-      // all key off the registry's spelling, so a case-insensitive gate alone would leave the
-      // dropdown showing a phantom duplicate option and the Beta tag missing.
-      expect(select.value).toBe("Push-up");
+      // Canonicalized, not merely accepted: the control's current value, the i18n label and the
+      // Beta badge all key off the registry's spelling, so a case-insensitive gate alone would
+      // leave the dropdown showing a phantom duplicate option and the Beta tag missing.
+      expect(await screen.findByLabelText("Movement: Push-up")).toBeInTheDocument();
       expect(screen.queryByText(/not.*analys|尚未/i)).toBeNull();
       expect(screen.getByText("Beta")).toBeTruthy();
       expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(

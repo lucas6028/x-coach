@@ -37,8 +37,8 @@ export default function DetectedErrorsCard({
               onClick={() => onSeek(d.start_time)}
               className={`flex w-full gap-2 rounded-lg border p-2 text-left transition-colors ${
                 activeFaultId === d.fault_id
-                  ? "border-[#ffc9c9] bg-[#ffecec]/80"
-                  : "border-[#ffe0e0] bg-[#fff5f5]/70 hover:border-[#ffc9c9]"
+                  ? "border-[#ffc9c9] bg-[#ffecec]/90"
+                  : "border-[#ffe0e0] bg-[#fff5f5]/85 hover:border-[#ffc9c9]"
               }`}
             >
               <span className="mt-0.5 flex h-3 w-3 shrink-0 items-center justify-center rounded-full border-[1.5px] border-[#ff6b6b] bg-white">
