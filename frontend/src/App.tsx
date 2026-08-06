@@ -211,6 +211,16 @@ export default function App() {
     setActiveFaultId(null);
   }, [analysis?.video_id]);
 
+  // Adopt the loaded analysis's own movement. Without this the page header keeps naming whatever
+  // the selector happened to hold — replaying a saved Overhead Press from history rendered
+  // "Squat Motion Analysis" over a clip the coach panel was correctly calling an overhead press.
+  // Syncing the selector rather than just the title keeps all three surfaces (title, dropdown,
+  // coach banner) saying one thing, and leaves the next upload defaulted to the same movement.
+  // Analyses predating per-movement selection carry no `movement`, so those leave it alone.
+  useEffect(() => {
+    if (analysis?.movement) setMovement(analysis.movement);
+  }, [analysis?.video_id, analysis?.movement]);
+
   const hasResult = !!analysis;
 
   return (

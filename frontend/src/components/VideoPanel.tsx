@@ -77,9 +77,6 @@ export default function VideoPanel({
   const [duration, setDuration] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
 
-  const { width, height } = analysis.metadata;
-  const aspect = width && height ? width / height : 9 / 16;
-  const portrait = aspect < 1;
   const videoSrc = useVideoSrc(analysis);
 
   useEffect(() => {
@@ -142,13 +139,13 @@ export default function VideoPanel({
       ref={wrapRef}
       className="group relative shrink-0 overflow-hidden rounded-[24px] border border-[#e6e8f0] bg-[#d6dbe3] shadow-[0_4px_24px_rgba(0,0,0,0.06)]"
     >
-      {/* The reference's stage is a 1.72:1 landscape frame. A portrait phone clip in that frame
-          would be a thin strip between two black margins, so portrait uploads get a taller stage
-          instead — the clip is the subject, the frame is not. */}
-      <div
-        className="relative overflow-hidden bg-black"
-        style={{ aspectRatio: portrait ? "1 / 1.05" : "1.72 / 1" }}
-      >
+      {/* One fixed stage for every clip: the reference's 1.72:1 landscape frame, regardless of
+          what the upload's own aspect is. A portrait phone clip pillarboxes inside it rather than
+          growing the card, so the page does not reflow between a phone recording and a landscape
+          one, and the floating cards keep the same position. The <video> is object-contain and
+          SkeletonOverlay maps the landmarks onto the RENDERED video rect (not the canvas box), so
+          the skeleton still tracks the body inside the letterbox. */}
+      <div className="relative overflow-hidden bg-black" style={{ aspectRatio: "1.72 / 1" }}>
         <video
           ref={videoRef}
           // Omitted entirely while unresolved: an empty `src` makes the browser re-request the
