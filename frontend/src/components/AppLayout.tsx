@@ -87,8 +87,15 @@ export default function AppLayout({
         {/* The one content card. `glass-shell` is the theme's outermost frosted pane: the tinted
             gradient that the translucent panels inside sample from, plus the page's single
             content-level blur. Everything nested in it stays unblurred by design (index.css). */}
-        <main className="glass-shell flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden rounded-[28px] border border-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_22px_58px_rgba(105,112,175,0.16)] sm:p-4 lg:rounded-[32px] lg:p-5">
-          <Header onMenu={() => setMobileNav(true)} />
+        <main className="glass-shell relative flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden rounded-[28px] border border-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_22px_58px_rgba(105,112,175,0.16)] sm:p-4 lg:gap-0 lg:rounded-[32px] lg:p-5">
+          {/* Below `lg` the header stays a row of its own — it carries the drawer button, and the
+              page beneath it needs the clearance. From `lg` all that is left in it is the account
+              cluster, so it floats in the card's top-right corner instead of reserving a full
+              row of mostly-empty width: the page's own header (breadcrumb, title, subtitle) takes
+              that space back and sits on the same line as the controls. */}
+          <div className="lg:absolute lg:right-5 lg:top-5 lg:z-30">
+            <Header onMenu={() => setMobileNav(true)} />
+          </div>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
         </main>
 
