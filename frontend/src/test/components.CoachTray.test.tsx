@@ -90,14 +90,18 @@ describe("CoachTray — coaching feedback", () => {
     // mockDetection spans [1.0, 2.5] — 1.5 is inside it.
     renderWithProviders(<CoachTray analysis={mockAnalysis} currentTime={1.5} onSeek={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Knee Valgus/i }).className).toContain(
-      "border-primary/40"
+      // The active signal is a violet ring; the card's own fill is the shared glass face, so the
+      // ring (not the border alone) is what distinguishes it from its neighbours.
+      "ring-primary/25"
     );
   });
 
   it("leaves the fault card inactive once the playhead passes its end time", () => {
     renderWithProviders(<CoachTray analysis={mockAnalysis} currentTime={3} onSeek={vi.fn()} />);
     expect(screen.getByRole("button", { name: /Knee Valgus/i }).className).not.toContain(
-      "border-primary/40"
+      // The active signal is a violet ring; the card's own fill is the shared glass face, so the
+      // ring (not the border alone) is what distinguishes it from its neighbours.
+      "ring-primary/25"
     );
   });
 });

@@ -232,6 +232,41 @@ const en: Dict = {
   "studio.movementUnavailable":
     "\"{movement}\" cannot be analysed yet. Pick one of the available movements.",
 
+  // Studio page header
+  "studio.crumbHome": "Home",
+  "studio.crumbWorkout": "Workout",
+  "studio.crumbCurrent": "{movement} Analysis",
+  "studio.title": "{movement} Motion Analysis",
+  "studio.subtitle": "Get grounded feedback and improve your form",
+  "studio.newSession": "Start / upload video",
+
+  // Studio dashboard cards
+  "studio.previous": "Your previous sessions",
+  "studio.viewAll": "View all",
+  "studio.previousEmpty": "No earlier sessions yet — this is your first.",
+  "studio.previousSignIn": "Sign in to keep a history of your sessions.",
+  "studio.previousError": "Couldn't load your earlier sessions.",
+  "studio.sessionClean": "Clean",
+  "studio.sessionFaults": "{n} faults",
+  "studio.keyMetrics": "Key metrics",
+  "studio.metricLimit": "(limit {op} {v})",
+  "studio.tips": "Tips for improvement",
+  "studio.tipsNone": "The knowledge graph returned no corrective cue for these faults.",
+  "studio.tipsClean": "Nothing to correct on this rep.",
+  "studio.detectedErrors": "Detected errors",
+  "studio.moreFaults": "+{n} more in the coach panel",
+
+  // Derived form score (client-side, see lib/formScore.ts)
+  "studio.formScore": "Form score",
+  "studio.formScoreFrom": "From detected faults",
+  "studio.formScoreNote":
+    "Derived on this device from the detected faults and their severities — not a backend measurement.",
+  "studio.formScoreUnknown": "Nothing measurable in this clip",
+  "studio.band.excellent": "Excellent",
+  "studio.band.good": "Good",
+  "studio.band.fair": "Fair",
+  "studio.band.poor": "Needs work",
+
   // Theme toggle
   "theme.light": "Light",
   "theme.system": "System",
@@ -413,6 +448,7 @@ const en: Dict = {
   // Account / nav
   "nav.history": "My records",
   "nav.movements": "Movements",
+  "nav.settings": "Settings",
   "account.signin": "Sign in",
   "account.signout": "Sign out",
   "account.menu": "Account menu",
@@ -912,6 +948,40 @@ const zhHant: Dict = {
   "studio.movement": "動作",
   "studio.movementUnavailable": "「{movement}」尚未支援分析，請選擇其他已開放的動作。",
 
+  // Studio page header
+  "studio.crumbHome": "首頁",
+  "studio.crumbWorkout": "訓練",
+  "studio.crumbCurrent": "{movement}分析",
+  "studio.title": "{movement}動作分析",
+  "studio.subtitle": "取得有憑有據的回饋，把動作練得更好",
+  "studio.newSession": "開始／上傳影片",
+
+  // Studio dashboard cards
+  "studio.previous": "先前的紀錄",
+  "studio.viewAll": "查看全部",
+  "studio.previousEmpty": "還沒有更早的紀錄，這是第一次。",
+  "studio.previousSignIn": "登入後即可保留每次分析的紀錄。",
+  "studio.previousError": "無法載入先前的紀錄。",
+  "studio.sessionClean": "無錯誤",
+  "studio.sessionFaults": "{n} 個錯誤",
+  "studio.keyMetrics": "關鍵指標",
+  "studio.metricLimit": "（門檻 {op} {v}）",
+  "studio.tips": "改善建議",
+  "studio.tipsNone": "知識圖譜沒有為這些錯誤回傳修正提示。",
+  "studio.tipsClean": "這一下沒有需要修正的地方。",
+  "studio.detectedErrors": "偵測到的錯誤",
+  "studio.moreFaults": "教練面板還有 {n} 項",
+
+  // Derived form score (client-side, see lib/formScore.ts)
+  "studio.formScore": "動作分數",
+  "studio.formScoreFrom": "由偵測到的錯誤推導",
+  "studio.formScoreNote": "此分數在本機由偵測到的錯誤與嚴重度推導而得，並非後端量測值。",
+  "studio.formScoreUnknown": "這段影片沒有可量測的畫面",
+  "studio.band.excellent": "優秀",
+  "studio.band.good": "良好",
+  "studio.band.fair": "尚可",
+  "studio.band.poor": "需加強",
+
   // Theme toggle
   "theme.light": "淺色",
   "theme.system": "系統",
@@ -1090,6 +1160,7 @@ const zhHant: Dict = {
   // Account / nav
   "nav.history": "我的紀錄",
   "nav.movements": "動作庫",
+  "nav.settings": "設定",
   "account.signin": "登入",
   "account.signout": "登出",
   "account.menu": "帳號選單",

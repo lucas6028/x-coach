@@ -8,12 +8,16 @@ import { renderWithProviders } from "./renderWithProviders";
 // through App so the URL-driven wiring is covered end to end). These props are fixed to an
 // always-available, already-loaded Squat so the pre-existing assertions below — none of which are
 // about movement selection — keep observing the same dropzone/loader behavior as before.
+//
+// The <select> itself now lives in the studio's page header (StudioTitleBar), not here: the
+// reference design moved every analysis control up into the header, and two selectors for one
+// setting is how they drift apart. So DemoIntro no longer takes `movements`/`onMovementChange`,
+// and the tier it forwards to CaptureStudio is supplied from above too.
 const movementProps = {
-  movements: [{ name: "Squat", validated: true }],
   movement: "Squat",
-  onMovementChange: vi.fn(),
   movementError: "",
   movementsLoaded: true,
+  tier: "heavy" as const,
 };
 
 describe("DemoIntro", () => {
@@ -40,7 +44,6 @@ describe("DemoIntro", () => {
         error=""
         {...movementProps}
         movement="Push-up"
-        movements={[{ name: "Push-up", validated: true }]}
       />
     );
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
@@ -133,11 +136,14 @@ describe("DemoIntro", () => {
     expect(screen.getByText("Knowledge graph")).toBeInTheDocument();
   });
 
-  it("shows the movement select with the current value", () => {
+  // The selector moved to the studio's page header (see the note on `movementProps`); this pins
+  // that it did NOT get left behind here too, which would give the app two of them and break
+  // App.movement.test.tsx's single-select lookup.
+  it("no longer renders a movement select — that lives in the page header", () => {
     renderWithProviders(
       <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
-    expect((screen.getByLabelText(/movement/i) as HTMLSelectElement).value).toBe("Squat");
+    expect(screen.queryByLabelText(/movement/i)).toBeNull();
   });
 
   it("shows the movementError panel instead of the dropzone, and hides no other content", () => {

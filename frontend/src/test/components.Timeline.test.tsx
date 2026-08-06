@@ -6,12 +6,15 @@ import { renderWithProviders } from "./renderWithProviders";
 import { mockAnalysis, mockCleanAnalysis } from "./fixtures";
 
 describe("Timeline", () => {
-  it("renders the legend labels", () => {
+  // The standalone timeline strip is gone: the reference design carries ONE scrub bar, inside the
+  // video card's control pill, and a legend does not fit in a 6px pill. The labels survive as the
+  // markers' `title` (asserted below), which is what actually named them for a pointer user.
+  it("names each fault segment rather than printing a legend", () => {
     renderWithProviders(
       <Timeline analysis={mockAnalysis} duration={10} currentTime={0} onSeek={vi.fn()} />
     );
-    expect(screen.getByText("Fault")).toBeInTheDocument();
-    expect(screen.getByText("Neutral")).toBeInTheDocument();
+    expect(screen.queryByText("Neutral")).toBeNull();
+    expect(document.querySelector("[title^='Fault:']")).toBeInTheDocument();
   });
 
   it("renders the current time display", () => {

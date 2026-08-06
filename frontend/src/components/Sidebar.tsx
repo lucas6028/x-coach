@@ -1,7 +1,30 @@
-import { Barbell, ClockCounterClockwise, Folders, GameController, Plus, ShieldCheck, VideoCamera, X } from "@phosphor-icons/react";
+import {
+  Barbell,
+  ClockCounterClockwise,
+  Folders,
+  GameController,
+  GearSix,
+  Plus,
+  ShieldCheck,
+  VideoCamera,
+  X,
+  type Icon,
+} from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
+
+// The app's own brand mark. The reference design's chevron placeholder is gone: with the top row
+// carrying no lockup any more, the rail shows the real X-Coach icon.
+function Mark({ className = "" }: { className?: string }) {
+  return (
+    <img
+      src="/icon.svg"
+      alt=""
+      className={`h-10 w-10 rounded-xl shadow-accent ring-1 ring-black/5 ${className}`}
+    />
+  );
+}
 
 interface Props {
   open: boolean;
@@ -17,10 +40,10 @@ interface Props {
   onClose?: () => void;
 }
 
-// The navigation rail: labelled when `open`, a slim icon rail when collapsed. The brand lockup and
-// the collapse toggle now live in the full-width top navbar (Header), so this component is purely the
-// nav list + footer. The aside itself is borderless and shares the main canvas background; the
-// divider between the desktop rail and the content area is drawn by the wrapper in AppLayout.
+// The reference design's navigation rail: a floating white card, one stacked icon-over-label cell
+// per destination, and a soft violet pill under the active one. `open` is the labelled 84px rail;
+// collapsed drops to a 64px icon-only strip. The mobile drawer reuses the same component with a
+// brand + close row on top.
 export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnalysis, onClose }: Props) {
   const { t } = useI18n();
   const { isAdmin } = useAuth();
@@ -29,6 +52,7 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
   const onMovements = pathname === "/movements";
+  const onSettings = pathname === "/settings";
   const onAdmin = pathname === "/admin";
 
   // The Admin link is admin-only UX gating (the /admin page + backend re-check are the real
@@ -37,95 +61,116 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
 
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
   const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
-  const navBase =
-    "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors";
-  // Borderless, softly-tinted active pill (the reference's sidebar look) — no outline ring.
-  const navActive = "bg-primary/10 text-primary font-semibold";
-  const navIdle = "text-muted hover:bg-content/5 hover:text-content";
+
+  // One rail cell: icon over a small label, the whole cell a rounded target.
+  const cell = "w-full flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-colors";
+  // `primary` is the reference's violet, so primary/10 over white lands on its #f3f0ff pill —
+  // using the token keeps the active state one definition instead of two.
+  const cellActive = "bg-primary/10 text-primary";
+  const cellIdle = "text-[#59648f] hover:bg-[#f8f8fb] hover:text-[#1e2142]";
+  const label = "text-[11px] font-medium leading-none tracking-tight";
+
+  const Cell = ({ icon: Ico, text, active }: { icon: Icon; text: string; active: boolean }) => (
+    <>
+      <Ico size={21} weight="duotone" />
+      {open && <span className={`${label} ${active ? "font-semibold" : ""}`}>{text}</span>}
+    </>
+  );
+
   return (
     <aside
       style={{ width }}
-      className={`h-full shrink-0 bg-background-dark flex flex-col justify-between overflow-hidden ${
+      // `glass-rail` — the second of the page's three blurred surfaces (shell, rail, popovers).
+      className={`glass-rail h-full shrink-0 flex flex-col justify-between overflow-y-auto scrollbar-none rounded-[28px] ${
         animate ? "transition-[width] duration-200 ease-in-out" : ""
       }`}
     >
       <div>
-        {/* Mobile drawer only: brand + close. The desktop rail keeps its top clear (brand is in the navbar). */}
+        {/* Mobile drawer only: brand + close. */}
         {onClose && (
-          <div className="h-16 flex items-center gap-2 px-3 border-b border-border-dark">
+          <div className="h-16 flex items-center gap-2 px-3 border-b border-[#f0f1f8]">
             <div className="flex items-center min-w-0 flex-1">
-              <img src="/icon.svg" alt="" className="w-9 h-9 rounded-xl shadow-accent ring-1 ring-black/5 shrink-0" />
-              <span className="ml-2.5 font-display font-bold tracking-tight truncate">X-Coach</span>
+              <Mark className="!h-9 !w-9 shrink-0" />
+              <span className="ml-2.5 font-display font-bold tracking-tight truncate text-[#1e2142]">
+                X-Coach
+              </span>
             </div>
             <button
               onClick={onClose}
               aria-label={t("nav.hide")}
               title={t("nav.hide")}
-              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-muted hover:bg-content/5 hover:text-content transition-colors"
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-[#59648f] hover:bg-[#f5f6fb] hover:text-[#1e2142] transition-colors"
             >
               <X size={20} />
             </button>
           </div>
         )}
-        <nav className="flex flex-col gap-1 p-2 pt-3">
+
+        {/* The rail mark is now the app's brand — the top row no longer carries a lockup, so this
+            is the one labelled "X-Coach" in the shell and it links home. */}
+        {!onClose && (
+          <div className="flex justify-center pt-5 pb-2">
+            <Link to="/app" aria-label="X-Coach" title="X-Coach" className="rounded-xl p-1">
+              <Mark />
+            </Link>
+          </div>
+        )}
+
+        <nav className="flex flex-col items-center gap-1.5 px-2 py-3">
           {/* Primary CTA: start a fresh analysis from anywhere in the app. */}
           <button
             onClick={onNewAnalysis}
             title={t("nav.newAnalysis")}
-            className={`${navBase} mb-1.5 bg-primary text-primary-content font-semibold shadow-accent hover:bg-primary/90 active:scale-[0.99] ${
-              open ? "" : "justify-center"
-            }`}
+            className={`${cell} bg-gradient-to-br from-[#a48bff] to-[#7b5cff] text-white shadow-[0_8px_20px_rgba(123,92,255,0.3)] hover:from-[#9a80ff] hover:to-[#6e4bff] active:scale-[0.98] mb-1`}
           >
-            <Plus size={22} weight="bold" />
-            {open && <span className="text-sm">{t("nav.newAnalysis")}</span>}
+            <Plus size={21} weight="bold" />
+            {open && <span className={`${label} font-semibold`}>{t("nav.newAnalysis")}</span>}
           </button>
           <Link
             to="/app"
             title={t("nav.analyse")}
-            className={`${navBase} ${onStudio ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            className={`${cell} ${onStudio ? cellActive : cellIdle}`}
           >
-            <VideoCamera size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.analyse")}</span>}
+            <Cell icon={VideoCamera} text={t("nav.analyse")} active={onStudio} />
           </Link>
-          <button
-            onClick={onOpenLibrary}
-            className={`${navBase} ${navIdle} ${open ? "" : "justify-center"}`}
-          >
-            <Folders size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
+          <button onClick={onOpenLibrary} className={`${cell} ${cellIdle}`}>
+            <Cell icon={Folders} text={t("nav.library")} active={false} />
           </button>
-          <Link
-            to="/games"
-            title={t("nav.games")}
-            className={`${navBase} ${onGames ? navActive : navIdle} ${open ? "" : "justify-center"}`}
-          >
-            <GameController size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.games")}</span>}
-          </Link>
           <Link
             to="/movements"
             title={t("nav.movements")}
-            className={`${navBase} ${onMovements ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            className={`${cell} ${onMovements ? cellActive : cellIdle}`}
           >
-            <Barbell size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.movements")}</span>}
+            <Cell icon={Barbell} text={t("nav.movements")} active={onMovements} />
           </Link>
           <Link
             to="/history"
             title={t("nav.history")}
-            className={`${navBase} ${onHistory ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            className={`${cell} ${onHistory ? cellActive : cellIdle}`}
           >
-            <ClockCounterClockwise size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.history")}</span>}
+            <Cell icon={ClockCounterClockwise} text={t("nav.history")} active={onHistory} />
+          </Link>
+          <Link
+            to="/games"
+            title={t("nav.games")}
+            className={`${cell} ${onGames ? cellActive : cellIdle}`}
+          >
+            <Cell icon={GameController} text={t("nav.games")} active={onGames} />
+          </Link>
+          <Link
+            to="/settings"
+            title={t("nav.settings")}
+            className={`${cell} ${onSettings ? cellActive : cellIdle}`}
+          >
+            <Cell icon={GearSix} text={t("nav.settings")} active={onSettings} />
           </Link>
           {isAdmin && (
             <Link
               to="/admin"
               title={t("admin.nav")}
-              className={`${navBase} ${onAdmin ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+              className={`${cell} ${onAdmin ? cellActive : cellIdle}`}
             >
-              <ShieldCheck size={22} weight="duotone" />
-              {open && <span className="text-sm font-medium">{t("admin.nav")}</span>}
+              <Cell icon={ShieldCheck} text={t("admin.nav")} active={onAdmin} />
             </Link>
           )}
         </nav>

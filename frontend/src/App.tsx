@@ -6,16 +6,14 @@ import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
-import ResizeHandle from "./components/ResizeHandle";
+import StudioTitleBar from "./components/StudioTitleBar";
+import KeyMetricsCard from "./components/studio/KeyMetricsCard";
+import PreviousSessionsCard from "./components/studio/PreviousSessionsCard";
+import TipsCard from "./components/studio/TipsCard";
 import { captureThumbnail } from "./lib/thumbnail";
-import type { PoseTier } from "./lib/poseTier";
+import { loadAnalysisTier, saveAnalysisTier, type PoseTier } from "./lib/poseTier";
 import { useI18n } from "./lib/i18n";
 import type { AnalyzableMovement } from "./lib/movements";
-
-const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
-
-const FEEDBACK_MIN = 280;
-const FEEDBACK_MAX = 640;
 
 export default function App() {
   const { t } = useI18n();
@@ -26,7 +24,14 @@ export default function App() {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
-  const [feedbackWidth, setFeedbackWidth] = useState(384);
+
+  // The extraction tier now lives in the page header (StudioTitleBar) rather than inside the
+  // capture panel, so the studio owns it and forwards it down. Persisted, same as before.
+  const [tier, setTier] = useState<PoseTier>(() => loadAnalysisTier());
+  const changeTier = useCallback((next: PoseTier) => {
+    setTier(next);
+    saveAnalysisTier(next);
+  }, []);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -126,7 +131,7 @@ export default function App() {
 
   // Client-side capture path: extraction happens in-browser (extractPoseFromBlob), then the pose
   // JSON + original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
-  const runPoseAnalysis = useCallback(async (blob: Blob, tier: PoseTier) => {
+  const runPoseAnalysis = useCallback(async (blob: Blob, chosenTier: PoseTier) => {
     setLoading(true);
     setError("");
     setAnalysis(null);
@@ -134,7 +139,7 @@ export default function App() {
     try {
       // MediaPipe is a cold path: defer its WASM graph until the user explicitly supplies video.
       const { extractPoseFromBlob } = await import("./lib/poseExtract");
-      const pose = await extractPoseFromBlob(blob, tier);
+      const pose = await extractPoseFromBlob(blob, chosenTier);
       // Captured from the same blob the browser just decoded for MediaPipe, so it costs one
       // extra seek. Resolves to null on any failure — a missing thumbnail never blocks analysis.
       const thumbnail = await captureThumbnail(blob);
@@ -213,6 +218,17 @@ export default function App() {
       onOpenLibrary={() => setPickerOpen(true)}
       onNewAnalysis={newAnalysis}
     >
+      <StudioTitleBar
+        movement={canonicalMovement}
+        movements={movements}
+        onMovementChange={setMovement}
+        tier={tier}
+        onTierChange={changeTier}
+        // Only once a result is up: in the empty state the dropzone right below is already the
+        // call to action, so this would be a second, weaker copy of it.
+        onNewSession={hasResult ? newAnalysis : undefined}
+      />
+
       {!hasResult ? (
         <DemoIntro
           onBlob={runPoseAnalysis}
@@ -221,38 +237,36 @@ export default function App() {
           loading={loading}
           statusMsg={statusMsg}
           error={error}
-          movements={movements}
           movement={canonicalMovement}
-          onMovementChange={setMovement}
           movementError={movementError}
           movementsLoaded={movementsLoaded}
+          tier={tier}
         />
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-y-auto lg:overflow-hidden scrollbar-thin">
-          {/* Left: video (with overlaid metrics HUD) + timeline. Mobile scrolls
-              with the page; desktop is a bounded, independently-scrolling column. */}
-          <div className="min-w-0 flex flex-col gap-4 p-4 bg-content/[0.03] lg:flex-1 lg:min-h-0 lg:overflow-hidden">
+        // The reference's 12-column split: the clip and its dashboard cards on the left, the
+        // coach column on the right. Mobile stacks and scrolls as one page; on desktop each
+        // column scrolls independently inside the card.
+        <div className="mt-4 grid min-h-0 flex-1 grid-cols-12 gap-4 overflow-y-auto scrollbar-thin lg:gap-5 lg:overflow-hidden">
+          <div className="col-span-12 flex min-w-0 flex-col gap-4 lg:col-span-8 lg:min-h-0 lg:overflow-y-auto lg:pr-1 scrollbar-thin">
             <VideoPanel
               analysis={analysis!}
               videoRef={videoRef}
               onTimeUpdate={setCurrentTime}
               onActiveFault={setActiveFaultId}
               onSeek={seek}
+              activeFaultId={activeFaultId}
             />
+
+            <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-3">
+              <PreviousSessionsCard currentVideoId={analysis!.video_id} />
+              <KeyMetricsCard analysis={analysis!} />
+              <TipsCard analysis={analysis!} />
+            </div>
           </div>
 
-          {/* Drag to resize video vs. feedback (desktop only — panes stack on mobile). */}
-          <ResizeHandle
-            className="hidden lg:block"
-            onResize={(d) => setFeedbackWidth((w) => clamp(w - d, FEEDBACK_MIN, FEEDBACK_MAX))}
-          />
-
-          {/* Right: one unified "coach chat" tray — the grounded fault-card analysis, the
-              knowledge graph below it, and the follow-up conversation, all in one thread. */}
-          <aside
-            style={{ ["--fbw" as string]: `${feedbackWidth}px` }}
-            className="w-full lg:w-[var(--fbw)] flex flex-col border-t lg:border-t-0 lg:border-l border-border-dark bg-surface-dark min-h-0 shrink-0"
-          >
+          {/* One unified "coach chat" column — the grounded fault-card analysis, the knowledge
+              graph below it, and the follow-up conversation, all in one thread. */}
+          <aside className="col-span-12 flex min-h-0 lg:col-span-4 lg:h-full">
             <CoachTray
               analysis={analysis!}
               currentTime={currentTime}

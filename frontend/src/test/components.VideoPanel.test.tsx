@@ -125,7 +125,10 @@ describe("VideoPanel", () => {
     expect(() => fireEvent.click(playBtns[0])).not.toThrow();
   });
 
-  it("renders a timeline beneath the video", () => {
+  // The timeline moved from a strip beneath the video into the card's own control pill (the
+  // reference design has one scrub bar, not two), so its legend went with it. What survives is
+  // the thing the legend was labelling: a per-fault marker on the track, named by its title.
+  it("renders the scrub bar with a marker per detected fault", () => {
     const ref = makeVideoRef();
     renderWithProviders(
       <VideoPanel
@@ -136,9 +139,7 @@ describe("VideoPanel", () => {
         onSeek={vi.fn()}
       />
     );
-    // Timeline renders "Fault" and "Neutral" labels
-    expect(screen.getByText("Fault")).toBeInTheDocument();
-    expect(screen.getByText("Neutral")).toBeInTheDocument();
+    expect(document.querySelector("[title*='Knee Valgus']")).toBeInTheDocument();
   });
 
   it("calls onTimeUpdate when the video fires timeupdate", () => {

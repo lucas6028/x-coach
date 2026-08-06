@@ -5,9 +5,8 @@ import Header from "./Header";
 import LiffAppShell from "./LiffAppShell";
 import { useLiffContext } from "../lib/liffContext";
 
-// Fixed expanded width — the sidebar is no longer drag-resizable; it only toggles
-// between this and the 64px icon rail.
-const SIDEBAR_WIDTH = 200;
+// The reference design's rail: 84px labelled, 64px icon-only when collapsed.
+const SIDEBAR_WIDTH = 84;
 
 interface Props {
   children: ReactNode;
@@ -20,11 +19,15 @@ interface Props {
   initialSidebarOpen?: boolean;
 }
 
-// The shared app shell: collapsible/resizable desktop sidebar, off-canvas mobile drawer, and the
-// top navbar (Header). Every signed-in page (studio, history, settings) renders its content as
-// `children` so the sidebar + navbar stay identical across the app. Only the home/landing and the
-// pre-auth login gateway opt out. Inside the LINE in-app browser this delegates to LiffAppShell
-// instead (see lib/liffContext).
+// The shared app shell, in the motion_analysis_muse-spark idiom: a lavender canvas carrying a
+// floating white nav rail beside one big rounded content card, with the pill action row and the
+// account controls along the top of that card. Every signed-in page (studio, history, settings)
+// renders its content as `children` so the shell stays identical across the app. Only the
+// home/landing and the pre-auth login gateway opt out. Inside the LINE in-app browser this
+// delegates to LiffAppShell instead (see lib/liffContext).
+//
+// The palette is the reference's own, fixed light hexes — it is a light-only design, so the shell
+// does not follow the theme toggle (which still governs the token-styled page bodies).
 export default function AppLayout({
   children,
   onOpenLibrary,
@@ -33,8 +36,10 @@ export default function AppLayout({
 }: Props) {
   const navigate = useNavigate();
   const { isInClient } = useLiffContext();
-  // Desktop sidebar is a fixed-width rail; it only toggles between expanded and the icon rail.
-  const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
+  // The desktop rail no longer has a collapse control (the top row carries no toggle), so this is
+  // fixed for the life of the layout: labelled 84px rail, or the 64px icon strip when a page asks
+  // for it (the games want the extra width for their camera area).
+  const sidebarOpen = initialSidebarOpen;
   const [mobileNav, setMobileNav] = useState(false);
 
   // Off the studio there is no picker, so "Library" just routes into the studio.
@@ -57,43 +62,54 @@ export default function AppLayout({
   }
 
   return (
-    <div className="h-[100dvh] w-full flex flex-col bg-background-dark text-content overflow-hidden">
-      {/* Full-width top navbar, spanning both the sidebar and main columns (the reference layout).
-          It carries the brand and the desktop sidebar-collapse toggle. */}
-      <Header
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((v) => !v)}
-        onMenu={() => setMobileNav(true)}
-      />
+    // `ms-shell` re-declares the light design tokens for everything inside the frame — see
+    // index.css. The reference design is light-only, and a dark token set under these white
+    // cards puts dark text and dark scrollbars inside them.
+    <div className="ms-shell relative h-[100dvh] w-full overflow-hidden bg-[#eef0fb] p-2 font-body text-[#211f39] sm:p-3 lg:p-[14px]">
+      {/* Background wash: the reference's two soft colour blooms behind the cards. */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute -right-20 -top-20 h-[600px] w-[600px] rounded-full bg-[#e9e3ff] opacity-40 blur-[120px]" />
+        <div className="absolute -left-40 top-40 h-[500px] w-[500px] rounded-full bg-[#e0e7ff] opacity-30 blur-[100px]" />
+      </div>
 
-      {/* Below the navbar: the sidebar and main sit side by side, split by a vertical divider. */}
-      <div className="flex flex-1 min-h-0 min-w-0">
-        {/* Desktop: inline, fixed-width sidebar with a divider between it and the main content. */}
-        <div className="hidden lg:flex shrink-0 border-r border-border-dark">
+      <div className="relative mx-auto flex h-full max-w-[1500px] gap-3 lg:gap-4">
+        {/* Desktop: the floating nav rail. */}
+        <div className="hidden lg:flex">
           <Sidebar
             open={sidebarOpen}
             width={sidebarOpen ? SIDEBAR_WIDTH : 64}
-            animate
+            animate={false}
             onOpenLibrary={openLibrary}
             onNewAnalysis={newAnalysis}
           />
         </div>
 
-        {/* Mobile: off-canvas drawer + backdrop (overlays the navbar too) */}
+        {/* The one content card. `glass-shell` is the theme's outermost frosted pane: the tinted
+            gradient that the translucent panels inside sample from, plus the page's single
+            content-level blur. Everything nested in it stays unblurred by design (index.css). */}
+        <main className="glass-shell flex min-h-0 min-w-0 flex-1 flex-col gap-4 overflow-hidden rounded-[28px] border border-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_22px_58px_rgba(105,112,175,0.16)] sm:p-4 lg:rounded-[32px] lg:p-5">
+          <Header onMenu={() => setMobileNav(true)} />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        </main>
+
+        {/* Mobile: off-canvas drawer + backdrop. Rendered LAST although it sits on the left —
+            it is `fixed`, so DOM order costs nothing visually, and keeping it after the content
+            card puts the navbar's collapse toggle ahead of the drawer's close button in the
+            accessibility tree (both are labelled "Hide navigation"). */}
         {mobileNav && (
           <div
-            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
             onClick={() => setMobileNav(false)}
           />
         )}
         <div
-          className={`fixed inset-y-0 left-0 z-50 w-[270px] max-w-[80vw] bg-background-dark transition-transform duration-200 ease-in-out lg:hidden ${
-            mobileNav ? "translate-x-0" : "-translate-x-full"
+          className={`fixed inset-y-2 left-2 z-50 w-[240px] max-w-[80vw] transition-transform duration-200 ease-in-out lg:hidden ${
+            mobileNav ? "translate-x-0" : "-translate-x-[110%]"
           }`}
         >
           <Sidebar
             open
-            width={270}
+            width={240}
             animate={false}
             onClose={() => setMobileNav(false)}
             onOpenLibrary={() => {
@@ -106,8 +122,6 @@ export default function AppLayout({
             }}
           />
         </div>
-
-        <main className="flex-1 flex flex-col min-w-0 min-h-0">{children}</main>
       </div>
     </div>
   );

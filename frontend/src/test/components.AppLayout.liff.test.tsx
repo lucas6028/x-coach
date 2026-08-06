@@ -114,7 +114,8 @@ describe("AppLayout — on the web (regression guard)", () => {
   it("keeps the existing navbar + sidebar shell", async () => {
     renderLayout();
     // AppLayout renders Sidebar twice (desktop rail hidden on mobile, mobile drawer hidden on
-    // desktop), so its "New analysis" button appears twice in the DOM.
+    // desktop), so its "New analysis" button appears twice in the DOM. The top row carries no
+    // action pills — see components.Header.test.tsx.
     await waitFor(() => expect(screen.getAllByRole("button", { name: /New analysis/i })).toHaveLength(2));
     expect(screen.getByLabelText("X-Coach")).toBeInTheDocument();
     expect(screen.getByText("page body")).toBeInTheDocument();
