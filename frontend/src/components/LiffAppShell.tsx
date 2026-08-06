@@ -51,7 +51,9 @@ export default function LiffAppShell({ children, onOpenLibrary, onNewAnalysis }:
   return (
     // 100dvh (not 100vh) so the LINE in-app browser's collapsing toolbar can't clip the tab
     // bar; the top inset covers a notch when LINE renders the LIFF view full-bleed.
-    <div className="h-[100dvh] w-full flex flex-col overflow-hidden bg-background-dark text-content pt-[env(safe-area-inset-top)]">
+    // `ms-shell` pins the light design tokens (index.css): the pages rendered inside this shell
+    // are the same reference-design pages the web shell carries, and they are light-only.
+    <div className="ms-shell h-[100dvh] w-full flex flex-col overflow-hidden bg-background-dark text-content pt-[env(safe-area-inset-top)]">
       <header className="h-12 shrink-0 border-b border-border-dark bg-surface flex items-center gap-1 px-4">
         {/* No page title: the bottom tab bar's active tab is what says which page you're on. */}
         <div className="flex-1" />

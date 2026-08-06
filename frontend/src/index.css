@@ -2,23 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Light theme (default). Channels are space-separated RGB for Tailwind's
-   `rgb(var(--x) / <alpha-value>)` opacity support. */
+/* Light theme (default) — the motion_analysis_muse-spark palette. Channels are space-separated
+   RGB for Tailwind's `rgb(var(--x) / <alpha-value>)` opacity support.
+
+   The reference design is light-only, so the shell and the studio page write its hexes directly
+   (--ms-* below). These semantic tokens are retuned to the SAME palette so the pages that still
+   style with tokens — history, settings, movements, games, admin — sit inside that shell without
+   clashing. The dark block still exists and still switches those pages; the shell itself does
+   not follow it. */
 :root {
   color-scheme: light;
-  --c-bg: 246 247 249;
+  --c-bg: 238 240 251; /* #eef0fb — the lavender canvas */
   --c-surface: 255 255 255;
-  --c-border: 226 230 235;
-  --c-content: 21 25 30;
-  --c-muted: 91 100 112;
-  --c-faint: 138 146 156;
-  --c-track: 210 215 221;
+  --c-border: 235 234 246; /* #ebeaf6 */
+  --c-content: 30 33 66; /* #1e2142 */
+  /* Secondary text is darkened to the reference theme's own values (#59648f / #63709f). Its
+     glass.ts records why: the lighter tints it started from measured 4.27:1 and 3.64:1 on this
+     canvas, under the 4.5:1 WCAG AA floor for body copy. Ours were lighter still — `faint`
+     (#9aa0b8) is about 2.6:1 on white and carries real copy (dropzone hints, card sublabels,
+     timecodes). Same hue family, just legible. */
+  --c-muted: 89 100 143; /* #59648f */
+  --c-faint: 99 112 159; /* #63709f */
+  --c-track: 240 241 248; /* #f0f1f8 */
   --c-fault: 183 121 31; /* amber, darkened for contrast on light canvas */
   /* Soft, cool-tinted card elevation — the reference's borderless-white-card look.
      Tinted toward slate (16 24 40) rather than pure black so shadows sit in the palette. */
   --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 24px -8px rgb(16 24 40 / 0.10);
   --shadow-card-hover: 0 2px 6px rgb(16 24 40 / 0.07), 0 16px 34px -10px rgb(16 24 40 / 0.16);
-  --shadow-accent: 0 6px 16px -6px rgb(15 117 138 / 0.40); /* teal-tinted lift for the primary CTA */
+  --shadow-accent: 0 8px 20px rgb(123 92 255 / 0.30); /* violet lift for the primary CTA */
+}
+
+/* The app shell is the reference design, and the reference design is light-only: the lavender
+   canvas, the white rail and the white content card are written in fixed hexes, so a dark `.dark`
+   token set underneath them puts dark text and dark scrollbars inside white cards. Re-declaring
+   the light tokens on the shell root keeps every token-styled descendant (the dropzone, the
+   library picker, the knowledge-graph widget, and the history/settings/games page bodies that
+   render as its children) on the same palette as the frame around them.
+
+   Scoped rather than global on purpose: the landing page sits OUTSIDE the shell and still follows
+   the theme toggle, so this is one line to delete if a dark shell is ever authored. */
+.ms-shell {
+  color-scheme: light;
+  --c-bg: 238 240 251;
+  --c-surface: 255 255 255;
+  --c-border: 235 234 246;
+  --c-content: 30 33 66;
+  --c-muted: 89 100 143;
+  --c-faint: 99 112 159;
+  --c-track: 240 241 248;
+  --c-fault: 183 121 31;
+  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 24px -8px rgb(16 24 40 / 0.1);
+  --shadow-card-hover: 0 2px 6px rgb(16 24 40 / 0.07), 0 16px 34px -10px rgb(16 24 40 / 0.16);
+  --shadow-accent: 0 8px 20px rgb(123 92 255 / 0.3);
+}
+
+/* ── muse-spark reference palette ───────────────────────────────────────────
+   Fixed values, deliberately NOT theme-switched: the reference design is light-only and the
+   shell / studio page are pinned to it. Kept as variables so the palette is stated once. */
+:root {
+  --ms-canvas: #eef0fb;
+  --ms-card: #ffffff;
+  --ms-card-soft: #fcfcff;
+  --ms-chip: #f5f6fb;
+  --ms-line: #ebeaf6;
+  --ms-line-soft: #f0f1f8;
+  --ms-ink: #1e2142;
+  --ms-ink-strong: #232535;
+  --ms-muted: #6b6f8a;
+  --ms-faint: #9aa0b8;
+  --ms-dim: #b8bcd3;
+  --ms-violet: #7b61ff;
+  --ms-violet-soft: #f3f0ff;
+  --ms-violet-line: #ece8ff;
+  --ms-green: #22c55e;
+  --ms-green-ink: #1a9e5a;
+  --ms-green-soft: #e6f7ed;
+  --ms-red: #ff6b6b;
+  --ms-red-soft: #fff5f5;
 }
 
 .dark {
@@ -40,7 +100,7 @@
 
 body {
   margin: 0;
-  font-family: "Space Grotesk", sans-serif;
+  font-family: "Inter", sans-serif;
   background-color: rgb(var(--c-bg));
   color: rgb(var(--c-content));
 }
@@ -52,6 +112,130 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgb(var(--c-border));
   border-radius: 9999px;
+}
+
+/* Horizontally scrollable strips (the shell's pill-tab row) scroll without a visible bar. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Pale-violet glass ──────────────────────────────────────────────────────
+   Ported from the reference theme (Downloads/theme/glass.ts + its MUI overrides): the same
+   translucency, inset top highlight and deep soft shadow, expressed as plain classes because
+   this app is Tailwind, not MUI/emotion.
+
+   BLUR DISCIPLINE — the constraint the source spells out, and the reason it is worth repeating
+   here: `backdrop-filter` is applied ONLY to the outermost shell surface, the nav rail, and
+   transient popovers. Inner panels deliberately do NOT blur. Stacking four blurred layers costs
+   frames while scrolling, and this app's worst case is worse than the source's — /app scrolls a
+   page that is simultaneously decoding video, running a rAF playhead and repainting the skeleton
+   canvas over it. The over-video cards and the control bar therefore use high-opacity fills
+   instead of blur.
+
+   RADIUS IS DELIBERATELY NOT SET by any of these classes. They are plain selectors emitted after
+   `@tailwind utilities`, so a `border-radius` here would silently beat every `rounded-*` utility
+   on the same element (equal specificity, later in the file) — the panels would all snap to one
+   corner regardless of what their markup asked for. The theme's radii (18 panel / 14 popover /
+   24 bar) are applied at the call sites instead. */
+
+/* The outermost surface: the shell's own frosted pane. One of only three blurs on the page. */
+.glass-shell {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.94),
+    rgba(248, 249, 255, 0.9) 45%,
+    rgba(252, 252, 255, 0.94)
+  );
+  backdrop-filter: blur(24px);
+}
+
+/* The nav rail — the source blurs this one too. */
+.glass-rail {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.66);
+  backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 22px 58px rgba(105, 112, 175, 0.13);
+}
+
+/* Inner panels: translucent white over the shell gradient. No blur (see above). */
+.glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 22px 58px rgba(105, 112, 175, 0.13);
+}
+
+/* Same face as `.glass-panel` but without border or radius, for elements that own those — the
+   fault card's active state is a coloured ring, and a panel border would overwrite it. */
+.glass-face {
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 22px 58px rgba(105, 112, 175, 0.13);
+}
+
+/* Controls: the filter-pill / input language. */
+.glass-control {
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 20px rgba(105, 112, 170, 0.08);
+}
+.glass-control:hover {
+  border-color: #e1e6f5;
+}
+
+/* The strip a row of controls sits on. */
+.glass-bar {
+  background: rgba(247, 248, 255, 0.62);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 16px 45px rgba(110, 116, 177, 0.1);
+}
+
+/* Popovers and modals — topmost layer, so this is where the third and last blur lives. The
+   source floors the fill at .82: any more transparent and the content behind fights the text. */
+.glass-popup {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(20px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 18px 44px rgba(105, 112, 175, 0.22);
+}
+
+/* Cards that float over the black video: same glass vocabulary, but nearly opaque and unblurred.
+   At the panel's .62 fill they would read as murky grey and the near-black label text would lose
+   its contrast against the clip behind it. */
+.glass-over-video {
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 18px 44px rgba(20, 24, 60, 0.28);
+}
+
+/* Entrance motion, from the same source: `rise` for a page header, `pop` for the cards under it
+   (stagger with an inline animation-delay). Both collapse under reduced motion, below. */
+@keyframes xc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes xc-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.xc-rise {
+  animation: xc-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.xc-pop {
+  animation: xc-pop 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Landing: tracking-pulse on the flagged keypoint. CSS (not JS rAF) so it
@@ -67,6 +251,8 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .xc-pulse-ring { animation: none; opacity: 0; }
+  /* The glass theme's entrance motion (see the glass block below) collapses here too. */
+  .xc-rise, .xc-pop { animation: none; }
 }
 
 /* ── Lumen loader ───────────────────────────────────────────────────────────

@@ -36,12 +36,17 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
   }, [fault]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 bg-[#1e2142]/45 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      {/* `glass-popup` — the topmost layer, and the third and last blurred surface on the page
+          (shell, rail, popovers). See the blur-discipline note in index.css. */}
       <div
-        className="bg-surface-dark border border-border-dark rounded-lg w-full max-w-2xl max-h-[80vh] flex flex-col"
+        className="glass-popup xc-pop rounded-[18px] w-full max-w-2xl max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-border-dark flex items-center justify-between">
+        <div className="p-4 border-b border-white/70 flex items-center justify-between">
           <h2 className="text-sm font-bold text-content">
             {t("library.title")} {total ? `(${total})` : ""}
           </h2>
@@ -49,15 +54,15 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
             <X size={20} />
           </button>
         </div>
-        <div className="p-3 flex gap-2 flex-wrap border-b border-border-dark">
+        <div className="p-3 flex gap-2 flex-wrap border-b border-white/70">
           {FAULT_FILTERS.map((f) => (
             <button
               key={f.id}
               onClick={() => setFault(f.id)}
-              className={`px-2.5 py-1 rounded-full text-[11px] border ${
+              className={`px-2.5 py-1 rounded-full text-[11px] ${
                 fault === f.id
-                  ? "bg-primary/20 text-primary border-primary/40"
-                  : "text-muted border-border-dark hover:text-content"
+                  ? "border border-primary/40 bg-primary/15 text-primary"
+                  : "glass-control text-muted hover:text-content"
               }`}
             >
               {t(f.labelKey)}
@@ -72,7 +77,7 @@ export default function LibraryPicker({ onClose, onPick }: Props) {
               <button
                 key={it.video_id}
                 onClick={() => onPick(it.video_id)}
-                className="text-left bg-background rounded border border-border-dark p-3 hover:border-primary transition-colors"
+                className="glass-control text-left rounded-xl p-3 transition-colors hover:border-primary/50"
               >
                 <div className="font-mono text-xs text-content truncate">{it.video_id}</div>
                 <div className="text-[10px] text-muted mb-1">

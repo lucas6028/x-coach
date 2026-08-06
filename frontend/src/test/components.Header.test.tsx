@@ -9,10 +9,20 @@ import { renderWithProviders } from "./renderWithProviders";
 // source). Both were removed: which page you're on is what the sidebar's active pill says, and the
 // analysis metadata lives in the result panels. The tests that pinned that copy went with it.
 describe("Header", () => {
-  it("carries the brand and the nav controls, and nothing else", () => {
+  it("keeps the mobile drawer opener — below lg it is the only way to reach the nav", () => {
     renderWithProviders(<Header />);
-    expect(screen.getByRole("link", { name: "X-Coach" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /show navigation/i })).toBeInTheDocument();
+  });
+
+  // The brand lockup, the New-analysis / Library pills and the rail-collapse toggle all moved out
+  // of the top row: the brand is the rail's mark (Sidebar), both actions are rail entries, and the
+  // 84px rail was not worth a permanent control to collapse. Pinned so none of them drift back.
+  it("carries no brand lockup, action pills or collapse toggle", () => {
+    renderWithProviders(<Header />);
+    expect(screen.queryByRole("link", { name: "X-Coach" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /New analysis/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Library/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /hide navigation/i })).not.toBeInTheDocument();
   });
 
   it("renders no page title or status line", () => {

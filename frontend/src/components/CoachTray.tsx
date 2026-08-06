@@ -83,7 +83,7 @@ export default function CoachTray({
   // Suggestion-chip styling, shared by the empty-state starters and the per-answer follow-ups so the
   // two read as the same affordance ("和一開始的選項一樣").
   const chipClass =
-    "flex items-center justify-between gap-2 rounded-2xl border border-border-dark bg-surface px-3.5 py-2.5 text-left text-[13px] text-content transition-colors hover:bg-content/[0.03]";
+    "glass-control flex items-center justify-between gap-2 rounded-2xl px-3.5 py-2.5 text-left text-[12.5px] text-[#3a3d5a] transition-colors";
 
   // A new analysis starts fresh, then restores its saved thread if the session can persist: a
   // history-replay of a saved analysis brings its conversation back, while a fresh upload (no saved
@@ -271,20 +271,20 @@ export default function CoachTray({
     <div className="relative" title={t("chat.title")}>
       <input
         disabled
-        className="w-full cursor-not-allowed rounded-2xl border border-border-dark bg-background py-2.5 pl-3 pr-10 text-sm text-muted placeholder-faint"
+        className="glass-control w-full cursor-not-allowed rounded-full py-2.5 pl-4 pr-10 text-[12.5px] text-[#63709f] placeholder-[#b8bcd3]"
         placeholder={t("chat.placeholder")}
       />
-      <PaperPlaneTilt size={18} className="absolute right-2 top-1/2 -translate-y-1/2 text-faint" />
+      <PaperPlaneTilt size={18} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#63709f]" />
     </div>
   );
 
   const signInComposer = (
-    <div className="flex items-center gap-3 rounded-2xl border border-border-dark bg-background/60 p-3">
+    <div className="flex items-center gap-3 rounded-2xl border border-[#ece8ff] bg-white p-3">
       <LumenAvatar size={36} className="shrink-0" />
-      <p className="min-w-0 flex-1 text-xs leading-relaxed text-muted">{t("chat.signIn")}</p>
+      <p className="min-w-0 flex-1 text-xs leading-relaxed text-[#59648f]">{t("chat.signIn")}</p>
       <Link
         to="/login"
-        className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-content transition-transform active:scale-[0.98]"
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-gradient-to-r from-[#a48bff] to-[#7b5cff] px-3 py-1.5 text-xs font-medium text-white shadow-[0_4px_12px_rgba(123,92,255,0.3)] transition-transform active:scale-[0.98]"
       >
         <SignIn size={15} weight="bold" />
         {t("account.signin")}
@@ -293,9 +293,8 @@ export default function CoachTray({
   );
 
   const workingComposer = (
-    // Pill composer (design 06). Voice + attach are the multimodal slots this design anticipates;
-    // they slot in beside the input once those features exist, so no dead controls ship now.
-    <div className="flex items-center gap-2 rounded-2xl border border-border-dark bg-background px-2 py-1.5 focus-within:ring-2 focus-within:ring-primary/40">
+    // The reference's pill composer: a white capsule with the send action as a violet disc.
+    <div className="glass-control flex items-center gap-2 rounded-full px-2 py-2 transition-all focus-within:border-[#c9bcff]">
       <input
         value={input}
         onChange={(e) => setInput(e.target.value)}
@@ -307,7 +306,7 @@ export default function CoachTray({
         }}
         disabled={loading}
         aria-label={t("chat.heading")}
-        className="min-w-0 flex-1 bg-transparent px-1.5 text-sm text-content placeholder-faint focus:outline-none disabled:opacity-60"
+        className="min-w-0 flex-1 bg-transparent px-2.5 text-[12.5px] text-[#3a3d5a] placeholder-[#b8bcd3] focus:outline-none disabled:opacity-60"
         placeholder={t("chat.placeholderActive")}
       />
       <button
@@ -315,9 +314,9 @@ export default function CoachTray({
         onClick={() => void send()}
         disabled={!canSend}
         aria-label={t("chat.send")}
-        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-primary-content transition enabled:active:scale-95 disabled:bg-content/10 disabled:text-faint"
+        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-r from-[#a48bff] to-[#7b5cff] text-white shadow-[0_4px_12px_rgba(123,92,255,0.3)] transition enabled:active:scale-95 disabled:from-[#e6e6f2] disabled:to-[#e6e6f2] disabled:text-[#63709f] disabled:shadow-none"
       >
-        <PaperPlaneTilt size={16} weight={canSend ? "fill" : "regular"} />
+        <PaperPlaneTilt size={15} weight={canSend ? "fill" : "regular"} />
       </button>
     </div>
   );
@@ -349,14 +348,18 @@ export default function CoachTray({
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-background">
+    <div className="glass-panel flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-[24px]">
       {/* One header for the whole coaching conversation. */}
-      <div className="flex items-center justify-between gap-2 border-b border-border-dark bg-surface-dark px-4 py-3">
-        <h2 className="flex items-center gap-2 text-sm font-semibold text-content">
-          <LumenAvatar size={22} />
+      <div className="flex shrink-0 items-center justify-between gap-2 px-4 pb-3 pt-4">
+        <h2 className="flex items-center gap-2.5 text-[15px] font-bold tracking-tight text-[#1e2142]">
+          <LumenAvatar size={26} />
           {t("chat.heading")}
         </h2>
-        <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 font-mono text-[10px] text-primary">
+        <span
+          title={t("chat.grounded")}
+          className="flex items-center gap-1.5 rounded-full border border-[#d0f0dc] bg-[#e6f7ed] px-2.5 py-1 text-[11px] font-semibold text-[#1a9e5a]"
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
           {t("feedback.badge")}
         </span>
       </div>
@@ -373,22 +376,24 @@ export default function CoachTray({
           // was not — congratulating someone on form nothing measured is a claim, not encouragement.
           <div className="space-y-4 p-4">
             {measured ? (
-              <div className="flex items-center gap-3 rounded-xl border border-secondary/20 bg-secondary/[0.06] p-4">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-secondary/10">
-                  <CheckCircle size={26} weight="fill" className="text-secondary" />
+              <div className="flex items-center gap-3 rounded-[16px] border border-[#d0f0dc] bg-[#e6f7ed] p-4">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white">
+                  <CheckCircle size={26} weight="fill" className="text-[#22c55e]" />
                 </span>
-                <p className="text-sm leading-relaxed text-content">
+                <p className="text-[13px] leading-relaxed text-[#1e2142]">
                   {t("feedback.noFaults", {
                     movement: movementLabel(t, analysis.movement ?? "Squat"),
                   })}
                 </p>
               </div>
             ) : (
-              <div className="flex items-center gap-3 rounded-xl border border-border-dark bg-surface-dark p-4">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/5">
-                  <Warning size={26} weight="fill" className="text-faint" />
+              <div className="flex items-center gap-3 rounded-[16px] border border-[#ece8ff] bg-white p-4">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#f5f6fb]">
+                  <Warning size={26} weight="fill" className="text-[#63709f]" />
                 </span>
-                <p className="text-sm leading-relaxed text-content">{t("feedback.notMeasured")}</p>
+                <p className="text-[13px] leading-relaxed text-[#1e2142]">
+                  {t("feedback.notMeasured")}
+                </p>
               </div>
             )}
             <KnowledgeGraphWidget analysis={analysis} activeFaultId={activeFaultId} />
@@ -417,19 +422,19 @@ export default function CoachTray({
 
         {/* Follow-up conversation — same thread, below the analysis. Only when chat is usable. */}
         {isWorking && (
-          <div className="border-t border-border-dark/60 px-4 pb-4 pt-3">
+          <div className="border-t border-[#ececf8] px-4 pb-4 pt-3">
             <div className="mb-2 flex items-center gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-faint">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#63709f]">
                 {t("coach.followUp")}
               </span>
-              <span className="h-px flex-1 bg-border-dark/60" />
+              <span className="h-px flex-1 bg-[#ececf8]" />
             </div>
 
             {messages.length === 0 && !loading ? (
               // Empty state: the intro line plus starter-suggestion chips that send on click. These
               // are the static entry points; per-answer dynamic follow-ups would need model support.
               <div>
-                <p className="text-xs leading-relaxed text-muted">{t("chat.intro")}</p>
+                <p className="text-xs leading-relaxed text-[#59648f]">{t("chat.intro")}</p>
                 <div className="mt-3 flex flex-col gap-2">
                   {["chat.suggestFix", "chat.suggestDrill", "chat.suggestWhy"].map((key) => (
                     <button
@@ -450,15 +455,19 @@ export default function CoachTray({
               <div className="space-y-5">
                 {messages.map((m, i) =>
                   m.role === "user" ? (
-                    <motion.p
+                    // The reference's user turn: a right-aligned tinted bubble with a clipped
+                    // top-right corner.
+                    <motion.div
                       key={i}
                       initial={reduce ? false : { opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-                      className="text-right text-sm leading-relaxed text-muted"
+                      className="flex justify-end"
                     >
-                      {m.content}
-                    </motion.p>
+                      <p className="max-w-[85%] rounded-[16px] rounded-tr-[4px] border border-[#e0e3ff] bg-[#eef0ff] px-3.5 py-2.5 text-[12.5px] font-medium leading-relaxed text-[#3a3d5a]">
+                        {m.content}
+                      </p>
+                    </motion.div>
                   ) : (
                     <motion.div
                       key={i}
@@ -470,7 +479,9 @@ export default function CoachTray({
                       {m.role === "assistant" && m.tools && m.tools.length > 0 && (
                         <ToolRunList runs={m.tools} />
                       )}
-                      <Markdown>{m.content}</Markdown>
+                      <div className="rounded-[16px] rounded-tl-[4px] border border-[#ece8ff] bg-[#f3f0ff] px-3.5 py-3 text-[12.5px] leading-relaxed text-[#3a3d5a]">
+                        <Markdown>{m.content}</Markdown>
+                      </div>
                     </motion.div>
                   ),
                 )}
@@ -484,7 +495,11 @@ export default function CoachTray({
                   <div>
                     {coachTag}
                     {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
-                    {streaming && <Markdown>{streaming}</Markdown>}
+                    {streaming && (
+                      <div className="rounded-[16px] rounded-tl-[4px] border border-[#ece8ff] bg-[#f3f0ff] px-3.5 py-3 text-[12.5px] leading-relaxed text-[#3a3d5a]">
+                        <Markdown>{streaming}</Markdown>
+                      </div>
+                    )}
                   </div>
                 )}
                 {/* Lumen's dots only until either a tool record or the first token lands; then the
@@ -515,11 +530,11 @@ export default function CoachTray({
 
       {/* Error + composer, pinned at the foot of the tray. */}
       {error && (
-        <p className="px-4 pt-2 text-xs text-danger" role="alert">
+        <p className="px-4 pt-2 text-xs text-[#e05252]" role="alert">
           {error}
         </p>
       )}
-      <div className="border-t border-border-dark bg-surface-dark p-3">{composer}</div>
+      <div className="mt-auto shrink-0 p-3">{composer}</div>
     </div>
   );
 }

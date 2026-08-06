@@ -114,6 +114,9 @@ describe("App — library picker", () => {
   });
 });
 
+// The detector's key evidence line now renders TWICE on the result screen — once in the video
+// card's floating "Detected errors" list and once on the coach panel's fault card — which is the
+// reference design's own arrangement, so these look it up with getAllByText.
 describe("App — analysis loaded", () => {
   it("shows analysis results when API returns data", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -135,7 +138,7 @@ describe("App — analysis loaded", () => {
     } as Response);
 
     await user.click(screen.getByText("vid_001").closest("button")!);
-    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
   });
 
   it("shows an error message when an upload fails", async () => {
@@ -193,7 +196,7 @@ describe("App — upload reflects the analysis in the URL", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
     // The URL now carries the id (shareable + refresh-survivable). Poll it: the router's location
     // update can settle a tick after the analysis render.
     await waitFor(() =>
@@ -202,7 +205,7 @@ describe("App — upload reflects the analysis in the URL", () => {
     // The replay effect is guarded, so the analysis is NOT re-fetched — if it were, GET
     // /api/analyses/<id> would return this same (result-less) shape and the fault card's evidence
     // line would disappear.
-    expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument();
+    expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument();
   });
 
   it("leaves the URL untouched for an anonymous upload (no analysis_id)", async () => {
@@ -215,7 +218,7 @@ describe("App — upload reflects the analysis in the URL", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
     expect(screen.getByTestId("loc-search").textContent).toBe("");
   });
 });
@@ -232,7 +235,7 @@ describe("App — new analysis reset", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText(/valgus angle 0\.35/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
     );
@@ -248,17 +251,14 @@ describe("App — new analysis reset", () => {
   });
 });
 
-describe("App — sidebar toggle", () => {
-  it("collapses the desktop sidebar when the navbar toggle is clicked", async () => {
-    const user = userEvent.setup();
+describe("App — shell chrome", () => {
+  // The navbar's rail-collapse toggle is gone: the rail is 84px, so collapsing it bought 20px in
+  // exchange for a permanent control in the top row. Both rails (desktop + mobile drawer) now
+  // always render their labels. The drawer's own ✕ keeps the "Hide navigation" name — the point
+  // here is that the TOP ROW no longer carries one.
+  it("renders both nav rails labelled, with no collapse toggle in the top row", () => {
     renderApp();
-    // The brand now lives in the top navbar; the collapse state shows through the nav labels.
-    // The open desktop rail and the (always-open) mobile drawer both render them initially.
     expect(screen.getAllByText("Analyse").length).toBe(2);
-    // The navbar's hide-navigation toggle (first in DOM order — the navbar precedes the drawer).
-    const hideBtn = screen.getAllByRole("button", { name: /Hide navigation/i })[0];
-    await user.click(hideBtn);
-    // After collapsing, the desktop rail drops its labels; only the mobile drawer's remain.
-    expect(screen.getAllByText("Analyse").length).toBe(1);
+    expect(screen.getAllByRole("button", { name: /Hide navigation/i })).toHaveLength(1);
   });
 });
