@@ -216,9 +216,14 @@ export default function App() {
   // "Squat Motion Analysis" over a clip the coach panel was correctly calling an overhead press.
   // Syncing the selector rather than just the title keeps all three surfaces (title, dropdown,
   // coach banner) saying one thing, and leaves the next upload defaulted to the same movement.
-  // Analyses predating per-movement selection carry no `movement`, so those leave it alone.
+  //
+  // The `?? "Squat"` is the SAME fallback CoachTray applies to its clean-rep banner, and it has to
+  // be: library clips and analyses predating per-movement selection carry no `movement` at all, so
+  // leaving those alone let the title keep the previous clip's name — an overhead-press header
+  // over a squat from the sample library. Two surfaces guessing differently is the failure this
+  // whole sync exists to prevent, so they guess together.
   useEffect(() => {
-    if (analysis?.movement) setMovement(analysis.movement);
+    if (analysis) setMovement(analysis.movement ?? "Squat");
   }, [analysis?.video_id, analysis?.movement]);
 
   const hasResult = !!analysis;

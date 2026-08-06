@@ -142,70 +142,79 @@ body {
    corner regardless of what their markup asked for. The theme's radii (18 panel / 14 popover /
    24 bar) are applied at the call sites instead. */
 
-/* The outermost surface: the shell's own frosted pane. One of only three blurs on the page. */
+/* The outermost surface: the shell's own frosted pane. One of only three blurs on the page.
+   Thinned well below the source's .90–.94 so the lavender canvas and its two colour blooms read
+   THROUGH the card instead of being sealed off by it — that tint showing through is what makes
+   the panels stacked on top look like glass rather than like flat grey boxes. */
 .glass-shell {
   background: linear-gradient(
     135deg,
-    rgba(255, 255, 255, 0.94),
-    rgba(248, 249, 255, 0.9) 45%,
-    rgba(252, 252, 255, 0.94)
+    rgba(255, 255, 255, 0.66),
+    rgba(248, 249, 255, 0.52) 45%,
+    rgba(252, 252, 255, 0.68)
   );
-  backdrop-filter: blur(24px);
+  backdrop-filter: blur(28px) saturate(1.3);
 }
 
 /* The nav rail — the source blurs this one too. */
 .glass-rail {
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.66);
-  backdrop-filter: blur(20px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 22px 58px rgba(105, 112, 175, 0.13);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.42);
+  backdrop-filter: blur(24px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 58px rgba(105, 112, 175, 0.13);
 }
 
-/* Inner panels: translucent white over the shell gradient. No blur (see above). */
+/* Inner panels: translucent white over the shell gradient. No blur (see above), so the alpha is
+   the only thing carrying them — kept above ~.38 because everything below it is body copy. */
 .glass-panel {
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 22px 58px rgba(105, 112, 175, 0.13);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 58px rgba(105, 112, 175, 0.13);
 }
 
 /* Same face as `.glass-panel` but without border or radius, for elements that own those — the
    fault card's active state is a coloured ring, and a panel border would overwrite it. */
 .glass-face {
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 22px 58px rgba(105, 112, 175, 0.13);
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 58px rgba(105, 112, 175, 0.13);
 }
 
-/* Controls: the filter-pill / input language. */
+/* Controls: the filter-pill / input language. Nested inside panels, so their fill compounds with
+   the one under them — this reads lighter on screen than the number suggests. */
 .glass-control {
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.6);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 20px rgba(105, 112, 170, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 8px 20px rgba(105, 112, 170, 0.08);
 }
 .glass-control:hover {
   border-color: #e1e6f5;
+  background: rgba(255, 255, 255, 0.6);
 }
 
 /* The strip a row of controls sits on. */
 .glass-bar {
-  background: rgba(247, 248, 255, 0.62);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 16px 45px rgba(110, 116, 177, 0.1);
+  background: rgba(247, 248, 255, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 16px 45px rgba(110, 116, 177, 0.1);
 }
 
-/* Popovers and modals — topmost layer, so this is where the third and last blur lives. The
-   source floors the fill at .82: any more transparent and the content behind fights the text. */
+/* Popovers and modals — topmost layer, so this is where the third and last blur lives. Thinned to
+   .68: the source's .82 floor was for an unblurred-page backdrop, and the 22px blur here already
+   dissolves whatever is behind into colour rather than legible shapes. */
 .glass-popup {
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  background: rgba(255, 255, 255, 0.82);
-  backdrop-filter: blur(20px);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 18px 44px rgba(105, 112, 175, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.68);
+  backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 18px 44px rgba(105, 112, 175, 0.22);
 }
 
-/* Cards that float over the black video: same glass vocabulary, but nearly opaque and unblurred.
-   At the panel's .62 fill they would read as murky grey and the near-black label text would lose
-   its contrast against the clip behind it. */
+/* Cards that float over the black video. THIS IS THE ONE THAT STAYS NEARLY OPAQUE, and it is not
+   an oversight: everything else here is translucent over a pale canvas, but these sit on a black
+   clip and carry near-black label text. Take them down to the panel's fill and the fault names
+   and the form score become unreadable over the athlete. Blur cannot rescue them either — that is
+   the one surface where it costs frames (see the discipline note above). */
 .glass-over-video {
   border: 1px solid rgba(255, 255, 255, 0.85);
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.92);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 18px 44px rgba(20, 24, 60, 0.28);
 }
 
