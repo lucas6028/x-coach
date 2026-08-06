@@ -108,7 +108,7 @@ export default function StudioTitleBar({
         <span className="text-[#63709f]">{t("studio.crumbCurrent", { movement: label })}</span>
       </nav>
 
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
           <h1 className="font-display text-[26px] font-bold leading-none tracking-tight text-[#1e2142] lg:text-[32px]">
             {t("studio.title", { movement: label })}
@@ -116,7 +116,12 @@ export default function StudioTitleBar({
           <p className="mt-1.5 text-[13.5px] font-medium text-[#63709f]">{t("studio.subtitle")}</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        {/* From `xl` these controls share a line with the page title, and the shell's account
+            cluster floats over the top-right corner of that same band (AppLayout) — bottom-
+            aligning them ran the movement/precision cards straight under the avatar. The offset
+            drops this cluster clear of that 40px strip. Below `xl` the header stacks, so the
+            controls are already on their own line and the offset does not apply. */}
+        <div className="flex flex-wrap items-center gap-3 xl:mt-[52px]">
           <div className="flex items-center gap-2">
             <SelectCard
               id="movement-select"
