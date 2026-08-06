@@ -10,6 +10,25 @@ function mockFetch(body: unknown, ok = true, status = 200) {
   } as Response);
 }
 
+// Mock fetch with a real ReadableStream body carrying the given (already byte-splittable) chunks,
+// so the client's frame-reassembly across chunk boundaries is exercised for real. Shared by every
+// describe block that exercises the SSE stream (chatStream itself and the tool/reset frame tests).
+function mockStream(chunks: string[]) {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const enc = new TextEncoder();
+      for (const c of chunks) controller.enqueue(enc.encode(c));
+      controller.close();
+    },
+  });
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    body,
+  } as unknown as Response);
+}
+
 describe("api.health", () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -327,24 +346,6 @@ describe("api.chatStream", () => {
   const messages: ChatMessage[] = [{ role: "user", content: "why did my knees cave?" }];
   const context: ChatContext = { fault_count: 0, quality: {}, faults: [] };
 
-  // Mock fetch with a real ReadableStream body carrying the given (already byte-splittable) chunks,
-  // so the client's frame-reassembly across chunk boundaries is exercised for real.
-  function mockStream(chunks: string[]) {
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        const enc = new TextEncoder();
-        for (const c of chunks) controller.enqueue(enc.encode(c));
-        controller.close();
-      },
-    });
-    return vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      body,
-    } as unknown as Response);
-  }
-
   function collectHandlers() {
     const deltas: string[] = [];
     let model = "";
@@ -455,6 +456,142 @@ describe("api.chatStream", () => {
       status: 503,
       message: "Chat failed (503)",
     });
+  });
+});
+
+describe("chat SSE tool frames", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("routes tool and reset frames to their handlers", async () => {
+    const seen: string[] = [];
+    const body = [
+      'event: tool\ndata: {"id":0,"name":"kg_query","query":"knee valgus"}\n\n',
+      'event: delta\ndata: {"text":"hm"}\n\n',
+      "event: reset\ndata: {}\n\n",
+      'event: delta\ndata: {"text":"answer"}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ].join("");
+    mockStream([body]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: (t) => seen.push(`delta:${t}`),
+      onDone: () => seen.push("done"),
+      onError: () => seen.push("error"),
+      onTool: (_id, n, q) => seen.push(`tool:${n}:${q}`),
+      onReset: () => seen.push("reset"),
+    });
+    expect(seen).toEqual([
+      "tool:kg_query:knee valgus",
+      "delta:hm",
+      "reset",
+      "delta:answer",
+      "done",
+    ]);
+  });
+
+  it("falls back to id -1 for a tool frame that omits its id", async () => {
+    const seen: number[] = [];
+    mockStream(['event: tool\ndata: {"name":"kg_query","query":"x"}\n\n', 'event: done\ndata: {"model":"m"}\n\n']);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onTool: (id) => seen.push(id),
+    });
+    expect(seen).toEqual([-1]);
+  });
+
+  it("ignores tool and reset frames when the handlers are absent", async () => {
+    const seen: string[] = [];
+    mockStream([
+      'event: tool\ndata: {"name":"kg_query","query":"x"}\n\nevent: reset\ndata: {}\n\nevent: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => seen.push("delta"),
+      onDone: () => seen.push("done"),
+      onError: () => seen.push("error"),
+    });
+    expect(seen).toEqual(["done"]);
+  });
+
+  it("strips detail from the followups request", async () => {
+    const fetchMock = mockFetch({ questions: [] });
+    await api.chatFollowups(
+      [{ role: "user", content: "hi" }],
+      { fault_count: 0, quality: {}, faults: [], detail: { detections: [] } }
+    );
+    const sent = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sent.context.detail).toBeUndefined();
+    expect(sent.context.fault_count).toBe(0);
+  });
+
+  it("routes tool_done sources to onToolDone, and an empty array when the frame omits them", async () => {
+    const seen: Array<[number, unknown]> = [];
+    mockStream([
+      'event: tool\ndata: {"id":0,"name":"rag_search","query":"ankle"}\n\n',
+      'event: tool_done\ndata: {"id":0,"sources":[{"label":"Wikipedia: Squat (exercise)","kind":"encyclopedia"}]}\n\n',
+      'event: tool\ndata: {"id":1,"name":"get_analysis","query":"Depth"}\n\n',
+      'event: tool_done\ndata: {"id":1}\n\n',
+      'event: delta\ndata: {"text":"A"}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onToolDone: (id, s) => seen.push([id, s]),
+    });
+    expect(seen).toEqual([
+      [0, [{ label: "Wikipedia: Squat (exercise)", kind: "encyclopedia" }]],
+      [1, []],
+    ]);
+  });
+
+  it("drops a tool_done frame whose id is not a number", async () => {
+    // A citation attached to the wrong tool is a worse failure than a citation lost: this feature
+    // exists to make provenance trustworthy, so an uncorrelatable frame is discarded outright.
+    const seen: unknown[] = [];
+    mockStream([
+      'event: tool_done\ndata: {"sources":[{"label":"L","kind":"paper"}]}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onToolDone: (id, s) => seen.push([id, s]),
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it("strips tools from messages on both chat endpoints", async () => {
+    const thread = [
+      { role: "user" as const, content: "hi" },
+      {
+        role: "assistant" as const,
+        content: "answer",
+        tools: [{ name: "rag_search", query: "ankle", sources: [{ label: "L", kind: "paper" }] }],
+      },
+    ];
+    const ctx = { fault_count: 0, quality: {}, faults: [] };
+
+    // Uses the file's `mockFetch` helper (a `vi.spyOn`, like every other test here) rather than
+    // `vi.stubGlobal` directly: a raw global stub isn't undone by this describe block's
+    // `afterEach(() => vi.restoreAllMocks())` and would leak a stubbed `fetch` into every test
+    // that runs after this one in the file.
+    const followupFetch = mockFetch({ questions: [] });
+    await api.chatFollowups(thread, ctx);
+    const followupBody = JSON.parse((followupFetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(followupBody.messages[1].tools).toBeUndefined();
+    expect(followupBody.messages[1].content).toBe("answer");
+
+    const streamSpy = mockStream(['event: done\ndata: {"model":"m"}\n\n']);
+    await api.chatStream(thread, ctx, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+    });
+    const chatBody = JSON.parse((streamSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(chatBody.messages[1].tools).toBeUndefined();
   });
 });
 

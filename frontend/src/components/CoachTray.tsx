@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, CheckCircle, PaperPlaneTilt, SignIn, Warning } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import { api, ChatError, type Analysis, type ChatMessage } from "../api";
+import { api, ChatError, type Analysis, type ChatMessage, type LiveToolRun, type ToolRun } from "../api";
 import { buildChatContext } from "../lib/grounding";
 import { retrievalByFault } from "../lib/retrieval";
 import { wasMeasured } from "../lib/quality";
@@ -13,6 +13,7 @@ import FaultCard from "./FaultCard";
 import KnowledgeGraphWidget from "./KnowledgeGraphWidget";
 import { LumenAvatar, LumenLoader } from "./LumenLoader";
 import Markdown from "./Markdown";
+import { ToolRunList } from "./ToolRunList";
 
 interface Props {
   analysis: Analysis;
@@ -55,6 +56,9 @@ export default function CoachTray({
   // below the committed thread while loading; committed into `messages` on a clean `done`, or
   // discarded on an error (the optimistic user turn is rolled back alongside it).
   const [streaming, setStreaming] = useState("");
+  // Every tool call this turn, in order. Unlike v3's single transient line these are NOT cleared
+  // when the answer starts: the record is the answer's provenance and belongs beside it.
+  const [toolRuns, setToolRuns] = useState<LiveToolRun[]>([]);
   // Two grounded next-question suggestions the coach offers after an answer. Captured per answer and
   // persisted alongside the thread (only the latest set), so a reload restores the chips, not just
   // the response; cleared on a new send / analysis.
@@ -88,6 +92,7 @@ export default function CoachTray({
     setMessages([]);
     setError("");
     setFollowups([]);
+    setToolRuns([]);
     followupSeq.current++; // invalidate any in-flight suggestion from the previous analysis
     if (!isWorking) return;
     let active = true;
@@ -153,11 +158,23 @@ export default function CoachTray({
     setError("");
     setLoading(true);
     setStreaming("");
+    setToolRuns([]);
     setFollowups([]); // drop the previous answer's suggestions while this one streams
     stickToBottom.current = true; // a fresh send re-engages auto-follow (user is acting at the foot)
     const mySeq = ++followupSeq.current; // this turn owns the next suggestion result
     let acc = "";
+    let runs: LiveToolRun[] = [];
     let inbandError = "";
+    // True only once the stream's `done` frame has actually been seen. `api.chatStream` resolves
+    // the instant the reader drains, regardless of which frame (if any) was last — so a connection
+    // that dies mid-flight with neither `done` nor `error` looks exactly like success here. That
+    // window is widest right after `onReset` clears `acc` to "": the very next thing the server
+    // does is `_dispatch_tool`, a graphml load plus a vector query, the slowest blocking work in
+    // the request, and a proxy idle-timeout there would otherwise commit and persist an EMPTY
+    // assistant turn. That is unrecoverable — `ChatRequest.messages` requires `content` to be
+    // non-empty, so the thread could never be posted to again. Checked before `inbandError` so an
+    // unterminated stream is never mistaken for clean just because no error frame happened to fire.
+    let finished = false;
     try {
       await api.chatStream(
         next,
@@ -166,8 +183,32 @@ export default function CoachTray({
           onDelta: (tkn) => {
             acc += tkn;
             setStreaming(acc);
+            // NOTE: unlike v3, the tool records are deliberately NOT cleared here.
           },
-          onDone: () => undefined,
+          onDone: () => {
+            finished = true;
+          },
+          onTool: (id, name, query) => {
+            runs = [...runs, { id, name, query, pending: true }];
+            setToolRuns(runs);
+          },
+          // Match on `id`, and only while still pending: a duplicate or replayed frame must not
+          // overwrite a run that has already settled.
+          onToolDone: (id, sources) => {
+            runs = runs.map((r) =>
+              r.id === id && r.pending
+                ? { ...r, pending: false, ...(sources.length ? { sources } : {}) }
+                : r,
+            );
+            setToolRuns(runs);
+          },
+          // The round that produced this text also called a tool, so it was narration, not the
+          // answer. Drop the text — but NOT `runs`: those calls really happened and really fed the
+          // answer, so erasing them would misreport the reasoning chain.
+          onReset: () => {
+            acc = "";
+            setStreaming("");
+          },
           // An in-band error (LLM provider connect/mid-stream/empty) isn't thrown — capture it and
           // rethrow below so success and failure share one rollback path.
           onError: (detail) => {
@@ -176,8 +217,22 @@ export default function CoachTray({
         },
         getStoredModel(), // the user's Settings choice; server validates against its allowlist
       );
+      if (!finished) throw new ChatError("The coach connection ended unexpectedly.", 502);
       if (inbandError) throw new ChatError(inbandError, 502);
-      const thread: ChatMessage[] = [...next, { role: "assistant", content: acc }];
+      // Strip the in-memory transport/UI fields by REBUILDING each run from an allow-list rather
+      // than destructuring them away: a field added to LiveToolRun later must not silently ride
+      // along into stored jsonb. This also settles any run still pending because its `tool_done`
+      // was lost or uncorrelatable — the committed record simply shows no sources, which is the
+      // truth, instead of a row that claims to still be running.
+      const committed: ToolRun[] = runs.map((r) => ({
+        name: r.name,
+        query: r.query,
+        ...(r.sources?.length ? { sources: r.sources } : {}),
+      }));
+      const thread: ChatMessage[] = [
+        ...next,
+        { role: "assistant", content: acc, ...(committed.length ? { tools: committed } : {}) },
+      ];
       setMessages(thread);
       // Persist the completed turn (fire-and-forget — a save failure must not disrupt the chat). Chips
       // are written empty here (clearing the previous answer's), then re-persisted below once this
@@ -207,6 +262,7 @@ export default function CoachTray({
     } finally {
       setLoading(false);
       setStreaming("");
+      setToolRuns([]);
     }
   }
 
@@ -411,20 +467,29 @@ export default function CoachTray({
                       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                     >
                       {coachTag}
+                      {m.role === "assistant" && m.tools && m.tools.length > 0 && (
+                        <ToolRunList runs={m.tools} />
+                      )}
                       <Markdown>{m.content}</Markdown>
                     </motion.div>
                   ),
                 )}
-                {/* Live assistant turn: the streamed answer as tokens arrive, same styling as a
-                    committed coach turn so it doesn't jump on completion. */}
-                {streaming && (
+                {/* The turn in flight shares ONE byline block with tool records and the streamed
+                    answer — coachTag, then ToolRunList, then content — the same order as a committed
+                    message above, so nothing shifts when the turn commits. Rendered as soon as EITHER
+                    exists, so a tool record shows the coach's byline from the moment it lands, not
+                    just once the first token streams (which is exactly when a record is most likely
+                    to be the only thing on screen). */}
+                {(toolRuns.length > 0 || streaming) && (
                   <div>
                     {coachTag}
-                    <Markdown>{streaming}</Markdown>
+                    {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
+                    {streaming && <Markdown>{streaming}</Markdown>}
                   </div>
                 )}
-                {/* Lumen's dots only until the first token lands; then the streaming text carries it. */}
-                {loading && !streaming && (
+                {/* Lumen's dots only until either a tool record or the first token lands; then the
+                    byline block above carries it. */}
+                {loading && !streaming && toolRuns.length === 0 && (
                   <div className="flex items-center gap-2 text-xs text-muted">
                     <LumenLoader variant="dots" />
                     {t("chat.thinking")}

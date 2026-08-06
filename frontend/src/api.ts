@@ -32,6 +32,14 @@ export interface Detection {
   peak_frame: number;
   phase: string;
   evidence: Record<string, number | string>;
+  /** Per-rep attribution (`PoseRuleDetection`, src/pose/pose_rule_detector.py:105-107), the seam
+   *  that makes "第 2 rep 膝蓋幾度" answerable via the backend's `get_analysis` tool. Optional,
+   *  same as `movement` above: analyses predating per-rep detection carry no per-rep attribution at
+   *  all, and the whole-clip fallback path sets these to their zero/empty defaults rather than
+   *  omitting them, so `undefined` here means "an older client/analysis", not "measured as zero". */
+  rep_index?: number;
+  occurred_reps?: number[];
+  rep_count?: number;
 }
 
 export interface SubgraphNode {
@@ -143,9 +151,38 @@ export interface StoredAnalysis {
 
 // ---- Conversational coaching (LLM chat, grounded in an analysis) --------------------------
 
+// One provenance entry under a tool call. `kind` is a corpus source_type for rag_search but the
+// literal "concept" for kg_query, whose knowledge-graph nodes carry no source field at all — the
+// renderer keys off it so a graph concept is never shown as a literature citation.
+export interface ToolSource {
+  label: string;
+  kind: string;
+}
+
+// One tool call the coach made while answering. `sources` is absent when the tool has nothing to
+// cite (get_analysis reads the user's own analysis), which is distinct from citing nothing.
+export interface ToolRun {
+  name: string;
+  query: string;
+  sources?: ToolSource[];
+}
+
+// One tool call as the client tracks it WHILE the turn streams. `id` correlates the `tool` frame
+// with the `tool_done` that follows it; `pending` is true until that frame arrives. Both are
+// transport/UI state — they are stripped when the run is committed to a ChatMessage, so the
+// persisted shape stays exactly `ToolRun`.
+export interface LiveToolRun extends ToolRun {
+  id: number;
+  pending: boolean;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  // The tool calls that produced this answer. Rendered above the message and persisted with it, so
+  // a reload restores the answer's provenance. Stripped before either chat endpoint is called — the
+  // LLM has no use for it and it would be re-uploaded every turn.
+  tools?: ToolRun[];
 }
 
 // One detected fault plus its retrieved knowledge, as the frontend already derives it for the
@@ -171,6 +208,9 @@ export interface ChatContext {
   quality: Record<string, number>;
   faults: ChatFaultContext[];
   movement?: string;
+  // The full analysis document (detections + retrievals, no `pose`), read server-side by the
+  // `get_analysis` tool. Never persisted, and never sent on the followups call.
+  detail?: Record<string, unknown>;
 }
 
 // Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
@@ -181,6 +221,16 @@ export interface ChatStreamHandlers {
   onDelta: (text: string) => void;
   onDone: (model: string) => void;
   onError: (detail: string) => void;
+  // The coach started a tool call. Fires BEFORE the tool runs, so the UI can name the lookup while
+  // it is still in flight. Optional so a caller that doesn't surface tool progress is unaffected.
+  onTool?: (id: number, name: string, query: string) => void;
+  // That tool call finished. Always fires once per `onTool`, even with no sources — it is the
+  // completion signal, not the sources signal, so a tool with nothing to cite still settles.
+  onToolDone?: (id: number, sources: ToolSource[]) => void;
+  // Discard everything streamed so far this turn: the round that produced it also called a tool, so
+  // its text was narration ("let me look that up"), not the answer. Safe because the caller commits
+  // the assistant turn only once the stream ends.
+  onReset?: () => void;
 }
 
 // A persisted chat thread for one analysed video (one per user+video_id). Restored on history-replay.
@@ -368,13 +418,32 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
   }
   if (!event) return;
-  let data: { text?: string; model?: string; detail?: string };
+  let data: {
+    text?: string;
+    model?: string;
+    detail?: string;
+    name?: string;
+    query?: string;
+    sources?: ToolSource[];
+    id?: number;
+  };
   try {
     data = JSON.parse(dataLines.join("\n"));
   } catch {
     return;
   }
   if (event === "delta") handlers.onDelta(data.text ?? "");
+  else if (event === "tool")
+    handlers.onTool?.(typeof data.id === "number" ? data.id : -1, data.name ?? "", data.query ?? "");
+  // An uncorrelatable tool_done is dropped, not defaulted: mis-attributing a citation is worse than
+  // losing one. A `tool` with no id still renders (id -1) and simply never resolves — it settles
+  // when the turn commits, since `pending` is stripped there. Theoretical consequence, unreachable
+  // against the current backend (which always sends an id): two id-less `tool` frames in one turn
+  // would both land as -1, and a `tool_done` carrying `id: -1` would then write to both rows. Not
+  // worth defensive code for a case the server never produces.
+  else if (event === "tool_done" && typeof data.id === "number")
+    handlers.onToolDone?.(data.id, data.sources ?? []);
+  else if (event === "reset") handlers.onReset?.();
   else if (event === "done") handlers.onDone(data.model ?? "");
   else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
 }
@@ -454,6 +523,14 @@ function uploadLimitError(status: number, body: unknown): UploadLimitError | nul
     Number(detail.limit_mb ?? 0),
     detail.used_mb === undefined ? null : Number(detail.used_mb)
   );
+}
+
+// Both chat endpoints get the conversation with `tools` removed. The records are a rendering and
+// persistence concern only: the backend's ChatMessage is {role, content}, so Pydantic would drop
+// them anyway — but relying on implicit stripping still re-uploads the whole array every turn, and
+// on a multi-tool thread that is not small.
+function leanMessages(messages: ChatMessage[]): Array<Pick<ChatMessage, "role" | "content">> {
+  return messages.map(({ role, content }) => ({ role, content }));
 }
 
 export const api = {
@@ -620,7 +697,11 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
       // The server validates `model` against its allowlist; omit it to use the server default.
-      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+      body: JSON.stringify(
+        model
+          ? { messages: leanMessages(messages), context, model }
+          : { messages: leanMessages(messages), context }
+      ),
     });
     if (!res.ok || !res.body) {
       const detail = await res.json().catch(() => ({}));
@@ -657,10 +738,17 @@ export const api = {
     context: ChatContext,
     model?: string
   ): Promise<string[]> {
+    // Strip `detail`: it is the bulk of the payload (full RAG passage text for every fault) and this
+    // fire-and-forget call can never use it — the followups endpoint runs no tools. Chip latency is
+    // a defended ~1.5s and nothing gets added to this path.
+    const { detail: _unused, ...lean } = context;
+    const leanMsgs = leanMessages(messages);
     const res = await fetch("/api/chat/followups", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
-      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+      body: JSON.stringify(
+        model ? { messages: leanMsgs, context: lean, model } : { messages: leanMsgs, context: lean }
+      ),
     });
     if (!res.ok) return [];
     const data = (await res.json().catch(() => ({}))) as { questions?: string[] };

@@ -442,7 +442,7 @@ see below.)
 
 # v3: Tool-calling loop
 
-Status: **specified, not built**. The coach becomes an agent over three server-side tools —
+Status: **built** (branch `feat/chat-tool-calling`). The coach becomes an agent over three server-side tools —
 `get_analysis`, `kg_query`, `rag_search` — instead of a single grounded completion. This is the
 "tool-calling live RAG" line the v2.1 out-of-scope list deferred.
 
@@ -529,14 +529,26 @@ OpenAI-compatible fields and are **not** gated by `_is_openrouter`; the `provide
 
 Server-side, inside `answer_stream`, entirely within one request:
 
-- **Max 3 tool rounds.** Three tools, one call each, is the realistic ceiling.
+- **Max 3 tool rounds.** Three tools, one call each, is the realistic ceiling. **Hitting this cap does
+  not error.** Issue one final request with `tools` omitted so the model answers in prose from
+  whatever it already gathered — the user gets an answer, not a failure. That extra request is cheap
+  (no `tools` field, no further round-trips possible after it) and there is always budget for it: it
+  runs before the time cap below, never after.
 - **Cumulative wall-clock budget = `chat_timeout()`**, shared across all rounds — *not* a fresh
   budget per round. This endpoint is metered; N rounds must not cost N× the timeout. Each individual
   upstream request is given a per-request timeout of the *remaining* budget, so the sum of the round
-  timeouts can never exceed the whole. If the remaining budget is exhausted the loop stops rather
-  than issuing a request that is certain to time out.
-- **On hitting either cap, do not error.** Issue one final request with `tools` omitted so the model
-  answers from what it already gathered. The user gets an answer, not a failure.
+  timeouts can never exceed the whole. **Hitting this cap DOES error.** If the remaining budget is
+  exhausted before the next round can even start, the loop stops with an honest in-band `error`
+  rather than issuing a request that is certain to time out.
+
+  **The two caps behave differently, and that is deliberate, not an oversight.** The round cap always
+  has a cheap, fast answer waiting on the other side of one more request — `tools=None` costs nothing
+  extra and cannot itself trigger another round, so there is no way for the forced round to blow the
+  budget. The time cap has, by construction, no budget left for that same request: issuing it anyway
+  would not buy an answer, only spend more of a metered budget on a call already destined to time out
+  — trading an honest, immediate failure for a slower one that still fails, and costs more. Do not
+  "fix" this into a single rule that always issues a final request; that would restore the guaranteed
+  timeout this section exists to avoid.
 - **A tool that raises is not fatal.** Feed the error text back as that tool's result and let the
   model say it couldn't look it up. The stream never dies over a missing KG file.
 - **An unknown tool name** (model hallucinates one) is handled the same way: an error result, not a
@@ -696,12 +708,461 @@ Gates: `.venv\Scripts\python.exe scripts/run_backend_coverage.py --fail-under 95
   round of *every* turn, including turns that call nothing. That is the standing price of v3, and
   it is charged against a metered endpoint. If it needs cutting later, the lever is trimming the
   descriptions, not dropping `detail`.
-- **Default model tool support is unverified.** `LLM_MODELS` defaults to
-  `deepseek/deepseek-v4-flash, xiaomi/mimo-v2.5, minimax/minimax-m3, tencent/hy3-preview`; whether
-  each supports function calling has not been checked against the live API. The 4xx-retry path makes
-  this non-fatal, but if *most* of the picker lacks support the feature is mostly inert — worth
-  measuring live early in implementation.
+- ~~**Default model tool support is unverified.**~~ **RESOLVED by live probe, 2026-08-04.** Note the
+  risk as originally written named the `.env.example` defaults, which are *not* what this deployment
+  runs. The real configuration is **NVIDIA NIM** (`LLM_BASE_URL=https://integrate.api.nvidia.com/v1`),
+  not OpenRouter, with `LLM_MODELS=openai/gpt-oss-120b, openai/gpt-oss-20b, minimaxai/minimax-m2.7`.
+  Probed each with a live tool-enabled streaming request:
+
+  | Model | Result |
+  |---|---|
+  | `openai/gpt-oss-120b` | **tool call**, `finish_reason=tool_calls` |
+  | `openai/gpt-oss-20b` | **tool call**, `finish_reason=tool_calls` |
+  | `minimaxai/minimax-m2.7` | **HTTP 410 Gone** — end-of-life 2026-07-27 |
+
+  So v3 is not inert: both live models genuinely emit tool calls. Because the base URL is NIM rather
+  than OpenRouter, `_is_openrouter` is False throughout, so the attribution headers and the
+  `provider` routing body are correctly omitted — and `tools`/`tool_choice`, being standard
+  OpenAI-compatible fields, are sent regardless. That is the intended behaviour.
+
+- **`minimaxai/minimax-m2.7` is dead and still in the picker — a PRE-EXISTING bug, not introduced by
+  v3.** It returns HTTP 410 for *every* request, tools or not, so any user who selects it gets a
+  failed chat today. v3's degradation path handles it correctly but cannot rescue it: 410 is a 4xx,
+  so the loop retries once without `tools`, gets 410 again, and emits a single in-band `error`
+  frame — honest, at the cost of one wasted round trip. **Fix by removing it from `LLM_MODELS`**;
+  that is a config change, independent of this branch.
 - **The red line in §4 is prompt-enforced, not mechanically enforced.** A model can still blur
   retrieved knowledge into observation. Verify against live models before shipping; if it leaks,
   the fallback is to tag every tool-returned knowledge block inline with a "REFERENCE ONLY" prefix
   rather than relying on one system-prompt rule.
+
+## Build notes (v3)
+
+Kept alive the way v2 and v2.1 were.
+
+- **Implemented across 6 commits** on `feat/chat-tool-calling`: transport split → `_stream_turn` →
+  tool catalogue → the loop → client wiring → tray UI. Backend coverage 96.8% (gate 95%),
+  `chat.py` 98%.
+- **Model support — measured, not assumed** (see Known risks above): both live NIM models emit real
+  tool calls. The third entry in `LLM_MODELS` is end-of-life and 410s; that is a pre-existing config
+  bug this branch merely surfaces.
+- **Six defects were found during implementation, and every one was a guard that did not cover the
+  input space it claimed to.** Recording them because the pattern is the lesson, not the individual
+  bugs:
+  1. `(KeyError, IndexError, TypeError)` does not catch `None.get(...)` — that is `AttributeError`.
+  2. A provider-supplied `tool_calls[].index` was trusted to be an int; a mixed str/int set made
+     `sorted()` raise `TypeError`.
+  3. `_clamp_int` missed `OverflowError`: `json.loads` accepts a bare `Infinity` literal and
+     `int(float('inf'))` overflows.
+  4. `json.dumps` sat *outside* the `try` whose docstring promised "nothing raises out of here" —
+     and `default=str` rescues neither a non-string dict key (never consulted for keys), a circular
+     reference (cycle detection fires first), nor a value whose `__str__` raises.
+  5. `answer_stream` caught only `_LLMError`, but `_stream_raw_chunks` wraps only the *transport* in
+     `except Exception → _LLMError`; `_stream_turn`'s reassembly is unwrapped, so five distinct
+     valid-JSON-but-misshapen chunk shapes raised straight out of the generator.
+  6. `_stream_turn`'s nameless-slot filter had no test driving its false branch.
+
+  All six share one failure mode, and it is the exact one this spec's error model exists to prevent:
+  they escape as exception types nobody catches, out of a generator whose **HTTP 200 is already
+  committed**, so the client sees a dead stream instead of an `error` frame. The structural fix was
+  an `except Exception` in `answer_stream` — the only frame in the stack that knows the 200 is
+  committed and can convert a crash into an in-band frame. Note a sibling `except` clause never
+  catches what is raised inside *another* clause's body, so the retry call needed its own.
+- **Correction to §1's framing.** The 200 is committed *earlier* than "the first frame is yielded":
+  Starlette sends `http.response.start` before it ever enters the body iterator. Every statement in
+  `answer_stream` is therefore in scope, including those before the first `yield`.
+- **Three findings were invisible to coverage**, which is worth internalising before trusting a
+  coverage number again: coverage.py does not split a one-line comprehension `if` or a one-line
+  `or` into separate branch arcs, and it never models an argument's *value*. Concretely — deleting
+  the `not offer_tools` disjunct left the whole suite green, and swapping `_dispatch_tool`'s third
+  argument from `context` to `convo` also left it green while `get_analysis` would have been
+  silently dead forever. Both are now covered by tests verified to fail against exactly those
+  mutations.
+- **The frontend coverage gate is red on the dev machine, and was already red on `main`** (3
+  failures there, 4 on this branch, all `Test timed out in 5000ms` in components this branch never
+  touches). `yarn test` without coverage passes 90/90 cleanly. Cause is vitest's default 5s
+  `testTimeout` losing races under coverage instrumentation on a slow machine (~490s wall,
+  ~3340s cumulative import). Raising `testTimeout` in `vite.config.ts` is the obvious fix but edits
+  shared CI config, so it was deliberately left out of this branch.
+
+### Live verification results (2026-08-04, `openai/gpt-oss-120b` on NIM)
+
+Run via `scripts/chat/try_tools.py`, which drives `answer_stream` directly — real loop, real tools,
+real model, no browser or Supabase session needed.
+
+| Check | Result |
+|---|---|
+| **Criterion 1 — `get_analysis` detail path** | **PASS.** "所有量測數值 + 第幾個 rep" returned `min_knee_angle_deg 104.7`, `hip_depth_ratio 0.83`, `torso_lean_deg 41.2`, `peak_frame 108`, `rep_index 2`, `confidence 0.88` — every one present ONLY in `detail`, never in the prompt. |
+| **Criterion 2 — `rag_search`** | **PASS.** Returned real corpus citations (Lee et al. 2019 JSC 33(3); Human Kinetics), framed as 「在一般文獻中」. |
+| **`kg_query`** | **PASS**, but only fires on a graph-shaped question. For ordinary knowledge questions the model consistently prefers `rag_search`. Not a defect; worth knowing the tool is not dead, just narrowly selected. |
+| **Criterion 3 — §4 red line, undetected fault** | **PASS.** Asked "我有 butt wink 嗎?" (a real KG fault, not detected). Opened with 「這次的分析並沒有偵測到 butt wink」 and labelled the retrieved knowledge 「參考一般文獻,未在此影片中測得」. |
+| **Criterion 3 — §4 red line, NOT MEASURED clip** | **PASS, and this is the one that mattered.** On a 0%-measurable clip it refused to judge depth (「系統無法對任何畫格進行分析,也就無法判斷您的深蹲深度是否足夠」), told the user to re-record, and labelled the literature 「**並非從您的影片中觀測到的問題**」. FIX 7's clause plus the REFERENCE ONLY prefix held — the escape hatch is closed in practice, not just on paper. |
+
+**The real cost, and it is not small: time-to-first-token on a tool turn is 31–36s.** A non-tool turn
+on the same model is ~4.7s. So a tool round costs roughly **+27s** — partly `gpt-oss-120b` being a
+reasoning model that thinks before both the tool call and the answer, partly the round trip plus
+retrieval. The `tool` status frame makes the wait legible rather than blank, but it does not make it
+short. This is materially worse than the spec's Known-risks section anticipated and is the strongest
+argument for pinning a faster model for tool turns, the way v2.1 pinned one for the follow-up chips.
+
+### Still outstanding
+
+Two items still need the browser, because they are about the tray's rendering rather than the loop:
+
+1. **The retraction path.** `gpt-oss-120b` did not narrate before calling a tool in any of the five
+   runs above, so no `reset` frame was observed in the wild. The behaviour is unit-tested on both
+   sides; what remains unverified is only that a real narrate-then-call turn *looks* right in the
+   tray. A model more prone to narrating (or a deliberately provocative prompt) would surface it.
+2. **Follow-up chip latency** — the v2.1 baseline is ~1.5s. Unchanged by this work in principle, since
+   the chip path sends neither `tools` nor `detail`, but not re-measured live.
+
+---
+
+# v3.1: Persistent tool records with citations
+
+Status: **built** (branch `feat/chat-tool-calling`; see `## Build notes (v3.1)` at the end of this
+section). Requested as "tool calling 的紀錄像 Claude Code 一樣,不會開始回答
+就消失,也可以讓使用者知道引用了哪些".
+
+## Objective (v3.1)
+
+v3 shows a **transient** tool status line that is cleared on the first `delta`. So the moment the
+answer starts, the evidence for it disappears — the user sees a claim with no visible provenance,
+which is the opposite of what a product whose thesis is explainability should do. v3.1 makes the
+tool record **persist beside the answer it produced**, and adds the one thing v3 never put on the
+wire at all: **which sources the retrieval actually returned**.
+
+## Decisions (settled at design review)
+
+1. Tool records live **above the answer**, in call order, **expanded by default** *(the source list's
+   default is reversed to collapsed by v3.2 Decision 2; the tool line itself stays visible)* — the Claude Code
+   shape, so the reasoning chain reads top-to-bottom: what was looked up, what came back, what the
+   coach concluded.
+2. They **persist across reload and history replay**, stored alongside the answer text.
+3. **`reset` does NOT clear them.** See §4 — this is an honesty decision, not a technical one.
+
+## 1. The three tools do not have comparable "sources", and the UI must not pretend they do
+
+Measured against the live data, not assumed:
+
+| Tool | What it can cite | Nature |
+|---|---|---|
+| `rag_search` | `metadata.reference` + `metadata.source_type`, e.g. `Wikipedia: Squat (exercise)` / `encyclopedia` | a **real literature citation** |
+| `kg_query` | `matched_nodes` and the 1-hop node names — nothing else | **graph nodes, NOT citations.** Verified: KG nodes carry only `node_id`, `name`, `label`; there is no source/reference/citation field anywhere in the subgraph |
+| `get_analysis` | nothing external | it reads the user's own analysis; there is no outside source to credit |
+
+So the UI **labels `kg_query`'s sources as knowledge-graph concepts, never as references**. Rendering
+a graph node in the same visual slot as a cited paper would tell the user a concept is a source —
+manufacturing exactly the false authority this feature exists to prevent. `get_analysis` shows its
+subject (the fault name) and no source list.
+
+## 2. Where the sources come from — and why the split is required, not cosmetic
+
+`_dispatch_tool` currently fuses four steps: run, prefix, serialise, truncate. Sources must be
+derived from the **raw** result, *before* truncation, or a large `rag_search` hit gets its citations
+sliced off by `_MAX_TOOL_RESULT_CHARS` — the exact results where provenance matters most.
+
+```
+_run_tool(name, args, context) -> Any            # the raw result; the never-raises try moves here
+_tool_sources(name, result) -> list[dict]        # pure; derives citations from the RAW result
+_dispatch_tool(...) -> _ToolResult(text, sources)
+```
+
+`_dispatch_tool`'s never-raises contract is unchanged and still covers serialisation (the v3 fix
+wave's finding). The 21 test call sites gain `.text` — mechanical.
+
+**The wire shape is deliberately narrow:**
+
+```json
+{"label": "Wikipedia: Squat (exercise)", "kind": "encyclopedia"}
+```
+
+Per tool, precisely:
+
+- **`rag_search`** — one entry per retrieved chunk. `label` from `metadata.reference`; when that is
+  absent, the basename of `metadata.source` with directories stripped. `kind` from
+  `metadata.source_type` (`encyclopedia`, `paper`, ...).
+- **`kg_query`** — one entry per `matched_nodes` entry plus the 1-hop `subgraph.nodes` names.
+  `label` is the node `name` with any `Movement:` prefix stripped (`Squat:Insufficient Depth` renders
+  as `Insufficient Depth`). **`kind` is the literal string `"concept"`** — never a `source_type` —
+  because that is what §1 requires the renderer to key off to keep graph nodes out of the citation
+  slot. The node `label` field (`QualityDimension`, …) is an internal taxonomy and is not sent.
+- **`get_analysis`** — the key is omitted entirely.
+
+Common rules:
+
+- **`metadata.source` is NEVER sent.** It is a server filesystem path (`data\rag\docs\squat_wiki.txt`)
+  — useless to a user and a gratuitous internals leak.
+- Deduplicated by `label` (one document yields many chunks; a KG node can be both matched and 1-hop),
+  capped at **5** per tool call, preserving first-seen order.
+
+## 3. SSE contract (v3.1 delta)
+
+The `tool` frame gains one field; no new frame types. *(Superseded by v3.2 §1, which splits this
+into `tool` + `tool_done` so the status line can appear before the tool runs.)*
+
+```
+event: tool
+data: {"name":"rag_search","query":"ankle dorsiflexion","sources":[{"label":"...","kind":"encyclopedia"}]}
+```
+
+Backward compatible: a client reading only `name`/`query` is unaffected, and `sources` is absent
+rather than `[]` for tools that have none to give.
+
+## 4. Client state — the actual behaviour change
+
+`tool: {name, query} | null` becomes `toolRuns: ToolRun[]`: **appended, never replaced**, and **not
+cleared on the first `delta`**.
+
+**`reset` does not clear `toolRuns`.** The retraction exists because a round's *narration* was not
+the answer — but the tool calls in that round genuinely happened, and their results genuinely fed
+the next round. Erasing them alongside the narration would misreport the reasoning chain, showing an
+answer whose real inputs are invisible. `reset` therefore clears only `acc`/`streaming`, exactly as
+in v3.
+
+`toolRuns` clears on: a new send, an analysis switch, and the error rollback path.
+
+## 5. Persistence — no migration needed
+
+`conversations.messages` is `jsonb` with no per-element constraint, so the storage side is free:
+
+- Frontend type: `ChatMessage.tools?: ToolRun[]`.
+- Backend: `ConversationMessage` (the **conversations** router) gains `tools`.
+- **`/api/chat`'s `ChatMessage` stays `{role, content}`.** Pydantic drops unknown fields, so the tool
+  records can never reach the LLM prompt — but the client should still strip them before sending, the
+  way it strips `detail`, rather than re-uploading them every turn and relying on implicit stripping.
+
+## 6. Rendering
+
+One component, two callers: a committed assistant message renders its own `tools`; the in-flight turn
+renders the live `toolRuns`. Both sit above the content, so nothing moves when the turn commits.
+
+`get_analysis` renders as subject-only. `rag_search` renders its citation list. `kg_query` renders its
+matched concepts under a label that says they are graph concepts.
+
+## 7. Testing (v3.1)
+
+Backend: `_tool_sources` per tool (RAG with and without `reference`; KG; `get_analysis` yields `[]`);
+`metadata.source` never appears in any frame; dedupe; the 5-cap; and the load-bearing one — **a
+result large enough to be truncated still yields its sources**, which is the regression that proves
+extraction happens before truncation.
+
+Frontend: `onTool` appends rather than replaces; a `reset` leaves `toolRuns` intact while clearing the
+streamed text; commit attaches `tools` to the message; a reload restores them; and both `/api/chat`
+and `/api/chat/followups` are sent messages with `tools` stripped.
+
+## Success criteria (v3.1)
+
+1. After an answer completes, the tools that produced it are still on screen, in call order.
+2. A `rag_search` turn names the documents it retrieved; no server path is visible anywhere.
+3. A `kg_query` turn's concepts are not presented as literature citations.
+4. Reloading the page, or replaying the analysis from history, restores the tool records.
+5. A narrate-then-call turn retracts the narration but keeps the tool record.
+6. Both coverage gates still pass.
+
+## Build notes (v3.1)
+
+Built across 9 commits (`461f93ea`..`4d889920`). Backend 1558 passed / 1 xfailed, coverage 97.0%
+against the 95% gate (`chat.py` 99%, `conversations.py` 100%); frontend 90/90 files, 818/818 tests,
+`yarn build` clean. Criteria 1-5 are pinned by tests; criterion 6 holds for the backend gate, and the
+frontend gate is `yarn test` — `yarn test:coverage` is red on this machine for reasons that predate
+this work (vitest's default 5s `testTimeout` under coverage instrumentation) and `main` fails
+identically.
+
+Four things the build changed relative to the text above:
+
+1. **§2's `_dispatch_tool` split shipped with a stronger never-raises guarantee than v3 had.** The
+   handler that formats a failed tool's message is itself wrapped, because `f"{exc}"` calls
+   `BaseException.__str__`, which returns `str(args[0])` — so an exception carrying an object whose
+   own `__str__` raises would raise *inside the handler*. That is a live path: the same reasoning had
+   already been applied to `json.dumps`'s fallback and not to this one.
+
+2. **§3's frame is now yielded *after* the tool runs, not before.** The frame carries the sources, and
+   those only exist once the tool has returned. The cost is real and was accepted: the tray shows
+   generic "thinking" dots through the whole retrieval instead of naming the lookup, and on a cold RAG
+   process that silence ran past two minutes in measurement. The fix, if it bites: yield `name`/`query`
+   before dispatch as v3 did, then a second frame whose sources attach to the last-appended run — no
+   correlation key needed, since the loop yields strictly sequentially.
+
+3. **§1's mechanism is now real rather than declared.** The spec said `kind` is what the renderer keys
+   off to keep graph nodes out of the citation slot; the first implementation keyed off the tool
+   *name* and rendered `kind` nowhere, leaving the stated safety mechanism inert — a fourth tool
+   returning concept-kind sources would have been headed "Sources". The renderer now derives the
+   heading from `kind`, so the guarantee travels with the data.
+
+4. **§4's list is rendered under a shared byline block.** The in-flight and committed turns render
+   `coachTag → ToolRunList → content` identically, so nothing shifts at commit and a tool record shows
+   its byline from the moment it lands — before the first token, which is exactly when a record is
+   most likely to be the only thing on screen.
+
+Not carried out, deliberately, and worth knowing: `_tool_sources` failing degrades to "no citations"
+indistinguishably from "nothing to cite", with nothing logged — `chat.py` has no logger at all, so
+fixing it means introducing logging to a module that has none.
+
+---
+
+# v3.2: Live tool status, condensed sources
+
+Status: **designed** (approved at design review 2026-08-05; not built). Requested as "我想要像
+Claude Code 一樣搜尋的時候顯示,搜尋完成後只顯示部分或濃縮的結果,而不是整個完整的標題".
+
+## Objective (v3.2)
+
+v3.1 bought provenance at the cost of live feedback and screen space, and both bills are now due:
+
+- **The tray goes silent during retrieval.** `## Build notes (v3.1)` item 2 records the tradeoff —
+  the `tool` frame moved *after* dispatch because it carries the sources, so the user sees generic
+  thinking dots for the whole lookup, measured past two minutes on a cold RAG process. v3 named the
+  lookup; v3.1 stopped doing so. v3.2 restores it without giving back the sources.
+- **Every source is rendered in full, always.** Three `rag_search` hits push the answer down the
+  tray behind a wall of document titles the user did not ask to read. Provenance should be
+  *available*, not *unavoidable*.
+
+v3.2 splits the tool frame in two and collapses the source list to a count.
+
+## Decisions (settled at design review)
+
+1. **Two frames per tool call**: one when it starts, one when it finishes.
+2. **Sources render collapsed by default**, as a count, expandable on click. This **reverses v3.1
+   Decision 1's "expanded by default"** for the source list specifically — the tool line itself
+   (name + query) stays always-visible, which is the part v3.1 got right.
+3. `kg_query` keeps its own heading when collapsed. §1 of v3.1 is not relaxed by counting.
+
+## 1. SSE contract (v3.2 delta)
+
+`tool` reverts to being yielded **before** dispatch and loses `sources`; a new `tool_done` carries
+them. Both frames carry an `id`.
+
+```
+event: tool       data: {"id":0,"name":"rag_search","query":"ankle dorsiflexion"}
+                  ... the tool actually runs here ...
+event: tool_done  data: {"id":0,"sources":[{"label":"...","kind":"encyclopedia"}]}
+```
+
+Three properties, each load-bearing:
+
+**`tool_done` is sent unconditionally, including with no sources.** It is the *completion* signal,
+not the *sources* signal — that is why it is not named `tool_sources`. `get_analysis` never has
+sources (v3.1 §1) and would otherwise sit on screen as "still running" forever. `sources` is omitted
+rather than `[]` when empty, preserving v3.1's "nothing to cite" / "cited nothing" distinction.
+
+**`id` is a counter monotonic across the entire `_answer_stream_inner` call, not per round.** The
+loop runs up to `_MAX_TOOL_ROUNDS = 3` rounds (chat.py:1018) and `enumerate(turn.tool_calls)`
+restarts at 0 in each, so a per-round index collides across rounds — as would matching on `name`,
+the moment two rounds both call `rag_search`, which is the *expected* shape of a multi-round
+conversation rather than a hypothetical. The counter makes correlation exact and independent of
+dispatch ordering, so it also survives a future parallel dispatch that "last pending run" would not.
+(The pre-existing `tool_call_id` fallback `f"call_{i}"` has the same latent per-round collision. Out
+of scope — do not chase it.)
+
+**A new event name, not a `done: true` flag on `tool`.** An older client's `dispatchSSE` chain
+(api.ts:421-425 — one site, verify it is still the only one) silently ignores an unknown event and
+leaves a row that never resolves; a flag on `tool` would render a duplicate row instead. Both are
+wrong, but a stuck row is the smaller lie.
+
+## 2. Client state
+
+`ToolRun` — the persisted shape — is **unchanged**: `{name, query, sources?}`. The two new fields
+live only in memory:
+
+```ts
+type LiveToolRun = ToolRun & { id: number; pending: boolean };
+```
+
+`onTool` appends with `pending: true`; `onToolDone` finds the run with the matching `id`, writes
+`sources`, and clears `pending`. A `tool_done` whose `id` matches nothing is **dropped** — silently
+mis-attributing a citation is worse than losing one.
+
+**No pending run may outlive the turn.** This matters because a lost `tool_done` is a real path, not
+a hypothetical: per v2 §1's error model Starlette has already committed HTTP 200 before the body
+iterator runs, so an exception escaping the generator — including one raised while serialising
+`tool_done` itself — produces a dead stream with no `error` frame at all. A dropped or
+uncorrelatable frame does the same thing more quietly.
+
+It needs no separate settle step, and deliberately does not get one. Both exits already cover it:
+the commit path rebuilds each run from an allow-list, which drops `pending` along with `id`, so a
+never-resolved run commits as "finished, cited nothing"; the rollback path clears the live list
+wholesale. The invariant is therefore structural rather than a rule someone must remember to apply,
+and no audit of backend serialisability is required.
+
+The one case left open: a stream that neither ends nor errors holds its row pending indefinitely.
+That is a hung connection — v3.1's thinking dots hung identically and the whole turn is stuck
+regardless — so v3.2 adds no new failure mode.
+
+**`id` and `pending` are stripped at commit**, alongside nothing else — the message keeps
+`{name, query, sources}`. This is the same reasoning as v3.1 §5's "strip before sending rather than
+relying on Pydantic dropping unknown fields": the backend's `ToolRun` model would ignore them, but
+that backstop is coincidental and must not become the mechanism. **No backend model changes in
+v3.2** — `conversations.py` is untouched.
+
+## 3. Rendering
+
+```
+running    檢索文獻:ankle dorsiflexion  ⋯
+done       檢索文獻:ankle dorsiflexion
+              › 引用來源 3 筆
+expanded   檢索文獻:ankle dorsiflexion
+              ⌄ 引用來源 3 筆
+                Wikipedia: Squat (exercise)
+                Lee et al. 2019
+                Human Kinetics: Strength Training
+```
+
+- **The pending marker reuses `<LumenLoader variant="dots" />`.** It is now the *only* signal that
+  anything is happening across a retrieval that can run minutes, so it must animate; a static `⋯` is
+  a much weaker signal than the dots it replaces. Reusing the existing primitive rather than
+  inventing a second spinner idiom is deliberate. **But it must be wrapped `aria-hidden`**: the dots
+  carry `role="status"`, and today exactly one exists at a time (CoachTray's, gated on
+  `toolRuns.length === 0`). A three-tool turn would otherwise mount three simultaneous live regions
+  all announcing the same string. The row instead carries `aria-busy`, which states the same thing
+  once, in the right place.
+- **A run with no sources renders no summary row at all**, collapsed or otherwise. `get_analysis`
+  therefore looks exactly as it does today once complete.
+- **The summary row is a `<button>` with `aria-expanded`**, not a clickable `div`.
+- `ToolRunList` gains a `ToolRunRow` child holding the expanded state — a hook cannot live inside
+  the `.map`. State is ephemeral and per-row.
+- **The heading still comes from `kind`, not from the tool name** (v3.1 Build note 3). Collapsed,
+  that is "知識圖譜概念 N 筆" vs "引用來源 N 筆". Counting must not flatten the distinction that v3.1
+  §1 exists to enforce.
+- **Known and accepted:** expanded rows collapse when the turn commits, because the live list is
+  replaced by the committed message's own list. Preserving it means hoisting row state into
+  `CoachTray` and keying it across both render paths — not worth it for a state the user usually
+  enters after reading.
+
+New i18n keys in **both** `en` and `zhHant` (`lib.i18n.test.ts` enforces parity), using the existing
+brace convention (`"video.faultMany": "{count} faults detected"`):
+
+```
+"chat.tool.sourcesN":  "Sources · {n}"                   / "引用來源 {n} 筆"
+"chat.tool.conceptsN": "Knowledge-graph concepts · {n}"  / "知識圖譜概念 {n} 筆"
+```
+
+`chat.tool.sources` / `chat.tool.concepts` become **unused** — the count row *is* the heading, and a
+second heading under it would be redundant — and are deleted from both dictionaries.
+
+## 4. Testing (v3.2)
+
+Backend — the `tool` frame is yielded **before** the tool runs (assert ordering against a dispatch
+that records when it was called); `tool_done` is emitted even when the tool yields no sources; ids
+are unique across a **two-round** turn.
+
+Frontend, the load-bearing four:
+
+1. `get_analysis` does not stay pending — a `tool_done` with no `sources` clears it.
+2. **The same tool called twice in one turn lands its sources on the right rows.** This is what
+   actually exercises correlation, and it is reachable today, not hypothetically.
+3. A `tool_done` with an unknown `id` is dropped rather than attached to anything.
+4. A stream that ends without `tool_done` (error, or `done` alone) leaves no pending row.
+
+Plus: collapsed `kg_query` says concepts, not sources; the expand toggle reveals the labels; and the
+committed message's `tools` contains neither `id` nor `pending`.
+
+## Success criteria (v3.2)
+
+1. During a slow retrieval the tray names the tool and the query, and shows it as running.
+2. When it completes, the sources appear as a count on one line; clicking reveals them.
+3. `get_analysis` completes visibly and shows no source row.
+4. Two `rag_search` calls in one turn each show their own sources.
+5. A stream that dies mid-tool leaves no row claiming to still be running.
+6. Nothing v3.1 pinned regresses: records still persist, no server path is visible, graph concepts
+   are still not called citations.
