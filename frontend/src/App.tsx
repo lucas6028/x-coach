@@ -232,18 +232,21 @@ export default function App() {
     <AppLayout
       onOpenLibrary={() => setPickerOpen(true)}
       onNewAnalysis={newAnalysis}
+      // The studio's header goes in the shell's top row, so its movement / precision / start
+      // controls sit on the title's own line, beside the account cluster rather than under it.
+      header={
+        <StudioTitleBar
+          movement={canonicalMovement}
+          movements={movements}
+          onMovementChange={setMovement}
+          tier={tier}
+          onTierChange={changeTier}
+          // Only once a result is up: in the empty state the dropzone right below is already the
+          // call to action, so this would be a second, weaker copy of it.
+          onNewSession={hasResult ? newAnalysis : undefined}
+        />
+      }
     >
-      <StudioTitleBar
-        movement={canonicalMovement}
-        movements={movements}
-        onMovementChange={setMovement}
-        tier={tier}
-        onTierChange={changeTier}
-        // Only once a result is up: in the empty state the dropzone right below is already the
-        // call to action, so this would be a second, weaker copy of it.
-        onNewSession={hasResult ? newAnalysis : undefined}
-      />
-
       {!hasResult ? (
         <DemoIntro
           onBlob={runPoseAnalysis}

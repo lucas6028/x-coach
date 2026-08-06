@@ -10,6 +10,9 @@ const SIDEBAR_WIDTH = 84;
 
 interface Props {
   children: ReactNode;
+  /** The page's own header row (breadcrumb / title / its controls). Rendered inside the shell's
+   *  top row, beside the account cluster — see the branch in the body for why that matters. */
+  header?: ReactNode;
   // The studio supplies a picker opener; other pages fall back to navigating into the studio.
   onOpenLibrary?: () => void;
   // The studio resets its own state for a fresh session; other pages just route into the studio.
@@ -30,6 +33,7 @@ interface Props {
 // does not follow the theme toggle (which still governs the token-styled page bodies).
 export default function AppLayout({
   children,
+  header,
   onOpenLibrary,
   onNewAnalysis,
   initialSidebarOpen = true,
@@ -88,14 +92,18 @@ export default function AppLayout({
             gradient that the translucent panels inside sample from, plus the page's single
             content-level blur. Everything nested in it stays unblurred by design (index.css). */}
         <main className="glass-shell relative flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden rounded-[28px] border border-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_22px_58px_rgba(105,112,175,0.16)] sm:p-4 lg:gap-0 lg:rounded-[32px] lg:p-5">
-          {/* Below `lg` the header stays a row of its own — it carries the drawer button, and the
-              page beneath it needs the clearance. From `lg` all that is left in it is the account
-              cluster, so it floats in the card's top-right corner instead of reserving a full
-              row of mostly-empty width: the page's own header (breadcrumb, title, subtitle) takes
-              that space back and sits on the same line as the controls. */}
-          <div className="lg:absolute lg:right-5 lg:top-5 lg:z-30">
-            <Header onMenu={() => setMobileNav(true)} />
-          </div>
+          {/* A page that supplies its own header puts it INSIDE this row, so its controls and the
+              account cluster are siblings in one flex line and cannot overlap. A page that does
+              not (history, settings, games) would otherwise be left with a row holding nothing but
+              the account cluster, so there the cluster floats in the card's top-right corner from
+              `lg` and the page's content starts at the top of the card instead. */}
+          {header ? (
+            <Header onMenu={() => setMobileNav(true)}>{header}</Header>
+          ) : (
+            <div className="lg:absolute lg:right-5 lg:top-5 lg:z-30">
+              <Header onMenu={() => setMobileNav(true)} />
+            </div>
+          )}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
         </main>
 
