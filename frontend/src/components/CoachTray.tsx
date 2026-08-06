@@ -376,7 +376,7 @@ export default function CoachTray({
           // was not — congratulating someone on form nothing measured is a claim, not encouragement.
           <div className="space-y-4 p-4">
             {measured ? (
-              <div className="flex items-center gap-3 rounded-[16px] border border-[#d0f0dc] bg-[#e6f7ed]/70 p-4">
+              <div className="flex items-center gap-3 rounded-[16px] border border-[#d0f0dc] bg-[#e6f7ed]/85 p-4">
                 <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white">
                   <CheckCircle size={26} weight="fill" className="text-[#22c55e]" />
                 </span>
@@ -464,7 +464,7 @@ export default function CoachTray({
                       transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
                       className="flex justify-end"
                     >
-                      <p className="max-w-[85%] rounded-[16px] rounded-tr-[4px] border border-[#e0e3ff] bg-[#eef0ff]/70 px-3.5 py-2.5 text-[12.5px] font-medium leading-relaxed text-[#3a3d5a]">
+                      <p className="max-w-[85%] rounded-[16px] rounded-tr-[4px] border border-[#e0e3ff] bg-[#eef0ff]/85 px-3.5 py-2.5 text-[12.5px] font-medium leading-relaxed text-[#3a3d5a]">
                         {m.content}
                       </p>
                     </motion.div>
@@ -479,7 +479,7 @@ export default function CoachTray({
                       {m.role === "assistant" && m.tools && m.tools.length > 0 && (
                         <ToolRunList runs={m.tools} />
                       )}
-                      <div className="rounded-[16px] rounded-tl-[4px] border border-[#ece8ff] bg-[#f3f0ff]/65 px-3.5 py-3 text-[12.5px] leading-relaxed text-[#3a3d5a]">
+                      <div className="rounded-[16px] rounded-tl-[4px] border border-[#ece8ff] bg-[#f3f0ff]/85 px-3.5 py-3 text-[12.5px] leading-relaxed text-[#3a3d5a]">
                         <Markdown>{m.content}</Markdown>
                       </div>
                     </motion.div>
@@ -496,7 +496,7 @@ export default function CoachTray({
                     {coachTag}
                     {toolRuns.length > 0 && <ToolRunList runs={toolRuns} />}
                     {streaming && (
-                      <div className="rounded-[16px] rounded-tl-[4px] border border-[#ece8ff] bg-[#f3f0ff]/65 px-3.5 py-3 text-[12.5px] leading-relaxed text-[#3a3d5a]">
+                      <div className="rounded-[16px] rounded-tl-[4px] border border-[#ece8ff] bg-[#f3f0ff]/85 px-3.5 py-3 text-[12.5px] leading-relaxed text-[#3a3d5a]">
                         <Markdown>{streaming}</Markdown>
                       </div>
                     )}
