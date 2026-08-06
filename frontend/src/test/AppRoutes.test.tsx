@@ -21,6 +21,7 @@ vi.mock("../pages/Movements", () => ({ default: () => <div>movements page</div> 
 vi.mock("../pages/Settings", () => ({ default: () => <div>settings page</div> }));
 vi.mock("../pages/Games", () => ({ default: () => <div>games page</div> }));
 vi.mock("../pages/LiffDiag", () => ({ default: () => <div>liff diag page</div> }));
+vi.mock("../pages/AnalysisMock", () => ({ default: () => <div>analysis mock page</div> }));
 vi.mock("../pages/admin/AdminLogin", () => ({ default: () => <div>admin login page</div> }));
 vi.mock("../pages/admin/AdminLayout", () => ({ default: () => <div>admin page</div> }));
 vi.mock("../pages/admin/AdminOverview", () => ({ default: () => <div>admin overview</div> }));
@@ -66,6 +67,8 @@ describe("AppRoutes — public routes", () => {
     ["/games", "games page"],
     ["/login", "login page"],
     ["/liff/diag", "liff diag page"],
+    // Static design comp — no session read, no API call, so it must not sit behind RequireAuth.
+    ["/mockup/analysis", "analysis mock page"],
     ["/admin/login", "admin login page"],
   ])("serves %s to a signed-out visitor", (path, marker) => {
     renderAnonymousAt(path);

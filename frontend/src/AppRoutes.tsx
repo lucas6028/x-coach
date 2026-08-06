@@ -16,6 +16,7 @@ import AdminSettingsRag from "./pages/admin/AdminSettingsRag";
 import AdminSettingsAnalyze from "./pages/admin/AdminSettingsAnalyze";
 import Games from "./pages/Games";
 import LiffDiag from "./pages/LiffDiag";
+import AnalysisMock from "./pages/AnalysisMock";
 import RequireAuth from "./components/RequireAuth";
 
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
@@ -54,6 +55,10 @@ export default function AppRoutes() {
       <Route path="/login" element={<Login />} />
       {/* LIFF device check (Phase 0 of the LINE rollout): open inside LINE on a phone. */}
       <Route path="/liff/diag" element={<LiffDiag />} />
+      {/* Design comp for the squat-analysis dashboard. PUBLIC because it is static demo content —
+          no API call, no session read — so the layout can be reviewed signed-out. The working
+          studio is /app. */}
+      <Route path="/mockup/analysis" element={<AnalysisMock />} />
       {/* PUBLIC on purpose. This is a catalog of the 16 movement names, their body-region
           grouping, and which are analyzable — the same information GET /api/movements serves
           unauthenticated and the landing page markets openly. Nothing here is user-specific.
