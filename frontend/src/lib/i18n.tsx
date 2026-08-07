@@ -267,6 +267,21 @@ const en: Dict = {
   "studio.band.fair": "Fair",
   "studio.band.poor": "Needs work",
 
+  // Phone layout (motion_analysis_mobile)
+  "mobile.back": "Back",
+  "mobile.analyze": "Analyze",
+  "mobile.reps": "Reps",
+  "mobile.duration": "Duration",
+  "mobile.topIssues": "Top issues",
+  "mobile.issuesN": "{n} detected",
+  "mobile.research": "Based on research",
+  "mobile.researchSub": "Evidence-backed suggestions",
+  "mobile.pastSessions": "Past sessions",
+  "mobile.pastSessionsSub": "Your progress over time",
+  "mobile.detailedMetrics": "Detailed metrics",
+  "mobile.detailedMetricsSub": "Clip quality & measurements",
+  "mobile.evidence": "Measured",
+
   // Theme toggle
   "theme.light": "Light",
   "theme.system": "System",
@@ -981,6 +996,21 @@ const zhHant: Dict = {
   "studio.band.good": "良好",
   "studio.band.fair": "尚可",
   "studio.band.poor": "需加強",
+
+  // Phone layout (motion_analysis_mobile)
+  "mobile.back": "返回",
+  "mobile.analyze": "分析",
+  "mobile.reps": "次數",
+  "mobile.duration": "時長",
+  "mobile.topIssues": "主要問題",
+  "mobile.issuesN": "偵測到 {n} 項",
+  "mobile.research": "文獻依據",
+  "mobile.researchSub": "有實證支持的建議",
+  "mobile.pastSessions": "先前的紀錄",
+  "mobile.pastSessionsSub": "看看這段時間的進步",
+  "mobile.detailedMetrics": "詳細指標",
+  "mobile.detailedMetricsSub": "影片品質與量測值",
+  "mobile.evidence": "量測值",
 
   // Theme toggle
   "theme.light": "淺色",
