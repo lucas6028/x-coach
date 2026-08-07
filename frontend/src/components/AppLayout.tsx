@@ -4,6 +4,9 @@ import Sidebar from "./Sidebar";
 import Header from "./Header";
 import LiffAppShell from "./LiffAppShell";
 import { useLiffContext } from "../lib/liffContext";
+import { useIsMobile } from "../lib/useIsMobile";
+import MobileTabBar from "./mobile/MobileTabBar";
+import MobileTopBar from "./mobile/MobileTopBar";
 
 // The reference design's rail: 84px labelled, 64px icon-only when collapsed.
 const SIDEBAR_WIDTH = 84;
@@ -11,8 +14,11 @@ const SIDEBAR_WIDTH = 84;
 interface Props {
   children: ReactNode;
   /** The page's own header row (breadcrumb / title / its controls). Rendered inside the shell's
-   *  top row, beside the account cluster — see the branch in the body for why that matters. */
+   *  top row, beside the account cluster — see the branch in the body for why that matters.
+   *  Desktop only: the phone shell has no room for it and shows `title` instead. */
   header?: ReactNode;
+  /** Short page name for the phone header's centred title. */
+  title?: string;
   // The studio supplies a picker opener; other pages fall back to navigating into the studio.
   onOpenLibrary?: () => void;
   // The studio resets its own state for a fresh session; other pages just route into the studio.
@@ -34,12 +40,14 @@ interface Props {
 export default function AppLayout({
   children,
   header,
+  title,
   onOpenLibrary,
   onNewAnalysis,
   initialSidebarOpen = true,
 }: Props) {
   const navigate = useNavigate();
   const { isInClient } = useLiffContext();
+  const mobile = useIsMobile();
   // The desktop rail no longer has a collapse control (the top row carries no toggle), so this is
   // fixed for the life of the layout: labelled 84px rail, or the 64px icon strip when a page asks
   // for it (the games want the extra width for their camera area).
@@ -59,9 +67,22 @@ export default function AppLayout({
   // second analysis without leaving LINE.
   if (isInClient) {
     return (
-      <LiffAppShell onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis}>
+      <LiffAppShell onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis} title={title}>
         {children}
       </LiffAppShell>
+    );
+  }
+
+  // Phone web: the same shell the LINE app gets — round-button header, the page, and the five-slot
+  // tab bar. The desktop rail and its off-canvas drawer are both gone here; the tab bar replaces
+  // them, and keeping a drawer as well would be two navigations for one set of destinations.
+  if (mobile) {
+    return (
+      <div className="ms-shell flex h-[100dvh] w-full flex-col overflow-hidden bg-[#eef0fb] pt-[env(safe-area-inset-top)] font-body text-[#1e2142]">
+        <MobileTopBar title={title ?? "X-Coach"} onNewAnalysis={newAnalysis} />
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+        <MobileTabBar onNewAnalysis={newAnalysis} onOpenLibrary={openLibrary} />
+      </div>
     );
   }
 

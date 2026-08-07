@@ -70,10 +70,10 @@ describe("AppLayout — inside the LINE app", () => {
   it("threads the studio's new-analysis/library actions into the shell header", async () => {
     renderLayout();
     await waitFor(() => expect(screen.getByRole("navigation")).toBeInTheDocument());
-    // Off the studio (this render uses title="My records"), AppLayout's own fallback routes both
-    // into /app — the point here is just that the shell actually renders and wires the actions,
-    // not stranding the user with the four tabs and no way to start a second analysis.
-    expect(screen.getByRole("button", { name: /New analysis/i })).toBeInTheDocument();
+    // The point here is that the shell actually renders and wires the actions, not stranding the
+    // user with tabs and no way to start a second analysis. "New analysis" appears twice by
+    // design in the phone shell — the header's upload button and the bar's raised centre action.
+    expect(screen.getAllByRole("button", { name: /New analysis/i }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Library/i })).toBeInTheDocument();
   });
 
@@ -105,7 +105,7 @@ describe("AppLayout — inside the LINE app", () => {
     );
     await waitFor(() => expect(screen.getByRole("navigation")).toBeInTheDocument());
     expect(screen.getByText("history body")).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: /New analysis/i }));
+    await userEvent.click(screen.getAllByRole("button", { name: /New analysis/i })[0]);
     await waitFor(() => expect(screen.getByText("studio")).toBeInTheDocument());
   });
 });

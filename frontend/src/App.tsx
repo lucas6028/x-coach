@@ -7,16 +7,23 @@ import CoachTray from "./components/CoachTray";
 import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import StudioTitleBar from "./components/StudioTitleBar";
+import StudioMobile from "./components/mobile/StudioMobile";
 import KeyMetricsCard from "./components/studio/KeyMetricsCard";
 import PreviousSessionsCard from "./components/studio/PreviousSessionsCard";
 import TipsCard from "./components/studio/TipsCard";
 import { captureThumbnail } from "./lib/thumbnail";
 import { loadAnalysisTier, saveAnalysisTier, type PoseTier } from "./lib/poseTier";
-import { useI18n } from "./lib/i18n";
+import { movementLabel, useI18n } from "./lib/i18n";
+import { useIsMobile } from "./lib/useIsMobile";
+import { useLiffContext } from "./lib/liffContext";
 import type { AnalyzableMovement } from "./lib/movements";
 
 export default function App() {
   const { t } = useI18n();
+  // The phone tree covers both phone surfaces: a narrow viewport, and the LINE in-app browser
+  // (which can be wide on a tablet but still gets the phone shell).
+  const { isInClient } = useLiffContext();
+  const phone = useIsMobile() || isInClient;
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
@@ -232,6 +239,7 @@ export default function App() {
     <AppLayout
       onOpenLibrary={() => setPickerOpen(true)}
       onNewAnalysis={newAnalysis}
+      title={t("studio.title", { movement: movementLabel(t, canonicalMovement) })}
       // The studio's header goes in the shell's top row, so its movement / precision / start
       // controls sit on the title's own line, beside the account cluster rather than under it.
       header={
@@ -247,7 +255,21 @@ export default function App() {
         />
       }
     >
-      {!hasResult ? (
+      {hasResult && phone ? (
+        // The phone layout (motion_analysis_mobile.png). Chosen here rather than by CSS: both
+        // trees mount a <video> and a skeleton canvas, so rendering the two and hiding one would
+        // decode the clip twice and run two rAF loops.
+        <StudioMobile
+          analysis={analysis!}
+          videoRef={videoRef}
+          currentTime={currentTime}
+          onTimeUpdate={setCurrentTime}
+          onActiveFault={setActiveFaultId}
+          activeFaultId={activeFaultId}
+          onSeek={seek}
+          onNewSession={newAnalysis}
+        />
+      ) : !hasResult ? (
         <DemoIntro
           onBlob={runPoseAnalysis}
           onError={setError}

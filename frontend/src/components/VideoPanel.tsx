@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { api, type Analysis } from "../api";
+import { useRef } from "react";
+import type { Analysis } from "../api";
 import { CheckCircle, CornersOut, Pause, Play, Warning } from "@phosphor-icons/react";
 import { useI18n } from "../lib/i18n";
+import { useVideoPlayback } from "../lib/useVideoPlayback";
+import { useVideoSrc } from "../lib/useVideoSrc";
 import SkeletonOverlay from "./SkeletonOverlay";
 import Timeline from "./Timeline";
 import DetectedErrorsCard from "./studio/DetectedErrorsCard";
@@ -17,49 +19,6 @@ interface Props {
   activeFaultId?: string | null;
 }
 
-/**
- * Where this analysis's video actually lives.
- *
- * Three sources, resolved in order of what is already known:
- *  - a library demo clip is a public file the backend streams directly;
- *  - a fresh upload's presigned URL rides along on the analyze response;
- *  - a history replay has neither, because storing a presigned URL in the row would mean
- *    replaying an expired one — so it re-signs through the ownership-checked endpoint.
- *
- * `null` while resolving and after a failure: the panel renders the analysis without playback
- * rather than blocking the page on storage.
- */
-function useVideoSrc(analysis: Analysis): string | null {
-  const { source, video_id: videoId, video_url: videoUrl } = analysis;
-  const [src, setSrc] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (source === "library") {
-      setSrc(api.videoFileUrl(videoId));
-      return;
-    }
-    if (videoUrl) {
-      setSrc(videoUrl);
-      return;
-    }
-    let cancelled = false;
-    setSrc(null);
-    api
-      .uploadMedia(videoId)
-      .then((media) => {
-        if (!cancelled) setSrc(media.video_url);
-      })
-      .catch(() => {
-        if (!cancelled) setSrc(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [source, videoId, videoUrl]);
-
-  return src;
-}
-
 // The reference design's video card: a rounded frame holding the clip and its skeleton overlay, a
 // status badge and expand control in the top corners, the floating analysis cards down the right
 // edge, and a frosted control pill along the bottom.
@@ -72,63 +31,15 @@ export default function VideoPanel({
   activeFaultId = null,
 }: Props) {
   const { t } = useI18n();
-  const [playing, setPlaying] = useState(false);
-  const [time, setTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const wrapRef = useRef<HTMLDivElement>(null);
-
   const videoSrc = useVideoSrc(analysis);
-
-  useEffect(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    const onTime = () => {
-      setTime(v.currentTime);
-      onTimeUpdate(v.currentTime);
-    };
-    const onMeta = () => setDuration(v.duration || 0);
-    const onPlay = () => setPlaying(true);
-    const onPause = () => setPlaying(false);
-    v.addEventListener("timeupdate", onTime);
-    v.addEventListener("loadedmetadata", onMeta);
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    return () => {
-      v.removeEventListener("timeupdate", onTime);
-      v.removeEventListener("loadedmetadata", onMeta);
-      v.removeEventListener("play", onPlay);
-      v.removeEventListener("pause", onPause);
-    };
-  }, [videoRef, onTimeUpdate, analysis.video_id]);
-
-  // `timeupdate` only fires ~4x/sec, so drive the playhead from rAF while playing
-  // for a smooth, frame-rate timeline (timeupdate still covers paused/seek updates).
-  useEffect(() => {
-    if (!playing) return;
-    const v = videoRef.current;
-    if (!v) return;
-    let raf = 0;
-    const tick = () => {
-      setTime(v.currentTime);
-      raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [playing, videoRef]);
-
-  const togglePlay = () => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (v.paused) v.play().catch(() => undefined);
-    else v.pause();
-  };
-
-  const toggleFullscreen = () => {
-    const el = wrapRef.current;
-    if (!el) return;
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
-    else el.requestFullscreen?.().catch(() => undefined);
-  };
+  // Shared with the phone card (MobileVideoCard) — see lib/useVideoPlayback.
+  const { playing, time, duration, togglePlay, toggleFullscreen } = useVideoPlayback(
+    videoRef,
+    analysis.video_id,
+    onTimeUpdate,
+    wrapRef
+  );
 
   const faultCount = analysis.detections.length;
 
