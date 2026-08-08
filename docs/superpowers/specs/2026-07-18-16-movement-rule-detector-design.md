@@ -783,7 +783,7 @@ spread) → eccentric return.**
 >
 > Separately, `0.01` carries no citation; Fukunaga supplies no landmark-displacement magnitude.
 >
-> **A NOTE and not a WITHDRAWAL, deliberately.** Fukunaga genuinely backs retraction as the
+> **A NOTE and not a WITHDRAWN blockquote, deliberately.** Fukunaga genuinely backs retraction as the
 > training mechanism, so the fault is real and cited and it is the *sensing* that fails — the
 > `pushup.rule_scapular_winging` case, not the OHP-bar-path / deadlift-bar-drift case. The KG is
 > not the gap either: `Band Pull Apart:Insufficient Scapular Retraction` resolves with a non-empty
