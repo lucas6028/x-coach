@@ -47,6 +47,19 @@ pip install -r requirements.txt
 
 Set `GOOGLE_API_KEY` only if you plan to run Gemini-backed knowledge-graph extraction.
 
+### Docker (web app)
+
+The backend and frontend also run as containers — no local Python or Node needed:
+
+```bash
+cp .env.example .env          # every value is optional; blanks degrade gracefully
+docker compose up --build     # app on :8080, API docs on :8000/docs
+```
+
+Add `-f docker-compose.dev.yml` for hot reload (Vite on :5173, uvicorn `--reload`). The
+research pipelines under `scripts/` are not containerised — they need the full
+`requirements.txt` and the datasets, so use the local `.venv`. Details: [docs/docker.md](docs/docker.md).
+
 ## Running Workflows
 
 Command details live with the script directories:
@@ -58,6 +71,7 @@ Command details live with the script directories:
 
 ## Documentation
 
+- [Running the web app in Docker](docs/docker.md)
 - [Knowledge graph extraction walkthrough](docs/kg_llm_extraction_walkthrough.md)
 - [MediaPipe processing walkthrough](docs/media_pipe_processing_walkthrough.md)
 - `notes/` contains experiment summaries and research notes.

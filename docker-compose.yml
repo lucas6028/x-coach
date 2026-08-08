@@ -1,0 +1,61 @@
+# x-coach — production-shaped local stack: FastAPI backend + nginx serving the built SPA.
+#
+#   cp .env.example .env          # backend secrets (all optional; blanks degrade gracefully)
+#   cp frontend/.env.example frontend/.env
+#   docker compose up --build
+#
+#   app  -> http://localhost:8080      API docs -> http://localhost:8000/docs
+#
+# For hot reload while developing, add the override:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# See docs/docker.md.
+
+name: x-coach
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: x-coach-backend:local
+    env_file:
+      # Optional: the app starts without it and reports each unconfigured subsystem on
+      # GET /api/health (auth, chat, LINE, R2 storage) rather than failing.
+      - path: .env
+        required: false
+    environment:
+      # The SPA is same-origin behind nginx, so CORS normally never applies. This keeps
+      # direct browser calls to :8000 working (e.g. hitting /docs "Try it out").
+      XCOACH_CORS_ORIGINS: ${XCOACH_CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}
+      XCOACH_MAX_CONCURRENT_ANALYSES: ${XCOACH_MAX_CONCURRENT_ANALYSES:-2}
+    volumes:
+      # Datasets, KG and RAG stores, read-only: the API only ever reads them, and ro
+      # sidesteps the uid mismatch between the host user and the container's `xcoach`.
+      - ./data:/app/data:ro
+      # ...except data/runtime/, where LocalObjectStore writes uploads when R2 is not
+      # configured. A named volume inherits the image's ownership, so it stays writable.
+      - xcoach-runtime:/app/data/runtime
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      target: runtime
+      args:
+        # Vite inlines these at build time — `docker compose build` after changing them.
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY:-}
+        VITE_LIFF_ID: ${VITE_LIFF_ID:-}
+    image: x-coach-frontend:local
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    restart: unless-stopped
+
+volumes:
+  xcoach-runtime:

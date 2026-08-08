@@ -6,6 +6,12 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    // Escape hatch for Docker: bind mounts on Docker Desktop/WSL2 often swallow the
+    // inotify events HMR relies on. docker-compose.dev.yml sets VITE_USE_POLLING=true;
+    // outside Docker this stays undefined and native watching is used.
+    watch: process.env.VITE_USE_POLLING
+      ? { usePolling: true, interval: 300 }
+      : undefined,
     // LIFF endpoints must be HTTPS: in dev the app is exposed through an ngrok tunnel
     // (see docs/line-login-liff-setup.md). Vite blocks unknown Host headers by default;
     // allow every domain family ngrok hands out (free-tier tunnels come from both
@@ -20,7 +26,9 @@ export default defineConfig({
     ],
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        // In Docker the API is another service on the compose network, not localhost —
+        // docker-compose.dev.yml sets VITE_PROXY_TARGET=http://backend:8000.
+        target: process.env.VITE_PROXY_TARGET || "http://localhost:8000",
         changeOrigin: true,
       },
     },
