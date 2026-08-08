@@ -396,6 +396,12 @@ follows Row's treatment of its own co-occurrence clause.
    branch and unconditionally assigns `rear_oblique`).
 3. Measured corpus, recorded in the Lunge design doc: across this repo's 45 real pose JSONs the
    estimator emitted 30 `rear_oblique`, 13 `rear`, 2 `unknown`, and `side` effectively never.
+   **Re-measured 2026-08-09** against this checkout by running
+   `estimate_view_for_pose(path, allow_front=False)` over all 49 files under
+   `data/runtime/pose_json`: `rear_oblique` 37, `rear` 9, `unknown` 3, `side` 0. The 45-file figure
+   was measured over a different directory union that has since changed and does not reproduce
+   here, but the two load-bearing conclusions below are unaffected — `rear_oblique` is still modal
+   and `side` still never appears.
 
 **Consequence for segmentation — favorable.** `rear_oblique` is the modal label and wrist spread
 survives there, foreshortened but present, so reps segment on the view production actually
@@ -473,11 +479,36 @@ Why this is defensible where a metric depth claim would not be:
 - It is a **geometric fact about this specific movement**, not a general-purpose facing detector.
 
 Implementation: the facing sign is a **per-clip** reduction (the median of `wrist_depth_offset`
-over valid `peak` frames, where the arms are most extended and the margin is largest), not
-per-frame, so per-frame `z` jitter cannot flip the sign mid-rep. When the median is not finite, or
-its magnitude sits under a degeneracy floor — a clip where the wrists are not resolvably in front
-of the torso, which is not a band pull apart — the facing is **undetermined and rule 4 returns
-`[]`**. This is the "can only ever SILENCE" guard category `pushup.py` documents.
+over valid `peak` frames), not per-frame, so per-frame `z` jitter cannot flip the sign mid-rep.
+
+**Correction to an earlier draft of this section.** An earlier version of this paragraph justified
+reducing over `peak` frames as the frames "where the arms are most extended and the margin is
+largest." That is backwards for this metric, and the correction must be stated plainly rather than
+softened. The margin — the anterior wrist-shoulder depth offset — is largest at **setup**, where
+the hands are together with the arms straight forward and the wrists sit roughly one arm-length
+anterior to the shoulders. By **peak**, the wrists are lateral to the shoulders at roughly shoulder
+depth, and the scapular retraction the exercise trains can push them slightly posterior — so the
+offset decays from setup toward peak and can legitimately cross zero. Reducing over `peak`
+therefore samples the signal exactly where its own premise ("the band is held in front of the
+torso") stops holding. Consequence: for a lifter who squeezes and holds at end range — a standard
+coaching cue — most `peak` frames sit near zero. Either the median falls under
+`FACING_DEGENERATE_OFFSET` and rule 4 silences itself (safe, and the likely common case), or a
+residual sign survives and rule 4 reports a backward lean for a forward one — the
+confidently-inverted verdict this construction exists to prevent.
+
+**Not changed here.** Reducing over `setup` or early `pull`, where the offset is actually largest,
+may well be the right fix, but no fixture in this repository carries a depth gradient across a rep
+to validate that change against, and `_setup_baseline`'s own docstring (§4.6/`band_pull_apart.py`)
+records that `setup` can be 1–2 frames on a short rep and may already overlap loaded frames. Under
+this project's "no tuning without ground truth" rule, this is recorded as an open question rather
+than changed. A future change should move the reduction to `setup` or early `pull`, backed by a
+fixture (or real clip) carrying a monotone depth decay across the rep — not the constant-per-frame
+offset the current test fixtures use.
+
+When the median is not finite, or its magnitude sits under a degeneracy floor — a clip where the
+wrists are not resolvably in front of the torso, which is not a band pull apart — the facing is
+**undetermined and rule 4 returns `[]`**. This is the "can only ever SILENCE" guard category
+`pushup.py` documents.
 
 **Stated limitation:** this derivation is unvalidated on band pull apart footage specifically,
 like every other number here. It is reflected in rule 4's observability being **`medium`** rather
@@ -521,11 +552,23 @@ Three conclusions, each load-bearing:
    **plumbing test that distinguishes "this runtime reports depth" from "this runtime reports
    zeros"**, not a tuned fault threshold, and the measurement above is why it is that number
    rather than a guess.
-3. **Sign stability is 81–100% on clips whose arms are *not* held forward.** These are squats and
-   push-ups — the worst case for this cue, since the wrists spend much of the clip beside or under
-   the torso. A band pull apart holds the arms extended anteriorly throughout by definition, so
-   its margin should exceed every row above. Taking the median over `peak` frames (§4.8), where
-   extension is greatest, is what converts even the 81.4% worst case into a stable per-clip sign.
+3. **Sign stability is 81–100% on clips whose arms are *not* held forward — squats and push-ups,
+   the worst case for this cue since the wrists spend much of the clip beside or under the torso.**
+   That figure supports the plumbing claim in (1)/(2) above: MediaPipe `z` on this pipeline is a
+   real, non-degenerate signal whose sign holds together even on movements where this rule's
+   anterior-offset premise does not apply. **It does not support any claim about band pull apart's
+   own sign stability**, and an earlier draft of this section read it that way in error. That draft
+   argued that because a band pull apart "holds the arms extended anteriorly throughout by
+   definition," its margin "should exceed every row above," and that taking the median over `peak`
+   frames, "where extension is greatest," converts even the 81.4% worst case into a stable
+   per-clip sign for *this* movement. Both premises are false: the 81–100% figures were measured on
+   squats and push-ups, not band pull apart, so they cannot be read forward onto this movement; and
+   — corrected in §4.8 — extension is greatest at `setup`, not `peak`, so the anterior offset can
+   already have decayed toward or past zero by the time `peak` is reached, particularly for a
+   lifter who squeezes and holds at end range. No band-pull-apart clip with a depth gradient across
+   the rep has been measured, so this movement's own sign stability at `peak` is genuinely unknown
+   and is not claimed here. A future measurement should reduce over `setup` or early `pull`
+   instead, on a fixture or real clip carrying a monotone depth decay across the rep.
 
 The RTMPose path consequently gets rule 4 silent, automatically and correctly, with no
 runtime-specific branch anywhere in this module.

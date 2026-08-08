@@ -394,6 +394,21 @@ class IncompleteRomRuleTest(unittest.TestCase):
         detections = rule_incomplete_rom(_core(_rom_rep(spread_ratio=1.0)), _ctx())
         self.assertAlmostEqual(detections[0].severity, 1.0, places=3)
 
+    def test_both_disjuncts_fire_together_and_the_larger_severity_wins_the_tiebreak(self) -> None:
+        """No existing fixture fires BOTH `spread_sev` and `elbow_sev` in the same segment, so
+        `spread_drove` and `evidence["primary_label"]`'s tie-break (`pairs[worst][0] >=
+        pairs[worst][1]`) were unpinned. spread_ratio=1.3 gives
+        `spread_sev = clip01((1.6 - 1.3) / (1.6 - 1.0)) = 0.5`; elbow_angle_deg=140.0 gives
+        `elbow_sev = clip01((150 - 140) / (150 - 110)) = 0.25`. Spread's severity is larger, so
+        spread must drive the verdict.
+        """
+        detections = rule_incomplete_rom(
+            _core(_rom_rep(spread_ratio=1.3, elbow_angle_deg=140.0)), _ctx()
+        )
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["primary_label"], "wrist spread at peak")
+        self.assertAlmostEqual(detections[0].severity, 0.5, places=3)
+
     def test_rear_oblique_downgrades_because_spread_foreshortens(self) -> None:
         core = _core(_rom_rep(spread_ratio=1.3))
         rear = rule_incomplete_rom(core, _ctx(view_type="rear"))[0]
