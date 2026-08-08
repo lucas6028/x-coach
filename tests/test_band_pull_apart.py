@@ -5,10 +5,12 @@ import numpy as np
 
 from src.pose.movements.band_pull_apart import (
     BAND_PULL_APART_METRIC_KEYS,
+    _clip_facing_sign,
     band_pull_apart_assign_phases,
     band_pull_apart_compute_raw,
     rule_incomplete_rom,
     rule_shrugging,
+    rule_trunk_extension_compensation,
 )
 from src.pose.movements.base import CoreFrame, RuleContext, run_detector
 
@@ -396,6 +398,103 @@ class IncompleteRomRuleTest(unittest.TestCase):
         self.assertEqual(rear.observability, "high")
         self.assertEqual(oblique.observability, "medium")
         self.assertLess(oblique.confidence, rear.confidence)
+
+
+def _lean_rep(
+    peak_lean_deg: float,
+    setup_lean_deg: float = 0.0,
+    wrist_depth_offset: float = -0.30,
+    n: int = 20,
+) -> list[dict]:
+    frames = []
+    for i in range(n):
+        wide = i >= int(n * 0.4)
+        frames.append(
+            bpa_frame(
+                spread_ratio=1.9 if wide else 0.6,
+                trunk_lean_deg=peak_lean_deg if wide else setup_lean_deg,
+                wrist_depth_offset=wrist_depth_offset,
+                frame_index=i,
+            )
+        )
+    return frames
+
+
+class FacingDerivationTest(unittest.TestCase):
+    def test_negative_offset_means_the_lifter_faces_the_camera(self) -> None:
+        # Wrists nearer the camera than the shoulders (MediaPipe z is negative toward camera).
+        self.assertEqual(_clip_facing_sign(_core(_lean_rep(0.0, wrist_depth_offset=-0.30))), 1.0)
+
+    def test_positive_offset_means_the_lifter_faces_away(self) -> None:
+        self.assertEqual(_clip_facing_sign(_core(_lean_rep(0.0, wrist_depth_offset=0.30))), -1.0)
+
+    def test_all_zero_z_is_undetermined(self) -> None:
+        """The RTMPose extraction path writes z=0.0 for EVERY landmark
+        (src/pose/rtmpose_pose_extraction.py:121,131), so this is a real runtime, not a
+        hypothetical. It must read as undetermined, never as a facing."""
+        self.assertTrue(math.isnan(_clip_facing_sign(_core(_lean_rep(0.0, wrist_depth_offset=0.0)))))
+
+    def test_offset_under_the_floor_is_undetermined(self) -> None:
+        self.assertTrue(
+            math.isnan(_clip_facing_sign(_core(_lean_rep(0.0, wrist_depth_offset=-0.01))))
+        )
+
+
+class TrunkExtensionRuleTest(unittest.TestCase):
+    def test_fires_on_a_backward_lean_past_the_threshold(self) -> None:
+        # Facing the camera (offset -0.30) => facing sign +1 => a POSITIVE image lean is
+        # backward. 15 degrees clears the spec's 10.
+        core = _core(_lean_rep(peak_lean_deg=15.0, wrist_depth_offset=-0.30))
+        detections = rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique"))
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "bpa_trunk_extension_compensation")
+
+    def test_a_forward_lean_of_the_same_size_does_not_fire(self) -> None:
+        """The whole point of the facing derivation: magnitude alone would fire here."""
+        core = _core(_lean_rep(peak_lean_deg=-15.0, wrist_depth_offset=-0.30))
+        self.assertEqual(
+            rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique")), []
+        )
+
+    def test_the_verdict_inverts_when_the_lifter_faces_away(self) -> None:
+        core = _core(_lean_rep(peak_lean_deg=-15.0, wrist_depth_offset=0.30))
+        self.assertEqual(
+            len(rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique"))), 1
+        )
+
+    def test_silent_just_inside_the_threshold(self) -> None:
+        core = _core(_lean_rep(peak_lean_deg=8.0, wrist_depth_offset=-0.30))
+        self.assertEqual(
+            rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique")), []
+        )
+
+    def test_hard_gated_silent_on_a_confident_rear_label(self) -> None:
+        """A signed sagittal lean read from a pure rear view is FRONTAL-plane lateral sway --
+        a confident reading of the wrong plane, which no confidence discount can express."""
+        core = _core(_lean_rep(peak_lean_deg=15.0, wrist_depth_offset=-0.30))
+        self.assertEqual(rule_trunk_extension_compensation(core, _ctx(view_type="rear")), [])
+
+    def test_hard_gated_silent_on_unknown(self) -> None:
+        core = _core(_lean_rep(peak_lean_deg=15.0, wrist_depth_offset=-0.30))
+        self.assertEqual(rule_trunk_extension_compensation(core, _ctx(view_type="unknown")), [])
+
+    def test_silent_when_the_facing_is_undetermined(self) -> None:
+        core = _core(_lean_rep(peak_lean_deg=15.0, wrist_depth_offset=0.0))
+        self.assertEqual(
+            rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique")), []
+        )
+
+    def test_observability_is_medium_not_high(self) -> None:
+        """Downgraded from the spec's `high` because the facing derivation is an unvalidated
+        precondition; the observability field should say so."""
+        core = _core(_lean_rep(peak_lean_deg=15.0, wrist_depth_offset=-0.30))
+        detection = rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique"))[0]
+        self.assertEqual(detection.observability, "medium")
+
+    def test_whip_speed_is_recorded_as_evidence_not_as_a_fire_condition(self) -> None:
+        core = _core(_lean_rep(peak_lean_deg=15.0, wrist_depth_offset=-0.30))
+        detection = rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique"))[0]
+        self.assertIn("trunk_whip_deg_s", detection.evidence)
 
 
 if __name__ == "__main__":
