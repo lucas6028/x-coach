@@ -35,8 +35,13 @@ export default function MovementCard({ movement, live, onPick }: Props) {
   // ones scale to its height and end up a third of the tile wide, with dead space either side.
   // Pale, because the illustrations are drawn as black-outlined figures for a white page and that
   // outline disappears against anything dark.
+  //
+  // No padding around the art itself: the 512px source PNGs are opaque, pre-matted squares (not
+  // the old trimmed transparent cutouts), so insetting them left a hard-edged white box floating
+  // over the gradient. Full-bleed lets the square art fill the tile and the rounded corners clip
+  // it; the gradient still shows through as backdrop for the icon-only fallback below.
   const stage = (
-    <span className="mt-3 block aspect-square overflow-hidden rounded-xl bg-gradient-to-b from-[#f7f5ff] to-[#eceefb] p-2.5">
+    <span className="mt-3 block aspect-square overflow-hidden rounded-xl bg-gradient-to-b from-[#f7f5ff] to-[#eceefb]">
       <MovementArt movement={movement} />
     </span>
   );
