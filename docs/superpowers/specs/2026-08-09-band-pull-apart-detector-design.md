@@ -255,6 +255,15 @@ fault. Convention from `pushup.rule_hip_sag` — ramp endpoint = 2.5× the fire 
 documented as a display/ranking curve rather than a cited quantity. The elbow ramp is the one
 exception and is pinned to `pushup.rule_shallow_depth`'s so the two elbow ramps cannot drift.
 
+**Ramp direction is expressed through `severity_from_range`'s flag, never by swapping the
+endpoints.** Its signature is `severity_from_range(value, mild, severe, *, lower_is_worse)`
+(`geometry.py:165`), so the two descending ramps here — rule 2's spread `1.6 → 1.0` and elbow
+`150° → 110°` — pass `mild=1.6, severe=1.0, lower_is_worse=True`, matching
+`pushup.rule_shallow_depth`'s call form. Rule 1's ascending `0.03 → 0.075` and rule 4's
+`10° → 25°` pass `lower_is_worse=False`. Reversing `mild`/`severe` to fake a direction would
+silently invert severity, so the tests assert the endpoint values map to severity 0 and 1 in the
+intended direction.
+
 #### Rule 1 — `bpa_shrugging`
 
 | | |
@@ -409,10 +418,56 @@ its magnitude sits under a degeneracy floor — a clip where the wrists are not 
 of the torso, which is not a band pull apart — the facing is **undetermined and rule 4 returns
 `[]`**. This is the "can only ever SILENCE" guard category `pushup.py` documents.
 
-**Stated limitation:** this derivation is unvalidated, like every other number here. It is
-reflected in rule 4's observability being **`medium`** rather than the spec's `high` — the fault
-is highly visible to a human, but this detector's reading of it rests on an unverified
-precondition, and the observability field should say so.
+**Stated limitation:** this derivation is unvalidated on band pull apart footage specifically,
+like every other number here. It is reflected in rule 4's observability being **`medium`** rather
+than the spec's `high` — the fault is highly visible to a human, but this detector's reading of it
+rests on a precondition no band-pull-apart clip has confirmed, and the observability field should
+say so.
+
+#### 4.8.1 The `z` plumbing is measured, not assumed, and the degeneracy floor comes from it
+
+The derivation above is worthless if `z` is absent or constant in the payloads production
+actually produces. Both writers and the 49 real pose JSONs under `data/runtime/pose_json/` were
+checked while writing this spec.
+
+**Writers.** The offline MediaPipe path (`src/pose/process_videos.py:85,97`) writes `lm.z`. The
+browser capture path (`frontend/src/lib/poseExtract.ts:40,43`) writes real `z` and **rejects any
+frame whose `z` is non-finite**, so on that path `z` is present by construction. But
+`src/pose/rtmpose_pose_extraction.py:121,131` writes **`"z": 0.0` for every landmark** — a 2-D
+backbone with no depth to report. A z-degenerate runtime therefore exists and is not
+hypothetical.
+
+**Measured, on the 49 runtime clips** (35 carry usable landmarks; 6 are distinct, the rest are
+re-uploads of the same clip):
+
+| distinct clip | frames | median wrist−shoulder z offset | sign stability |
+|---|---|---|---|
+| 1 | 111 | −1.3958 | 100.0% |
+| 2 | 79 | −0.5070 | 96.2% |
+| 3 | 61 | −0.4876 | 98.4% |
+| 4 | 2304 | −0.2486 | 99.9% |
+| 5 | 30 | −0.1688 | 96.7% |
+| 6 | 43 | +0.1295 | 81.4% |
+| **3 further clips** | — | **exactly 0.0000** (z identically zero) | — |
+
+Three conclusions, each load-bearing:
+
+1. **`z` is real and non-degenerate on the production path.** The offset is not noise around zero;
+   its magnitude runs 0.13–1.40.
+2. **The two populations separate cleanly with no overlap.** Non-degenerate clips floor at
+   `0.1295`; degenerate clips sit at exactly `0.0`. The degeneracy floor is therefore set at
+   **`0.02`** — roughly 6× below the smallest observed real value and far above zero. It is a
+   **plumbing test that distinguishes "this runtime reports depth" from "this runtime reports
+   zeros"**, not a tuned fault threshold, and the measurement above is why it is that number
+   rather than a guess.
+3. **Sign stability is 81–100% on clips whose arms are *not* held forward.** These are squats and
+   push-ups — the worst case for this cue, since the wrists spend much of the clip beside or under
+   the torso. A band pull apart holds the arms extended anteriorly throughout by definition, so
+   its margin should exceed every row above. Taking the median over `peak` frames (§4.8), where
+   extension is greatest, is what converts even the 81.4% worst case into a stable per-clip sign.
+
+The RTMPose path consequently gets rule 4 silent, automatically and correctly, with no
+runtime-specific branch anywhere in this module.
 
 ### 4.9 The parent spec's elbow cue has its direction inverted
 
@@ -505,8 +560,10 @@ Coverage:
    literal `>`).
 6. **Rule 3 is silent** — asserts `[]` for inputs that would otherwise look like the fault, so a
    future edit cannot un-silence it unnoticed.
-7. **Rule 4's gate and facing** — silent on `rear` and `unknown`; fires on `rear_oblique`; sign
-   flips with `wrist_depth_offset`; silent when the facing median is degenerate or `NaN`.
+7. **Rule 4's gate and facing** — silent on a confident `rear` label and on `unknown`; fires on
+   `rear_oblique`; the verdict inverts with the sign of `wrist_depth_offset`; silent when the
+   facing median is `NaN` or under the `0.02` floor, including the **all-zero-`z` case** that the
+   RTMPose writer produces (§4.8.1), which gets its own fixture.
 8. **Setup-baseline NaN policy** — rules 1 and 4 return `[]` on a `NaN` baseline; rule 2 drops
    only its baseline term and still fires on the spread term.
 9. **Registry** — `get_detector("band pull apart")` resolves and the name matches
