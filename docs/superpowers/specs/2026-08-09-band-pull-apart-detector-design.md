@@ -154,31 +154,66 @@ found — not merely unit tests on the rule functions, which would pass happily 
 returned zero reps and every rule silently ran on the whole-clip fallback. This is the same class
 of silent-zero failure as the SP1 live-record bug (`be85d1fd`).
 
-**A second, still-open gap the synthetic clip cannot rule out: the segmentation floor itself is
-unverified for this movement's cadence.** `rep_segmentation.py`'s `DEFAULT_MIN_REP_SECONDS = 0.4`
+**A second gap the synthetic clip cannot rule out: whether the segmentation floor itself is
+compatible with this movement's cadence.** `rep_segmentation.py`'s `DEFAULT_MIN_REP_SECONDS = 0.4`
 discards any candidate rep shorter than 0.4s (12 frames at 30fps) as duration-anomaly noise —
 "the segmentation itself doing exactly what `rep_segmentation.py` documents it doing", per SP1
 §3.4. `BAND_PULL_APART_DETECTOR` takes this default unchanged, on the strength of SP1's "clean
-unipolar excursion, all defaults" placement, but that placement is explicitly the inference §3.4
-warns is unverified, and no real band-pull-apart footage exists here to check it against (§2). The
-end-to-end fixture above is built at 18 frames/rep (0.6s at 30fps, comfortably above the floor) —
-by construction it cannot expose a floor problem, because building it any faster fails for a
-reason that has nothing to do with wrist-spread segmentation: at 9 frames/rep (0.3s) the same
-fixture's excursions are still found on their correct boundaries, and `_finalize` discards all
-three anyway, purely because `9 < 12`. That is the floor working as designed, not a segmentation
-defect — but it is also a preview of what happens to a genuinely fast real clip. The symptom, if
-this assumption is wrong: every rep in the clip falls under 12 frames, `segment_reps` returns
-`[]`, and `run_detector` falls back to scoring the whole clip as one window instead of per-rep —
-silently, with no error and no log line distinguishing it from a clean single-rep clip. This is
-the same class of gap SP1 §3.4 already measured for High Knee (~3Hz alternating-leg cadence,
-~10 frames/rep at 30fps, below the same 12-frame floor, which is why High Knee ships with
-segmentation disabled rather than a guessed override). Band Pull Apart was not given that
-treatment because nothing in Fukunaga or the KG suggests a comparably fast cadence — but nothing
-confirms a safely slow one either. Not fixed here: overriding `min_rep_seconds` on
-`BAND_PULL_APART_DETECTOR` would be real threshold tuning with no cited cadence behind it, and
-would silently weaken the anomaly floor for every real clip just to make a hypothetical fast one
-segment — the same fabrication this project's threshold rules forbid elsewhere. Flagged, not
-patched; recorded in `TODO.md`.
+unipolar excursion, all defaults" placement, which §3.4 itself calls interface-design inference
+rather than verified fact.
+
+**This is cheaply checkable, and was checked, because §2 already names the source.** §2
+establishes that — unlike REHAB24-6 or the Squat dataset — Fit3D **does** carry band-pull-apart
+footage with rep boundaries (`rep_ann.json`); what it lacks is fault labels, which is the reason
+`validated` stays `False`, not a reason to skip a cadence check that needs no labels at all. Rep
+boundaries are exactly the input a cadence question needs. Pulled from
+`data/Fit3D/train/{s03,s04,s05,s07,s08}/rep_ann.json` — the five subjects with a
+`band_pull_apart` key — each file's boundary list is six frame indices bounding five reps (25
+reps total). Every `band_pull_apart.mp4` in this repo runs at **50fps**, confirmed directly with
+`ffprobe` (`r_frame_rate=50/1`) rather than assumed — Fit3D is not the 30fps this floor's frame
+arithmetic uses elsewhere. Converting each subject's boundary-frame deltas to seconds at 50fps:
+
+| subject | rep durations (s) |
+|---|---|
+| s03 | 2.36, 1.78, 2.10, 1.80, 2.02 |
+| s04 | 2.34, 2.18, 2.30, 2.30, 2.86 |
+| s05 | 2.58, 2.18, 2.66, 2.48, 2.28 |
+| s07 | 2.64, 2.30, 2.40, 2.38, 2.92 |
+| s08 | 2.58, 2.08, 2.60, 2.20, 2.28 |
+
+Across all 25 measured reps the range is **1.78s–2.92s**. The fastest rep measured (s03, 1.78s)
+is still 4.45× the 0.4s floor; the slowest (s07, 2.92s) is 7.3×. Five independent subjects, none
+within a factor of four of tripping the floor.
+
+**Directional evidence, not a validation — and it should not be read as more than that.** Five
+subjects is not a cadence distribution, and Fit3D subjects perform a coached, deliberate protocol
+for mocap capture, which is not the same population as a real app user rushing through a set with
+imperfect form. This measures rep *duration* from mocap-derived rep boundaries, not this
+project's own `segment_reps` running on this project's own pose extraction. What it establishes:
+there is no evidence, from the one real source available, that the 0.4s floor is likely to bite
+typical band-pull-apart execution — replacing what was previously an unsupported claim that no
+such evidence exists at all. What it does **not** establish: that a rushed real user cannot
+produce a sub-0.4s rep, or that Fit3D's coached cadence is representative of this app's users.
+The residual risk is bounded, not eliminated.
+
+The end-to-end fixture above is built at 18 frames/rep (0.6s at 30fps, comfortably above the
+floor and consistent with the measured Fit3D range) — by construction it cannot exercise a
+floor problem, because building it any faster fails for a reason that has nothing to do with
+wrist-spread segmentation: at 9 frames/rep (0.3s) the same fixture's excursions are still found
+on their correct boundaries, and `_finalize` discards all three anyway, purely because `9 < 12`.
+That is the floor working as designed, not a segmentation defect — but it is also a preview of
+what happens to a genuinely fast real clip. The symptom, if a real clip ever is that fast: every
+rep in it falls under 12 frames, `segment_reps` returns `[]`, and `run_detector` falls back to
+scoring the whole clip as one window instead of per-rep — silently, with no error and no log line
+distinguishing it from a clean single-rep clip. This is the same class of gap SP1 §3.4 already
+measured for High Knee (~3Hz alternating-leg cadence, ~10 frames/rep at 30fps, below the same
+12-frame floor, which is why High Knee ships with segmentation disabled rather than a guessed
+override) — the difference being that here there is now a measurement, and it points the other
+way. Not fixed here regardless: overriding `min_rep_seconds` on `BAND_PULL_APART_DETECTOR` would
+be real threshold tuning against a five-subject, coached-cadence sample with no cited production
+cadence behind it, and would silently weaken the anomaly floor for every real clip on the strength
+of a directional signal — the same fabrication this project's threshold rules forbid elsewhere.
+Flagged and now measured, not patched; recorded in `TODO.md`.
 
 ### 4.2 Phases
 

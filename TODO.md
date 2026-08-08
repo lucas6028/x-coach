@@ -191,7 +191,7 @@
   - 結果：出貨用的 lead-leg cue **在三維下就是錯的**（不只是投影損失）；
     規格書自己定義的另一半替代量測從單目 2D 拿到 0.959/0.894。
   - 注意：**沒有任何閾值因此被調整**，`LUNGE_DETECTOR.validated` 仍為 `False`。
-- [ ] Squat / Overhead Press / Push-up / Deadlift / Row 五個偵測器仍是
+- [ ] Squat / Overhead Press / Push-up / Deadlift / Row / Band Pull Apart 六個偵測器仍是
   「spec-derived、UNVALIDATED」，前端以 Beta tag 標示（`/api/movements` 的 `validated` 欄位）
 - [ ] 把 `validated` 從「人工判斷」變成「有標註集撐腰」：每個動作至少一組標註資料 + 回歸腳本
 
@@ -438,8 +438,12 @@
     兩者都是 `scripts/knowledge/stub_general_movements_v3.py:80-87` 的一行修正，
     但 graphml 已 gitignore，重新產生屬部署步驟。
 - [ ] `src/pose/rep_segmentation.py` 的 `DEFAULT_MIN_REP_SECONDS = 0.4`（30fps 下 12 幀）對
-  Band Pull Apart 未曾用真實影片驗證過節奏，若真實 clip 每下快於 0.4 秒會整段被丟成雜訊，
-  退回 whole-clip fallback——與 High Knee 需要 `min_rep_seconds` override 是同一類問題。
+  Band Pull Apart 若真實 clip 每下快於 0.4 秒，整段會被丟成雜訊、退回 whole-clip fallback——
+  與 High Knee 需要 `min_rep_seconds` override 是同一類問題。2026-08-09 已用 Fit3D 的
+  `rep_ann.json`（`s03/s04/s05/s07/s08`，共 25 下，50fps 經 ffprobe verified）量到真實節奏
+  1.78–2.92 秒/下，是門檻的 4.45–7.3 倍，方向上不太可能觸發——但只有 5 位受試者且是配合 mocap
+  的刻意動作，不能代表真實使用者可能更快更隨便的執行，仍是未證實的殘餘風險，因此不加
+  override（沒有可引用的節奏數字可調）。
 
 ### P3：感知升級 — ⏸ 未開始（但研究面已備妥依據）
 
