@@ -1,0 +1,58 @@
+# Build context for backend/Dockerfile is the REPO ROOT (the app imports `src.*` and
+# `backend.*` by absolute package path, so both trees must be in the image).
+# Everything below is either huge, host-specific, or irrelevant to the running API.
+
+# Version control / tooling
+.git
+.github
+.gitignore
+.graphifyignore
+.claude
+.codex
+.agents
+.obsidian
+.shared
+.antigravitycli
+graphify-out
+
+# Python environments and caches — host-specific (Windows .venv), never portable
+.venv
+.venv-mmpose
+__pycache__
+**/__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+.ruff_cache
+htmlcov
+.coverage
+coverage.xml
+
+# Datasets and runtime scratch. `data/` is bind-mounted by docker-compose rather than
+# baked in: it is gitignored, several GB in places, and the KG/RAG stores are rebuilt
+# by the pipelines rather than shipped. See docs/docker.md.
+data
+notebooks
+
+# Frontend — has its own image and its own .dockerignore
+frontend
+open-slide
+demo
+
+# Tests, docs, research prose: not needed to serve the API
+tests
+test_metadata.py
+notes
+docs
+specs
+research
+tasks
+blog
+db
+*.md
+研究計畫.md
+
+# Local secrets — env comes from docker-compose `env_file`, never from a baked layer
+.env
+.env.*
+!.env.example

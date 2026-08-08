@@ -1,0 +1,35 @@
+# Runtime dependencies for the containerised web backend (backend/Dockerfile).
+#
+# This is the WEB SUBSET of requirements.txt: everything the FastAPI app can reach at
+# runtime, and nothing else. Deliberately excluded, because no code path under
+# backend/ or src/{pose,knowledge} imports them — they belong to the research
+# pipelines under src/{rehab24,video} and would add several GB to the image:
+#
+#   torch, transformers            (VideoMAE feature extraction / classification)
+#   langchain*, openrouter         (KG extraction via Gemini; chat talks raw HTTP)
+#   beautifulsoup4                 (corpus scraping, offline tooling)
+#   pytest, coverage               (test tooling)
+#
+# Kept in sync with requirements.txt by hand — same pins, one substitution:
+# opencv-python -> opencv-python-headless (no GUI/X11 in a container).
+
+# --- Web backend ---------------------------------------------------------------
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.18
+pydantic==2.12.5
+pydantic-settings==2.14.2
+supabase>=2.0,<3
+boto3>=1.34,<2   # Cloudflare R2 over the S3 API (backend/app/services/storage.py)
+httpx>=0.27,<0.29  # OpenRouter (LLM chat) client; also a transitive supabase dep
+
+# --- Analysis pipeline (src/pose) ----------------------------------------------
+numpy==2.4.3
+opencv-python-headless==4.13.0.92
+mediapipe==0.10.14
+tqdm==4.68.3
+
+# --- Knowledge retrieval (src/knowledge: KG + RAG) -----------------------------
+networkx==3.6.1
+langchain-text-splitters==1.1.2
+pypdf==6.8.0

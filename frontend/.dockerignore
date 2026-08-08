@@ -1,0 +1,11 @@
+# Build context for frontend/Dockerfile is frontend/.
+node_modules
+dist
+coverage
+.vite
+tsconfig.tsbuildinfo
+.env
+.env.*
+!.env.example
+mockup
+README.md
