@@ -1,6 +1,8 @@
-import { ArrowCounterClockwise, MagnifyingGlass } from "@phosphor-icons/react";
+import { useState } from "react";
+import { ArrowCounterClockwise, FunnelSimple, MagnifyingGlass } from "@phosphor-icons/react";
 import MenuCard from "../MenuCard";
 import { movementLabel, useI18n } from "../../lib/i18n";
+import { useIsMobile } from "../../lib/useIsMobile";
 
 export type ResultFilter = "all" | "clean" | "faults";
 export type RangeFilter = "all" | "today" | "7d" | "30d";
@@ -53,9 +55,24 @@ interface Props {
 //
 // No leading icons here, unlike the studio's two: caption + value already name each control, and
 // three tinted circles in a row read as status badges rather than as filters.
+//
+// On the phone the three menus fold behind a funnel button — four controls at 150px wide each wrap
+// into a four-line block that pushes the records themselves below the fold. Search stays out, as
+// the one filter worth reaching in a single tap. Keyed to `useIsMobile`, the same hook that swaps
+// the whole shell, rather than a `lg:` class: the two must agree at the boundary, and only one of
+// them can be a media query without the other going out of step.
 export default function HistoryFilters({ value, onChange, movements }: Props) {
   const { t } = useI18n();
+  const mobile = useIsMobile();
+  const [open, setOpen] = useState(false);
   const set = (patch: Partial<HistoryFilterState>) => onChange({ ...value, ...patch });
+
+  // How many of the three FOLDED filters are set. Search is excluded — it is visible either way,
+  // so counting it would put a badge on a button that hides nothing.
+  const activeCount =
+    (value.movement === "all" ? 0 : 1) +
+    (value.result === "all" ? 0 : 1) +
+    (value.range === "all" ? 0 : 1);
 
   // Each list leads with its "no filter" entry, so clearing one control is a choice inside that
   // control rather than something only the row-level reset can do.
@@ -77,10 +94,58 @@ export default function HistoryFilters({ value, onChange, movements }: Props) {
   const shown = (opts: { value: string; label: string }[], v: string) =>
     opts.find((o) => o.value === v)?.label ?? v;
 
-  return (
-    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-      {/* Matched to the MenuCard's height and radius so the row reads as one set of controls. */}
-      <div className="relative min-w-[190px] max-w-[260px] flex-1">
+  // The three folded controls, laid out inline on the desktop row and stacked full-width in the
+  // phone's disclosure panel. One definition either way — a second copy is how the two drift.
+  const menus = (
+    <>
+      <MenuCard
+        label={t("history.filterMovement")}
+        value={value.movement}
+        display={shown(movementOptions, value.movement)}
+        options={movementOptions}
+        onChange={(v) => set({ movement: v })}
+        align="left"
+        full={mobile}
+      />
+      <MenuCard
+        label={t("history.filterStatus")}
+        value={value.result}
+        display={shown(resultOptions, value.result)}
+        options={resultOptions}
+        onChange={(v) => set({ result: v as ResultFilter })}
+        align="left"
+        full={mobile}
+      />
+      <MenuCard
+        label={t("history.filterRange")}
+        value={value.range}
+        display={shown(rangeOptions, value.range)}
+        options={rangeOptions}
+        onChange={(v) => set({ range: v as RangeFilter })}
+        align="left"
+        full={mobile}
+      />
+    </>
+  );
+
+  // Only offered once something is actually filtered — a permanent reset on an unfiltered list is
+  // a control that can only do nothing.
+  const reset = filtersActive(value) && (
+    <button
+      type="button"
+      onClick={() => onChange(EMPTY_FILTERS)}
+      className={`glass-control flex h-[52px] items-center justify-center gap-2 rounded-2xl px-4 text-[13px] font-semibold text-[#59648f] transition-colors hover:border-[#c9bcff] hover:text-[#1e2142] ${
+        mobile ? "w-full" : ""
+      }`}
+    >
+      <ArrowCounterClockwise size={14} weight="bold" />
+      {t("history.clearFilters")}
+    </button>
+  );
+
+  const search = (
+    /* Matched to the MenuCard's height and radius so the row reads as one set of controls. */
+    <div className={`relative ${mobile ? "min-w-0 flex-1" : "min-w-[190px] max-w-[260px] flex-1"}`}>
         <MagnifyingGlass
           size={15}
           className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[#63709f]"
@@ -92,48 +157,55 @@ export default function HistoryFilters({ value, onChange, movements }: Props) {
           value={value.search}
           onChange={(e) => set({ search: e.target.value })}
           className="glass-control h-[52px] w-full rounded-2xl pl-10 pr-4 text-[13px] font-medium text-[#1e2142] outline-none transition-colors placeholder:font-normal placeholder:text-[#8b93bb] hover:border-[#c9bcff] focus:border-[#c9bcff] [&::-webkit-search-cancel-button]:appearance-none"
-        />
+      />
+    </div>
+  );
+
+  if (mobile) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          {search}
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            aria-controls="history-filter-panel"
+            aria-label={
+              activeCount
+                ? t("history.filterToggleActive", { count: activeCount })
+                : t("history.filterToggle")
+            }
+            className={`glass-control relative flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-2xl transition-colors ${
+              open || activeCount ? "text-primary" : "text-[#59648f]"
+            }`}
+          >
+            <FunnelSimple size={19} weight="bold" />
+            {/* A count, not a dot: with the menus folded away this is the only thing saying how
+                much of the list is being hidden by a filter the user cannot see. */}
+            {activeCount > 0 && (
+              <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-content">
+                {activeCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {open && (
+          <div id="history-filter-panel" className="flex flex-col gap-2">
+            {menus}
+            {reset}
+          </div>
+        )}
       </div>
+    );
+  }
 
-      <MenuCard
-        label={t("history.filterMovement")}
-        value={value.movement}
-        display={shown(movementOptions, value.movement)}
-        options={movementOptions}
-        onChange={(v) => set({ movement: v })}
-        align="left"
-      />
-
-      <MenuCard
-        label={t("history.filterStatus")}
-        value={value.result}
-        display={shown(resultOptions, value.result)}
-        options={resultOptions}
-        onChange={(v) => set({ result: v as ResultFilter })}
-        align="left"
-      />
-
-      <MenuCard
-        label={t("history.filterRange")}
-        value={value.range}
-        display={shown(rangeOptions, value.range)}
-        options={rangeOptions}
-        onChange={(v) => set({ range: v as RangeFilter })}
-        align="left"
-      />
-
-      {/* Only offered once something is actually filtered — a permanent reset on an unfiltered
-          list is a control that can only do nothing. */}
-      {filtersActive(value) && (
-        <button
-          type="button"
-          onClick={() => onChange(EMPTY_FILTERS)}
-          className="glass-control flex h-[52px] items-center gap-2 rounded-2xl px-4 text-[13px] font-semibold text-[#59648f] transition-colors hover:border-[#c9bcff] hover:text-[#1e2142]"
-        >
-          <ArrowCounterClockwise size={14} weight="bold" />
-          {t("history.clearFilters")}
-        </button>
-      )}
+  return (
+    <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+      {search}
+      {menus}
+      {reset}
     </div>
   );
 }

@@ -569,6 +569,10 @@ const en: Dict = {
   // caption — the caption is already above it on the control.
   "history.filterAllMovements": "All movements",
   "history.filterAllResults": "All results",
+  // The phone layout's disclosure for the three menus. `{count}` is how many are set, so the
+  // button says whether anything is hidden behind it.
+  "history.filterToggle": "Filters",
+  "history.filterToggleActive": "Filters ({count} active)",
   "history.filterClean": "Clean reps",
   "history.filterFaults": "Needs work",
   "history.rangeAll": "All time",
@@ -1324,6 +1328,8 @@ const zhHant: Dict = {
   "history.filterRange": "時間範圍",
   "history.filterAllMovements": "全部動作",
   "history.filterAllResults": "全部結果",
+  "history.filterToggle": "篩選",
+  "history.filterToggleActive": "篩選（已套用 {count} 項）",
   "history.filterClean": "動作正確",
   "history.filterFaults": "需要調整",
   "history.rangeAll": "全部時間",
