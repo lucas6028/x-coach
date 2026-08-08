@@ -203,6 +203,65 @@ describe("History — filters", () => {
   });
 });
 
+// On the phone the three menus fold behind a funnel button. Driven by `useIsMobile`, so this
+// forces its media query to match — the global setup stub answers `false` to everything, which is
+// what keeps every describe above on the desktop row.
+describe("History — filters on the phone", () => {
+  beforeEach(() => {
+    vi.spyOn(window, "matchMedia").mockImplementation(
+      (query: string) =>
+        ({
+          matches: query === "(max-width: 1023px)",
+          media: query,
+          onchange: null,
+          addListener: vi.fn(),
+          removeListener: vi.fn(),
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        }) as unknown as MediaQueryList
+    );
+  });
+
+  it("folds the three menus away, keeping search reachable in one tap", async () => {
+    renderHistory();
+    await screen.findByText("Total analyses");
+
+    expect(screen.getByLabelText("Search movements")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Filters" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Movement:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Result:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Period:/ })).not.toBeInTheDocument();
+  });
+
+  it("reveals all three when the funnel is tapped, and filters from there", async () => {
+    renderHistory();
+    await screen.findByText("Total analyses");
+
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
+    expect(screen.getByRole("button", { name: /^Movement:/ })).toBeInTheDocument();
+
+    await pick("Movement", "Push-up");
+    expect(cards()).toHaveLength(2);
+  });
+
+  // With the menus folded away, this badge is the only thing telling the user that the list in
+  // front of them is being narrowed by something they cannot see.
+  it("counts the applied filters on the button, ignoring the visible search", async () => {
+    renderHistory();
+    await screen.findByText("Total analyses");
+
+    await userEvent.click(screen.getByRole("button", { name: "Filters" }));
+    await pick("Movement", "Push-up");
+    await pick("Result", "Clean reps");
+    expect(screen.getByRole("button", { name: "Filters (2 active)" })).toBeInTheDocument();
+
+    // Search is visible either way, so it must not add to the count of what is hidden.
+    await userEvent.type(screen.getByLabelText("Search movements"), "push");
+    expect(screen.getByRole("button", { name: "Filters (2 active)" })).toBeInTheDocument();
+  });
+});
+
 describe("History — day separators", () => {
   it("labels the two most recent days relatively and dates the rest", async () => {
     renderHistory();

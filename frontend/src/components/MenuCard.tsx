@@ -24,6 +24,9 @@ interface Props {
   /** Which edge the menu aligns to. Left for controls at the start of a row, where a
    *  right-aligned menu would hang off toward the page edge. */
   align?: "left" | "right";
+  /** Stretch to the container's width instead of sizing to the label. For stacked layouts (the
+   *  phone's filter panel), where a row of `min-w-[150px]` cards would sit ragged. */
+  full?: boolean;
 }
 
 // The shell's dropdown: a small glass card carrying a caption over the current value, with a caret
@@ -46,6 +49,7 @@ export default function MenuCard({
   options,
   onChange,
   align = "right",
+  full = false,
 }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -65,7 +69,7 @@ export default function MenuCard({
   }, [open]);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={`relative ${full ? "w-full" : ""}`}>
       <button
         id={id}
         type="button"
@@ -75,7 +79,9 @@ export default function MenuCard({
         // The label and the current value together, so the control announces both — the visible
         // caption is a <span>, not a <label>, now that the trigger is a button.
         aria-label={`${label}: ${display}`}
-        className="glass-control flex min-w-[150px] items-center gap-3 rounded-2xl px-4 py-2.5 transition-colors hover:border-[#c9bcff]"
+        className={`glass-control flex min-w-[150px] items-center gap-3 rounded-2xl px-4 py-2.5 transition-colors hover:border-[#c9bcff] ${
+          full ? "w-full" : ""
+        }`}
       >
         {icon && (
           <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${tint}`}>
