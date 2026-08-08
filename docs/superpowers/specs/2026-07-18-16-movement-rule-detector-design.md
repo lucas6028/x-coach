@@ -742,6 +742,18 @@ spread) → eccentric return.**
 | **citation** | Fukunaga T et al. Int J Sports Phys Ther (2022) PMC8975561, DOI 10.26603/001c.33026. |
 | **citation_support** | Fukunaga: peak muscle activity spanned "15.3% to 72.6% of MVC across muscles and exercise conditions," and the diagonal-up (largest-excursion, against-gravity) direction produced the highest trapezius activity — "the diagonal up movement showing the highest shoulder-girdle muscle activity is understandable as the arm is moving against gravity, resulting in higher overall load" — i.e. covering more range against the band drives higher target activation, which a truncated pull loses. |
 
+> **NOTE — direction inversion in this rule's elbow cue, corrected in implementation
+> (2026-08-09).** The `detection_heuristic` above reads "elbow-extension check `elbow_angle >
+> ~150deg` maintained (bent-elbow curl-style cheat = fault)". Read literally, `> 150°` — nearly
+> *straight* arms — is the fault, contradicting the parenthetical in the same sentence. The
+> parenthetical is right: a bent-elbow cheat means a *smaller* elbow angle.
+> `src/pose/movements/band_pull_apart.py` implements **`min_elbow_angle < 150°`**. The number
+> `150` is unchanged and remains FROM THE SPEC; only the comparison direction is corrected.
+> Corroboration beyond the parenthetical: the KG names this fault `Bent Elbows`
+> (`scripts/knowledge/stub_general_movements_v3.py:85`), and Fukunaga's rationale — more range
+> covered against the band drives higher activation — is a range argument that bending the elbows
+> shortens.
+
 #### Loss of scapular retraction
 
 | field | value |
@@ -754,6 +766,28 @@ spread) → eccentric return.**
 | **biomechanical_rationale** | The therapeutic target of the pull-apart is middle/lower-trapezius scapular retraction; if the scapulae never retract, the periscapular retractors are bypassed and the exercise loses its scapular-stabilizer training effect. |
 | **citation** | Fukunaga T et al. Int J Sports Phys Ther (2022) PMC8975561, DOI 10.26603/001c.33026. |
 | **citation_support** | Fukunaga: middle-trapezius activity was significantly driven by the retraction-oriented directions (highest in diagonal-up/horizontal vs diagonal-down), and the exercise is framed around recruiting "periscapular muscles" for "scapular stabilization" — retraction is the mechanism; an arms-only pull removes it. Honest limitation: scapular position itself is not reliably recoverable from monocular front-view pose, hence low observability. |
+
+> **NOTE — implemented as a permanently-silent rule (2026-08-09).** `rule_loss_of_scapular_retraction`
+> is registered in `src/pose/movements/band_pull_apart.py` and always returns `[]`, following
+> `pushup.rule_scapular_winging`. Two independent defects in the heuristic above, either
+> disqualifying:
+>
+> 1. **The fire condition is a null-detection.** It fires when `dist(11,12)` *fails to change*
+>    ("change < 0.01"), so a steady frame, a partially occluded frame, and a genuine non-retraction
+>    are indistinguishable. Every correct rep that holds the shoulders stable would fire it.
+> 2. **The metric is confounded with what it must be independent of.** MediaPipe's shoulder
+>    landmark is a *glenohumeral* point that moves with the humerus, and horizontal abduction is
+>    exactly the humeral motion in question, so `dist(11,12)` cannot attribute a narrowing to
+>    scapular adduction rather than arm position. Root cause: MediaPipe Pose has no scapular
+>    landmarks.
+>
+> Separately, `0.01` carries no citation; Fukunaga supplies no landmark-displacement magnitude.
+>
+> **A NOTE and not a WITHDRAWAL, deliberately.** Fukunaga genuinely backs retraction as the
+> training mechanism, so the fault is real and cited and it is the *sensing* that fails — the
+> `pushup.rule_scapular_winging` case, not the OHP-bar-path / deadlift-bar-drift case. The KG is
+> not the gap either: `Band Pull Apart:Insufficient Scapular Retraction` resolves with a non-empty
+> `causes` bucket. The metric is the gap.
 
 #### Trunk-extension compensation (leaning back)
 

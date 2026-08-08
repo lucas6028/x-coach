@@ -268,7 +268,7 @@ class MovementRegistryTests(unittest.TestCase):
 
 
 class TestMovementRegistry(unittest.TestCase):
-    def test_lists_all_five_detectors_in_registration_order(self) -> None:
+    def test_lists_all_detectors_in_registration_order(self) -> None:
         from src.pose.movements import registry
 
         names = [d.name for d in registry.list_detectors()]
