@@ -33,6 +33,7 @@ MODULE_MOVEMENTS = {
     "lunge.py": "Lunge",
     "deadlift.py": "Deadlift",
     "row.py": "Row",
+    "band_pull_apart.py": "Band Pull Apart",
 }
 
 

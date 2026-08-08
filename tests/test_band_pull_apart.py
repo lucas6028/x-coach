@@ -7,7 +7,9 @@ from src.pose.movements.band_pull_apart import (
     BAND_PULL_APART_METRIC_KEYS,
     band_pull_apart_assign_phases,
     band_pull_apart_compute_raw,
+    rule_shrugging,
 )
+from src.pose.movements.base import CoreFrame, RuleContext, run_detector
 
 
 def _lm(x: float, y: float, z: float = 0.0, visibility: float = 0.95) -> dict:
@@ -246,6 +248,97 @@ class BandPullApartPhaseTest(unittest.TestCase):
         frames[0]["landmarks"][11] = _lm(0.4, 0.5, visibility=0.10)
         raw = band_pull_apart_compute_raw(frames, fps=30.0)
         self.assertEqual(band_pull_apart_assign_phases(raw)[0], "unknown")
+
+
+def _ctx(view_type: str = "rear", view_confidence: float = 0.8, min_frames: int = 3) -> RuleContext:
+    return RuleContext(
+        fps=30.0, view_type=view_type, view_confidence=view_confidence, min_frames=min_frames
+    )
+
+
+def _core(frames: list[dict], fps: float = 30.0) -> list[CoreFrame]:
+    """Metrics + phases WITHOUT run_detector, so a rule can be tested on an exact fixture.
+
+    run_detector median-filters and re-slices per rep; both are correct in production and both
+    would blur a boundary fixture built to sit one step either side of a threshold.
+    """
+    raw = band_pull_apart_compute_raw(frames, fps=fps)
+    phases = band_pull_apart_assign_phases(raw)
+    return [
+        CoreFrame(
+            frame_index=int(item.get("frame_index", i) or i),
+            time=float(item.get("time", 0.0) or 0.0),
+            phase=phases[i],
+            valid=bool(item.get("valid", False)),
+            lower_body_visibility=float(item.get("lower_body_visibility", 0.0) or 0.0),
+            metrics={k: float(item.get(k, np.nan)) for k in BAND_PULL_APART_METRIC_KEYS},
+        )
+        for i, item in enumerate(raw)
+    ]
+
+
+def _shrug_rep(peak_gap: float, setup_gap: float = 0.12, n: int = 20) -> list[dict]:
+    """A rep whose setup frames hold `setup_gap` and whose widest frames hold `peak_gap`."""
+    frames = []
+    for i in range(n):
+        wide = i >= int(n * 0.4)
+        frames.append(
+            bpa_frame(
+                spread_ratio=1.9 if wide else 0.6,
+                shoulder_ear_gap=peak_gap if wide else setup_gap,
+                frame_index=i,
+            )
+        )
+    return frames
+
+
+class ShruggingRuleTest(unittest.TestCase):
+    def test_fires_when_the_gap_closes_past_the_spec_threshold(self) -> None:
+        # setup 0.12 -> peak 0.08 is a 0.04 closure, past the spec's 0.03.
+        core = _core(_shrug_rep(peak_gap=0.08))
+        detections = rule_shrugging(core, _ctx())
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "bpa_shrugging")
+        self.assertGreater(detections[0].severity, 0.0)
+
+    def test_silent_just_inside_the_threshold(self) -> None:
+        # 0.12 -> 0.095 is a 0.025 closure, inside the spec's 0.03.
+        core = _core(_shrug_rep(peak_gap=0.095))
+        self.assertEqual(rule_shrugging(core, _ctx()), [])
+
+    def test_a_unilateral_shrug_still_fires(self) -> None:
+        frames = []
+        for i in range(20):
+            wide = i >= 8
+            frames.append(
+                bpa_frame(
+                    spread_ratio=1.9 if wide else 0.6,
+                    shoulder_ear_gap=0.12,
+                    left_gap_delta=-0.05 if wide else 0.0,
+                    frame_index=i,
+                )
+            )
+        detections = rule_shrugging(_core(frames), _ctx())
+        self.assertEqual(len(detections), 1)
+
+    def test_severity_reaches_one_at_the_ramp_endpoint(self) -> None:
+        # 0.12 -> 0.045 is a 0.075 closure, the RULE-LEVEL ramp endpoint.
+        core = _core(_shrug_rep(peak_gap=0.045))
+        self.assertAlmostEqual(rule_shrugging(core, _ctx())[0].severity, 1.0, places=3)
+
+    def test_the_metric_is_facing_free_so_rear_oblique_is_not_discounted(self) -> None:
+        core = _core(_shrug_rep(peak_gap=0.08))
+        rear = rule_shrugging(core, _ctx(view_type="rear"))[0]
+        oblique = rule_shrugging(core, _ctx(view_type="rear_oblique"))[0]
+        self.assertEqual(rear.observability, "high")
+        self.assertEqual(oblique.observability, "high")
+        self.assertAlmostEqual(rear.confidence, oblique.confidence, places=6)
+
+    def test_a_nan_baseline_silences_the_rule(self) -> None:
+        frames = _shrug_rep(peak_gap=0.08)
+        for i in range(4):  # blank out every setup frame
+            frames[i]["landmarks"][7] = _lm(0.4, 0.2, visibility=0.10)
+        self.assertEqual(rule_shrugging(_core(frames), _ctx()), [])
 
 
 if __name__ == "__main__":
