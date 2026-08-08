@@ -26,16 +26,25 @@ export function useVideoPlayback(
       setTime(v.currentTime);
       onTimeUpdate(v.currentTime);
     };
-    const onMeta = () => setDuration(v.duration || 0);
+    // A browser-recorded clip is a live-muxed WebM with no Duration element, so the element
+    // reports `Infinity` (see lib/mediaDuration.ts). Infinity is truthy, so passing it on would
+    // slip past the `duration || metadata` fallback the scrub bars use and freeze the playhead at
+    // `t / Infinity` = 0%. Report 0 for any length that is not a real one and let them fall back.
+    const onMeta = () =>
+      setDuration(Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     v.addEventListener("timeupdate", onTime);
     v.addEventListener("loadedmetadata", onMeta);
+    // Chrome learns a live-muxed clip's true length once playback has reached the end; take it
+    // when it arrives so the readout stops being the metadata's frames/fps estimate.
+    v.addEventListener("durationchange", onMeta);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
     return () => {
       v.removeEventListener("timeupdate", onTime);
       v.removeEventListener("loadedmetadata", onMeta);
+      v.removeEventListener("durationchange", onMeta);
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
     };
