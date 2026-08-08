@@ -103,13 +103,16 @@ describe("History", () => {
     expect(await screen.findByText("clean rep")).toBeInTheDocument();
   });
 
+  // Scoped to the card: the movement name also appears in the summary strip's "Most trained" tile
+  // and as an option in the movement filter, so an unscoped query is ambiguous.
   it("badges a row with the movement whose rules produced it", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({
       total: 1,
       items: [item({ movement: "Push-up" })],
     });
     renderHistory();
-    expect(await screen.findByText("Push-up")).toBeInTheDocument();
+    const card = await screen.findByRole("link", { name: /Side Push-up/i });
+    expect(within(card).getByText("Push-up")).toBeInTheDocument();
   });
 
   it("titles a row with its own movement, not a hardcoded Squat", async () => {
@@ -128,7 +131,8 @@ describe("History", () => {
       items: [item()], // no `movement` — the column didn't exist yet for this row
     });
     renderHistory();
-    expect(await screen.findByText("Squat")).toBeInTheDocument();
+    const card = await screen.findByRole("link", { name: /Side Squat/i });
+    expect(within(card).getByText("Squat")).toBeInTheDocument();
   });
 
   it("shows the empty state with no analyses", async () => {

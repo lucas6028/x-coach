@@ -547,6 +547,39 @@ const en: Dict = {
   "history.deleteCancel": "Cancel",
   "history.deleting": "Deleting…",
   "history.deleteError": "Couldn't delete this record. Please try again.",
+  // Summary strip. Only `statTotal` is a true all-time figure (the API returns it alongside the
+  // page); the rest are derived from the rows actually loaded, which `statsScope` says out loud.
+  // The header CTA. Distinct from `startCta` ("Analyze a squat"), which the empty state uses to
+  // pitch the one movement a newcomer can try; once there are records the button is just the way
+  // to add another, and naming a movement there would read as a filter.
+  "history.uploadCta": "Upload a video",
+  "history.statTotal": "Total analyses",
+  "history.statCleanRate": "Clean-rep rate",
+  "history.statTopMovement": "Most trained",
+  "history.statLatest": "Latest analysis",
+  "history.statTimes": "{count} analyses",
+  "history.statNone": "—",
+  "history.statsScope": "Rates below are from the {loaded} most recent of {total} analyses.",
+  // Filter bar
+  "history.searchPlaceholder": "Search movements",
+  "history.filterMovement": "Movement",
+  "history.filterStatus": "Result",
+  "history.filterRange": "Period",
+  // Each menu's "no filter" entry. Worded as a value ("All movements"), not repeated as the
+  // caption — the caption is already above it on the control.
+  "history.filterAllMovements": "All movements",
+  "history.filterAllResults": "All results",
+  "history.filterClean": "Clean reps",
+  "history.filterFaults": "Needs work",
+  "history.rangeAll": "All time",
+  "history.rangeToday": "Today",
+  "history.range7": "Last 7 days",
+  "history.range30": "Last 30 days",
+  "history.clearFilters": "Clear filters",
+  "history.noMatch": "No records match these filters.",
+  // Day separators
+  "history.today": "Today",
+  "history.yesterday": "Yesterday",
 
   // Admin panel (P1 shell — role-gated; sections arrive in later phases)
   "admin.nav": "Admin",
@@ -1277,6 +1310,30 @@ const zhHant: Dict = {
   "history.deleteCancel": "取消",
   "history.deleting": "刪除中…",
   "history.deleteError": "無法刪除這筆紀錄，請再試一次。",
+  "history.uploadCta": "上傳影片",
+  "history.statTotal": "總分析次數",
+  "history.statCleanRate": "動作正確率",
+  "history.statTopMovement": "最常訓練動作",
+  "history.statLatest": "最近分析",
+  "history.statTimes": "共 {count} 次分析",
+  "history.statNone": "—",
+  "history.statsScope": "下方比率取自最近 {loaded} 次分析（共 {total} 次）。",
+  "history.searchPlaceholder": "搜尋動作",
+  "history.filterMovement": "動作類型",
+  "history.filterStatus": "分析結果",
+  "history.filterRange": "時間範圍",
+  "history.filterAllMovements": "全部動作",
+  "history.filterAllResults": "全部結果",
+  "history.filterClean": "動作正確",
+  "history.filterFaults": "需要調整",
+  "history.rangeAll": "全部時間",
+  "history.rangeToday": "今天",
+  "history.range7": "近 7 天",
+  "history.range30": "近 30 天",
+  "history.clearFilters": "清除篩選",
+  "history.noMatch": "沒有符合篩選的紀錄。",
+  "history.today": "今天",
+  "history.yesterday": "昨天",
 
   // 後台管理面板（P1 空殼——依角色授權；其餘分頁於後續階段推出）
   "admin.nav": "後台管理",
