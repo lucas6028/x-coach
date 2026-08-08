@@ -19,9 +19,14 @@
 #
 # That is safe in production only because of a reachability fact, not by luck:
 # `estimate_view_for_pose` is called with `allow_front=False` (src/pose/view_estimation.py:14-16),
-# so the reachable labels are {side, rear, rear_oblique, unknown}, and across the 45 real pose
-# JSONs in this repository the estimator emitted `rear_oblique` 30 times, `rear` 13, `unknown` 2,
-# and `side` effectively never. Wrist spread survives `rear_oblique` foreshortened but present.
+# so the reachable labels are {side, rear, rear_oblique, unknown}. Measured 2026-08-09 by running
+# `estimate_view_for_pose(path, allow_front=False)` over all 49 files under
+# data/runtime/pose_json: the estimator emitted `rear_oblique` 37 times, `rear` 9, `unknown` 3, and
+# `side` never. (An earlier "45 real pose JSONs -- 30 rear_oblique / 13 rear / 2 unknown" figure
+# used to appear here, inherited from the Lunge design doc; that doc measured a different
+# directory union that has since changed, the figure does not reproduce against this checkout, and
+# it is superseded by the re-measurement above.) Wrist spread survives `rear_oblique` foreshortened
+# but present.
 #
 # ---------------------------------------------------------------------------------------
 # ONE DROPPED LANDMARK SILENCES EVERY BAND PULL APART RULE FOR THAT FRAME.
@@ -387,8 +392,9 @@ def rule_shrugging(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDete
     VERTICAL image-y difference between a shoulder and its own ear. A magnitude in image-y reads
     identically from in front of or behind the subject, so the rule is facing-free BY
     CONSTRUCTION -- the same argument `row.rule_asymmetric_pull` and `lunge.rule_knee_valgus`
-    make for their own metrics. `rear` and `rear_oblique` (between them, 43 of the 45 real pose
-    JSONs in this repository) therefore both earn the spec's `high` rating with no discount.
+    make for their own metrics. `rear` and `rear_oblique` (between them, 46 of the 49 real pose
+    JSONs under data/runtime/pose_json, measured 2026-08-09) therefore both earn the spec's `high`
+    rating with no discount.
     """
     left_baseline = _setup_baseline(core, "left_shoulder_ear_gap")
     right_baseline = _setup_baseline(core, "right_shoulder_ear_gap")
@@ -543,6 +549,11 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
         severity = float(np.nanmax(combined))
         worst = int(np.nanargmax(combined))
         spread_drove = pairs[worst][0] >= pairs[worst][1]
+        # `np.nanmin` over an all-NaN segment would warn and return NaN, but that path is
+        # effectively unreachable here: both wrists are in `required` (band_pull_apart_compute_raw),
+        # so `wrist_spread_shoulder_norm` is finite whenever `shoulder_width > _DEGENERATE_LENGTH`,
+        # which holds on any real (non-degenerate) frame; `min_elbow_angle` is likewise finite
+        # whenever either elbow angle is. No code change is warranted.
         min_spread = float(
             np.nanmin([frame.m("wrist_spread_shoulder_norm") for frame in segment])
         )
@@ -610,7 +621,8 @@ FACING_DEGENERATE_OFFSET = 0.02
 # different fault, or none. That is not a low-confidence reading of the right quantity (the case
 # the x0.65 discount exists for); it is a confident reading of the WRONG PLANE. Row's objection
 # to gating was that gated rules ship silent, and that does not apply here: the view the gate
-# leaves standing is `rear_oblique`, the modal production label (30 of 45 real pose JSONs).
+# leaves standing is `rear_oblique`, the modal production label (37 of 49 real pose JSONs under
+# data/runtime/pose_json, measured 2026-08-09).
 #
 # WHY NEGATIVE rather than a {side, rear_oblique, front_oblique} whitelist: `front_oblique` is
 # unreachable under `allow_front=False`, so a whitelist containing it is dead weight that READS
@@ -651,8 +663,36 @@ def _clip_facing_sign(core: list[CoreFrame]) -> float:
     here -- and per-rep is the safer scope anyway, because it keeps rep N's verdict independent
     of rep 1's frames, which this architecture deliberately does not couple.
 
-    REDUCED OVER `peak` FRAMES, where the arms are most extended and the margin is largest, and
-    by MEDIAN so per-frame z jitter cannot flip the sign mid-rep.
+    REDUCED OVER `peak` FRAMES BY MEDIAN, so per-frame z jitter cannot flip the sign mid-rep --
+    BUT THE PHASE CHOICE ITSELF RESTS ON AN INVERTED PREMISE THAT MUST BE STATED PLAINLY, NOT
+    SOFTENED. An earlier version of this docstring justified reducing over `peak` because "the
+    arms are most extended and the margin is largest" there. That is backwards for this metric.
+    At SETUP the hands are together with the arms straight forward, so the wrists sit roughly one
+    arm-length anterior to the shoulders -- the anterior offset is at its MAXIMUM there, not at
+    peak. The rep is horizontal abduction toward a T: by PEAK the wrists are lateral to the
+    shoulders at roughly shoulder depth, and the scapular retraction this exercise exists to train
+    can push them slightly POSTERIOR. So the anterior offset decays from setup toward peak and can
+    legitimately cross zero -- the reduction samples the signal exactly where its own premise ("the
+    band is held in front of the torso") stops holding.
+
+    CONSEQUENCE, STATED RATHER THAN SOFTENED: for a lifter who squeezes and holds at end range -- a
+    standard coaching cue -- most `peak` frames sit near zero. Either `|median| <
+    FACING_DEGENERATE_OFFSET` and the rule silences itself (safe, and the likely common case), or a
+    residual sign survives and rule 4 reports a backward lean for a forward one -- the
+    confidently-inverted verdict this construction exists to prevent.
+
+    NOT CHANGED HERE, AND WHY. Moving the reduction to `setup` or early `pull`, where the anterior
+    offset is actually largest, may well be the right fix -- but no fixture in this repository
+    carries a depth gradient across a rep to verify that change against, and `_setup_baseline`'s
+    own docstring (below) records that `setup` can be 1-2 frames on a short rep and may already
+    overlap loaded frames. Under this project's "no tuning without ground truth" rule, this is
+    written up rather than changed. A future change should reduce over `setup` or early `pull`
+    instead, backed by a fixture carrying a monotone depth decay across the rep.
+
+    NO CURRENT TEST CAN SEE THIS GAP: `bpa_frame` (tests/test_band_pull_apart.py) holds
+    `wrist_depth_offset` CONSTANT across every frame of a fixture, and `_facing_switch_rep` varies
+    it only as a step function built to pin the `phase == "peak"` filter -- neither reproduces the
+    monotone decay a real rep produces.
 
     UNDETERMINED SILENCES THE RULE -- the "can only ever SILENCE" guard category pushup.py
     documents. Two cases reach it: no finite z at all, and a median magnitude under
