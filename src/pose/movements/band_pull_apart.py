@@ -584,3 +584,199 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
             )
         )
     return detections
+
+
+BPA_TRUNK_KG_QUERY = "No Compensatory Trunk Movement"
+
+# FROM THE SPEC: "Flag if `trunk_lean_backward > 10deg` beyond setup baseline".
+TRUNK_LEAN_MILD_DEG = 10.0
+# RULE-LEVEL CHOICE MADE HERE. 2.5x the fire threshold, the `pushup.rule_hip_sag` convention.
+TRUNK_LEAN_SEVERE_DEG = 25.0
+
+# RULE-LEVEL, AND MEASURED RATHER THAN GUESSED -- but note what it is: a PLUMBING test that
+# distinguishes "this runtime reports depth" from "this runtime reports zeros", not a fault
+# threshold. Measured over the 49 real pose JSONs in data/runtime/pose_json (6 distinct clips
+# carry real z, 3 are z-degenerate): every non-degenerate clip's median wrist-shoulder offset
+# had magnitude >= 0.1295, and every degenerate clip sat at exactly 0.0. The two populations do
+# not overlap. 0.02 sits about 6x below the smallest real value and far above zero.
+FACING_DEGENERATE_OFFSET = 0.02
+
+# HARD GATE, WRITTEN IN THE NEGATIVE, and the form matters as much as the members.
+#
+# WHY A GATE AT ALL, when Row's design doc argues "downgrade, never gate": this rule measures a
+# SAGITTAL quantity. From a pure `rear` view the sagittal axis is perpendicular to the image
+# plane, so a signed torso lean computed there reads LATERAL SWAY IN THE FRONTAL PLANE -- a
+# different fault, or none. That is not a low-confidence reading of the right quantity (the case
+# the x0.65 discount exists for); it is a confident reading of the WRONG PLANE. Row's objection
+# to gating was that gated rules ship silent, and that does not apply here: the view the gate
+# leaves standing is `rear_oblique`, the modal production label (30 of 45 real pose JSONs).
+#
+# WHY NEGATIVE rather than a {side, rear_oblique, front_oblique} whitelist: `front_oblique` is
+# unreachable under `allow_front=False`, so a whitelist containing it is dead weight that READS
+# as coverage. The negative form needs no edit if `allow_front` is ever enabled (it admits
+# front/front_oblique automatically and correctly), and it fails in the safer direction -- an
+# unanticipated future label is scored rather than silently dropped. `pushup.rule_elbow_flare` is
+# the shipped precedent for a hard gate and takes exactly this negative shape.
+#
+# `unknown` is named explicitly because it means THE VIEW ESTIMATOR FAILED, not "a confirmed
+# view" -- and this rule, unlike `row.rule_momentum_jerk`, genuinely depends on knowing the
+# viewing plane, so it cannot wave the distinction away.
+TRUNK_BLIND_VIEWS = {"rear", "unknown"}
+
+
+def _clip_facing_sign(core: list[CoreFrame]) -> float:
+    """+1.0 if the lifter faces the camera, -1.0 if away, NaN when undetermined.
+
+    THE PROBLEM THIS SOLVES. `estimate_view_for_pose(allow_front=False)` relabels a genuinely
+    FRONT-facing subject as `rear_oblique` (src/pose/view_estimation.py:368-370), so the view
+    label conflates the two facings and CANNOT sign a sagittal offset. `overhead_press.py`
+    handles this by ASSUMING a facing and documenting that the other facing inverts every
+    sagittal reading in the module -- a coin flip per clip, on the losing side of which this rule
+    would confidently report the OPPOSITE fault. Not adopted.
+
+    WHY WRIST DEPTH IS THE RIGHT SIGNAL, and why it does not contradict this project's
+    depth-bottleneck findings. A band pull apart holds the band IN FRONT OF THE TORSO by
+    definition -- that is what the movement IS, from setup through peak. So the SIGN of
+    (mean wrist z - mean shoulder z) identifies the facing. This is a BINARY, LARGE-MARGIN
+    decision, not a metric-depth measurement: the Fit3D line found MediaPipe's depth unreliable
+    for cue MAGNITUDES, which is a different demand from the sign of a tens-of-centimetres
+    separation. It is also a MEASUREMENT PRECONDITION, not a fault threshold -- it decides which
+    direction counts as backward and is never compared against a cited number, so no citation is
+    being stretched to cover it.
+
+    PER-REP, NOT PER-CLIP, and that is a deliberate narrowing of the design spec's wording.
+    `run_detector` hands rules a per-rep slice, so a clip-level reduction is not reachable from
+    here -- and per-rep is the safer scope anyway, because it keeps rep N's verdict independent
+    of rep 1's frames, which this architecture deliberately does not couple.
+
+    REDUCED OVER `peak` FRAMES, where the arms are most extended and the margin is largest, and
+    by MEDIAN so per-frame z jitter cannot flip the sign mid-rep.
+
+    UNDETERMINED SILENCES THE RULE -- the "can only ever SILENCE" guard category pushup.py
+    documents. Two cases reach it: no finite z at all, and a median magnitude under
+    FACING_DEGENERATE_OFFSET. The latter covers the RTMPose extraction path, which writes z=0.0
+    for every landmark and therefore yields exactly 0.0 here -- rule 4 goes silent on that
+    runtime automatically, with no runtime-specific branch anywhere in this module.
+    """
+    values = [
+        frame.m("wrist_depth_offset")
+        for frame in core
+        if frame.valid and frame.phase == "peak" and np.isfinite(frame.m("wrist_depth_offset"))
+    ]
+    if not values:
+        return float(np.nan)
+    median = float(np.median(values))
+    if abs(median) < FACING_DEGENERATE_OFFSET:
+        return float(np.nan)
+    # MediaPipe z is NEGATIVE toward the camera, so a negative offset (wrists nearer the camera
+    # than the shoulders) means the lifter faces the camera.
+    return 1.0 if median < 0.0 else -1.0
+
+
+def rule_trunk_extension_compensation(
+    core: list[CoreFrame], ctx: RuleContext
+) -> list[PoseRuleDetection]:
+    """Flag the lifter leaning BACKWARD to fling the band apart instead of using the shoulders.
+
+    THRESHOLD PROVENANCE -- TWO CATEGORIES, DO NOT CONFLATE THEM.
+      FIRE THRESHOLD 10 deg: FROM THE SPEC ("Flag if trunk_lean_backward > 10deg beyond setup
+      baseline").
+      SEVERITY RAMP 10 -> 25 deg: A RULE-LEVEL CHOICE (see TRUNK_LEAN_SEVERE_DEG).
+      FACING FLOOR 0.02: A RULE-LEVEL CHOICE, measured (see FACING_DEGENERATE_OFFSET).
+
+    PHASE SCOPE `pull` and `peak`, FROM THE SPEC ("synchronized with the pull").
+
+    DIRECTIONAL, NOT A MAGNITUDE, and that is the whole design problem. Firing on |lean change|
+    would flag a FORWARD lean as trunk-extension compensation -- relabeling a different quantity
+    under this fault_id, which is exactly the defect that killed `row.rounded_thoracolumbar_spine`
+    construction 2. Hence `_clip_facing_sign`.
+
+    THE SPEC'S SECOND CUE IS EVIDENCE, NOT A FIRE CONDITION. "or a trunk-angle velocity spike
+    co-occurs with the concentric" is recorded as `evidence["trunk_whip_deg_s"]`, which
+    distinguishes a slow lean from a whip for the coaching cue without changing what fires --
+    the same treatment `row.rule_momentum_jerk` gives its own co-occurrence clause.
+
+    OBSERVABILITY `medium`, DOWNGRADED FROM THE SPEC'S `high`, ON PURPOSE. The fault is highly
+    visible to a human, but this detector's reading of it rests on a facing precondition that no
+    band-pull-apart clip has ever confirmed. The observability field should say so.
+
+    HARM CLAIM IS PARTLY INFERENTIAL, and the parent spec says so itself -- Fukunaga even notes
+    trunk extension can be deliberately engaged. Restated here rather than quietly upgraded.
+    """
+    if ctx.view_type in TRUNK_BLIND_VIEWS:
+        return []
+    facing = _clip_facing_sign(core)
+    if not np.isfinite(facing):
+        return []
+    baseline = _setup_baseline(core, "trunk_lean_image_signed_deg")
+    if not np.isfinite(baseline):
+        return []
+
+    def backward_lean(frame: CoreFrame) -> float:
+        """Degrees of BACKWARD lean beyond setup. Negative = forward, which never fires."""
+        value = frame.m("trunk_lean_image_signed_deg")
+        if not np.isfinite(value):
+            return float(np.nan)
+        return float((value - baseline) * facing)
+
+    mask = [
+        frame.valid
+        and frame.phase in ("pull", "peak")
+        and np.isfinite(backward_lean(frame))
+        and backward_lean(frame) > TRUNK_LEAN_MILD_DEG
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        leans = [backward_lean(frame) for frame in segment]
+        max_lean = float(np.nanmax(leans))
+        severity = severity_from_range(
+            max_lean, TRUNK_LEAN_MILD_DEG, TRUNK_LEAN_SEVERE_DEG, lower_is_worse=False
+        )
+        speeds = [
+            frame.m("trunk_angle_speed_deg_s")
+            for frame in segment
+            if np.isfinite(frame.m("trunk_angle_speed_deg_s"))
+        ]
+        detections.append(
+            build_detection(
+                fault_id="bpa_trunk_extension_compensation",
+                fault_name="Trunk-Extension Compensation (Leaning Back)",
+                kg_query=BPA_TRUNK_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=leans,
+                severity=severity,
+                confidence=severity * _OFF_VIEW_CONFIDENCE,
+                observability="medium",
+                evidence={
+                    "setup_trunk_lean_deg": round(baseline, 2),
+                    "max_backward_lean_deg": round(max_lean, 2),
+                    "threshold_deg": TRUNK_LEAN_MILD_DEG,
+                    "facing_sign": facing,
+                    "trunk_whip_deg_s": round(float(np.nanmax(speeds)), 2) if speeds else None,
+                    "primary_label": "backward trunk lean vs setup",
+                    "primary_value": round(max_lean, 2),
+                    "primary_threshold": TRUNK_LEAN_MILD_DEG,
+                },
+                citation=(
+                    "Fukunaga T et al. Int J Sports Phys Ther (2022) PMC8975561, DOI "
+                    "10.26603/001c.33026."
+                ),
+                citation_support=(
+                    "Fukunaga establishes the pull-apart as a standing horizontal-abduction / "
+                    "diagonal scapular exercise whose load should come from the shoulder girdle; "
+                    "the paper notes trunk/hip extension can be *engaged* deliberately but the "
+                    "target muscles are the periscapular/RTC group — so a backward trunk whip "
+                    "that replaces (rather than stabilizes for) horizontal abduction diverts the "
+                    "movement off its intended muscles. NOTE: no RAG/EMG source directly "
+                    "quantifies a \"lean-back cheat\" injury; the rule is a "
+                    "controlled-execution/performance-loss rule grounded in the exercise's "
+                    "intended horizontal-abduction mechanics, so the compensation framing is "
+                    "partly inferential (observability of the fault is high, but its harm claim "
+                    "is supported indirectly)."
+                ),
+            )
+        )
+    return detections
