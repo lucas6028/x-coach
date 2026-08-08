@@ -142,7 +142,7 @@ function AdminNav({ t, onNavigate }: { t: TFunc; onNavigate?: () => void }) {
     <aside className="h-full w-[240px] shrink-0 border-r border-border-dark bg-surface-dark flex flex-col justify-between overflow-hidden">
       <div>
         <div className="h-16 flex items-center gap-2 px-4 border-b border-border-dark">
-          <img src="/icon.svg" alt="" className="w-8 h-8 rounded shrink-0" />
+          <img src="/icon-192.png" alt="" className="w-8 h-8 shrink-0" />
           <span className="font-bold tracking-wide truncate">{t("admin.console.title")}</span>
           {onNavigate && (
             <button
