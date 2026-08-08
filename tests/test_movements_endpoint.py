@@ -19,7 +19,10 @@ class TestMovementsEndpoint(unittest.TestCase):
         resp = self.client.get("/api/movements")
         self.assertEqual(resp.status_code, 200)
         names = [m["name"] for m in resp.json()["movements"]]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row"])
+        self.assertEqual(
+            names,
+            ["Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row", "Band Pull Apart"],
+        )
 
     def test_reports_validation_status(self) -> None:
         # Lunge and Row surface with validated=False -- the Beta tag -- because their thresholds
@@ -38,6 +41,10 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # repository, so its thresholds have never been checked against ground truth.
                 "Deadlift": False,
                 "Row": False,
+                # Band pull apart ships Beta: no REHAB24-6 or labeled-correctness data exists
+                # for it anywhere in this repository (src/pose/movements/band_pull_apart.py's
+                # registration comment).
+                "Band Pull Apart": False,
             },
         )
 

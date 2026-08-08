@@ -4,15 +4,18 @@ import unittest
 import numpy as np
 
 from src.pose.movements.band_pull_apart import (
+    BAND_PULL_APART_DETECTOR,
     BAND_PULL_APART_METRIC_KEYS,
     _clip_facing_sign,
     band_pull_apart_assign_phases,
     band_pull_apart_compute_raw,
     rule_incomplete_rom,
+    rule_loss_of_scapular_retraction,
     rule_shrugging,
     rule_trunk_extension_compensation,
 )
 from src.pose.movements.base import CoreFrame, RuleContext, run_detector
+from src.pose.movements import registry
 
 
 def _lm(x: float, y: float, z: float = 0.0, visibility: float = 0.95) -> dict:
@@ -536,6 +539,115 @@ class TrunkExtensionRuleTest(unittest.TestCase):
         core = _core(_lean_rep(peak_lean_deg=15.0, wrist_depth_offset=-0.30))
         detection = rule_trunk_extension_compensation(core, _ctx(view_type="rear_oblique"))[0]
         self.assertIn("trunk_whip_deg_s", detection.evidence)
+
+
+class SilentRuleTest(unittest.TestCase):
+    def test_the_scapular_retraction_rule_is_registered_but_always_silent(self) -> None:
+        """Registered so spec and code stay 1:1 at four rules, silent because MediaPipe has no
+        scapular landmarks. Pinned so a future edit cannot un-silence it unnoticed."""
+        self.assertIn(rule_loss_of_scapular_retraction, BAND_PULL_APART_DETECTOR.rules)
+        # Input that superficially LOOKS like the fault: arms spread wide, shoulders unchanged.
+        core = _core(_rom_rep(spread_ratio=2.0))
+        for view in ("rear", "rear_oblique", "side", "unknown"):
+            self.assertEqual(rule_loss_of_scapular_retraction(core, _ctx(view_type=view)), [])
+
+
+class DetectorAssemblyTest(unittest.TestCase):
+    def test_registered_under_the_canonical_frontend_name(self) -> None:
+        """`get_detector` keys on name.lower(); the studio sends the string from
+        frontend/src/lib/movements.ts. A spelling drift makes the movement unselectable."""
+        self.assertEqual(BAND_PULL_APART_DETECTOR.name, "Band Pull Apart")
+        self.assertIs(registry.get_detector("Band Pull Apart"), BAND_PULL_APART_DETECTOR)
+        self.assertIs(registry.get_detector("band pull apart"), BAND_PULL_APART_DETECTOR)
+
+    def test_ships_unvalidated(self) -> None:
+        self.assertFalse(BAND_PULL_APART_DETECTOR.validated)
+
+    def test_all_four_spec_rules_are_present(self) -> None:
+        self.assertEqual(len(BAND_PULL_APART_DETECTOR.rules), 4)
+
+    def test_rep_signal_is_a_declared_metric_key(self) -> None:
+        """`run_detector` indexes `smoothed[detector.rep_signal]`, which is built from
+        metric_keys -- a rep_signal outside that tuple is a KeyError at analysis time."""
+        self.assertIn(BAND_PULL_APART_DETECTOR.rep_signal, BAND_PULL_APART_METRIC_KEYS)
+        self.assertEqual(BAND_PULL_APART_DETECTOR.rep_polarity, "max")
+
+
+# Repetition duration for the end-to-end fixtures below. Each of the 9 `_RATIOS` samples is
+# held for `_FRAMES_PER_SAMPLE` frames, so one rep spans 18 frames (0.6s @ 30fps) -- comfortably
+# past `rep_segmentation.DEFAULT_MIN_REP_SECONDS` (0.4s = 12 frames @ 30fps).
+#
+# AT 1 FRAME PER SAMPLE (9 frames/rep = 0.3s) THIS FIXTURE CANNOT PASS, AND THAT IS NOT A
+# SEGMENTATION DEFECT. Verified directly: `_excursion_bounds` finds all three excursions exactly
+# on their intended boundaries (three 9-frame spans, each `partial=False`) -- the frontal signal,
+# the hysteresis band, `polarity="max"` and `rep_start="extended"` all locate the reps correctly.
+# `_finalize` then discards all three on its duration-anomaly floor, `9 < 12`, and
+# `segment_reps` returns `[]`. The floor is doing exactly what `rep_segmentation.py` documents it
+# doing (rejecting a movement whose apparent reps are too brief to be real), on a fixture that was
+# too fast for the movement's DEFAULT `min_rep_seconds` -- not evidence that wrist-spread
+# segmentation itself is broken. `_FRAMES_PER_SAMPLE = 2` is the minimum fix that lets the test
+# answer the question it exists to ask; the assertions below are unchanged from the brief.
+#
+# THE FINDING THIS SURFACES, FOR TASK 6 / THE PARENT SPEC: with the default 0.4s floor, any real
+# band-pull-apart clip whose reps run faster than 0.4s is discarded as an anomaly the same way
+# this fixture was. Band pull aparts are legitimately performed briskly. RS-SP1's placement of
+# this movement in the "clean unipolar excursion, all defaults" group is plausible but UNVERIFIED
+# against real cadence -- the same category of gap `MovementDetector`'s own docstring names for
+# high knees ("~3Hz, about 10 frames per rep at 30fps, which the default would discard as
+# noise"). Not fixed here: overriding `min_rep_seconds` on `BAND_PULL_APART_DETECTOR` would be
+# real threshold tuning with no cited cadence behind it, and would silently weaken production
+# anomaly rejection for every real clip to make a test fixture convenient. Flagged, not patched.
+_FRAMES_PER_SAMPLE = 2
+_RATIOS = [0.4, 0.7, 1.2, 1.7, 2.0, 1.7, 1.2, 0.7, 0.4]
+
+
+def _three_rep_clip() -> list[dict]:
+    frames: list[dict] = []
+    for _rep in range(3):
+        for r in _RATIOS:
+            for _sample in range(_FRAMES_PER_SAMPLE):
+                frames.append(bpa_frame(spread_ratio=r, frame_index=len(frames)))
+    return frames
+
+
+class EndToEndSegmentationTest(unittest.TestCase):
+    def test_three_reps_are_segmented_from_a_three_rep_clip(self) -> None:
+        """THE SILENT-ZERO GUARD, AND IT IS NOT OPTIONAL.
+
+        Every rule test above builds CoreFrames directly, so all of them would pass while
+        `segment_reps` returned ZERO reps and production silently ran the whole-clip fallback on
+        every clip. The rep signal here is FRONTAL (wrist spread), unlike the six shipped
+        detectors' sagittal signals, and RS-SP1's own audit says its table is interface-design
+        inference rather than verified fact. This test is the only thing standing between that
+        inference and a silently mis-segmenting detector.
+        """
+        result = run_detector(
+            BAND_PULL_APART_DETECTOR,
+            _three_rep_clip(),
+            fps=30.0,
+            view_type="rear_oblique",
+            view_confidence=0.8,
+        )
+        self.assertIsNone(result.fallback)
+        self.assertEqual(len(result.reps), 3)
+
+    def test_a_clean_three_rep_clip_raises_no_faults(self) -> None:
+        result = run_detector(
+            BAND_PULL_APART_DETECTOR,
+            _three_rep_clip(),
+            fps=30.0,
+            view_type="rear_oblique",
+            view_confidence=0.8,
+        )
+        self.assertEqual(result.detections, [])
+
+    def test_phases_are_one_per_frame_through_the_framework(self) -> None:
+        """`run_detector` RAISES if assign_phases returns the wrong length (base.py:174)."""
+        frames = _three_rep_clip()
+        result = run_detector(
+            BAND_PULL_APART_DETECTOR, frames, fps=30.0, view_type="rear", view_confidence=0.8
+        )
+        self.assertEqual(len(result.core), len(frames))
 
 
 if __name__ == "__main__":
