@@ -420,6 +420,38 @@ def _lean_rep(
     return frames
 
 
+def _facing_switch_rep(
+    peak_offset: float,
+    off_peak_offset: float,
+    peak_frames: int = 6,
+    off_peak_frames: int = 14,
+) -> list[dict]:
+    """A rep whose PEAK-phase frames carry `peak_offset` and whose setup/pull frames carry a
+    DIFFERENT (here, opposite-signed) `off_peak_offset` -- built to PIN `_clip_facing_sign`'s
+    `frame.phase == "peak"` filter as a load-bearing line, not incidental.
+
+    Off-peak frames deliberately OUTNUMBER peak frames (14 vs 6, the default split) so that if
+    the filter were ever dropped (falling back to every valid frame) or widened to
+    `("pull", "peak")` (still admitting the 11 `pull` frames), the off-peak value's majority
+    would dominate the median and flip the returned sign. A fixture where peak frames were the
+    majority (as `_lean_rep`'s default 60/40 split is) would NOT catch that regression, because
+    the median would still land on the peak value's side by sheer frame count -- that is
+    precisely the gap the coordinator's review flagged: `_lean_rep` alone cannot pin this.
+    """
+    n = off_peak_frames + peak_frames
+    frames = []
+    for i in range(n):
+        wide = i >= off_peak_frames
+        frames.append(
+            bpa_frame(
+                spread_ratio=1.9 if wide else 0.6,
+                wrist_depth_offset=peak_offset if wide else off_peak_offset,
+                frame_index=i,
+            )
+        )
+    return frames
+
+
 class FacingDerivationTest(unittest.TestCase):
     def test_negative_offset_means_the_lifter_faces_the_camera(self) -> None:
         # Wrists nearer the camera than the shoulders (MediaPipe z is negative toward camera).
@@ -438,6 +470,15 @@ class FacingDerivationTest(unittest.TestCase):
         self.assertTrue(
             math.isnan(_clip_facing_sign(_core(_lean_rep(0.0, wrist_depth_offset=-0.01))))
         )
+
+    def test_the_peak_only_filter_is_load_bearing_not_incidental(self) -> None:
+        """Pins the `frame.phase == "peak"` filter directly, closing the gap the coordinator's
+        review flagged: every OTHER test in this class holds `wrist_depth_offset` constant
+        across all phases, so none of them would fail if the filter were dropped or widened.
+        Here the majority off-peak frames (14) carry the OPPOSITE sign from the minority peak
+        frames (6); only a genuine peak-only reduction returns the peak frames' sign."""
+        core = _core(_facing_switch_rep(peak_offset=-0.30, off_peak_offset=0.30))
+        self.assertEqual(_clip_facing_sign(core), 1.0)
 
 
 class TrunkExtensionRuleTest(unittest.TestCase):
