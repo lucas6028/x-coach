@@ -5,8 +5,8 @@
 >
 > 現況摘要：
 >
-> - **規則偵測器 6/16 動作**：squat、push-up、overhead press、lunge、deadlift、row
->   （`src/pose/movements/`，registry 驅動；`/api/movements` 由 registry 導出，
+> - **規則偵測器 7/16 動作**：squat、push-up、overhead press、lunge、deadlift、row、
+>   band pull apart（`src/pose/movements/`，registry 驅動；`/api/movements` 由 registry 導出，
 >   新增偵測器不需改前端）。PR #47 #48 #51 #53 #54。
 > - **逐 rep 偵測已上線**（`src/pose/rep_segmentation.py`，PR #49）；RS-SP2「只密集抽取
 >   要評分的 rep」仍在 **PR #50（未合併）**。
@@ -191,7 +191,7 @@
   - 結果：出貨用的 lead-leg cue **在三維下就是錯的**（不只是投影損失）；
     規格書自己定義的另一半替代量測從單目 2D 拿到 0.959/0.894。
   - 注意：**沒有任何閾值因此被調整**，`LUNGE_DETECTOR.validated` 仍為 `False`。
-- [ ] Squat / Overhead Press / Push-up / Deadlift / Row 五個偵測器仍是
+- [ ] Squat / Overhead Press / Push-up / Deadlift / Row / Band Pull Apart 六個偵測器仍是
   「spec-derived、UNVALIDATED」，前端以 Beta tag 標示（`/api/movements` 的 `validated` 欄位）
 - [ ] 把 `validated` 從「人工判斷」變成「有標註集撐腰」：每個動作至少一組標註資料 + 回歸腳本
 
@@ -394,16 +394,17 @@
   CoachTray 具名狀態列、pending dots、來源折疊為可點擊計數）
 - [x] 工具呼叫 trace 存進 conversations JSONB（可重播、可稽核；含 per-tool sources）
 
-### P2：多動作 + 記憶 — 🔶 偵測器 6/16，其餘未動
+### P2：多動作 + 記憶 — 🔶 偵測器 7/16，其餘未動
 
 - [x] **多動作規則偵測器（原「Lunge rule pack」已被更大的工程取代）**：
   registry 驅動的 per-movement 偵測器，端到端接進 web app（PR #47、#48、#51、#53、#54）
-  - 已上線 6 個：`squat`、`pushup`、`overhead_press`、`lunge`、`deadlift`、`row`
-    （`src/pose/movements/`；`GET /api/movements` 直接由 registry 導出，
+  - 已上線 7 個：`squat`、`pushup`、`overhead_press`、`lunge`、`deadlift`、`row`、
+    `band_pull_apart`（`src/pose/movements/`；`GET /api/movements` 直接由 registry 導出，
     新增一個偵測器不需改前端）
   - 皆帶 Beta tag（`validated=False`），唯一有標註驗證的是 Lunge（見上方「規則偵測器的標註驗證」）
-  - 部分規則被**證明無法實作**並明白記錄（Row 第 5 條、Deadlift 撤回一條）
-  - [ ] 其餘 10 個動作的 rule pack 未做
+  - 部分規則被**證明無法實作**並明白記錄（Row 第 5 條、Deadlift 撤回一條、
+    Band Pull Apart 的 scapular retraction 條恆為 silent）
+  - [ ] 其餘 9 個動作的 rule pack 未做
 - [ ] `compare_analyses` / `list_user_history` 工具 + 進步追蹤（跨分析記憶）
 - [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
 - [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
@@ -420,7 +421,7 @@
   「x-coach's squat analysis」。（`landing.showcase.squat.*` 與範例教練語句中的 goblet squat
   屬合理保留，不算。）另有硬字串散在 `App.tsx`、`UploadDropzone.tsx`、`CaptureStudio.tsx`、
   `StudioMobile.tsx`、`DemoIntro.tsx`、`history/HistoryStats.tsx` 等，尚未逐一清點。
-  注意 `landing.hero.sub` 目前寫「squat, push-up or overhead-press」——偵測器已到 6 個，
+  注意 `landing.hero.sub` 目前寫「squat, push-up or overhead-press」——偵測器已到 7 個，
   這句本身也過期了。
   使用者 2026-07-17 指定：未來採「完全泛化」而非加註解（en + zhHant 皆需更新；
   品牌／landing 文案已於 commit `4d64e659` 泛化為 multi-exercise）。
@@ -429,9 +430,20 @@
   `landing.showcase.title`（「One pipeline, the whole movement library.」）仍在
   （`frontend/src/lib/i18n.tsx`、`frontend/src/landing/MovementShowcase.tsx`），
   但 showcase 的 push-up/high-knee/sit-up clip 只有 MediaPipe pose tracking、無 fault 偵測。
-  偵測器已到 6 個，落差比原本小但仍存在（16 個動作的知識庫 vs 6 個動作的分析）。
+  偵測器已到 7 個，落差比原本小但仍存在（16 個動作的知識庫 vs 7 個動作的分析）。
 - [ ] 許多動作的錯誤需要脊椎及其他 MediaPipe 無法定義的點，思考其他解決方法。
 - [ ] 許多錯誤沒有對應到 Knowledge Graph 的節點。
+  - Band Pull Apart 具體案例（2026-08-09）：`Bent Elbows` 節點存在但 connectivity 0
+    （沒有 cause / risk / correction），`trunk_extension_compensation` 則完全沒有對應節點。
+    兩者都是 `scripts/knowledge/stub_general_movements_v3.py:80-87` 的一行修正，
+    但 graphml 已 gitignore，重新產生屬部署步驟。
+- [ ] `src/pose/rep_segmentation.py` 的 `DEFAULT_MIN_REP_SECONDS = 0.4`（30fps 下 12 幀）對
+  Band Pull Apart 若真實 clip 每下快於 0.4 秒，整段會被丟成雜訊、退回 whole-clip fallback——
+  與 High Knee 需要 `min_rep_seconds` override 是同一類問題。2026-08-09 已用 Fit3D 的
+  `rep_ann.json`（`s03/s04/s05/s07/s08`，共 25 下，50fps 經 ffprobe verified）量到真實節奏
+  1.78–2.92 秒/下，是門檻的 4.45–7.3 倍，方向上不太可能觸發——但只有 5 位受試者且是配合 mocap
+  的刻意動作，不能代表真實使用者可能更快更隨便的執行，仍是未證實的殘餘風險，因此不加
+  override（沒有可引用的節奏數字可調）。
 
 ### P3：感知升級 — ⏸ 未開始（但研究面已備妥依據）
 
