@@ -70,19 +70,22 @@ function LangSwitch() {
   );
 }
 
-// Brand lockup: the X mark (public/icon-192.png — the same artwork as the favicon and the app
-// rail) beside the name set in the display face. It is a transparent cutout, so it needs no plate
-// behind it. The name stays in flat ink — the mark is already the violet in this lockup, and the
-// app's own lockups (the rail, the login panel) set the name the same way.
+// Brand lockup: the skeleton mark (public/icon.svg — the same artwork as the favicon and the app
+// rail) beside the name set in the display face. The mark is rendered WITH its violet plate, not
+// as the bare figure this used to hand-draw inline: that figure was tuned for the old near-black
+// nav, and on the lavender canvas a near-white skeleton has nothing to sit against. The name stays
+// in flat ink — the mark is already the violet in this lockup, and the app's own lockups (the
+// rail, the login panel) set the name the same way.
 function Brand({ markSize = 26, textClass = "text-lg" }: { markSize?: number; textClass?: string }) {
   return (
     <span className="flex shrink-0 items-center gap-2.5">
       <img
-        src="/icon-192.png"
+        src="/icon.svg"
         width={markSize}
         height={markSize}
         alt=""
         aria-hidden="true"
+        className="rounded-md"
         style={{ width: markSize, height: markSize }}
       />
       <span className={`whitespace-nowrap font-display font-bold tracking-tight text-content ${textClass}`}>

@@ -19,10 +19,16 @@ import { useI18n } from "../lib/i18n";
 import AccountMenu from "./AccountMenu";
 
 // The app's own brand mark. The reference design's chevron placeholder is gone: with the top row
-// carrying no lockup any more, the rail shows the real X-Coach icon. The artwork is a transparent
-// cutout, so it carries no rounded plate to clip, ring, or drop a shadow against.
+// carrying no lockup any more, the rail shows the real X-Coach icon. The artwork carries its own
+// rounded violet plate, so the ring and the shadow have real edges to trace.
 function Mark({ className = "" }: { className?: string }) {
-  return <img src="/icon-192.png" alt="" className={`h-10 w-10 ${className}`} />;
+  return (
+    <img
+      src="/icon.svg"
+      alt=""
+      className={`h-10 w-10 rounded-xl shadow-accent ring-1 ring-black/5 ${className}`}
+    />
+  );
 }
 
 interface Props {

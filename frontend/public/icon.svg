@@ -1,0 +1,69 @@
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="x-coach">
+  <title>x-coach</title>
+
+  <!-- The squatting-skeleton mark, on the muse-spark palette the rest of the app runs (see
+       index.css): a violet plate, a near-white figure, green for the measured angle. It used to
+       be a near-black plate under a lime->teal figure, which is the one place the old dark theme
+       survived after the app went light. -->
+  <defs>
+    <!-- app-icon plate: the two violet stops the landing's accent text uses (#8b6bff to #5a3fe0),
+         deep enough that a white figure clears contrast at 32px -->
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8b6bff"/>
+      <stop offset="1" stop-color="#5a3fe0"/>
+    </linearGradient>
+    <!-- bone gradient: white, cooling to the palette's violet tint (ms-violet-soft) so the
+         figure has depth without ever dropping toward the plate's own value -->
+    <linearGradient id="bone" x1="28" y1="20" x2="104" y2="116" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f3f0ff"/>
+    </linearGradient>
+    <!-- The glow DEEPENS the plate behind the figure rather than lightening it. On the old dark
+         plate a bright green bloom made the figure pop; on a violet plate the same trick would
+         close the gap to a white figure instead of opening it. -->
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3d24a8" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#3d24a8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- rounded app-icon background -->
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- soft shade behind the figure so the skeleton pops -->
+  <circle cx="62" cy="62" r="52" fill="url(#glow)"/>
+
+  <!-- ground line -->
+  <line x1="22" y1="110" x2="106" y2="110" stroke="#ffffff" stroke-opacity="0.35" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- knee-angle arc: the "explainable" measurement accent, on the palette's green (ms-green).
+       Token names are written bare throughout this file, without the CSS custom-property prefix
+       they carry in index.css: an XML comment may not contain a double hyphen, and a comment that
+       spelled the prefix out would make the whole icon fail to parse. -->
+  <path d="M84 84 A 22 22 0 0 1 70 110" fill="none" stroke="#22c55e" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- skeleton bones: bold squatting side profile, fills the canvas -->
+  <g stroke="url(#bone)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- neck to hip (torso) -->
+    <line x1="47" y1="40" x2="40" y2="78"/>
+    <!-- thigh: hip to knee -->
+    <line x1="40" y1="78" x2="86" y2="84"/>
+    <!-- shin: knee to ankle -->
+    <line x1="86" y1="84" x2="74" y2="110"/>
+    <!-- foot -->
+    <line x1="60" y1="110" x2="94" y2="110"/>
+    <!-- arm: shoulder reaching forward -->
+    <line x1="47" y1="44" x2="92" y2="50"/>
+  </g>
+
+  <!-- pose keypoints: bright, large, with a deep-violet halo for separation from the bones -->
+  <g fill="#ffffff" stroke="#5a3fe0" stroke-width="2.5">
+    <circle cx="47" cy="42" r="6"/>   <!-- shoulder -->
+    <circle cx="40" cy="78" r="6"/>   <!-- hip -->
+    <circle cx="86" cy="84" r="7.5"/> <!-- knee (key joint) -->
+    <circle cx="74" cy="110" r="6"/>  <!-- ankle -->
+    <circle cx="92" cy="50" r="5.5"/> <!-- wrist -->
+  </g>
+
+  <!-- head: bold, with the same deep-violet outline the keypoints carry -->
+  <circle cx="49" cy="26" r="12" fill="url(#bone)" stroke="#5a3fe0" stroke-width="3"/>
+</svg>

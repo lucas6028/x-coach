@@ -313,7 +313,7 @@ describe("History thumbnails", () => {
       upload_a: { video_url: "v", thumbnail_url: "https://signed/thumb" },
     });
     // Scoped to `li img`, not just `img`: AppLayout's Header and Sidebar each render an
-    // unconditional `<img src="/icon-192.png">` brand logo ahead of the row content in DOM order, so
+    // unconditional `<img src="/icon.svg">` brand logo ahead of the row content in DOM order, so
     // an unscoped `container.querySelector("img")` finds the logo, not the row's thumbnail.
     const { container } = renderHistory();
     await waitFor(() =>
