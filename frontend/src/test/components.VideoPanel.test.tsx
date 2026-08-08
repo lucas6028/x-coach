@@ -177,6 +177,68 @@ describe("VideoPanel", () => {
     expect(video).toBeInTheDocument();
   });
 
+  // A clip recorded in the browser is a live-muxed WebM with no Duration element, so Chrome
+  // reports `Infinity` for its length (the reason lib/mediaDuration.ts exists). Infinity is
+  // truthy, so it used to sail past the `duration || metadata` fallback in the scrub bar and
+  // render as "0:00" with a playhead pinned at 0% — the clip appeared to have no length at all.
+  it("falls back to the analysis metadata when the clip reports an infinite duration", () => {
+    const ref = makeVideoRef();
+    renderWithProviders(
+      <VideoPanel
+        analysis={mockAnalysis}
+        videoRef={ref}
+        onTimeUpdate={vi.fn()}
+        onActiveFault={vi.fn()}
+        onSeek={vi.fn()}
+      />
+    );
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "duration", { configurable: true, value: Infinity });
+    fireEvent(video, new Event("loadedmetadata"));
+    // 300 frames at 30fps.
+    expect(document.querySelector(".tabular-nums")!.textContent).toContain("0:10");
+  });
+
+  it("advances the scrub bar on an infinite-duration clip", () => {
+    const ref = makeVideoRef();
+    renderWithProviders(
+      <VideoPanel
+        analysis={mockAnalysis}
+        videoRef={ref}
+        onTimeUpdate={vi.fn()}
+        onActiveFault={vi.fn()}
+        onSeek={vi.fn()}
+      />
+    );
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "duration", { configurable: true, value: Infinity });
+    Object.defineProperty(video, "currentTime", { configurable: true, value: 2 });
+    fireEvent(video, new Event("loadedmetadata"));
+    fireEvent(video, new Event("timeupdate"));
+    // 2s of a 10s clip: the fill has to have real width, not the 0% that `t / Infinity` gives.
+    const fill = document.querySelector<HTMLElement>('div[class*="bg-[#8b7bff]"]')!;
+    expect(fill.style.width).toBe("20%");
+  });
+
+  it("takes the real duration once the clip reports one", () => {
+    const ref = makeVideoRef();
+    renderWithProviders(
+      <VideoPanel
+        analysis={mockAnalysis}
+        videoRef={ref}
+        onTimeUpdate={vi.fn()}
+        onActiveFault={vi.fn()}
+        onSeek={vi.fn()}
+      />
+    );
+    const video = document.querySelector("video")!;
+    Object.defineProperty(video, "duration", { configurable: true, value: Infinity });
+    fireEvent(video, new Event("loadedmetadata"));
+    Object.defineProperty(video, "duration", { configurable: true, value: 25 });
+    fireEvent(video, new Event("durationchange"));
+    expect(document.querySelector(".tabular-nums")!.textContent).toContain("0:25");
+  });
+
   it("updates playing state when the video fires play and pause events", () => {
     const ref = makeVideoRef();
     renderWithProviders(
