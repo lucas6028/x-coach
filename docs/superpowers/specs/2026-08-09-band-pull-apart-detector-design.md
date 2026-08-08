@@ -154,6 +154,32 @@ found — not merely unit tests on the rule functions, which would pass happily 
 returned zero reps and every rule silently ran on the whole-clip fallback. This is the same class
 of silent-zero failure as the SP1 live-record bug (`be85d1fd`).
 
+**A second, still-open gap the synthetic clip cannot rule out: the segmentation floor itself is
+unverified for this movement's cadence.** `rep_segmentation.py`'s `DEFAULT_MIN_REP_SECONDS = 0.4`
+discards any candidate rep shorter than 0.4s (12 frames at 30fps) as duration-anomaly noise —
+"the segmentation itself doing exactly what `rep_segmentation.py` documents it doing", per SP1
+§3.4. `BAND_PULL_APART_DETECTOR` takes this default unchanged, on the strength of SP1's "clean
+unipolar excursion, all defaults" placement, but that placement is explicitly the inference §3.4
+warns is unverified, and no real band-pull-apart footage exists here to check it against (§2). The
+end-to-end fixture above is built at 18 frames/rep (0.6s at 30fps, comfortably above the floor) —
+by construction it cannot expose a floor problem, because building it any faster fails for a
+reason that has nothing to do with wrist-spread segmentation: at 9 frames/rep (0.3s) the same
+fixture's excursions are still found on their correct boundaries, and `_finalize` discards all
+three anyway, purely because `9 < 12`. That is the floor working as designed, not a segmentation
+defect — but it is also a preview of what happens to a genuinely fast real clip. The symptom, if
+this assumption is wrong: every rep in the clip falls under 12 frames, `segment_reps` returns
+`[]`, and `run_detector` falls back to scoring the whole clip as one window instead of per-rep —
+silently, with no error and no log line distinguishing it from a clean single-rep clip. This is
+the same class of gap SP1 §3.4 already measured for High Knee (~3Hz alternating-leg cadence,
+~10 frames/rep at 30fps, below the same 12-frame floor, which is why High Knee ships with
+segmentation disabled rather than a guessed override). Band Pull Apart was not given that
+treatment because nothing in Fukunaga or the KG suggests a comparably fast cadence — but nothing
+confirms a safely slow one either. Not fixed here: overriding `min_rep_seconds` on
+`BAND_PULL_APART_DETECTOR` would be real threshold tuning with no cited cadence behind it, and
+would silently weaken the anomaly floor for every real clip just to make a hypothetical fast one
+segment — the same fabrication this project's threshold rules forbid elsewhere. Flagged, not
+patched; recorded in `TODO.md`.
+
 ### 4.2 Phases
 
 `band_pull_apart_assign_phases` labels a rep window `setup → pull → peak → return`, mirroring
