@@ -34,9 +34,13 @@ describe("Sidebar — desktop rail (open)", () => {
     expect(screen.queryByText("Pose · Rules · GraphRAG")).not.toBeInTheDocument();
   });
 
-  it("omits the brand wordmark — the rail shows the mark alone", () => {
+  // This used to pin the opposite — the rail showed the mark alone. It now carries the same
+  // mark + wordmark lockup the landing nav does, so the shell names itself the way the page
+  // that links into it does.
+  it("shows the brand wordmark beside the mark", () => {
     renderRail();
-    expect(screen.queryByText("X-Coach")).not.toBeInTheDocument();
+    expect(screen.getByText("X-Coach")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "X-Coach" })).toBeInTheDocument();
   });
 
   // The rail owns its width toggle again (the top row still carries none — see
@@ -128,6 +132,14 @@ describe("Sidebar — collapsed rail", () => {
     renderCollapsed();
     expect(screen.queryByText("Analyse")).not.toBeInTheDocument();
     expect(screen.queryByText("Library")).not.toBeInTheDocument();
+  });
+
+  // The wordmark is the one piece of the brand lockup that cannot survive the 76px strip. Once
+  // the text is gone the link's aria-label is the only thing naming the mark.
+  it("drops the brand wordmark but keeps the mark named", () => {
+    renderCollapsed();
+    expect(screen.queryByText("X-Coach")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "X-Coach" })).toBeInTheDocument();
   });
 
   // With the labels gone the `title` attributes are the only thing naming the destinations —

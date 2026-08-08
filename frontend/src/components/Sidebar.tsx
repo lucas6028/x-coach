@@ -130,12 +130,27 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* The rail mark is now the app's brand — the top row no longer carries a lockup, so this
-            is the one labelled "X-Coach" in the shell and it links home. */}
+        {/* The rail's brand — the top row no longer carries a lockup, so this is the shell's own
+            and it links home. Mark plus wordmark, the lockup the landing nav uses, so the first
+            click into /app does not drop the visitor into a shell that names itself differently.
+            The wordmark goes when the rail collapses to its 76px strip: there is no room for it,
+            and the link keeps its aria-label so the bare mark is still named. `px-4` puts the
+            mark's left edge on the nav rows' icon inset below (nav px-2 + cell px-3 + the link's
+            own p-1). */}
         {!onClose && (
-          <div className="flex justify-center pt-5 pb-2">
-            <Link to="/app" aria-label="X-Coach" title="X-Coach" className="rounded-xl p-1">
+          <div className={`flex pt-5 pb-2 ${open ? "px-4" : "justify-center"}`}>
+            <Link
+              to="/app"
+              aria-label="X-Coach"
+              title="X-Coach"
+              className="flex min-w-0 items-center gap-2.5 rounded-xl p-1"
+            >
               <Mark />
+              {open && (
+                <span className="truncate font-display text-lg font-bold tracking-tight text-[#1e2142]">
+                  X-Coach
+                </span>
+              )}
             </Link>
           </div>
         )}
