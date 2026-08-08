@@ -351,8 +351,7 @@
 
 ## Demo
 
-- [x] Line ChatBot — 已上線：LINE Login + LIFF app shell（PR #37、#43）、
-  聊天室查訓練摘要 bot（PR #41）、admin 端連線/配額/webhook 診斷（PR #45、#46）
+- [ ] Line ChatBot — 剩下 LLM 對話
 - [ ] QR Code demo, real time interaction
 - [ ] 語音回饋（composer 已預留 UI 槽位，功能未做）
 - [x] **（計畫外）互動 mini-games**：`/games` hub、`/67` 手勢計數、`/ninja` Fruit Ninja
