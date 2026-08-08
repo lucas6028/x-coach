@@ -3,13 +3,16 @@
 // (#eef0fb) under white rounded cards, violet #7B61FF as the single accent, green #22c55e for
 // "good" and coral #ff5a5a for faults.
 //
-// Semantic surface/text tokens are driven by CSS variables (see index.css) so the same class
-// names adapt to light & dark themes. The legacy "-dark" suffixed names are kept as aliases to
-// avoid churn across components. NOTE: the reference design is light-only — the shell and the
-// studio page pin the reference hexes directly, so only token-styled pages follow the toggle.
+// Semantic surface/text tokens are driven by CSS variables (see index.css). The legacy "-dark"
+// suffixed names are a naming accident kept as aliases to avoid churn across components — they
+// are NOT a dark theme. The app is light-only: there is one token set and nothing ever puts a
+// `dark` class on <html>.
 const withVar = (name) => `rgb(var(${name}) / <alpha-value>)`;
 
 export default {
+  // Class-based, deliberately: Tailwind's DEFAULT is `media`, which would let a stray `dark:`
+  // utility switch on the visitor's OS preference and half-darken a light-only app. Keyed to a
+  // class nothing applies, such a utility simply never matches.
   darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {

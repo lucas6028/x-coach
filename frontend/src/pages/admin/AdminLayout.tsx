@@ -19,8 +19,6 @@ import { Link, NavLink, Outlet } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { useI18n, type TFunc } from "../../lib/i18n";
 import AccountMenu from "../../components/AccountMenu";
-import LanguageToggle from "../../components/LanguageToggle";
-import ThemeToggle from "../../components/ThemeToggle";
 
 interface NavItem {
   to: string;
@@ -81,10 +79,9 @@ export default function AdminLayout() {
             <ShieldCheck size={20} weight="duotone" className="shrink-0 text-primary" />
             <span className="truncate">{t("admin.console.title")}</span>
           </h1>
+          {/* Language moved behind this avatar (the settings dialog it opens) along with the rest
+              of the app's chrome; the theme picker is gone entirely. */}
           <div className="flex items-center gap-1 shrink-0">
-            <LanguageToggle />
-            <ThemeToggle />
-            <div className="mx-1 h-6 w-px bg-border-dark" />
             <AccountMenu />
           </div>
         </header>

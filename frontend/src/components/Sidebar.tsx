@@ -1,5 +1,7 @@
 import {
   Barbell,
+  CaretDoubleLeft,
+  CaretDoubleRight,
   ClockCounterClockwise,
   Folders,
   GameController,
@@ -10,9 +12,11 @@ import {
   X,
   type Icon,
 } from "@phosphor-icons/react";
+import { CircleNotch, SignIn } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
+import AccountMenu from "./AccountMenu";
 
 // The app's own brand mark. The reference design's chevron placeholder is gone: with the top row
 // carrying no lockup any more, the rail shows the real X-Coach icon.
@@ -35,18 +39,28 @@ interface Props {
   // Start a fresh studio session (clears the current analysis / routes into the studio).
   onNewAnalysis: () => void;
   // Mobile drawer only: when provided, the sidebar renders a brand + close row at the top and
-  // wires the ✕ button to it. The desktop rail omits this — its brand lives in the top navbar,
-  // and its collapse toggle lives there too (see Header).
+  // wires the ✕ button to it. The desktop rail omits this — its brand is the mark below.
   onClose?: () => void;
+  // Desktop rail only: flips `open`. Omitted by the drawer, which is always labelled and closes
+  // outright rather than shrinking to a strip.
+  onToggle?: () => void;
 }
 
-// The reference design's navigation rail: a floating white card, one stacked icon-over-label cell
-// per destination, and a soft violet pill under the active one. `open` is the labelled 84px rail;
-// collapsed drops to a 64px icon-only strip. The mobile drawer reuses the same component with a
-// brand + close row on top.
-export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnalysis, onClose }: Props) {
+// The navigation rail: a floating white card, one horizontal icon + label row per destination, and
+// a soft violet pill under the active one. `open` is the labelled 236px rail; collapsed drops to a
+// 76px icon-only strip with the labels living in the rows' tooltips. The mobile drawer reuses the
+// same component with a brand + close row on top and no collapse control.
+export default function Sidebar({
+  open,
+  width,
+  animate,
+  onOpenLibrary,
+  onNewAnalysis,
+  onClose,
+  onToggle,
+}: Props) {
   const { t } = useI18n();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user, lineAuthenticating } = useAuth();
   const { pathname } = useLocation();
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
@@ -62,18 +76,25 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
   const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
 
-  // One rail cell: icon over a small label, the whole cell a rounded target.
-  const cell = "w-full flex flex-col items-center gap-1.5 py-3 rounded-2xl transition-colors";
+  // One rail row: icon beside its label, the whole row a rounded target. Collapsed, the label is
+  // gone and the icon centres itself in the 76px strip — the row keeps its height either way, so
+  // toggling only moves things horizontally.
+  const cell = `w-full flex items-center gap-3 min-h-[46px] px-3 rounded-[14px] transition-colors ${
+    open ? "justify-start" : "justify-center"
+  }`;
   // `primary` is the reference's violet, so primary/10 over white lands on its #f3f0ff pill —
-  // using the token keeps the active state one definition instead of two.
-  const cellActive = "bg-primary/10 text-primary";
+  // using the token keeps the active state one definition instead of two. The lift under the
+  // selected row is the reference's own, and it is what separates "selected" from a plain hover.
+  const cellActive = "bg-primary/10 text-primary shadow-[0_14px_34px_rgba(112,70,255,0.14)]";
   const cellIdle = "text-[#59648f] hover:bg-[#f8f8fb] hover:text-[#1e2142]";
-  const label = "text-[11px] font-medium leading-none tracking-tight";
+  const label = "text-sm leading-none tracking-tight truncate";
 
   const Cell = ({ icon: Ico, text, active }: { icon: Icon; text: string; active: boolean }) => (
     <>
-      <Ico size={21} weight="duotone" />
-      {open && <span className={`${label} ${active ? "font-semibold" : ""}`}>{text}</span>}
+      <Ico size={21} weight="duotone" className="shrink-0" />
+      {open && (
+        <span className={`${label} ${active ? "font-semibold" : "font-medium"}`}>{text}</span>
+      )}
     </>
   );
 
@@ -81,11 +102,13 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
     <aside
       style={{ width }}
       // `glass-rail` — the second of the page's three blurred surfaces (shell, rail, popovers).
-      className={`glass-rail h-full shrink-0 flex flex-col justify-between overflow-y-auto scrollbar-none rounded-[28px] ${
+      // The scroll lives on the inner block, NOT here: an overflow container clips absolutely
+      // positioned descendants, and the account menu at the foot opens upward out of the rail.
+      className={`glass-rail h-full shrink-0 flex flex-col rounded-[28px] ${
         animate ? "transition-[width] duration-200 ease-in-out" : ""
       }`}
     >
-      <div>
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none rounded-t-[28px]">
         {/* Mobile drawer only: brand + close. */}
         {onClose && (
           <div className="h-16 flex items-center gap-2 px-3 border-b border-[#f0f1f8]">
@@ -116,14 +139,14 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
           </div>
         )}
 
-        <nav className="flex flex-col items-center gap-1.5 px-2 py-3">
+        <nav className="flex flex-col gap-1 px-2 py-3">
           {/* Primary CTA: start a fresh analysis from anywhere in the app. */}
           <button
             onClick={onNewAnalysis}
             title={t("nav.newAnalysis")}
             className={`${cell} bg-gradient-to-br from-[#a48bff] to-[#7b5cff] text-white shadow-[0_8px_20px_rgba(123,92,255,0.3)] hover:from-[#9a80ff] hover:to-[#6e4bff] active:scale-[0.98] mb-1`}
           >
-            <Plus size={21} weight="bold" />
+            <Plus size={21} weight="bold" className="shrink-0" />
             {open && <span className={`${label} font-semibold`}>{t("nav.newAnalysis")}</span>}
           </button>
           <Link
@@ -133,7 +156,7 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
           >
             <Cell icon={VideoCamera} text={t("nav.analyse")} active={onStudio} />
           </Link>
-          <button onClick={onOpenLibrary} className={`${cell} ${cellIdle}`}>
+          <button onClick={onOpenLibrary} title={t("nav.library")} className={`${cell} ${cellIdle}`}>
             <Cell icon={Folders} text={t("nav.library")} active={false} />
           </button>
           <Link
@@ -174,6 +197,43 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
             </Link>
           )}
         </nav>
+      </div>
+
+      {/* The width toggle stays INSIDE the rail rather than pinned to the shell's edge: the shell
+          is a rounded card, and anything absolutely positioned on the seam ends up outside the
+          radius. Drawer variant has no toggle — it closes outright instead of shrinking. */}
+      {onToggle && (
+        <div className={`flex px-2 py-1 ${open ? "justify-end" : "justify-center"}`}>
+          <button
+            onClick={onToggle}
+            aria-label={open ? t("nav.collapse") : t("nav.expand")}
+            title={open ? t("nav.collapse") : t("nav.expand")}
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-[#59648f] transition-colors hover:bg-[#f5f6fb] hover:text-[#1e2142]"
+          >
+            {open ? <CaretDoubleLeft size={16} weight="bold" /> : <CaretDoubleRight size={16} weight="bold" />}
+          </button>
+        </div>
+      )}
+
+      {/* The account cluster now lives at the foot of the rail rather than the content card's top
+          row. The same slot carries all three states, so the corner is never just empty: the
+          avatar when signed in, the in-flight LINE auto-login, otherwise the way in. */}
+      <div className="border-t border-[#f0f1f8] p-2">
+        {user ? (
+          <AccountMenu rail={open ? "open" : "closed"} />
+        ) : lineAuthenticating ? (
+          // Silent LINE auto-login is in flight (typically the web redirect-return): show a
+          // "signing in" affordance instead of the log-in link, which would read as failed.
+          <span aria-live="polite" className={`${cell} ${cellIdle} pointer-events-none`}>
+            <CircleNotch size={21} weight="bold" className="shrink-0 animate-spin" />
+            {open && <span className={`${label} font-medium`}>{t("account.lineSigningIn")}</span>}
+          </span>
+        ) : (
+          <Link to="/login" title={t("account.signin")} className={`${cell} ${cellIdle}`}>
+            <SignIn size={21} className="shrink-0" />
+            {open && <span className={`${label} font-medium`}>{t("account.signin")}</span>}
+          </Link>
+        )}
       </div>
     </aside>
   );

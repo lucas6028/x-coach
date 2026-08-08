@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   GearSix,
   MagnifyingGlass,
@@ -34,9 +35,13 @@ const GROUPS: { labelKey: string; items: { id: SectionId; labelKey: string; Icon
 
 // The settings popup: a searchable category rail on the left, one scrollable pane on the right.
 //
-// Follows ConfirmDialog's overlay idiom (`fixed inset-0 z-50`, no portal) rather than introducing
-// a portal layer. Only the selected pane is mounted, so each pane owns its own state and side
-// effects (ModelPane's /api/health fetch, AccountPane's clear flow) without the shell knowing.
+// Portalled to <body>, unlike ConfirmDialog's plain `fixed inset-0` overlay. It has to be: one of
+// the things that opens it is the account menu at the foot of the nav rail, and `.glass-rail` sets
+// `backdrop-filter` — which makes that 236px rail the containing block for `position: fixed`
+// descendants, so an in-tree overlay sizes itself to the rail instead of the viewport. Measured:
+// 234×697 rather than 1495×726. Only the selected pane is mounted, so each pane owns its own state
+// and side effects (ModelPane's /api/health fetch, AccountPane's clear flow) without the shell
+// knowing.
 //
 // The shell is presentational: it never navigates. Whoever renders it decides what closing means —
 // the /settings route goes back, the account menu just unmounts it.
@@ -77,7 +82,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
 
   if (!user) return null;
 
-  return (
+  return createPortal(
     <div
       // mousedown, not click: a drag that starts inside the card and releases on the backdrop
       // would otherwise read as a backdrop click and dismiss the popup.
@@ -177,6 +182,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
