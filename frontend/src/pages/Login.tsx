@@ -164,7 +164,7 @@ export default function Login() {
           className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-primary/10 blur-3xl"
         />
         <Link to="/" className="flex items-center gap-2.5">
-          <img src="/icon.svg" alt="" className="h-9 w-9 rounded" />
+          <img src="/icon-192.png" alt="" className="h-9 w-9" />
           <span className="font-display text-lg font-bold tracking-tight">X-Coach</span>
         </Link>
         <div className="relative">
