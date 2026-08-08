@@ -459,3 +459,128 @@ def rule_shrugging(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDete
             )
         )
     return detections
+
+
+BPA_ROM_KG_QUERY = "Bent Elbows"
+
+# FROM THE SPEC: "Flag if `wrist_spread_peak / shoulder_width < 1.6`". Explicitly normalized by
+# shoulder width by the spec's own wording, so scale-free -- unlike SHRUG_MILD above.
+SPREAD_MILD = 1.6
+# RULE-LEVEL CHOICE MADE HERE. A DESCENDING ramp: severity grows as the spread SHRINKS. 1.0 is
+# the spread ratio at which the wrists sit exactly at shoulder width -- no horizontal abduction
+# beyond the torso line at all, which is the natural floor of this movement rather than an
+# arbitrary 2.5x. Display/ranking curve, not a cited quantity.
+SPREAD_SEVERE = 1.0
+
+# FROM THE SPEC, WITH ITS INEQUALITY CORRECTED. Parent spec line 739 reads "elbow-extension
+# check `elbow_angle > ~150deg` maintained (bent-elbow curl-style cheat = fault)". Read
+# literally, >150 degrees -- nearly STRAIGHT arms -- is the fault, which contradicts the
+# parenthetical in the same sentence. The parenthetical is right and the inequality is a slip: a
+# bent-elbow cheat means a SMALLER elbow angle. Corroboration rather than inference alone: the
+# knowledge graph names this fault "Bent Elbows"
+# (scripts/knowledge/stub_general_movements_v3.py:85), and Fukunaga's rationale -- more range
+# covered against the band drives higher activation -- is a range argument that bending the
+# elbows shortens. The NUMBER 150 is unchanged and stays FROM THE SPEC; only the comparison
+# direction is corrected, and the correction is annotated in the parent spec so it cannot be
+# silently re-flipped by someone reading line 739 alone.
+ELBOW_MILD_DEG = 150.0
+# RULE-LEVEL CHOICE MADE HERE. 40 degrees of ramp width, taken from `pushup.rule_shallow_depth`
+# (100 -> 140) so this module's elbow ramp and push-up's cannot drift apart. DESCENDING.
+ELBOW_SEVERE_DEG = 110.0
+
+# Views in which the spec rates wrist spread `high` ("high -- front / rear"). `front` is listed
+# knowing it is unreachable under `allow_front=False`: it is correct on the merits and costs
+# nothing. `rear_oblique` foreshortens the frontal-plane spread, so it downgrades.
+SPREAD_HIGH_VIEWS = {"front", "rear"}
+
+
+def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag a pull that stops short -- hands not fully spread, or elbows bent to cheat the range.
+
+    THRESHOLD PROVENANCE -- TWO CATEGORIES, DO NOT CONFLATE THEM.
+      FIRE THRESHOLDS 1.6 and 150 deg: FROM THE SPEC (the latter with its inequality corrected,
+      see ELBOW_MILD_DEG).
+      SEVERITY RAMPS 1.6 -> 1.0 and 150 -> 110 deg: RULE-LEVEL CHOICES.
+
+    A GENUINE DISJUNCTION, unlike `row.rule_momentum_jerk`'s second condition which was a strict
+    SUBSET of its first and therefore unreachable. These two cues are independent failure modes:
+    a lifter can reach full spread with bent elbows (short-lever cheat) or hold straight arms and
+    stop short. `evidence["primary_label"]` records which term drove the verdict.
+
+    PHASE SCOPE `peak`, FROM THE SPEC ("Peak wrist separation").
+
+    NO SETUP BASELINE. Both terms are absolute thresholds on the peak, not deltas, so this rule
+    never calls `_setup_baseline` and an occluded setup cannot silence it.
+    """
+    observable = ctx.view_type in SPREAD_HIGH_VIEWS
+    scale = 1.0 if observable else _OFF_VIEW_CONFIDENCE
+
+    def scores(frame: CoreFrame) -> tuple[float, float]:
+        """(spread severity, elbow severity) for one frame; 0.0 where the term does not fire."""
+        spread = frame.m("wrist_spread_shoulder_norm")
+        elbow = frame.m("min_elbow_angle")
+        spread_sev = (
+            severity_from_range(spread, SPREAD_MILD, SPREAD_SEVERE, lower_is_worse=True)
+            if np.isfinite(spread) and spread < SPREAD_MILD
+            else 0.0
+        )
+        elbow_sev = (
+            severity_from_range(elbow, ELBOW_MILD_DEG, ELBOW_SEVERE_DEG, lower_is_worse=True)
+            if np.isfinite(elbow) and elbow < ELBOW_MILD_DEG
+            else 0.0
+        )
+        return spread_sev, elbow_sev
+
+    mask = [
+        frame.valid and frame.phase == "peak" and max(scores(frame)) > 0.0 for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        pairs = [scores(frame) for frame in segment]
+        combined = [max(p) for p in pairs]
+        severity = float(np.nanmax(combined))
+        worst = int(np.nanargmax(combined))
+        spread_drove = pairs[worst][0] >= pairs[worst][1]
+        min_spread = float(
+            np.nanmin([frame.m("wrist_spread_shoulder_norm") for frame in segment])
+        )
+        min_elbow = float(np.nanmin([frame.m("min_elbow_angle") for frame in segment]))
+        detections.append(
+            build_detection(
+                fault_id="bpa_incomplete_rom",
+                fault_name="Incomplete ROM (Hands Not Fully Spread)",
+                kg_query=BPA_ROM_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=combined,
+                severity=severity,
+                confidence=severity * scale,
+                observability="high" if observable else "medium",
+                evidence={
+                    "min_spread_ratio": round(min_spread, 3),
+                    "spread_threshold": SPREAD_MILD,
+                    "min_elbow_angle_deg": round(min_elbow, 2),
+                    "elbow_threshold_deg": ELBOW_MILD_DEG,
+                    "primary_label": (
+                        "wrist spread at peak" if spread_drove else "elbow flexion at peak"
+                    ),
+                    "primary_value": round(min_spread if spread_drove else min_elbow, 3),
+                    "primary_threshold": SPREAD_MILD if spread_drove else ELBOW_MILD_DEG,
+                },
+                citation=(
+                    "Fukunaga T et al. Int J Sports Phys Ther (2022) PMC8975561, DOI "
+                    "10.26603/001c.33026."
+                ),
+                citation_support=(
+                    "Fukunaga: peak muscle activity spanned \"15.3% to 72.6% of MVC across "
+                    "muscles and exercise conditions,\" and the diagonal-up (largest-excursion, "
+                    "against-gravity) direction produced the highest trapezius activity — "
+                    "\"the diagonal up movement showing the highest shoulder-girdle muscle "
+                    "activity is understandable as the arm is moving against gravity, resulting "
+                    "in higher overall load\" — i.e. covering more range against the band "
+                    "drives higher target activation, which a truncated pull loses."
+                ),
+            )
+        )
+    return detections
