@@ -42,8 +42,14 @@ from src.pose.geometry import (
     LEFT_SHOULDER, RIGHT_SHOULDER, LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility, distance,
+    contiguous_true_segments, severity_from_range,
 )
-from src.pose.movements.base import CoreFrame
+from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.pose_rule_detector import (
+    VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
+    PoseRuleDetection,
+    build_detection,
+)
 
 # Defined locally, matching row.py and overhead_press.py: geometry.py exports only the
 # lower-body and shoulder/hip constants.
@@ -283,3 +289,173 @@ def band_pull_apart_assign_phases(raw: list[dict]) -> list[str]:
         else:
             phases.append("return")
     return phases
+
+
+# ---------------------------------------------------------------------------------------
+# STEP 0 -- KG QUERY RESOLUTION, recorded before any rule was written. Each string below was
+# checked against data/kg/sports_kg_v3.graphml with `retrieve_graph_context(query,
+# movement="Band Pull Apart")` -- the function PRODUCTION calls, not just `resolve_nodes`.
+# Observed results, not predicted ones:
+#
+#   "Shoulder Shrugging" -> Band Pull Apart:Shoulder Shrugging
+#       causes: Weak Scapular Stabilizers | quality_impacts: Shoulder Depression      NON-EMPTY
+#   "Bent Elbows"        -> Band Pull Apart:Bent Elbows
+#       NO buckets -- only the HAS_FAULT backlink                                     THIN
+#   rule 4               -> NO Band-Pull-Apart-scoped node exists at all
+#       "Trunk Extension" / "Loss Of Neutral Body Position" (Row's queries) do not resolve
+#       under this movement's scoping; the shared nodes that do resolve are bare.
+#
+# The two gaps are recorded rather than masked. Pointing rule 2 at the shared `Range Of Motion`
+# QualityDimension WOULD return a rich bucket set, and was rejected: its `corrections` bucket is
+# "Wrapping Surface Adjustment", meaningless for this movement. A semantically correct thin card
+# beats a semantically wrong full one. Both gaps are one-line fixes in
+# scripts/knowledge/stub_general_movements_v3.py:80-87 and are logged against TODO.md's existing
+# "many faults have no KG node" item.
+BPA_SHRUG_KG_QUERY = "Shoulder Shrugging"
+
+# Imported rather than re-typed, so a change to the shared constant cannot silently skip this
+# module.
+_OFF_VIEW_CONFIDENCE = VIEW_UNAVAILABLE_CONFIDENCE_SCALE
+
+# FROM THE SPEC: "flag shrug if `gap_peak < gap_setup - 0.03` (shoulders elevate) on either
+# side". RAW IMAGE UNITS -- the spec states no normalizer here, and it says "normalized by
+# shoulder width" explicitly where it means that (the very next rule), so the absence is
+# meaningful rather than an omission. The honest cost is camera-distance dependence:
+# the same shrug filmed further away yields a smaller closure and fires less. Implemented as
+# written; `shoulder_ear_gap_shoulder_norm` is emitted as the scale-free companion that no rule
+# fires on, so a future validation can compare the two without moving this number.
+SHRUG_MILD = 0.03
+# RULE-LEVEL CHOICE MADE HERE. The parent spec states NO severity ramp for ANY Band Pull Apart
+# fault (the Lunge section states its ramps explicitly, so the absence is meaningful). 0.075 is
+# 2.5x the fire threshold, the convention `pushup.rule_hip_sag` uses for exactly this situation.
+# A display/ranking curve, not a cited quantity.
+SHRUG_SEVERE = 0.075
+
+
+def _setup_baseline(core: list[CoreFrame], key: str) -> float:
+    """Median of `key` over this window's valid `setup` frames; NaN when there are none.
+
+    WHY THE BASELINE LIVES IN THE RULES AND NOT IN `band_pull_apart_compute_raw`. Two of this
+    movement's three firing rules are deltas from a setup baseline, and a baseline is a PER-REP
+    reduction. `run_detector` calls `compute_raw` over the WHOLE CLIP before `segment_reps`, so
+    at metric time no rep boundary exists and there is no "this rep's setup" to reduce against.
+    Rules receive a per-rep slice, which is the first place the question is answerable.
+
+    MEDIAN, NOT MEAN, so one bad frame in a short setup cannot move the reference every later
+    comparison is made against.
+
+    NEVER A GUESSED BASELINE -- but what a caller does with a NaN one is conditional on the
+    caller's own fire condition, NOT a universal "return []" contract:
+      - A rule whose fire condition depends ONLY on this baseline (`rule_shrugging`,
+        `rule_trunk_extension_compensation`) has nothing left to evaluate and returns [].
+      - A rule whose fire condition is a DISJUNCTION with a non-baseline term
+        (`rule_incomplete_rom`, which fires on spread ratio OR elbow angle, neither of which is a
+        baseline delta) never consults this function at all.
+
+    STATED LIMITATION, inherited from `row._setup_baseline` where it was measured: `setup` is the
+    first 15% of the REP WINDOW, and the window has already been trimmed by `segment_reps` to the
+    rep's excursion -- so on a short rep `setup` can be 1-2 frames and may already overlap loaded
+    frames. Because every comparison here is `peak - baseline`, a baseline biased toward the
+    loaded state makes the MEASURED change smaller than the true one: the failure mode is a
+    MISSED fault, never a false one. Not corrected -- there is no principled way to detect "this
+    setup frame is already loaded" without a second threshold the parent spec does not supply.
+    """
+    values = [
+        frame.m(key)
+        for frame in core
+        if frame.valid and frame.phase == "setup" and np.isfinite(frame.m(key))
+    ]
+    if not values:
+        return float(np.nan)
+    return float(np.median(values))
+
+
+def rule_shrugging(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
+    """Flag the shoulders rising toward the ears across the pull -- upper-trap dominance.
+
+    THRESHOLD PROVENANCE -- TWO CATEGORIES, DO NOT CONFLATE THEM.
+      FIRE THRESHOLD 0.03: FROM THE SPEC ("flag shrug if gap_peak < gap_setup - 0.03").
+      SEVERITY RAMP 0.03 -> 0.075: A RULE-LEVEL CHOICE (see SHRUG_SEVERE).
+
+    PHASE SCOPE `peak`, FROM THE SPEC's own wording ("Compute at setup baseline and at peak").
+
+    EITHER SIDE, NOT THE MEAN, also FROM THE SPEC ("on either side"). A unilateral shrug is the
+    common presentation and averaging the two gaps would halve it toward the threshold.
+
+    NO VIEW DISCOUNT, AND THAT IS AN ARGUMENT RATHER THAN AN OVERSIGHT. This rule's metric is a
+    VERTICAL image-y difference between a shoulder and its own ear. A magnitude in image-y reads
+    identically from in front of or behind the subject, so the rule is facing-free BY
+    CONSTRUCTION -- the same argument `row.rule_asymmetric_pull` and `lunge.rule_knee_valgus`
+    make for their own metrics. `rear` and `rear_oblique` (between them, 43 of the 45 real pose
+    JSONs in this repository) therefore both earn the spec's `high` rating with no discount.
+    """
+    left_baseline = _setup_baseline(core, "left_shoulder_ear_gap")
+    right_baseline = _setup_baseline(core, "right_shoulder_ear_gap")
+    if not np.isfinite(left_baseline) and not np.isfinite(right_baseline):
+        return []
+
+    def closure(frame: CoreFrame) -> float:
+        """Largest gap CLOSURE across the two sides; NaN-safe, so one occluded ear does not
+        silence the other side."""
+        options = [
+            base - frame.m(key)
+            for base, key in (
+                (left_baseline, "left_shoulder_ear_gap"),
+                (right_baseline, "right_shoulder_ear_gap"),
+            )
+            if np.isfinite(base) and np.isfinite(frame.m(key))
+        ]
+        return float(max(options)) if options else float(np.nan)
+
+    mask = [
+        frame.valid
+        and frame.phase == "peak"
+        and np.isfinite(closure(frame))
+        and closure(frame) > SHRUG_MILD
+        for frame in core
+    ]
+    detections: list[PoseRuleDetection] = []
+    for start, end in contiguous_true_segments(mask, ctx.min_frames):
+        segment = core[start : end + 1]
+        closures = [closure(frame) for frame in segment]
+        max_closure = float(np.nanmax(closures))
+        severity = severity_from_range(max_closure, SHRUG_MILD, SHRUG_SEVERE, lower_is_worse=False)
+        detections.append(
+            build_detection(
+                fault_id="bpa_shrugging",
+                fault_name="Shrugging (Upper-Trap Dominance)",
+                kg_query=BPA_SHRUG_KG_QUERY,
+                retrieval_mode="kg",
+                segment_metrics=segment,
+                score_values=closures,
+                severity=severity,
+                confidence=severity,
+                observability="high",
+                evidence={
+                    "setup_left_gap": round(left_baseline, 4) if np.isfinite(left_baseline) else None,
+                    "setup_right_gap": round(right_baseline, 4) if np.isfinite(right_baseline) else None,
+                    "max_gap_closure": round(max_closure, 4),
+                    "threshold": SHRUG_MILD,
+                    "primary_label": "shoulder-ear gap closure vs setup",
+                    "primary_value": round(max_closure, 4),
+                    "primary_threshold": SHRUG_MILD,
+                },
+                citation=(
+                    "Fukunaga T et al. Int J Sports Phys Ther (2022) PMC8975561, DOI "
+                    "10.26603/001c.33026; Camargo PR & Neumann DA, Braz J Phys Ther (2019) "
+                    "23(6):467–475, PMC6849087, DOI 10.1016/j.bjpt.2019.01.011."
+                ),
+                citation_support=(
+                    "Fukunaga: \"it has been suggested that exercises should aim to "
+                    "preferentially target the middle trapezius, lower trapezius, and posterior "
+                    "RTC, with lower contributions from the upper trapezius and deltoid "
+                    "muscles\" — a shrug inverts the intended UT-low pattern. Camargo & Neumann: "
+                    "\"Exercises that increase the strength or relative activation of the upper "
+                    "trapezius may be counterproductive in many patients with shoulder pain, "
+                    "especially those with symptoms of impingement,\" because \"the upper "
+                    "trapezius naturally causes an increased anterior tilt of the scapula, which "
+                    "may compromise the volume within the subacromial space.\""
+                ),
+            )
+        )
+    return detections
