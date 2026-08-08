@@ -7,6 +7,7 @@ from src.pose.movements.band_pull_apart import (
     BAND_PULL_APART_METRIC_KEYS,
     band_pull_apart_assign_phases,
     band_pull_apart_compute_raw,
+    rule_incomplete_rom,
     rule_shrugging,
 )
 from src.pose.movements.base import CoreFrame, RuleContext, run_detector
@@ -339,6 +340,62 @@ class ShruggingRuleTest(unittest.TestCase):
         for i in range(4):  # blank out every setup frame
             frames[i]["landmarks"][7] = _lm(0.4, 0.2, visibility=0.10)
         self.assertEqual(rule_shrugging(_core(frames), _ctx()), [])
+
+
+def _rom_rep(spread_ratio: float, elbow_angle_deg: float = 170.0, n: int = 20) -> list[dict]:
+    frames = []
+    for i in range(n):
+        wide = i >= int(n * 0.4)
+        frames.append(
+            bpa_frame(
+                spread_ratio=spread_ratio if wide else 0.6,
+                elbow_angle_deg=elbow_angle_deg if wide else 175.0,
+                frame_index=i,
+            )
+        )
+    return frames
+
+
+class IncompleteRomRuleTest(unittest.TestCase):
+    def test_fires_when_the_spread_falls_short(self) -> None:
+        detections = rule_incomplete_rom(_core(_rom_rep(spread_ratio=1.3)), _ctx())
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].fault_id, "bpa_incomplete_rom")
+
+    def test_silent_at_full_spread_with_straight_arms(self) -> None:
+        self.assertEqual(rule_incomplete_rom(_core(_rom_rep(spread_ratio=1.9)), _ctx()), [])
+
+    def test_fires_on_bent_elbows_even_at_full_spread(self) -> None:
+        """THE SPEC'S INEQUALITY IS INVERTED AND THIS TEST PINS THE CORRECTION.
+
+        Parent spec line 739 reads `elbow_angle > ~150deg` while its own parenthetical says a
+        bent-elbow cheat is the fault -- and >150 degrees is nearly STRAIGHT arms. The
+        parenthetical is right. Implemented as `< 150`, so this fixture (140 degrees, full
+        spread) MUST fire; under the spec's literal `>` it would be silent.
+        """
+        detections = rule_incomplete_rom(
+            _core(_rom_rep(spread_ratio=1.9, elbow_angle_deg=140.0)), _ctx()
+        )
+        self.assertEqual(len(detections), 1)
+        self.assertEqual(detections[0].evidence["primary_label"], "elbow flexion at peak")
+
+    def test_straight_arms_at_full_spread_do_not_fire(self) -> None:
+        self.assertEqual(
+            rule_incomplete_rom(_core(_rom_rep(spread_ratio=1.9, elbow_angle_deg=170.0)), _ctx()),
+            [],
+        )
+
+    def test_spread_severity_reaches_one_at_the_ramp_endpoint(self) -> None:
+        detections = rule_incomplete_rom(_core(_rom_rep(spread_ratio=1.0)), _ctx())
+        self.assertAlmostEqual(detections[0].severity, 1.0, places=3)
+
+    def test_rear_oblique_downgrades_because_spread_foreshortens(self) -> None:
+        core = _core(_rom_rep(spread_ratio=1.3))
+        rear = rule_incomplete_rom(core, _ctx(view_type="rear"))[0]
+        oblique = rule_incomplete_rom(core, _ctx(view_type="rear_oblique"))[0]
+        self.assertEqual(rear.observability, "high")
+        self.assertEqual(oblique.observability, "medium")
+        self.assertLess(oblique.confidence, rear.confidence)
 
 
 if __name__ == "__main__":
