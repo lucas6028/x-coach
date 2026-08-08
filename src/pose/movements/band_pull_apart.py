@@ -44,7 +44,8 @@ from src.pose.geometry import (
     landmarks_to_array, visible_point, angle_degrees, midpoint, mean_visibility, distance,
     contiguous_true_segments, severity_from_range,
 )
-from src.pose.movements.base import CoreFrame, RuleContext
+from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
+from src.pose.movements import registry
 from src.pose.pose_rule_detector import (
     VIEW_UNAVAILABLE_CONFIDENCE_SCALE,
     PoseRuleDetection,
@@ -781,3 +782,97 @@ def rule_trunk_extension_compensation(
             )
         )
     return detections
+
+
+def rule_loss_of_scapular_retraction(
+    core: list[CoreFrame], ctx: RuleContext
+) -> list[PoseRuleDetection]:
+    """Registered but PERMANENTLY SILENT -- always returns [].
+
+    Loss of scapular retraction is a real, cited band-pull-apart fault: Fukunaga (PMC8975561)
+    found middle-trapezius activity driven by the retraction-oriented directions, and the
+    exercise is framed around recruiting the periscapular muscles. The fault is genuine. What
+    fails is the SENSING, and the parent spec's prescribed heuristic fails twice over.
+
+    (a) ITS FIRE CONDITION IS A NULL-DETECTION. The spec says: flag when wrist spread increases
+        while `dist(11,12)` changes by LESS THAN 0.01 -- i.e. fire when the shoulder width FAILS
+        TO CHANGE. A steady frame, a partially occluded frame, and a frame where the lifter
+        genuinely does not retract are indistinguishable to that test; all three satisfy it.
+        Every correctly performed rep that holds the shoulders stable would fire the fault. A
+        rule whose positive class is "nothing measurable happened" cannot separate the fault from
+        the absence of evidence.
+
+    (b) THE METRIC IS CONFOUNDED WITH WHAT IT MUST BE INDEPENDENT OF. MediaPipe's shoulder
+        landmark is a GLENOHUMERAL point, not a scapular border point, and it moves with the
+        humerus. During horizontal abduction the humerus is exactly what is moving, so
+        `dist(11,12)` changes for reasons unrelated to scapular adduction and cannot attribute an
+        observed narrowing to retraction rather than to arm position. Root cause: MediaPipe Pose
+        has NO scapular landmarks -- no medial border, no inferior angle -- so no construction
+        over its 33 points measures scapular position. Same root cause as
+        `pushup.rule_scapular_winging` and `row`'s fifth rule.
+
+    Separately, the `0.01` figure carries no citation; Fukunaga supplies no landmark-displacement
+    magnitude in any units.
+
+    SILENT, NOT WITHDRAWN, AND THE DISTINCTION IS LOAD-BEARING. This project has two treatments
+    for a rule it will not fire. Registered-but-silent (pushup.rule_scapular_winging, row's
+    fifth) says "real, well-cited fault; the sensor cannot see it". Withdrawn from the parent
+    spec (OHP bar-path 2026-07-25, deadlift bar-drift 2026-08-01) says "no citation supports the
+    rule as written". Fukunaga genuinely backs retraction as the mechanism, so this is a sensing
+    failure, not a citation failure, and it takes the silent treatment. The parent spec carries a
+    NOTE, not a WITHDRAWN blockquote.
+
+    NOT SUBSTITUTED, DELIBERATELY. Scapular contour from a rear view and shoulder-to-spine
+    distance both carry SOME retraction information and neither is recoverable from 33 landmarks.
+    Shipping a different metric under this fault_id would attach Fukunaga's citation to a
+    quantity Fukunaga says nothing about -- the fabrication this project's anti-hallucination
+    rule forbids.
+
+    THE KG IS NOT THE GAP: `Band Pull Apart:Insufficient Scapular Retraction` resolves with a
+    non-empty `causes` bucket ("Limited Scapular Retraction"). The metric is the gap.
+    """
+    return []
+
+
+# ALL FOUR of the parent spec's Band Pull Apart rules are listed, deliberately: three can fire
+# and `rule_loss_of_scapular_retraction` is permanently silent so the spec and the code stay in
+# 1:1 correspondence (see its docstring). Registering it costs one no-op call per clip and buys
+# an auditor the answer "yes, it is accounted for, and here is why it says nothing" -- the same
+# trade `pushup.rule_scapular_winging` makes. Contrast `deadlift`'s withdrawn bar-drift rule,
+# which is ABSENT rather than silent because its problem was the citation, not the sensor.
+#
+# `BAND_PULL_APART_METRIC_KEYS` must stay a two-way match with what `band_pull_apart_compute_raw`
+# emits (pinned by `test_metric_keys_match_the_emitted_metrics_exactly`): a key the tuple omits
+# is dropped by `run_detector`, which builds each CoreFrame's metrics dict FROM this tuple, and
+# read back as NaN by every rule.
+BAND_PULL_APART_DETECTOR = MovementDetector(
+    "Band Pull Apart",
+    BAND_PULL_APART_METRIC_KEYS,
+    band_pull_apart_compute_raw,
+    band_pull_apart_assign_phases,
+    (
+        rule_shrugging,
+        rule_incomplete_rom,
+        rule_loss_of_scapular_retraction,
+        rule_trunk_extension_compensation,
+    ),
+    # `validated` stays at its default False, and that is not a formality. REHAB24-6 holds arm
+    # abduction, arm VW, table push-ups, leg abduction, lunge and squats -- no band pull apart.
+    # Fit3D DOES have `band pull apart` video with 3D mocap ground truth and rep boundaries
+    # (docs/movement-kg-expansion-plan.md:33,48), but no binary correct/incorrect label on any
+    # rep, so it cannot support a REHAB24-6-style fire-rate/AUC-against-correctness check. NO
+    # labeled-CORRECTNESS band pull apart repetition exists anywhere in this repository, so no
+    # threshold here has ever been checked against a rep judged correct or incorrect by a human.
+    # Beta is the factual label.
+    rep_signal="wrist_spread_shoulder_norm",
+    # `max`, not the `min` five of the six shipped detectors use: this movement's excursion is
+    # hands-together -> spread -> together, so the rep peaks at the signal's MAXIMUM. Assigned by
+    # the RS-SP1 design spec's 16-movement audit (docs/superpowers/specs/
+    # 2026-07-26-rep-segmentation-sp1-design.md section 3.4), which places Band Pull Apart in the
+    # "clean unipolar excursion, all defaults" group -- an interface-design inference that
+    # `EndToEndSegmentationTest` is what actually verifies.
+    rep_polarity="max",
+    rep_start="extended",
+)
+
+registry.register(BAND_PULL_APART_DETECTOR)
