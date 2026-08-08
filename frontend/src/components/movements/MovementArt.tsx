@@ -2,26 +2,28 @@ import MovementIcon from "./MovementIcon";
 
 // The illustration shown on a movement card, keyed by the canonical English movement name.
 //
-// These are the exercise_library_muse-spark reference's own figures, cut out and cleaned before
-// being committed: the sources are scraped stock art -- one carried a stock-agency watermark bar,
-// one a third-party wordmark, and their backgrounds ranged from flat white through a faint grid to
-// a photograph of a swimming pool. They were knocked out to transparency, trimmed and resized from
-// 6.9 MB to ~1 MB for the set. `scripts/prep_movement_art.py` is that pipeline, kept so the eight
-// can be regenerated or audited rather than being opaque binaries.
-//
-// KNOWN GAP, stated rather than hidden: the reference only drew eight exercises and this catalog
-// has sixteen. The rest fall back to their own MovementIcon figure drawn large -- the same drawing
-// that sits beside the title, so a card without an illustration still shows ITS movement rather
-// than a stand-in for movement in general.
+// The first eight (squat through jumping jacks) started as the exercise_library_muse-spark
+// reference's own figures; `scripts/prep_movement_art.py` documents that original knockout-to-
+// transparency pipeline. What ships today, for all sixteen, are opaque 1254x1254 pre-matted
+// squares -- see the "stage" comment in MovementCard.tsx for why full-bleed opaque art replaced
+// the trimmed transparent cutouts.
 export const ART: Record<string, string> = {
   Squat: "squat.png",
   Lunge: "lunge.png",
   Deadlift: "deadlift.png",
+  "Leg Abduction": "leg-abduction.png",
+  "Shoulder Bridge": "shoulder-bridge.png",
   "Push-up": "pushup.png",
   "Overhead Press": "overhead-press.png",
   Row: "row.png",
+  "Bicep Curl": "bicep-curl.png",
+  "Band Pull Apart": "band-pull-apart.png",
+  "Arm Abduction": "arm-abduction.png",
+  "Arm VW": "arm-vw.png",
   "Sit-up": "situp.png",
+  "Torso Twist": "torso-twist.png",
   "Jumping Jacks": "jumping-jack.png",
+  "High Knee": "high-knee.png",
 };
 
 interface Props {
@@ -34,6 +36,8 @@ interface Props {
 export default function MovementArt({ movement }: Props) {
   const file = ART[movement];
 
+  // No movement in the catalog is missing art today; the MovementIcon fallback stays as a guard
+  // against a future movement being added to lib/movements.ts before its art ships.
   if (!file) {
     return (
       <span className="flex h-full w-full items-center justify-center">
