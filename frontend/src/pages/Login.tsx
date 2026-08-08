@@ -194,7 +194,7 @@ export default function Login() {
           className="w-full max-w-sm"
         >
           <Link
-            to="/"
+            to="/app"
             className="mb-8 inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-content"
           >
             <ArrowLeft size={18} />

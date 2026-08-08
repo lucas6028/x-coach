@@ -408,7 +408,7 @@ const en: Dict = {
 
   // Auth — login + session
   "auth.checking": "Checking your session…",
-  "auth.back": "Back to home",
+  "auth.back": "Back to app",
   "auth.signInTitle": "Sign in",
   "auth.signInSub": "Welcome back. Pick up your saved analyses.",
   "auth.signUpTitle": "Create your account",
@@ -1172,7 +1172,7 @@ const zhHant: Dict = {
 
   // Auth — login + session
   "auth.checking": "確認登入狀態中…",
-  "auth.back": "返回首頁",
+  "auth.back": "返回應用程式",
   "auth.signInTitle": "登入",
   "auth.signInSub": "歡迎回來，繼續查看你儲存的分析。",
   "auth.signUpTitle": "建立帳號",
