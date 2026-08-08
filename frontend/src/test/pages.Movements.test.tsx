@@ -127,6 +127,45 @@ describe("Movements page", () => {
     expect(navigate).toHaveBeenCalledWith("/app?movement=Overhead%20Press");
   });
 
+  it("narrows to one body region when a filter pill is picked", async () => {
+    renderWithProviders(<Movements />);
+    await userEvent.click(screen.getByRole("button", { name: "Upper body" }));
+    // One section left, and it is the right one: an upper-body movement is present and a
+    // lower-body one is gone.
+    expect(screen.getAllByRole("list")).toHaveLength(1);
+    expect(screen.getByRole("heading", { name: "Upper body" })).toBeInTheDocument();
+    expect(screen.getByText("Row")).toBeInTheDocument();
+    expect(screen.queryByText("Squat")).toBeNull();
+
+    // And the whole catalog comes back — a filter that cannot be undone is a dead end.
+    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(ALL_MOVEMENTS.length);
+  });
+
+  it("searches across sections and drops the ones left empty", async () => {
+    renderWithProviders(<Movements />);
+    await userEvent.type(screen.getByRole("searchbox"), "row");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("Row")).toBeInTheDocument();
+    // The heading of a section with no surviving card is gone too, not left over nothing.
+    expect(screen.queryByRole("heading", { name: "Lower body" })).toBeNull();
+  });
+
+  it("searches the label the reader can see, not the English key", async () => {
+    localStorage.setItem("lang", "zh-Hant");
+    renderWithProviders(<Movements />);
+    await userEvent.type(screen.getByRole("searchbox"), "深蹲");
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("深蹲")).toBeInTheDocument();
+  });
+
+  it("says nothing matched rather than showing an empty grid", async () => {
+    renderWithProviders(<Movements />);
+    await userEvent.type(screen.getByRole("searchbox"), "zzzz");
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    expect(screen.getByText(/No movements match/)).toBeInTheDocument();
+  });
+
   it("falls back to Squat-only when the list cannot be fetched", async () => {
     vi.spyOn(api, "getMovements").mockRejectedValue(new Error("offline"));
     renderWithProviders(<Movements />);
