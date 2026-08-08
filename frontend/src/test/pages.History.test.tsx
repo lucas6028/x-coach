@@ -273,12 +273,14 @@ describe("History", () => {
     expect(screen.getByText("2 faults")).toBeInTheDocument();
   });
 
-  it("signs out from the account menu in the shared navbar", async () => {
+  it("signs out from the account menu at the foot of the rail", async () => {
     vi.spyOn(api, "listAnalyses").mockResolvedValue({ total: 0, items: [] });
     renderHistory();
     await screen.findByText("No saved analyses yet.");
-    // Sign-out now lives in the unified navbar's account menu, not a page-local header button.
-    await userEvent.click(screen.getByRole("button", { name: /Account menu/i }));
+    // Sign-out lives in the shell's account menu, not a page-local header button. AppLayout
+    // renders the rail twice (desktop, plus the off-canvas drawer hidden from `lg`), so there are
+    // two triggers in the DOM; drive the desktop one and expect a single menu from it.
+    await userEvent.click(screen.getAllByRole("button", { name: /Account menu/i })[0]);
     await userEvent.click(screen.getByRole("menuitem", { name: /Sign out/i }));
     await waitFor(() => expect(signOut).toHaveBeenCalled());
   });

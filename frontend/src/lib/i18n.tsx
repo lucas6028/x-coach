@@ -22,6 +22,11 @@ const en: Dict = {
   "nav.games": "Games",
   "nav.hide": "Hide navigation",
   "nav.show": "Show navigation",
+  // The desktop rail's own width toggle. Deliberately NOT worded "hide/show navigation" — that
+  // pair names the tablet drawer's ✕ and the navbar's ☰, and two controls sharing an accessible
+  // name makes every by-name query in the layout tests ambiguous.
+  "nav.collapse": "Collapse navigation",
+  "nav.expand": "Expand navigation",
   "nav.tabBar": "Primary navigation",
 
   // Games hub — the App-Store-style catalog of the pose mini-games
@@ -282,14 +287,7 @@ const en: Dict = {
   "mobile.detailedMetricsSub": "Clip quality & measurements",
   "mobile.evidence": "Measured",
 
-  // Theme toggle
-  "theme.light": "Light",
-  "theme.system": "System",
-  "theme.dark": "Dark",
-  "theme.label": "Theme: {name} (click to change)",
-  "theme.aria": "Theme: {name}",
-
-  // Language toggle
+  // Language
   "lang.label": "Language",
   "lang.en": "English",
   "lang.zh-Hant": "繁體中文",
@@ -501,9 +499,7 @@ const en: Dict = {
   "settings.preferences": "Preferences",
   "settings.account": "Account",
   "settings.avatar": "Avatar",
-  "settings.appearance": "Appearance",
   "settings.language": "Language",
-  "settings.theme": "Theme",
   "settings.profile": "Profile",
   "settings.name": "Name",
   "settings.email": "Email",
@@ -764,6 +760,8 @@ const zhHant: Dict = {
   "nav.games": "小遊戲",
   "nav.hide": "隱藏導覽列",
   "nav.show": "顯示導覽列",
+  "nav.collapse": "收合導覽列",
+  "nav.expand": "展開導覽列",
   "nav.tabBar": "主要導覽",
 
   // 小遊戲中心 — App Store 風格的姿態小遊戲總覽
@@ -1012,14 +1010,7 @@ const zhHant: Dict = {
   "mobile.detailedMetricsSub": "影片品質與量測值",
   "mobile.evidence": "量測值",
 
-  // Theme toggle
-  "theme.light": "淺色",
-  "theme.system": "系統",
-  "theme.dark": "深色",
-  "theme.label": "主題：{name}（點擊切換）",
-  "theme.aria": "主題：{name}",
-
-  // Language toggle
+  // Language
   "lang.label": "語言",
   "lang.en": "English",
   "lang.zh-Hant": "繁體中文",
@@ -1239,9 +1230,7 @@ const zhHant: Dict = {
   "settings.preferences": "偏好設定",
   "settings.account": "帳號",
   "settings.avatar": "頭像",
-  "settings.appearance": "外觀",
   "settings.language": "語言",
-  "settings.theme": "主題",
   "settings.profile": "個人資料",
   "settings.name": "名稱",
   "settings.email": "電子郵件",

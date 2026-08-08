@@ -120,4 +120,20 @@ describe("AppLayout — on the web (regression guard)", () => {
     expect(screen.getByLabelText("X-Coach")).toBeInTheDocument();
     expect(screen.getByText("page body")).toBeInTheDocument();
   });
+
+  // The rail's width is live layout state now, not a constant. Round-trip it through real clicks:
+  // the toggle has to move the width AppLayout hands down, not just a flag inside Sidebar. Only
+  // the desktop rail (the first <aside>) gets a toggle — the off-canvas drawer has none — so the
+  // by-name query stays unambiguous even with both sidebars in the DOM.
+  it("collapses and re-expands the desktop rail", async () => {
+    const { container } = renderLayout();
+    const railWidth = () => (container.querySelectorAll("aside")[0] as HTMLElement).style.width;
+    await waitFor(() => expect(railWidth()).toBe("236px"));
+
+    await userEvent.click(screen.getByRole("button", { name: /collapse navigation/i }));
+    expect(railWidth()).toBe("76px");
+
+    await userEvent.click(screen.getByRole("button", { name: /expand navigation/i }));
+    expect(railWidth()).toBe("236px");
+  });
 });

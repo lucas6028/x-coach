@@ -16,7 +16,7 @@ describe("Header", () => {
 
   // The brand lockup, the New-analysis / Library pills and the rail-collapse toggle all moved out
   // of the top row: the brand is the rail's mark (Sidebar), both actions are rail entries, and the
-  // 84px rail was not worth a permanent control to collapse. Pinned so none of them drift back.
+  // collapse control now lives at the foot of the rail it resizes. Pinned so none drift back.
   it("carries no brand lockup, action pills or collapse toggle", () => {
     renderWithProviders(<Header />);
     expect(screen.queryByRole("link", { name: "X-Coach" })).not.toBeInTheDocument();

@@ -8,8 +8,6 @@ import {
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../lib/auth";
 import { useI18n } from "../../lib/i18n";
-import LanguageToggle from "../../components/LanguageToggle";
-import ThemeToggle from "../../components/ThemeToggle";
 
 // Dedicated admin console sign-in. Standalone (NOT inside AppLayout or the AdminLayout console
 // chrome): a compact centered card with email + password ONLY — no Google/OAuth. Authorization is
@@ -51,13 +49,9 @@ export default function AdminLogin() {
   }
 
   return (
+    // No corner controls: language is a setting behind the account menu (unreachable pre-auth, as
+    // it already is on the main /login), and the theme picker is gone with the theme system.
     <div className="relative grid min-h-[100dvh] place-items-center bg-background-dark px-5 py-10 text-content">
-      {/* Corner controls */}
-      <div className="absolute right-4 top-4 flex items-center gap-1">
-        <LanguageToggle />
-        <ThemeToggle />
-      </div>
-
       <div className="w-full max-w-sm">
         <div className="flex flex-col items-center text-center">
           <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary">

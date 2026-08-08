@@ -8,8 +8,8 @@
    The reference design is light-only, so the shell and the studio page write its hexes directly
    (--ms-* below). These semantic tokens are retuned to the SAME palette so the pages that still
    style with tokens — history, settings, movements, games, admin — sit inside that shell without
-   clashing. The dark block still exists and still switches those pages; the shell itself does
-   not follow it. */
+   clashing. This is the app's only token set: there is no theme picker and no dark block, so the
+   pages outside the shell (landing, admin) follow these too. */
 :root {
   color-scheme: light;
   --c-bg: 238 240 251; /* #eef0fb — the lavender canvas */
@@ -32,29 +32,10 @@
   --shadow-accent: 0 8px 20px rgb(123 92 255 / 0.30); /* violet lift for the primary CTA */
 }
 
-/* The app shell is the reference design, and the reference design is light-only: the lavender
-   canvas, the white rail and the white content card are written in fixed hexes, so a dark `.dark`
-   token set underneath them puts dark text and dark scrollbars inside white cards. Re-declaring
-   the light tokens on the shell root keeps every token-styled descendant (the dropzone, the
-   library picker, the knowledge-graph widget, and the history/settings/games page bodies that
-   render as its children) on the same palette as the frame around them.
-
-   Scoped rather than global on purpose: the landing page sits OUTSIDE the shell and still follows
-   the theme toggle, so this is one line to delete if a dark shell is ever authored. */
-.ms-shell {
-  color-scheme: light;
-  --c-bg: 238 240 251;
-  --c-surface: 255 255 255;
-  --c-border: 235 234 246;
-  --c-content: 30 33 66;
-  --c-muted: 89 100 143;
-  --c-faint: 99 112 159;
-  --c-track: 240 241 248;
-  --c-fault: 183 121 31;
-  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 24px -8px rgb(16 24 40 / 0.1);
-  --shadow-card-hover: 0 2px 6px rgb(16 24 40 / 0.07), 0 16px 34px -10px rgb(16 24 40 / 0.16);
-  --shadow-accent: 0 8px 20px rgb(123 92 255 / 0.3);
-}
+/* `.ms-shell` used to re-declare this whole token set, to hold the shell on light values while
+   the rest of the app followed a theme picker. The picker is gone and there is one palette now,
+   so the override was an exact copy of the block above — two places to edit, one of which would
+   eventually be forgotten. Deleted; the class stays as a styling hook on the layout roots. */
 
 /* ── muse-spark reference palette ───────────────────────────────────────────
    Fixed values, deliberately NOT theme-switched: the reference design is light-only and the
@@ -79,23 +60,6 @@
   --ms-green-soft: #e6f7ed;
   --ms-red: #ff6b6b;
   --ms-red-soft: #fff5f5;
-}
-
-.dark {
-  color-scheme: dark;
-  --c-bg: 18 20 22;
-  --c-surface: 30 33 36;
-  --c-border: 42 46 51;
-  --c-content: 243 244 246;
-  --c-muted: 156 163 175;
-  --c-faint: 107 114 128;
-  --c-track: 55 65 81;
-  --c-fault: 245 185 69; /* amber #f5b945 for dark canvas */
-  /* On the dark canvas soft shadows all but vanish, so go deeper and lean on the card's
-     hairline border for separation. */
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.45), 0 12px 28px -12px rgb(0 0 0 / 0.60);
-  --shadow-card-hover: 0 2px 6px rgb(0 0 0 / 0.55), 0 18px 36px -14px rgb(0 0 0 / 0.70);
-  --shadow-accent: 0 6px 18px -6px rgb(15 117 138 / 0.55);
 }
 
 body {

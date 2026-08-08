@@ -8,9 +8,16 @@ import { AuthProvider } from "../lib/auth";
 import { renderWithProviders } from "./renderWithProviders";
 
 describe("Sidebar — desktop rail (open)", () => {
-  const renderRail = () =>
+  const renderRail = (onToggle = vi.fn()) =>
     renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
+      <Sidebar
+        open={true}
+        width={236}
+        animate
+        onToggle={onToggle}
+        onOpenLibrary={vi.fn()}
+        onNewAnalysis={vi.fn()}
+      />
     );
 
   it("shows the nav labels when open", () => {
@@ -27,10 +34,27 @@ describe("Sidebar — desktop rail (open)", () => {
     expect(screen.queryByText("Pose · Rules · GraphRAG")).not.toBeInTheDocument();
   });
 
-  it("omits the brand and collapse toggle — those live in the top navbar", () => {
+  it("omits the brand wordmark — the rail shows the mark alone", () => {
     renderRail();
     expect(screen.queryByText("X-Coach")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /navigation/i })).not.toBeInTheDocument();
+  });
+
+  // The rail owns its width toggle again (the top row still carries none — see
+  // components.Header.test.tsx). Its name must NOT collide with the drawer's ✕ / the navbar's ☰,
+  // both of which are "Hide/Show navigation": two controls under one accessible name makes every
+  // by-name query in the layout tests ambiguous.
+  it("carries its own collapse toggle, named apart from the drawer's close button", () => {
+    renderRail();
+    expect(screen.getByRole("button", { name: /collapse navigation/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /hide navigation/i })).not.toBeInTheDocument();
+  });
+
+  it("calls onToggle when the collapse button is clicked", async () => {
+    const user = userEvent.setup();
+    const onToggle = vi.fn();
+    renderRail(onToggle);
+    await user.click(screen.getByRole("button", { name: /collapse navigation/i }));
+    expect(onToggle).toHaveBeenCalledOnce();
   });
 
   it("calls onOpenLibrary when the Library button is clicked", async () => {
@@ -88,12 +112,37 @@ describe("Sidebar — games hub active state", () => {
 });
 
 describe("Sidebar — collapsed rail", () => {
-  it("hides the nav labels when collapsed", () => {
+  const renderCollapsed = () =>
     renderWithProviders(
-      <Sidebar open={false} width={64} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} />
+      <Sidebar
+        open={false}
+        width={76}
+        animate
+        onToggle={vi.fn()}
+        onOpenLibrary={vi.fn()}
+        onNewAnalysis={vi.fn()}
+      />
     );
+
+  it("hides the nav labels when collapsed", () => {
+    renderCollapsed();
     expect(screen.queryByText("Analyse")).not.toBeInTheDocument();
     expect(screen.queryByText("Library")).not.toBeInTheDocument();
+  });
+
+  // With the labels gone the `title` attributes are the only thing naming the destinations —
+  // an icon strip whose icons are unnamed is unusable with a screen reader and unguessable
+  // with a mouse. Querying by role+name is exactly what a user would rely on.
+  it("keeps every destination named by its tooltip", () => {
+    renderCollapsed();
+    expect(screen.getByRole("link", { name: "Analyse" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Library" })).toBeInTheDocument();
+  });
+
+  it("flips the toggle's label to expand", () => {
+    renderCollapsed();
+    expect(screen.getByRole("button", { name: /expand navigation/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /collapse navigation/i })).not.toBeInTheDocument();
   });
 });
 
@@ -113,5 +162,14 @@ describe("Sidebar — mobile drawer (onClose)", () => {
     );
     await user.click(screen.getByRole("button", { name: /Hide navigation/i }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  // AppLayout hands the drawer no onToggle: a drawer that shrank to a 76px strip floating over
+  // the page would be a second, worse way to dismiss it. It closes outright instead.
+  it("renders no collapse toggle", () => {
+    renderWithProviders(
+      <Sidebar open width={270} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} onClose={vi.fn()} />
+    );
+    expect(screen.queryByRole("button", { name: /collapse navigation/i })).not.toBeInTheDocument();
   });
 });

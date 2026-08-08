@@ -8,8 +8,9 @@ import { useIsMobile } from "../lib/useIsMobile";
 import MobileTabBar from "./mobile/MobileTabBar";
 import MobileTopBar from "./mobile/MobileTopBar";
 
-// The reference design's rail: 84px labelled, 64px icon-only when collapsed.
-const SIDEBAR_WIDTH = 84;
+// The rail: 236px with labels beside the icons, 76px icon-only when collapsed.
+const WIDTH_OPEN = 236;
+const WIDTH_CLOSED = 76;
 
 interface Props {
   children: ReactNode;
@@ -24,7 +25,8 @@ interface Props {
   // The studio resets its own state for a fresh session; other pages just route into the studio.
   onNewAnalysis?: () => void;
   // Whether the desktop sidebar starts expanded. Defaults to open; the games opt to start it
-  // collapsed so the camera/play area gets near-full width.
+  // collapsed so the camera/play area gets near-full width. It is the starting state only — the
+  // rail's own toggle owns it from the first click.
   initialSidebarOpen?: boolean;
 }
 
@@ -48,10 +50,10 @@ export default function AppLayout({
   const navigate = useNavigate();
   const { isInClient } = useLiffContext();
   const mobile = useIsMobile();
-  // The desktop rail no longer has a collapse control (the top row carries no toggle), so this is
-  // fixed for the life of the layout: labelled 84px rail, or the 64px icon strip when a page asks
-  // for it (the games want the extra width for their camera area).
-  const sidebarOpen = initialSidebarOpen;
+  // The rail carries its own collapse control (the top row still carries none), so the width is
+  // live state seeded from the page's preference: the labelled 236px rail, or the 76px icon strip
+  // when a page asks to start there (the games want the extra width for their camera area).
+  const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const [mobileNav, setMobileNav] = useState(false);
 
   // Off the studio there is no picker, so "Library" just routes into the studio.
@@ -102,8 +104,9 @@ export default function AppLayout({
         <div className="hidden lg:flex">
           <Sidebar
             open={sidebarOpen}
-            width={sidebarOpen ? SIDEBAR_WIDTH : 64}
-            animate={false}
+            width={sidebarOpen ? WIDTH_OPEN : WIDTH_CLOSED}
+            animate
+            onToggle={() => setSidebarOpen((v) => !v)}
             onOpenLibrary={openLibrary}
             onNewAnalysis={newAnalysis}
           />
@@ -113,18 +116,11 @@ export default function AppLayout({
             gradient that the translucent panels inside sample from, plus the page's single
             content-level blur. Everything nested in it stays unblurred by design (index.css). */}
         <main className="glass-shell relative flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden rounded-[28px] border border-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_22px_58px_rgba(105,112,175,0.16)] sm:p-4 lg:gap-0 lg:rounded-[32px] lg:p-5">
-          {/* A page that supplies its own header puts it INSIDE this row, so its controls and the
-              account cluster are siblings in one flex line and cannot overlap. A page that does
-              not (history, settings, games) would otherwise be left with a row holding nothing but
-              the account cluster, so there the cluster floats in the card's top-right corner from
-              `lg` and the page's content starts at the top of the card instead. */}
-          {header ? (
-            <Header onMenu={() => setMobileNav(true)}>{header}</Header>
-          ) : (
-            <div className="lg:absolute lg:right-5 lg:top-5 lg:z-30">
-              <Header onMenu={() => setMobileNav(true)} />
-            </div>
-          )}
+          {/* One row, in flow, whatever the page supplies. It used to need a floating variant for
+              header-less pages so the account cluster didn't hover over the page's own controls —
+              with that cluster moved to the rail's foot, the row holds only the page's header and
+              a drawer button that is hidden from `lg`, so it collapses to nothing on its own. */}
+          <Header onMenu={() => setMobileNav(true)}>{header}</Header>
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
         </main>
 

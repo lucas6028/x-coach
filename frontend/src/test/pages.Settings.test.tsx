@@ -61,6 +61,17 @@ describe("Settings — popup shell", () => {
     expect(screen.queryByRole("heading", { name: "Coach model" })).not.toBeInTheDocument();
   });
 
+  // The overlay is `fixed inset-0`, and one of the things that opens it is the account menu at
+  // the foot of the nav rail — whose `.glass-rail` backdrop-filter makes that 236px rail the
+  // containing block for fixed descendants, so an in-tree overlay sizes itself to the rail
+  // (measured 234×697 against a 1495×726 viewport) instead of the screen. jsdom has no layout
+  // and cannot see that, but it can see the invariant that prevents it: the dialog is rendered
+  // outside the tree that mounted it.
+  it("portals out of the tree that mounted it", () => {
+    const { container } = renderSettings();
+    expect(container).not.toContainElement(screen.getByRole("dialog"));
+  });
+
   it("switches panes from the category rail", async () => {
     renderSettings();
     await openPane(/^Account$/);
@@ -118,29 +129,28 @@ describe("Settings — popup shell", () => {
 });
 
 describe("Settings — profile", () => {
+  // Scoped to the dialog: the shell's rail carries the same display name and avatar in its
+  // account footer, so an unscoped query matches the chrome as well as the pane under test.
   it("shows the profile name, email, and avatar", () => {
-    const { container } = renderSettings();
-    expect(screen.getByText("Ada Lovelace")).toBeInTheDocument();
-    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
-    expect(container.querySelector("img[src='https://x/me.png']")).toBeInTheDocument();
+    renderSettings();
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Ada Lovelace")).toBeInTheDocument();
+    expect(within(dialog).getByText("ada@x.com")).toBeInTheDocument();
+    // querySelector rather than a role query: the avatar is decorative (alt=""), so it exposes
+    // no `img` role at all.
+    expect(dialog.querySelector("img[src='https://x/me.png']")).toBeInTheDocument();
   });
 });
 
 describe("Settings — preferences", () => {
-  it("shows appearance as a three-way segmented control", () => {
+  // Language is the only preference left: the theme picker is gone app-wide (light-only), and
+  // this row is now the single place language can be changed anywhere in the app.
+  it("carries language and nothing else", () => {
     renderSettings();
-    const appearanceRow = screen.getByText("Appearance").closest("div")!;
-    const modes = within(appearanceRow).getAllByRole("radio");
-    expect(modes.map((m) => m.getAttribute("aria-label"))).toEqual(["System", "Light", "Dark"]);
-    // Fresh user -> "system", the stored default.
-    expect(modes[0]).toBeChecked();
-  });
-
-  it("persists the chosen theme", async () => {
-    renderSettings();
-    await userEvent.click(screen.getByRole("radio", { name: "Dark" }));
-    expect(localStorage.getItem("theme")).toBe("dark");
-    expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
+    const prefs = screen.getByRole("heading", { name: "Preferences" }).closest("section")!;
+    expect(within(prefs).getByText("Language")).toBeInTheDocument();
+    expect(within(prefs).queryByText("Appearance")).not.toBeInTheDocument();
+    expect(within(prefs).queryByRole("radio")).not.toBeInTheDocument();
   });
 
   it("Escape closes an open language menu without closing the dialog", async () => {
