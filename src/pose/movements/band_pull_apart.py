@@ -615,8 +615,9 @@ FACING_DEGENERATE_OFFSET = 0.02
 # unreachable under `allow_front=False`, so a whitelist containing it is dead weight that READS
 # as coverage. The negative form needs no edit if `allow_front` is ever enabled (it admits
 # front/front_oblique automatically and correctly), and it fails in the safer direction -- an
-# unanticipated future label is scored rather than silently dropped. `pushup.rule_elbow_flare` is
-# the shipped precedent for a hard gate and takes exactly this negative shape.
+# unanticipated future label is scored rather than silently dropped. `pushup.HEAD_ON_VIEWS`
+# (pushup.py:782, `if ctx.view_type in HEAD_ON_VIEWS: return []`) is the shipped precedent for a
+# hard gate and takes exactly this negative, set-membership shape.
 #
 # `unknown` is named explicitly because it means THE VIEW ESTIMATOR FAILED, not "a confirmed
 # view" -- and this rule, unlike `row.rule_momentum_jerk`, genuinely depends on knowing the
@@ -754,7 +755,7 @@ def rule_trunk_extension_compensation(
                     "setup_trunk_lean_deg": round(baseline, 2),
                     "max_backward_lean_deg": round(max_lean, 2),
                     "threshold_deg": TRUNK_LEAN_MILD_DEG,
-                    "facing_sign": facing,
+                    "facing_sign": round(facing, 2),
                     "trunk_whip_deg_s": round(float(np.nanmax(speeds)), 2) if speeds else None,
                     "primary_label": "backward trunk lean vs setup",
                     "primary_value": round(max_lean, 2),
