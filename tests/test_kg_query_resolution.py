@@ -35,6 +35,7 @@ MODULE_MOVEMENTS = {
     "row.py": "Row",
     "band_pull_apart.py": "Band Pull Apart",
     "bicep_curl.py": "Bicep Curl",
+    "arm_abduction.py": "Arm Abduction",
 }
 
 

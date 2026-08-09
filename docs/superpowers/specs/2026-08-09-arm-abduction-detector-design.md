@@ -137,6 +137,31 @@ common-mode error cancels. (Measured on `cam17_orientation == front`, a label
 `estimate_view_for_pose(allow_front=False)` can never emit, so it is a statement about the
 metric, not about what a user would see.)
 
+### 2.4b How to reproduce every number above
+
+Measured by throwaway scripts, not committed — the same convention
+`notes/lunge-rule-validation.md` §3.2 uses for its marker-based passes. Reproduce as follows;
+nothing here needs a GPU, a model, or an extraction step.
+
+- **REHAB24-6 Ex1, marker 3-D.** Load `data/REHAB24-6/Ex1/{video_id}-30fps.npy` (26 joints per
+  `joints_names.txt`, `[:, :, :3]`, **Y is up**). Take `RightArm`(12)/`RightForeArm`(13) with
+  `RightUpLeg`(21) for right-arm elevation (`LeftArm`(7)/`LeftForeArm`(8)/`LeftUpLeg`(16) for the
+  left), `RightShoulder`(11)/`LeftShoulder`(6) as the clavicle candidates and `Head`(4) for the
+  gap. Window each rep by `Segmentation.csv` (`;`-delimited, `exercise_id == 1`,
+  `first_frame`..`last_frame`, clamped to the array). Lateral trunk lean: decompose
+  `mid_shoulder − mid_hip` onto the horizontal component of the hip-line axis against vertical.
+- **REHAB24-6 Ex1, MediaPipe.** `data/REHAB24-6/processed/mediapipe_landmarks_cache/
+  {video_id}-Camera17-30fps.npz`, key `image`, frame-aligned to the same indices. Reference every
+  height to the **mid-hip only** — normalising by a shoulder-derived scale makes the two shoulders
+  antisymmetric by construction and produced a spurious ±0.932 pair on the first attempt.
+- **Fit3D.** `data/fit3d/train/{s}/joints3d_25/side_lateral_raise.json`, H36M-17 order per
+  `src/fit3d/dataset.py` (**Z is up** here, unlike REHAB24-6). `rep_ann.json[action]` is a **flat
+  list of boundary frame indices**, so k boundaries give k−1 reps.
+- **The production corpus.** `estimate_view_for_pose(Path(p), allow_front=False)` over
+  `data/runtime/pose_json/*.json` (it takes a `Path`, not a `str`); shoulder widths via
+  `landmarks_to_array` + `visible_point(a, 11/12)`, discarding the degenerate zero-width clips
+  (3 of 46).
+
 ### 2.5 Why `validated` is still `False`
 
 `ARM_ABDUCTION_DETECTOR.validated` drives the Beta badge, and its meaning — "checked against
