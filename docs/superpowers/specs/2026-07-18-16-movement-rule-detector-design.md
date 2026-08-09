@@ -1271,8 +1271,10 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 >    Ex2's 208 annotated reps: median start **140.4°**, median trough **54.7°** at position
 >    **0.508** of the rep, median end 141.1°. `rule_loss_of_elevation` is consequently the first
 >    shipped rule in the project scoped to the 15% `setup` window — the phase-fraction trap that
->    silenced Bicep Curl's extension term — and it clears at **1.25×** on the real segmenter
->    (234 reps of 1.67–25.07 s over Ex2's 12 videos; `setup` min 7 frames against `min_frames` 6).
+>    silenced Bicep Curl's extension term — and it clears at **1.65×** on the reps the rules
+>    actually score (234 segmented over Ex2's 12 videos, **217 complete and analyzed**, 2.20–19.73 s;
+>    `setup` min 9 frames against `min_frames` 6), or **1.25×** on the shortest **partial** rep
+>    (1.67 s), which `select_reps` analyzes when no complete rep exists.
 
 #### Incomplete scapular / arm excursion
 - **fault_id**: `incomplete_scapular_rom`
@@ -1411,14 +1413,21 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 > / per-subject median **0.735** over the eight non-degenerate ones. 0.735 is comparable to the
 > 0.800 that carried `arm_abd_contralateral_trunk_lean`.
 >
+> **The shipped fire rate, measured through the REAL pipeline on the windows the rule actually
+> sees.** `run_detector(ARM_VW_DETECTOR, ...)` over Ex2's 12 cached MediaPipe videos — which
+> smooths, segments, trims and phases exactly as production does — fires this rule on **34 of the
+> 217 analyzed reps (15.7%)**: 10/57 on the `front` clips, 24/160 on the `half-profile` ones.
+> **Read over the annotation windows instead, the same rule fires on only 9/208** — `segment_reps`
+> trims the V plateau away, so a segmented window's first 15% sits further down the descent.
+> 15.7% is the shipped number; the 4.3% was measuring a window the rule never sees.
+>
 > **One semantic note on the reading.** "V-phase **peak** < 120°" strictly means the maximum over
 > the V window is below 120; the codebase idiom is a per-frame mask plus
 > `contiguous_true_segments`, which fires on any **sustained run** below 120 — strictly weaker, so
-> it fires more. Both are recorded: max-over-`setup` fires 6/208 (markers) and 0/208 (MediaPipe);
-> the **shipped** sustained-run reading fires **31/208** and **9/208**. Also note the **closing**
-> V falls in `eccentric` and is not read, and the rep's global maximum sits near the end on most
-> reps (median argmax position 0.918) — so the rule under-reads the movement's best moment, in the
-> conservative direction.
+> it fires more. Over annotation windows the two read 6/208 against 31/208 on the marker 3-D; the
+> shipped reading is the codebase idiom. Also note the **closing** V falls in `eccentric` and is
+> not read, and the rep's global maximum sits near the end on most reps (median argmax position
+> 0.918) — so the rule under-reads the movement's best moment, in the conservative direction.
 >
 > **WITHDRAWN — "or W-phase abduction < 75°".** Absent, not silent, and it fails two ways, either
 > of which would be sufficient. **(i) The 75° appears in no cited source**: Mun measures
@@ -1483,7 +1492,13 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 > **State the ceiling, because it is severe.** Production is `rear_oblique` 37, `rear` 9,
 > `unknown` 3, `side` 0 over 49 pose JSONs (re-measured 2026-08-09), and `front` is unreachable
 > under `allow_front=False`. So this rule is **live on 9 of 49 clips and silent on the other 40** —
-> the price of not firing falsely on two thirds of them. Two inferential steps also sit underneath
+> the price of not firing falsely on two thirds of them. **What the gate buys and what it does
+> not, measured through the real pipeline:** over Ex2's 217 analyzed reps it fires on **20/217 =
+> 9.2%** (20/57 `front`, 0/160 `half-profile`); forced through as `front` everywhere it fires on
+> **121/217 = 56%**, so the gate suppresses 101 firings — 63% of the oblique reps. **The residual
+> is still high:** 20/57 = **35%** on truly-frontal clips against a marker-3-D exceedance of 3/109
+> and 12/109. The gate removes the asymmetry **obliquity adds**; it does not make the metric agree
+> with 3-D truth. Two inferential steps also sit underneath
 > the gate: Ex2's cameras are front-hemisphere, so the gate excludes the views where fabrication
 > was **measured** and admits one (`rear`) where it was **not**; those 9 clips earn `high` on a
 > geometric argument (a frontal-plane difference reads the same mirrored, and `|L − R|` is
@@ -1570,8 +1585,13 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 > - **A new structural finding for the framework, not for this movement.** `loss_of_elevation_angle`
 >   is the first shipped rule scoped to the 15% `setup` window, and the Bicep Curl phase-fraction
 >   trap (`phase_fraction · T ≥ min_frames / fps`) **binds** there rather than being dodged. It
->   clears at 1.25×, and both sides of the cliff are pinned end-to-end. Any future rule reading a
->   movement's *opening* position inherits this constraint.
+>   clears at 1.65× on analyzed reps and 1.25× on the shortest partial one, and both sides of the
+>   cliff are pinned end-to-end. Any future rule reading a movement's *opening* position inherits
+>   this constraint.
+> - **A method note worth carrying forward.** Fire rates for phase-scoped rules must be measured
+>   on **segmented** windows through `run_detector`, not on a dataset's annotation windows: the two
+>   differ by **3.7×** for `loss_of_elevation_angle` here, because `segment_reps` trims the
+>   plateau the annotations include. This document originally carried the annotation-window figure.
 
 ---
 

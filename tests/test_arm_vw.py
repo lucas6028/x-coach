@@ -9,6 +9,7 @@ from src.pose.movements.arm_vw import (
     ASYMMETRY_MILD_DEG,
     ELEVATION_MILD_DEG,
     EXCURSION_MILD_DEG,
+    FRONTAL_OBSERVABLE_VIEWS,
     arm_vw_assign_phases,
     arm_vw_compute_raw,
     rule_incomplete_excursion,
@@ -512,11 +513,22 @@ class ViewHandlingTest(unittest.TestCase):
         """The ceiling, pinned so it cannot be quietly forgotten. Re-measured 2026-08-09 over all
         49 files under data/runtime/pose_json: rear_oblique 37, rear 9, unknown 3, side 0, and
         `front` unreachable under allow_front=False. So the asymmetry rule is live on 9 clips and
-        silent on 40."""
+        silent on 40.
+
+        The count is derived from `FRONTAL_OBSERVABLE_VIEWS` rather than from an inline set
+        literal, so narrowing or widening the gate breaks this test instead of leaving it green
+        on arithmetic it defines itself.
+        """
         census = {"rear_oblique": 37, "rear": 9, "unknown": 3}
-        live = sum(n for view, n in census.items() if view in {"front", "rear"})
         self.assertEqual(sum(census.values()), 49)
+        live = sum(n for view, n in census.items() if view in FRONTAL_OBSERVABLE_VIEWS)
         self.assertEqual(live, 9)
+        # And the gate really is the set the count was derived from: every censused view outside
+        # it must silence the rule, and the one inside it must not.
+        for view in census:
+            with self.subTest(view=view):
+                fired = {d.fault_id for d in self._all_three(view)}
+                self.assertEqual("vw_lr_asymmetry" in fired, view in FRONTAL_OBSERVABLE_VIEWS)
 
 
 class DroppedDisjunctsTest(unittest.TestCase):

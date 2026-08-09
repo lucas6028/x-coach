@@ -55,12 +55,15 @@ view it sits at **16.0°** against the markers' **4.1°**, and the 12° threshol
 **fabricates** it. §7 gates this movement's asymmetry rule accordingly. §7.3 says exactly why
 `arm_abduction.py` is **not** edited on this branch.
 
-**(d) It is the first shipped rule scoped to `setup`, and the margin is 1.25×.** Bicep Curl §4.3
-found the arithmetic that silences a phase-scoped rule — `phase_fraction · T ≥ min_frames / fps`
-— and Arm Abduction avoided it by scoping nothing to the 15% `setup` window. Rule 3 has to read
-the V, and the V *is* the opening of the rep. Measured through the real `segment_reps`
-(§8.3): it clears on **234/234** segmented reps, but the shortest is 1.67 s against a 1.333 s
-requirement. That is a margin, not a comfort, and the end-to-end test pins it.
+**(d) It is the first shipped rule scoped to `setup`, and the margin is 1.65× — 1.25× in the worst
+case the framework allows.** Bicep Curl §4.3 found the arithmetic that silences a phase-scoped
+rule — `phase_fraction · T ≥ min_frames / fps` — and Arm Abduction avoided it by scoping nothing
+to the 15% `setup` window. Rule 3 has to read the V, and the V *is* the opening of the rep.
+Measured through the real `run_detector` (§8.3): it clears on **217/217** analyzed reps, whose
+shortest is 2.20 s against a 1.333 s requirement; the shortest **partial** rep the segmenter
+produced — which `select_reps` analyzes when no complete rep exists — is 1.67 s, a 1.25× margin.
+Both sides of that cliff are pinned end-to-end, including a 1.27 s window on which the rule goes
+structurally silent while the `peak`-scoped rule still fires.
 
 ---
 
@@ -368,20 +371,27 @@ The near-degenerate subject was suppressing it. At 0.735 this is comparable to
 `arm_abd_contralateral_trunk_lean`'s 0.800 and is the only cue in this movement that carries
 real information about rep correctness.
 
-**Fire rates, and one semantic note.** The parent spec says "V-phase **peak** < 120°", which
+**The shipped fire rate, measured through the REAL pipeline on the windows the rule actually
+sees.** Running `run_detector(ARM_VW_DETECTOR, ...)` over Ex2's 12 cached MediaPipe videos — which
+applies `centered_median(window=5)`, segments, trims and phases exactly as production does — this
+rule fires on **34 of the 217 analyzed reps (15.7%)**: 10/57 on the `front` clips and 24/160 on
+the `half-profile` ones. (Landmarks carry `z=0.0`, `visibility=1.0` because the cache stores image
+x,y only; `z=0` is exactly what the RTMPose extraction path writes. `view_type` is the **oracle**
+label from `cam17_orientation`, the `src/rehab24/lunge_rule_validation.py` `ORACLE_VIEWS`
+convention.)
+
+**That is not the number an annotation-window measurement gives, and the difference is the point.**
+Read over the `Segmentation.csv` rep windows instead, the same rule fires on only **9/208**
+MediaPipe reps. `segment_reps` trims the V plateau away, so a segmented window's first 15% sits
+further down the descent than an annotation window's does. **15.7% is the shipped number; 4.3% was
+measuring a window the rule never sees** — the failure §11 warns against, caught by re-running.
+
+**One semantic note on the reading.** The parent spec says "V-phase **peak** < 120°", which
 strictly means *the maximum over the V window is below 120*. The codebase idiom is a per-frame
-mask plus `contiguous_true_segments`, which fires on any **sustained run** below 120 within the
-window — a strictly weaker condition, so it fires more. Both are recorded rather than one being
-silently chosen:
-
-| Reading | markers | MediaPipe (image) |
-|---|---|---|
-| max over `setup` < 120 (spec-literal) | 6/208 | 0/208 |
-| **sustained run below 120 in `setup` (shipped)** | **31/208** | **9/208** |
-
-The shipped reading is the codebase idiom and is the more sensitive of the two; 31/208 = 15% on
-3-D truth and 9/208 = 4.3% through the estimator are both plausible fault rates rather than a
-false-positive machine. **`setup` is the *opening* V.** With `rep_start="extended"` the rep runs
+mask plus `contiguous_true_segments`, which fires on any **sustained run** below 120 — a strictly
+weaker condition, so it fires more. Over annotation windows the two read 6/208 (spec-literal)
+against 31/208 (sustained run) on the marker 3-D. The shipped reading is the codebase idiom and
+the more sensitive of the two. **`setup` is the *opening* V.** With `rep_start="extended"` the rep runs
 V → W → V, so the closing V falls in `eccentric` and is not read; measured, the rep's global
 maximum sits near the *end* on most reps (median argmax position 0.918), so reading only the
 opening V under-reads the movement's best moment. That is the conservative direction — a missed
@@ -474,6 +484,16 @@ unreachable means **this rule is live on 9 of 49 clips and silent on the other 4
 price of not firing falsely on two thirds of them, and it is the honest trade — but the doc should
 not read as though the rule is broadly available. It is not.
 
+**What the gate actually buys, and what it does not — measured through the real pipeline.** Over
+Ex2's 12 videos (217 analyzed reps, oracle `view_type`), the rule fires on **20/217 = 9.2%**:
+**20/57** on the `front` clips and **0/160** on the `half-profile` ones, which the gate silences.
+Force every rep through as `front` and it fires on **121/217 = 56%** — so the gate suppresses 101
+firings, i.e. **63% of the oblique reps** would otherwise have fired. **The residual is still
+high:** 20/57 = **35%** on the truly-frontal clips, against a marker-3-D exceedance of 3/109 and
+12/109 over the annotated V and W windows of the same clips. The gate removes the asymmetry
+**obliquity adds**; it does not make the metric agree with 3-D truth. Recorded, not repaired —
+moving the 12° is the one thing §11 forbids.
+
 **And two inferential steps sit underneath the gate.** Ex2's cameras are `front` and
 `half-profile`, both front-hemisphere. The gate *excludes* the views where fabrication was
 **measured** (obliquity) and *admits* one view where it was **not** (`rear`). Geometrically a
@@ -564,25 +584,27 @@ to `assign_phases`, mirroring `row_assign_phases` and `bicep_curl_assign_phases`
   return to V).
 - `unknown` — any invalid frame, checked **before** the setup cutoff.
 
-**The `setup` scope is the Bicep Curl trap, and the margin is measured on the REAL segmenter, not
-on annotation windows.** A phase-scoped rule needs `phase_fraction · T ≥ min_frames / fps` with
-`min_frames = max(3, ceil(0.20 · fps))` (`base.py:197`). Running the actual
-`segment_reps(smoothed avg_arm_elevation, fps=30, polarity="min", rep_start="extended",
-min_rep_seconds=0.4)` over all 12 Ex2 videos — which trims each window to the excursion, and is
-therefore tighter than the annotations — yields **234 reps of 50–752 frames = 1.67–25.07 s**
-(median 4.65 s):
+**The `setup` scope is the Bicep Curl trap, and the margin is measured through the REAL
+`run_detector`, not on annotation windows.** A phase-scoped rule needs
+`phase_fraction · T ≥ min_frames / fps` with `min_frames = max(3, ceil(0.20 · fps))`
+(`base.py:197`). `segment_reps` trims each window to the excursion, and `select_reps` then drops
+partial reps whenever complete ones exist. Over all 12 Ex2 videos: **234 reps segmented, 217
+complete and analyzed**, of **66–592 frames = 2.20–19.73 s** (median 4.70 s):
 
-| Window | fraction | frames: min / median | requirement | reps failing |
+| Window | fraction | frames: min / median | requirement | analyzed reps failing |
 |---|---|---|---|---|
-| `setup` | 15% | **7** / 20 | `T ≥ 1.333 s` | **0/234** |
-| `peak` | 30% | 15 / 41 | `T ≥ 0.667 s` | 0/234 |
+| `setup` | 15% | **9** / 21 | `T ≥ 1.333 s` | **0/217** |
+| `peak` | 30% | 20 / 43 | `T ≥ 0.667 s` | 0/217 |
 
-The shortest segmented rep is 1.67 s against `setup`'s 1.333 s requirement: a **1.25× margin**,
-against `peak`'s 2.5×. At Fit3D's 50 fps (`min_frames` = 10) the same requirement is 1.333 s
-against a 2.12 s shortest rep, a 1.59× margin. This clears — and it is the tightest clearance any
-detector in this project has shipped with, so `EndToEndSegmentationTest` pins it explicitly
-(§10). `min_rep_seconds` stays at `DEFAULT_MIN_REP_SECONDS` (0.4 s); the shortest segmented rep is
-4.2× that.
+**Two margins, and both bound different cases.** On the reps the rules actually score the shortest
+is 2.20 s against `setup`'s 1.333 s requirement — a **1.65× margin**, against `peak`'s 3.3×. But
+`select_reps` keeps **partial** reps "when they are all there is", and the shortest partial the
+segmenter produced here is **1.67 s**: **1.25×**, and that is the tightest window this rule can
+ever be handed. At Fit3D's 50 fps (`min_frames` = 10) the requirement is the same 1.333 s against
+a 2.12 s shortest rep, 1.59×. `EndToEndSegmentationTest` pins the 1.25× case **and** the other
+side of the cliff — a 1.27 s window where the rule goes structurally silent (§10).
+`min_rep_seconds` stays at `DEFAULT_MIN_REP_SECONDS` (0.4 s); the shortest analyzed rep is 5.5×
+that and the shortest partial 4.2×.
 
 ### 8.4 Metrics — and the metric layer contains no thresholds
 
@@ -745,9 +767,10 @@ attributing it to this change.
 ## 11. Honesty constraints
 
 - **No threshold tuning.** Every cited number stays as the parent spec states it. §5.2's finding
-  that the swing threshold fires 0/457 across three instruments, §6.1's that the 120° sits under
-  the observed distribution, and §7.1's that the 12° has no provenance in its citation are all
-  **written up, not repaired**.
+  that the swing threshold fires 0/208 on the markers, 0/208 through MediaPipe and 0/41 on Fit3D,
+  §6.1's that the 120° sits under the observed distribution, §6.2's that the shipped rule fires on
+  15.7% of real segmented reps, and §7.1's that the 12° has no provenance in its citation — with
+  §7.2's 35% residual fire rate on frontal clips — are all **written up, not repaired**.
 - **A dropped criterion is not a moved threshold, and the two are labelled differently.** §6.3
   withdraws the W disjunct, §5.1 and §7.4 drop the `0.05`-normalized ones. In each case the reason
   is that the criterion has no cited referent or no well-defined unit — never that its numbers
@@ -759,7 +782,9 @@ attributing it to this change.
   records that **all four** sources study a different exercise than this one.
 - **Every measurement names its dataset, its instrument and its window.** Marker 3-D, MediaPipe
   `image` 2-D and MediaPipe `world` 3-D disagree, and §7.2 quotes all three rather than the
-  flattering one.
+  flattering one. **Fire rates for the shipped rules are quoted on SEGMENTED windows through the
+  real `run_detector`, not on annotation windows** — the two differ by 3.7× for rule 3 (§6.2), and
+  the annotation-window figure was the one this document originally carried.
 - **Per-subject AUCs are reported with and without person 8** (2 correct / 20 incorrect), because
   including it moved two of them (§6.2, §6.3).
 - **`validated=False`**, with §2's evidence stated at the registration site — including that

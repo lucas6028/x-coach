@@ -208,22 +208,27 @@ def arm_vw_assign_phases(raw: list[dict]) -> list[str]:
     rather than repaired.
 
     THIS IS THE FIRST DETECTOR IN THE PROJECT WITH A SHIPPED RULE SCOPED TO `setup`, AND THE
-    MARGIN IS 1.25x. Bicep Curl section 4.3 found the arithmetic that silences a phase-scoped
+    MARGIN IS 1.65x -- 1.25x in the worst case the framework allows. Bicep Curl section 4.3 found the arithmetic that silences a phase-scoped
     rule: `phase_fraction * T >= min_frames / fps` with `min_frames = max(3, ceil(0.20 * fps))`
     (base.py:197), so a 15% `setup` window needs T >= 1.333 s while a 30% `peak` window needs only
     T >= 0.667 s. Arm Abduction dodged this by scoping nothing to `setup`; `rule_loss_of_elevation`
     cannot, because the V IS the opening of the rep.
 
-    Measured on the REAL segmenter rather than on annotation windows -- `segment_reps` trims each
-    window to the excursion and is therefore TIGHTER than the annotations. Running
-    `segment_reps(smoothed avg_arm_elevation, fps=30, polarity="min", rep_start="extended",
-    min_rep_seconds=0.4)` over all 12 REHAB24-6 Ex2 videos yields 234 reps of 50-752 frames =
-    1.67-25.07 s (median 4.65): the `setup` window is 7-113 frames (min 7) against min_frames=6,
-    failing on 0/234, and `peak` is 15-225 (min 15), failing on 0/234. The shortest segmented rep
-    sits at 1.25x the `setup` requirement, against 2.5x for `peak`. At Fit3D's 50 fps
-    (min_frames=10) the same requirement is 1.333 s against a 2.12 s shortest rep, 1.59x. It
-    clears, and it is the tightest clearance any detector here has shipped with -- which is why
-    `EndToEndSegmentationTest` pins it. Design spec section 8.3.
+    Measured through the REAL `run_detector` rather than on annotation windows -- `segment_reps`
+    trims each window to the excursion and is therefore TIGHTER than the annotations, and
+    `select_reps` then drops partial reps whenever complete ones exist. Over all 12 REHAB24-6 Ex2
+    videos: 234 reps segmented, **217 complete and analyzed**, of 66-592 frames = 2.20-19.73 s
+    (median 4.70). The `setup` window is 9-88 frames (min 9) against min_frames=6, failing on
+    0/217, and `peak` is 20-177 (min 20), failing on 0/217.
+
+    TWO MARGINS, AND BOTH ARE WORTH STATING BECAUSE THEY BOUND DIFFERENT CASES. On the reps the
+    rules actually score, the shortest is 2.20 s against `setup`'s 1.333 s requirement -- 1.65x,
+    versus 3.3x for `peak`'s 0.667 s. But `select_reps` keeps PARTIAL reps "when they are all
+    there is", and the shortest partial the segmenter produced here is 1.67 s: 1.25x. That is the
+    tightest window this rule can ever be handed, and it is the number
+    `EndToEndSegmentationTest` pins -- along with the other side of the cliff, a 1.27 s window
+    where the rule goes structurally silent. At Fit3D's 50 fps (min_frames=10) the requirement is
+    the same 1.333 s against a 2.12 s shortest rep, 1.59x. Design spec section 8.3.
     """
     frame_count = len(raw)
     if frame_count == 0:
@@ -590,18 +595,27 @@ def rule_shrug_substitution(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
 # the eight non-degenerate ones (person 8 contributes 2 correct against 20 incorrect and was
 # suppressing it). 0.735 is comparable to the 0.800 that carried `arm_abd_contralateral_trunk_lean`.
 #
-# FIRE RATES, AND ONE SEMANTIC NOTE ABOUT THE READING. The parent spec says "V-phase PEAK < 120",
-# which strictly means the MAXIMUM over the V window is below 120. The codebase idiom is a
-# per-frame mask plus `contiguous_true_segments`, which fires on any SUSTAINED RUN below 120 in the
-# window -- a strictly weaker condition, so it fires more. Both are recorded rather than one being
-# silently chosen:
+# FIRE RATE, MEASURED THROUGH THE REAL PIPELINE ON THE WINDOWS THE RULE ACTUALLY SEES. Running
+# `run_detector(ARM_VW_DETECTOR, ...)` over REHAB24-6 Ex2's 12 cached MediaPipe videos -- which
+# applies centered_median(window=5) smoothing, segments, trims and phases exactly as production
+# does -- this rule fires on 34 of the 217 analyzed reps (15.7%): 10/57 on the `front` clips and
+# 24/160 on the `half-profile` ones. (Landmarks carry z=0.0 and visibility=1.0 because the cache
+# stores image x,y only; z=0 is exactly what the RTMPose extraction path writes. `view_type` is
+# the ORACLE label from `cam17_orientation`, the convention
+# src/rehab24/lunge_rule_validation.py ORACLE_VIEWS uses.)
 #
-#     reading                                         markers    MediaPipe
-#     max over `setup` < 120 (spec-literal)             6/208        0/208
-#     sustained run below 120 in `setup` (SHIPPED)     31/208        9/208
+# THAT NUMBER IS NOT THE ONE AN ANNOTATION-WINDOW MEASUREMENT GIVES, AND THE DIFFERENCE IS THE
+# POINT. Read over the Segmentation.csv rep windows instead, the same rule fires on only 9/208
+# MediaPipe reps. `segment_reps` trims the V plateau away, so a segmented window's first 15% sits
+# further down the descent than an annotation window's does. 15.7% is the shipped number; 4.3%
+# was measuring a window the rule never sees.
 #
-# The shipped reading is the codebase idiom and the more sensitive of the two; 15% on 3-D truth and
-# 4.3% through the estimator are both plausible fault rates rather than a false-positive machine.
+# ONE SEMANTIC NOTE ABOUT THE READING. The parent spec says "V-phase PEAK < 120", which strictly
+# means the MAXIMUM over the V window is below 120. The codebase idiom is a per-frame mask plus
+# `contiguous_true_segments`, which fires on any SUSTAINED RUN below 120 -- a strictly weaker
+# condition, so it fires more. Over annotation windows the two read 6/208 (spec-literal) against
+# 31/208 (sustained run) on the marker 3-D; the shipped reading is the codebase idiom and the more
+# sensitive of the two.
 ELEVATION_MILD_DEG = 120.0
 # RULE-LEVEL CHOICE MADE HERE. 60 is 0.5x the fire threshold; `lower_is_worse=True` because this is
 # a "not enough" quantity. A display/ranking curve, not a cited quantity.
@@ -643,8 +657,9 @@ def rule_loss_of_elevation(core: list[CoreFrame], ctx: RuleContext) -> list[Pose
 
     PHASE SCOPE `setup`, WHICH IS THE OPENING V. This is the first shipped rule in the project
     scoped to the 15% `setup` window -- the exact arithmetic trap that silenced Bicep Curl's
-    extension term -- and it clears with a 1.25x margin measured on the REAL segmenter. See
-    `arm_vw_assign_phases` for the numbers, and note that the CLOSING V (in `eccentric`) is not
+    extension term -- and it clears with a 1.65x margin on the reps the rules actually score, 1.25x
+    on the shortest PARTIAL rep the framework can hand it. Both are measured through the real
+    `run_detector`. See `arm_vw_assign_phases` for the numbers, and note that the CLOSING V (in `eccentric`) is not
     read, which under-reads the movement and errs toward silence.
 
     THE SPEC'S SECOND DISJUNCT (W-phase abduction < 75 deg) IS WITHDRAWN AND ABSENT -- see the
@@ -790,6 +805,17 @@ def rule_lr_asymmetry(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleD
     stays live everywhere). The gate is not an invention: the parent spec rates this rule `high` on
     FRONT/REAR specifically, and gating to that set is implementing the rating.
 
+    WHAT THE GATE ACTUALLY BUYS AND WHAT IT DOES NOT, MEASURED THROUGH THE REAL PIPELINE. Running
+    `run_detector` over Ex2's 12 cached MediaPipe videos (217 analyzed reps, oracle `view_type`
+    from `cam17_orientation`), this rule fires on 20/217 = 9.2% overall: 20/57 on the `front`
+    clips and 0/160 on the `half-profile` ones, which the gate silences. Force every rep through
+    as `front` and it fires on 121/217 = 56% -- so the gate suppresses 101 firings, i.e. 63% of
+    the oblique reps would otherwise have fired. THE RESIDUAL IS STILL HIGH: 20/57 = 35% on the
+    truly-frontal clips, against a marker-3-D exceedance of 3/109 and 12/109 over the annotated V
+    and W windows of the same clips. The gate removes the asymmetry OBLIQUITY ADDS; it does not
+    make the metric agree with 3-D truth. Recorded, not repaired -- moving the 12 deg is the one
+    thing the no-tuning rule forbids.
+
     STATE THE CEILING, BECAUSE IT IS SEVERE. Production is rear_oblique 37, rear 9, unknown 3,
     side 0 over 49 pose JSONs, and `front` is unreachable under allow_front=False. So this rule is
     LIVE ON 9 OF 49 CLIPS and silent on the other 40. That is the price of not firing falsely on
@@ -934,11 +960,13 @@ ARM_VW_DETECTOR = MovementDetector(
     # variant to degrade on -- Ex2 is bilateral on 208/208 and movements.ts offers one Arm VW -- so
     # the stated-limitation paragraph that module needed does not apply here.
     #
-    # `min_rep_seconds` stays at DEFAULT_MIN_REP_SECONDS (0.4s). Running the real segmenter over
-    # all 12 Ex2 videos yields 234 reps of 1.67-25.07 s, so the tightest real rep is 4.2x the
-    # floor. The TIGHTER constraint -- the phase-fraction x min_frames interaction Bicep Curl
-    # section 4.3 found -- BINDS HERE, because `rule_loss_of_elevation` is scoped to the 15%
-    # `setup` window: see `arm_vw_assign_phases` for the 1.25x margin and the test that pins it.
+    # `min_rep_seconds` stays at DEFAULT_MIN_REP_SECONDS (0.4s). Running the real pipeline over all
+    # 12 Ex2 videos yields 234 segmented reps, 217 of them complete and analyzed, of 2.20-19.73 s
+    # -- so the tightest analyzed rep is 5.5x the floor (the shortest partial, 1.67 s, is 4.2x).
+    # The TIGHTER constraint -- the phase-fraction x min_frames interaction Bicep Curl section 4.3
+    # found -- BINDS HERE, because `rule_loss_of_elevation` is scoped to the 15% `setup` window:
+    # see `arm_vw_assign_phases` for both margins (1.65x on analyzed reps, 1.25x on the shortest
+    # partial the rule can ever be handed) and the tests that pin both sides of the cliff.
 )
 
 registry.register(ARM_VW_DETECTOR)
