@@ -882,27 +882,27 @@ const zhHant: Dict = {
   "view.unknown": "未知",
 
   // Video panel
-  "video.faultOne": "偵測到 1 個錯誤",
-  "video.faultMany": "偵測到 {count} 個錯誤",
-  "video.noFaults": "未偵測到錯誤",
+  "video.faultOne": "偵測到 1 個動作問題",
+  "video.faultMany": "偵測到 {count} 個動作問題",
+  "video.noFaults": "未偵測到動作問題",
   "a11y.play": "播放",
   "a11y.pause": "暫停",
   "a11y.fullscreen": "切換全螢幕",
 
   // Timeline
-  "timeline.fault": "錯誤",
+  "timeline.fault": "動作問題",
   "timeline.neutral": "正常",
 
   // Metrics
   "metric.cameraView": "拍攝視角",
-  "metric.faults": "錯誤數",
+  "metric.faults": "問題數",
   "metric.lowerBodyVis": "下肢可見度",
   "metric.validFrames": "有效影格",
-  "metric.conf": "信心 {v}",
-  "metric.peakSeverity": "最高嚴重度 {v}",
-  "metric.cleanRep": "標準動作",
+  "metric.conf": "可信度 {v}",
+  "metric.peakSeverity": "最高問題程度 {v}",
+  "metric.cleanRep": "動作穩定",
   "metric.notMeasured": "無法判讀",
-  "metric.landmarkConf": "關鍵點信心度",
+  "metric.landmarkConf": "關鍵點可信度",
   "metric.framesRatio": "{valid}/{total} 影格",
 
   // Chat input — disabled fallback (auth/LLM not configured) + the working grounded chat.
@@ -911,7 +911,7 @@ const zhHant: Dict = {
   "chat.heading": "Lumen",
   "chat.grounded": "根據你的分析",
   "chat.groundedShort": "有依據",
-  "chat.intro": "針對你的深蹲追問後續問題，回答將僅根據偵測到的錯誤與檢索到的提示。",
+  "chat.intro": "針對這次深蹲繼續提問；回答只會根據偵測到的動作問題和找到的建議。",
   "chat.suggestFix": "我該先修正什麼？",
   "chat.suggestDrill": "給我一個矯正動作",
   "chat.suggestWhy": "這為什麼重要？",
@@ -932,9 +932,9 @@ const zhHant: Dict = {
   "chat.coach": "Lumen",
   "coach.followUp": "後續追問",
   "loader.aria": "Lumen 分析中",
-  "loader.step1": "讀取姿勢",
-  "loader.step2": "對照力學",
-  "loader.step3": "照亮原因",
+  "loader.step1": "讀取動作",
+  "loader.step2": "檢查動作細節",
+  "loader.step3": "找出可能原因",
   "loader.neutral": "載入中…",
 
   "a11y.close": "關閉",
@@ -942,10 +942,10 @@ const zhHant: Dict = {
   // Reasoning / coaching feedback
   "feedback.title": "教練回饋",
   "feedback.badge": "規則 + GraphRAG",
-  "feedback.noFaults": "未偵測到{movement}的生物力學錯誤，這一下很標準。",
+  "feedback.noFaults": "這次{movement}沒有偵測到明顯的動作問題，做得很穩。",
   "feedback.notMeasured":
-    "這支影片沒有任何一個影格可供判讀，因此沒有產生動作評估結果。請確認全身都在畫面內後重新錄製。",
-  "feedback.graphragContext": "GraphRAG 脈絡",
+    "這支影片沒有可判讀的畫面，所以暫時無法評估動作。請確認全身都入鏡後再錄一次。",
+  "feedback.graphragContext": "建議依據",
   "feedback.likelyCause": "可能原因：",
   "feedback.injuryRisk": "受傷風險：",
   "feedback.cause": "原因",
@@ -959,12 +959,12 @@ const zhHant: Dict = {
   "severity.mild": "低",
 
   // Squat phases
-  "phase.descent": "下降",
-  "phase.ascent": "上升",
+  "phase.descent": "下蹲",
+  "phase.ascent": "起身",
   "phase.bottom": "最低點",
   "phase.top": "頂點",
-  "phase.eccentric": "離心",
-  "phase.concentric": "向心",
+  "phase.eccentric": "下放",
+  "phase.concentric": "發力起身",
   "phase.hold": "停頓",
   "phase.transition": "轉換",
   "phase.setup": "準備",
@@ -976,12 +976,12 @@ const zhHant: Dict = {
   "fault.shallow_depth": "深度不足",
   "fault.excessive_forward_lean": "軀幹過度前傾",
   "fault.heel_rise": "腳跟離地",
-  "fault.butt_wink": "骨盆後傾",
+  "fault.butt_wink": "骨盆捲起",
   "fault.asymmetric_shift": "左右不對稱",
 
   // Knowledge graph
   "kg.title": "知識圖譜",
-  "kg.chain": "錯誤 → 成因 → 修正",
+  "kg.chain": "動作問題 → 原因 → 改善方式",
   "kg.nodes": "{count} 個節點",
   "kg.empty": "此片段沒有圖譜脈絡。",
   "kg.focus": "顯示",
@@ -1000,10 +1000,10 @@ const zhHant: Dict = {
 
   // Upload dropzone
   "upload.analysing": "分析中…",
-  "upload.prompt": "拖放{movement}影片或點擊上傳",
+  "upload.prompt": "拖放 {movement} 影片，或點一下上傳",
   "upload.hint": "MP4 / MOV · 單一運動員 · 側面或背面視角",
-  "upload.tooLarge": "這支影片太大了,上限是 {limit} MB。請改用較短的片段。",
-  "upload.quotaFull": "儲存空間已滿({used} MB / {limit} MB)。請先刪除一些已存的分析來騰出空間。",
+  "upload.tooLarge": "這支影片太大了，上限是 {limit} MB。請改用較短的片段。",
+  "upload.quotaFull": "儲存空間已滿（{used} MB / {limit} MB）。請先刪除部分已存分析來騰出空間。",
 
   // Capture studio — input mode + the MediaPipe model-tier picker
   "capture.upload": "上傳影片",
@@ -1013,20 +1013,20 @@ const zhHant: Dict = {
   "tier.aria": "分析精度：{name}",
   "tier.default": "預設",
   "tier.lite.hint": "最快，但深蹲判定僅約半數與 Heavy 一致。",
-  "tier.full.hint": "速度與準確度的折衷。",
-  "tier.heavy.hint": "最準確，錯誤門檻即以此驗證。",
+  "tier.full.hint": "速度和準確度之間的平衡。",
+  "tier.heavy.hint": "最準確；目前的問題判定標準就是用它驗證的。",
   "tier.note": "僅影響分析；即時骨架疊圖一律使用 Lite。",
 
   // Demo onboarding (empty state)
-  "demo.heading": "約 20 秒，分析一段{movement}。",
-  "demo.sub": "上傳或直接錄一段影片。你會得到骨架疊圖、錯誤時間軸，以及能追溯成因的教練回饋。",
+  "demo.heading": "約 20 秒，分析一段 {movement}。",
+  "demo.sub": "上傳影片或直接錄一段。你會看到骨架疊圖、問題時間軸，以及附上原因的教練建議。",
   "demo.getTitle": "你會得到",
-  "demo.get1.title": "骨架與錯誤",
-  "demo.get1.body": "骨架疊圖，並在時間軸上標出每個偵測到的錯誤。",
+  "demo.get1.title": "骨架與動作問題",
+  "demo.get1.body": "骨架疊圖會在時間軸上標出每個偵測到的動作問題。",
   "demo.get2.title": "有據回饋",
-  "demo.get2.body": "每個錯誤都附上觀察、可能成因與修正提示。",
+  "demo.get2.body": "每個動作問題都有觀察結果、可能原因和改善提示。",
   "demo.get3.title": "知識圖譜",
-  "demo.get3.body": "連結每個現象到其成因的檢索路徑。",
+  "demo.get3.body": "帶你看系統怎麼從動作問題找到可能原因。",
   "demo.errorTitle": "這段片段沒有成功處理",
 
   // Studio movement selector
@@ -1036,9 +1036,9 @@ const zhHant: Dict = {
   // Studio page header
   "studio.crumbHome": "首頁",
   "studio.crumbWorkout": "訓練",
-  "studio.crumbCurrent": "{movement}分析",
-  "studio.title": "{movement}動作分析",
-  "studio.subtitle": "取得有憑有據的回饋，把動作練得更好",
+  "studio.crumbCurrent": "{movement} 分析",
+  "studio.title": "{movement} 動作分析",
+  "studio.subtitle": "看懂動作問題，把每一下做得更好",
   "studio.newSession": "開始／上傳影片",
 
   // Studio dashboard cards
@@ -1047,20 +1047,20 @@ const zhHant: Dict = {
   "studio.previousEmpty": "還沒有更早的紀錄，這是第一次。",
   "studio.previousSignIn": "登入後即可保留每次分析的紀錄。",
   "studio.previousError": "無法載入先前的紀錄。",
-  "studio.sessionClean": "無錯誤",
-  "studio.sessionFaults": "{n} 個錯誤",
+  "studio.sessionClean": "動作穩定",
+  "studio.sessionFaults": "{n} 個動作問題",
   "studio.keyMetrics": "關鍵指標",
   "studio.metricLimit": "（門檻 {op} {v}）",
   "studio.tips": "改善建議",
-  "studio.tipsNone": "知識圖譜沒有為這些錯誤回傳修正提示。",
+  "studio.tipsNone": "目前找不到能對應這些動作問題的改善提示。",
   "studio.tipsClean": "這一下沒有需要修正的地方。",
-  "studio.detectedErrors": "偵測到的錯誤",
+  "studio.detectedErrors": "偵測到的動作問題",
   "studio.moreFaults": "教練面板還有 {n} 項",
 
   // Derived form score (client-side, see lib/formScore.ts)
   "studio.formScore": "動作分數",
-  "studio.formScoreFrom": "由偵測到的錯誤推導",
-  "studio.formScoreNote": "此分數在本機由偵測到的錯誤與嚴重度推導而得，並非後端量測值。",
+  "studio.formScoreFrom": "依偵測到的動作問題計算",
+  "studio.formScoreNote": "這個分數會依偵測到的動作問題和程度在你的裝置上計算，不是後端直接量出來的數值。",
   "studio.formScoreUnknown": "這段影片沒有可量測的畫面",
   "studio.band.excellent": "優秀",
   "studio.band.good": "良好",
@@ -1098,85 +1098,85 @@ const zhHant: Dict = {
   "landing.hero.titleAccent": "追溯到關節",
   "landing.hero.titlePost": "。",
   "landing.hero.sub":
-    "x-coach 讀取深蹲、伏地挺身或肩上推舉影片，定位動作錯誤，在涵蓋 16 個動作的生物力學知識圖譜中追溯成因，並說明修正方式。",
+    "x-coach 會分析深蹲、伏地挺身和肩上推舉影片，找出動作問題，從涵蓋 16 種動作的知識圖譜找原因，再告訴你怎麼改善。",
   "landing.hero.readMethod": "了解方法",
 
   // Landing — problem
-  "landing.problem.title": "分數不會教學，通用模型只能猜測。",
+  "landing.problem.title": "分數不會告訴你怎麼練，通用模型也只能猜。",
   "landing.problem.sub":
-    "動作品質模型只回傳一個分數，沒有任何指導。問通用語言模型，它聽起來很有把握，卻在杜撰生物力學。",
-  "landing.problem.aqs.label": "動作品質評分",
+    "只會打分的動作模型只給你一個數字，沒有改善方向。通用語言模型聽起來很有把握，卻可能把原因講錯。",
+  "landing.problem.aqs.label": "只會打分的模型",
   "landing.problem.aqs.body":
-    "回傳 0 到 100 的評分。運動員只知道自己得了 71 分，卻不知道該改什麼、為什麼改。",
+    "它回傳 0 到 100 分。你只知道自己拿了 71 分，卻不知道哪裡要改、為什麼要改。",
   "landing.problem.llm.label": "通用語言模型",
   "landing.problem.llm.body":
-    "產生與影片脫節的流暢建議，並憑空捏造影片中根本沒有出現的成因。",
-  "landing.problem.xcoach.title": "從設計上就有依據",
-  "landing.problem.point1": "在實際影格中看見錯誤",
-  "landing.problem.point2": "從具來源的知識圖譜檢索成因",
-  "landing.problem.point3": "說明可回溯依據的修正方式",
+    "它能給出流暢的建議，卻不一定真的看懂你的影片，還可能猜錯原因。",
+  "landing.problem.xcoach.title": "每個建議都有根據",
+  "landing.problem.point1": "從實際畫面找出動作問題",
+  "landing.problem.point2": "從有來源的知識圖譜找可能原因",
+  "landing.problem.point3": "每個改善方式都說得出依據",
 
   // Landing — pipeline
   "landing.pipeline.kicker": "系統架構",
-  "landing.pipeline.title": "四個模組，構成從畫面到處方的完整閉環。",
-  "landing.stage.perceive.title": "感知",
+  "landing.pipeline.title": "四個步驟，從畫面一路帶你找到改善方式。",
+  "landing.stage.perceive.title": "看動作",
   "landing.stage.perceive.body":
-    "姿態關鍵點與 VideoMAE 動作特徵擷取幾何資訊，再於時間軸上定位錯誤。",
-  "landing.stage.retrieve.title": "檢索",
+    "姿態關鍵點和 VideoMAE 動作特徵讀取身體位置，再找出問題發生的時間點。",
+  "landing.stage.retrieve.title": "找資料",
   "landing.stage.retrieve.body":
-    "GraphRAG 在健身知識圖譜中，從可見徵狀走向更深層的成因。",
-  "landing.stage.reason.title": "推理",
+    "GraphRAG 會在健身知識圖譜中，從看得到的動作問題找出可能原因。",
+  "landing.stage.reason.title": "判斷原因",
   "landing.stage.reason.body":
-    "一條思考鏈從觀察、歸因到處方，全程以檢索到的證據為依據。",
-  "landing.stage.coach.title": "指導",
+    "系統把看到的情況、可能原因和改善方式串起來，並以找到的資料為依據。",
+  "landing.stage.coach.title": "給建議",
   "landing.stage.coach.body":
-    "回傳診斷報告與修正提示，並標出確切的影格。",
+    "提供改善建議，並標出問題出現的畫面。",
 
   // Landing — diagnosis
-  "landing.diagnosis.title": "每個提示都帶著推理依據。",
+  "landing.diagnosis.title": "每個建議都看得到原因。",
   "landing.diagnosis.sub":
-    "一個偵測到的錯誤，從鏡頭所見一路走到你該採取的訓練動作。",
-  "landing.step.observation.tag": "感知",
+    "從鏡頭看到的動作問題，一路帶到你可以怎麼練。",
+  "landing.step.observation.tag": "看動作",
   "landing.step.observation.title": "觀察",
   "landing.step.observation.body":
     "在動作最低點，左膝向內越過腳掌，於第 96 到 118 影格被標記。",
   "landing.step.attribution.tag": "知識圖譜",
-  "landing.step.attribution.title": "歸因",
+  "landing.step.attribution.title": "找原因",
   "landing.step.attribution.body":
-    "多跳檢索將膝蓋內移連結到髖外展肌無力，並以臀中肌為主要節點。",
-  "landing.step.prescription.tag": "推理",
-  "landing.step.prescription.title": "處方",
+    "系統把膝蓋內夾連結到髖部外側力量不足，並指出臀中肌可能是關鍵。",
+  "landing.step.prescription.tag": "給建議",
+  "landing.step.prescription.title": "怎麼改善",
   "landing.step.prescription.body":
-    "提示運動員將膝蓋向腳尖外推，並安排彈力帶高腳杯深蹲作為輔助訓練。",
+    "讓膝蓋跟著腳尖方向往外推，並加上彈力帶高腳杯深蹲輔助練習。",
   "landing.frame.alt": "分析中的取樣影格",
 
   // Landing — bento
   "landing.bento.kicker": "技術細節",
-  "landing.bento.title": "四種訊號，於本地讀取並融合。",
+  "landing.bento.title": "四種訊號都在裝置上分析，再整合成結果。",
   "landing.bento.pose.title": "姿態感知",
   "landing.bento.pose.body":
-    "MediaPipe 與 RTMPose 在 33 個關鍵點上的標記。像膝外翻這類關節幾何，可直接對應成知識圖譜理解的語言。",
+    "MediaPipe 和 RTMPose 追蹤 33 個身體關鍵點，像膝蓋內夾這類問題都能轉成系統看得懂的資訊。",
   "landing.bento.kg.title": "知識圖譜",
   "landing.bento.kg.body":
-    "健身知識圖譜將錯誤、成因與修正串連起來，並在具來源的生物力學上進行多跳檢索。",
-  "landing.bento.rules.title": "可解釋規則",
+    "健身知識圖譜把動作問題、原因和改善方式串起來，讓建議有資料可追溯。",
+  "landing.bento.rules.title": "看得懂的判定規則",
   "landing.bento.videomae.title": "VideoMAE 動作",
   "landing.bento.videomae.body":
-    "時空特徵能分辨標準動作與細微錯誤。",
+    "影片中的動作變化能幫系統分辨穩定動作和細微問題。",
 
   // Landing — evaluation
-  "landing.eval.title": "以可衡量的標準檢驗。",
+  "landing.eval.title": "不只說得好聽，也要經得起檢驗。",
   "landing.eval.sub":
-    "可解釋性唯有能被驗證才有意義。x-coach 在一致性、依據紮實度，以及運動員是否真的採用建議上接受驗證。",
+    "建議能不能解釋不夠，還要能驗證。x-coach 會檢查結果是否一致、建議是否有根據，以及使用者是否真的覺得有幫助。",
   "landing.eval.m1.label": "評分一致性",
   "landing.eval.m1.body":
-    "與專家排名的 Spearman 相關性，讓模型的排序貼近人類評審。",
-  "landing.eval.m2.label": "依據與幻覺",
+    "和專家的排序比對，確認模型的判斷是否接近真人教練。",
+  "landing.eval.m2.label": "建議是否有根據",
   "landing.eval.m2.body":
-    "以 RAGAS 忠實度檢查，確保每項主張都緊扣檢索到的證據。",
+    "用 RAGAS 檢查每個說法是否都對得上找到的資料。",
   "landing.eval.m3.label": "實用性",
   "landing.eval.m3.body":
-    "由不同經驗程度的運動員參與使用者研究，評比骨架疊圖與文字建議。",
+    "邀請不同程度的訓練者實際使用，評估骨架疊圖和文字建議是否好懂、有幫助。",
 
   // Landing — closing CTA
   "landing.cta.title": "看它分析一段真實深蹲。",
@@ -1185,7 +1185,7 @@ const zhHant: Dict = {
 
   // Landing — footer
   "landing.footer.pipeline": "處理流程",
-  "landing.footer.tagline": "可解釋的動作教練，研究原型。",
+  "landing.footer.tagline": "看得懂原因的動作教練，研究原型。",
 
   // Landing — movement showcase
   "landing.showcase.title": "同一套流程，涵蓋整個動作庫。",
