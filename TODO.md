@@ -191,7 +191,7 @@
   - 結果：出貨用的 lead-leg cue **在三維下就是錯的**（不只是投影損失）；
     規格書自己定義的另一半替代量測從單目 2D 拿到 0.959/0.894。
   - 注意：**沒有任何閾值因此被調整**，`LUNGE_DETECTOR.validated` 仍為 `False`。
-- [ ] Squat / Overhead Press / Push-up / Deadlift / Row / Band Pull Apart 六個偵測器仍是
+- [ ] Squat / Overhead Press / Push-up / Deadlift / Row / Band Pull Apart / Bicep Curl 七個偵測器仍是
   「spec-derived、UNVALIDATED」，前端以 Beta tag 標示（`/api/movements` 的 `validated` 欄位）
 - [ ] 把 `validated` 從「人工判斷」變成「有標註集撐腰」：每個動作至少一組標註資料 + 回歸腳本
 
@@ -469,6 +469,20 @@
   Fit3D 沒有 correctness label，所以無法判定那一下究竟是不是真的做短了，因此**只記錄不調整**
   （no-threshold-tuning）。另外投影誤差方向不對稱：伸展那一項偏向「多觸發」，屈曲那一項偏向
   「漏掉」，細節寫在 `rule_incomplete_rom` 的 docstring 與設計文件 §2。
+- [ ] **Bicep Curl 的「伸展不足」判定很脆弱**（2026-08-09 量測記錄，未修）：`setup` 是 rep window
+  的前 15%，而 `contiguous_true_segments` 需要 `min_frames = max(3, ceil(0.20*fps))` 連續幀，
+  推導出**每下至少 1.333 秒**才可能觸發（fps ≥ 15 時與 fps 無關）——比
+  `DEFAULT_MIN_REP_SECONDS`（0.4 秒）緊得多，真實最快的一下（1.92 秒）只有 1.44 倍餘裕。
+  更麻煩的是 `segment_reps` 會把 window 裁到訊號的 excursion：受試者若在兩下之間停在手臂伸直的
+  位置，那段 hold 會被裁掉，`setup` 反而落在動作中段。實測一個每下 63 幀、含 hold 的 fixture：
+  window 只剩 37 幀、`setup` 只有 5 幀（差 1 幀）、涵蓋的角度是 84–110° 而非真正的 130° 底部，
+  結果整條規則靜默。**所以這一項會不會觸發取決於 rep 的形狀，不只是長度**（平滑 excursion 在
+  1.92 / 2.54 秒都會觸發，所以是脆弱而非死掉）。沒有修：15% 與 `min_frames` 都是共用的框架常數，
+  沒有可引用的依據為單一動作調整；失效方向是漏報而非誤報。
+  由 `tests/test_bicep_curl.py::PhaseWindowWidthTest` 與
+  `test_rep_trimming_can_silence_the_extension_term` 釘住。
+  這其實是 `_setup_baseline` docstring 已記載的 trimming 問題最尖銳的形式，
+  對其他 baseline 類規則只是「量到的變化偏小」，對這一條卻是「量錯位置後直接靜默」。
 
 ### P3：感知升級 — ⏸ 未開始（但研究面已備妥依據）
 

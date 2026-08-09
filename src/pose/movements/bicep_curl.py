@@ -680,6 +680,30 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
     MISSING faults. Perfectly collinear points project collinearly, so a genuinely straight arm
     still reads ~180 from any view and the extension term is safe at its limit.
 
+    THE EXTENSION TERM IS FRAGILE, AND THE MEASUREMENT IS RECORDED RATHER THAN REPAIRED. Two
+    framework interactions narrow the `setup` window it fires in:
+
+      1. `setup` is 15% of the rep window and `contiguous_true_segments` needs
+         `min_frames = max(3, ceil(0.20 * fps))`, so the term needs `0.15 * fps * T >= 0.20 *
+         fps`, i.e. **T >= 1.333 s per rep** -- fps-independent above 15 fps. Measured Fit3D
+         cadence is 1.92-3.68 s/rep, so the fastest real rep sits at 1.44x this floor. That is
+         a TIGHTER constraint than DEFAULT_MIN_REP_SECONDS (0.4 s), which is what the design
+         spec's cadence figure was checked against.
+      2. Worse, `segment_reps` trims each window to the signal's EXCURSION. A lifter who pauses
+         with the arms extended between reps has that hold cut away, so `setup` covers
+         mid-range frames rather than the bottom -- and the trimmed window is shorter, which
+         can push `setup` back under `min_frames` on its own. Measured on a 63-frame-per-rep
+         fixture with a between-reps hold: windows came out 37 frames, `setup` 5 frames (one
+         short of 6), and the frames it covered read 84-110 degrees instead of the true
+         130-degree bottom. Pinned by
+         `tests/test_bicep_curl.py::EndToEndSegmentationTest::test_rep_trimming_can_silence_the_extension_term`.
+
+    So whether this term reports depends on the SHAPE of the rep, not only its duration. NOT
+    repaired: the 15% setup fraction and `min_frames` are shared framework constants, and
+    neither has a cited basis to move for one movement. The failure mode is a MISSED fault,
+    never a false one. `_setup_baseline`'s docstring records the same trimming caveat for the
+    baseline rules, where it degrades more gently.
+
     DOWNGRADE, NOT GATE, unlike the two sagittal rules above. An elbow angle is the RIGHT
     quantity from every view; obliquity makes it noisier, not different in kind. So this rule
     fires everywhere with the standard discount off `side` -- matching
