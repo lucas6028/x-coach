@@ -411,13 +411,17 @@ see it.
 3. **No KG node.** `"Momentum"` matches `Anterior Momentum Generation` and `Forward Momentum`,
    both reached from other movements' subgraphs.
 
-### 7.3 The graph and the citation audit selected the same subset
+### 7.3 The graph is a useful negative filter, and nothing stronger
 
 This movement has exactly **three** fault nodes in the knowledge graph, and the two parent-spec
-rules with no node are exactly the two withdrawn on citation grounds. That is the first time in
-this programme the graph and the citation audit have independently agreed on which rules should
-not exist, and it is worth recording precisely because it could easily have been a coincidence —
-n = 2.
+rules with no node are exactly the two withdrawn on citation grounds. That is worth recording —
+but it is the whole of the agreement, and the tempting stronger claim does not survive counting.
+
+Node-presence predicts the outcome in **2 of the 5 decisions taken here**. The other three all
+*have* nodes, and they are a ship (`Trunk Lean Compensation`), a permanent silence
+(`Insufficient Abduction Range` — the best seed in the section), and a not-implemented sub-clause
+(`Pelvic Hiking`). So a missing node was a reliable signal that a rule should not exist, and a
+present node said nothing at all about whether it would.
 
 ---
 
@@ -453,9 +457,14 @@ incorrect ones. That is the measurement §5 rests on.
 **The view estimator** emitted a `FRONTAL_OBSERVABLE_VIEWS` label on **0 of 210** repetitions —
 `front` → `rear_oblique` 116/116, `half-profile` → `side` 92/94. §1.3.
 
-**The eight-landmark gate** costs a median validity rate of **0.600 and a p10 of 0.000**: at least
-a tenth of repetitions carry no fully-landmarked frame at all. **35 of 210 (17%) took a fallback
-path** and are excluded from every AUC above, which are computed over **163/210** and say so.
+**The eight-landmark gate** costs a median validity rate of **0.600, p10 0.000** — and it is the
+**sole** cause of the fallback path here, checked in both directions: the 35 of 210 (17%) that
+`segment_reps` could not segment are *exactly* the 35 whose validity rate is 0.000. Nothing with a
+usable frame failed to segment and nothing with zero usable frames reached the segmented path, so
+`p10 = 0.000` and `35/210` are one fact stated twice (p10 falls inside the zero block because
+17% > 10%). Among the 175 that did segment, validity is median 0.654, min 0.064. Those 35, plus 12
+segmented repetitions whose score is NaN (11 ambiguous side, 1 with no finite active-phase tilt),
+are why every AUC above is computed over **163/210** and says so.
 
 ---
 

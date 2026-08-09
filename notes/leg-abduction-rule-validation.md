@@ -76,15 +76,23 @@ video. `assert_dataset_shape` raises unless every one of those counts still hold
 change cannot reach this note as a plausible-looking number.
 
 **The eight-landmark validity gate is expensive: median 0.600, p10 0.000.** Half the frames of a
-median repetition carry all eight required landmarks, and **at least a tenth of repetitions carry
-none at all**. That is the price of requiring both ankles for the support limb — two landmarks
-more than any other Group E module needs — and it is the visible cause of the segmentation
-outcome below.
+median repetition carry all eight required landmarks. That is the price of requiring both ankles
+for the support limb — two landmarks more than any other Group E module needs.
 
-**35 of 210 repetitions (17%) took a fallback path** — `no_reps_detected` 17, `only_partial_reps`
-18 — meaning `segment_reps` found no complete repetition inside the labeled window. Those
-repetitions are excluded from every AUC in §4 and §5, which are therefore computed over
-**163/210**. The exclusion is stated at every number rather than buried here.
+**And the gate is the SOLE cause of the fallback path here — the two are the same 35
+repetitions, checked rather than inferred.** 35 of 210 (17%) took a fallback path
+(`no_reps_detected` 17, `only_partial_reps` 18), and **every one of them has a validity rate of
+exactly 0.000**; conversely every repetition with zero valid frames is one of those 35. Nothing
+with a usable frame failed to segment, and nothing with zero usable frames slipped into the
+segmented bucket. The `p10 0.000` figure and the `35/210` figure are therefore not two
+independent facts — p10 lands inside the zero block precisely because 17% > 10%.
+
+Among the 175 that did segment, validity is median 0.654 and minimum 0.064.
+
+Those 35 are excluded from every AUC in §4 and §5. A further 12 segmented repetitions score NaN
+(11 because the working side was ambiguous, 1 because no active-phase frame carried a finite
+tilt), so the AUCs are computed over **163/210**. The denominator is stated at every number
+rather than buried here.
 
 ---
 

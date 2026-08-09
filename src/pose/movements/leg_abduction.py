@@ -77,10 +77,15 @@
 # the support limb: without them this module has no vertical. If `visible_point` drops any ONE of
 # the eight the frame is marked `valid=False` and carries no metric keys, so every rule masking on
 # `frame.valid` goes silent for that frame. MEASURED ON 210 LABELED REPETITIONS, THE COST IS LARGE:
-# median validity rate 0.600 and p10 0.000 -- at least a tenth of repetitions carry NO fully
-# landmarked frame at all -- and 35 of 210 (17%) end up on a `segment_reps` fallback path as a
-# result. The p10 is quoted alongside the median deliberately, because the median hides exactly the
-# repetitions where the gate bites. notes/leg-abduction-rule-validation.md section 2.
+# median validity rate 0.600, p10 0.000.
+#
+# AND THE GATE IS THE SOLE CAUSE OF THE FALLBACK PATH ON THAT CORPUS -- checked, not inferred. The
+# 35 of 210 (17%) that `segment_reps` could not segment are EXACTLY the 35 whose validity rate is
+# 0.000, in both directions: nothing with a usable frame failed to segment, and nothing with zero
+# usable frames reached the segmented path. So "p10 = 0.000" and "35 on a fallback path" are one
+# fact stated twice -- p10 lands inside the zero block because 17% > 10%. Among the 175 that did
+# segment, validity is median 0.654, min 0.064.
+# notes/leg-abduction-rule-validation.md section 2.
 from __future__ import annotations
 
 import math

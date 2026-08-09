@@ -1990,10 +1990,12 @@ All citation_support paraphrases/quotes above were taken from the six RAG docs a
 >   humans judged CORRECT** against 8/70 (11%) judged incorrect, with the cue's AUC at **0.206
 >   pooled and below chance in all 9 subjects**. Silent rather than moved, because moving it is
 >   fitting a threshold to labels.
-> - **THE GRAPH AND THE CITATION AUDIT INDEPENDENTLY SELECTED THE SAME SUBSET.** This movement has
->   exactly three `Leg Abduction:` fault nodes, and the two rules withdrawn on citation grounds are
->   exactly the two with no node. First time in the programme; n = 2, so recorded rather than
->   claimed as a method.
+> - **THE TWO RULES WITH NO GRAPH NODE ARE ALSO THE TWO WITHDRAWN ON CITATION GROUNDS** — but that
+>   is the whole of the agreement, and it is weaker than it first looks. This movement has exactly
+>   three `Leg Abduction:` fault nodes. Node-presence predicts the outcome in 2 of the 5 decisions
+>   taken here: the other three all HAVE nodes and are a ship, a permanent silence, and a
+>   not-implemented sub-clause. So the graph is a useful negative filter and **not** a predictor of
+>   which rules survive. Recorded, not offered as a method.
 > - **THE FIRST SIDE RESOLVER IN THE REGISTRY WITH GROUND TRUTH — AND IT CAUGHT A DESIGN ERROR.**
 >   `exercise_subtype` names the working leg on all 210 repetitions. Final: **163 correct, 1 wrong,
 >   11 declined** of the 175 that reached it (accuracy 0.994, coverage 0.937). The FIRST

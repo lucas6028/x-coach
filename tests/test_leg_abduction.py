@@ -378,11 +378,28 @@ class TrunkLeanRuleTest(unittest.TestCase):
         """The distinguishing property against `arm_abduction.rule_contralateral_trunk_lean`,
         which measures the same compensation from the IMAGE vertical.
 
-        A subject rolled 90 degrees whose trunk is still aligned with their planted leg has not
-        leaned; an image-vertical rule would call that a 90-degree lean.
+        BOTH HALVES ARE ASSERTED, because the silence alone proves nothing: a fixture with zero
+        trunk tilt is silent under either reference frame. So this also computes the
+        image-vertical form on the SAME rolled frames and asserts it would have fired well past
+        the cut. A subject rolled 90 degrees whose trunk is still aligned with their planted leg
+        has not leaned; an image-vertical rule calls that a 90-degree lean.
         """
-        upright_but_rolled = _core(self._frames(0.0, roll_deg=90.0))
-        self.assertEqual(rule_trunk_lean_compensation(upright_but_rolled, _ctx()), [])
+        frames = self._frames(0.0, roll_deg=90.0)
+        self.assertEqual(rule_trunk_lean_compensation(_core(frames), _ctx()), [])
+
+        from src.pose.geometry import landmarks_to_array, midpoint
+
+        image_vertical_leans = []
+        for frame in frames:
+            points = landmarks_to_array(frame["landmarks"])
+            shoulder_mid = midpoint(points, 11, 12, dims=2)
+            hip_mid = midpoint(points, 23, 24, dims=2)
+            trunk = shoulder_mid - hip_mid
+            image_vertical_leans.append(
+                abs(math.degrees(math.atan2(float(trunk[0]), -float(trunk[1]))))
+            )
+        self.assertGreater(min(image_vertical_leans), TRUNK_LEAN_MILD_DEG)
+        self.assertAlmostEqual(min(image_vertical_leans), 90.0, places=3)
 
     def test_the_citation_records_that_its_support_is_secondary(self) -> None:
         detection = rule_trunk_lean_compensation(_core(self._frames(20.0)), _ctx())[0]
