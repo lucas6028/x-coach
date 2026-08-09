@@ -459,8 +459,8 @@ class RegistrationTest(unittest.TestCase):
 
     def test_it_is_the_eleventh_detector_in_registration_order(self) -> None:
         names = [detector.name for detector in list_detectors()]
-        self.assertEqual(names[-1], "Sit-up")
-        self.assertEqual(len(names), 11)
+        self.assertEqual(names[10], "Sit-up")
+        self.assertGreaterEqual(len(names), 11)
         self.assertEqual(names[0], "Squat")
 
     def test_lookup_is_case_insensitive(self) -> None:

@@ -48,22 +48,22 @@
 > （例如 `notes/rtmpose_result_analysis_and_backend_comparison.md` 記了 `n=1623`），
 > 尚未正式整理成一份資料集規格文件。
 
-- [ ] 確認已可直接使用的標註與切分：
+- [x] 確認已可直接使用的標註與切分：
   - `data/Squat/Labeled_Dataset/Splits/train_keys.json`
   - `data/Squat/Labeled_Dataset/Splits/val_keys.json`
   - `data/Squat/Labeled_Dataset/Splits/test_keys.json`
-- [ ] 記錄目前資料規模：
+- [x] 記錄目前資料規模：
   - `Labeled_Dataset/videos`: 1739 支影片
   - split union: 1623 支有正式 train/val/test key
   - `Unlabeled_Dataset/videos`: 4970 支影片
-- [ ] 記錄標註類型：
+- [x] 記錄標註類型：
   - `error_knees_forward.json`: 影片 key 對應錯誤時間區段
   - `error_knees_inward.json`: 影片 key 對應錯誤時間區段
   - `labels_shallow_depth.json`: 片段/局部 label
-- [ ] 記錄標註格式：
+- [x] 記錄標註格式：
   - `[video_id]: [error_start_time, error_end_time]`
   - 無錯誤時為空陣列
-- [ ] 記錄影片基本特性：
+- [x] 記錄影片基本特性：
   - 多數影片約 `30 FPS`
   - 長度約 `3 秒`
   - 解析度約 `480x600`
@@ -443,8 +443,37 @@
     Band Pull Apart 的 scapular retraction 條恆為 silent、Bicep Curl 撤回 wrist flexion、
     Arm Abduction 撤回 impingement arc 且 shoulder shrug 恆為 silent、
     Arm VW 撤回 loss_of_elevation 的 W 分支且 shrug substitution 恆為 silent）
-  - [ ] 其餘 6 個動作的 rule pack 未做（Group E：sit-up、shoulder bridge、leg abduction；
-    Group F：torso twist、jumping jacks、high knee）
+  - [ ] 其餘 5 個動作的 rule pack 未做（Group E：leg abduction；
+    Group F：torso twist、jumping jacks、high knee；Group A：無）
+    ※ Shoulder Bridge 已於 2026-08-09 完成（12/16）：1 條 live、1 條永久 silent、2 條撤回。
+- [ ] **下載 `frames_open.tar.gz.ac`，跑 Shoulder Bridge 的 77 動作驗證**（2026-08-09 開）。
+  這是整個 16 動作計畫裡**第一個 `validated=False` 的原因是「檔案沒下載完」而不是研究缺口**的動作。
+  EgoExo-Fitness 有 **77 個人工評分的 Shoulder Bridge action、130 筆標註記錄**，
+  canonical guidance 77 個全部逐字相同，且**逐字寫出**這條規則的終點
+  （「until your knees and hips are raised in a straight line with the shoulders」）；
+  十二條 technical-keypoint 準則裡有一條**就是這條規則**
+  （「Progressively raise your body until your knees, hips, and shoulders align in a straight
+  line」，77 個裡有 **16 個被判 False**）。變體也對得上——沒有 Sit-up 那種「圖與 spec 講不同動作」
+  的問題。**缺的只有像素**：`frames_open` 分成 3 GiB 一份下載，`.ac` 那份沒有，
+  所以 77 個裡只有 **2 個**（`z8RAua_action_4`、`z8RAua_action_11`）落在解得開的 record 裡。
+  補完 `.ac` 之後，這會是繼 Squat 之後**第二個真正有標註驗證的動作**，
+  而且驗的是規則本身的準則、不是代理指標。見
+  `docs/superpowers/specs/2026-08-09-shoulder-bridge-detector-design.md` §2。
+- [ ] **`angle_degrees` 是無號的，這件事會靜默地反轉規則語意**（2026-08-09 由 Shoulder Bridge
+  發現，影響範圍未盤點）。`src/pose/geometry.py:73` 回傳 `degrees(arccos(...))`，值域 [0, 180]，
+  且**對 180° 完全對稱**：實測合成 fixture，離直線 +20° 與 −20° 都讀成 **140.00°**。
+  兩個後果：(1) parent spec 的 `bridge_lumbar_hyperextension`「> ~190°」**永遠不可能 fire**
+  （本 registry 第五個 vacuous branch，第二個在實作前就抓到）；
+  (2) 出貨的 `bridge_incomplete_hip_extension`「< 160°」**會對「拱過頭」的橋 fire**，
+  然後告訴使用者「抬高一點」——**方向正好相反的提示**。
+  試過兩種 body-relative 補號方法，**兩種都在真實影片上實測失敗**：
+  以踝關節為參考在合成 fixture 上完全正確（旋轉/鏡射不變，還原 120/160/180/200/240），
+  但真實片段上有 **57.0% 與 62.3%** 的 frame 被判成「拱起」，而那些是標註者判定**正確**的 rep；
+  以肩–踝連線當地面則**左右兩側自己互相矛盾**（24 個抽樣 frame 裡有 21 個左右號相反）。
+  靠近直線時兩個外積都趨近 0，號就是雜訊。**沒有在規則內修**，因為任何修法都是發明數字。
+  待辦：盤點 registry 裡還有哪些規則的語意依賴「角度可以超過 180°」或「角度的方向」。
+  現況由 `tests/test_shoulder_bridge.py::MetricConflationTest` 釘住。見
+  `docs/superpowers/specs/2026-08-09-shoulder-bridge-detector-design.md` §3、§4。
 - [ ] `compare_analyses` / `list_user_history` 工具 + 進步追蹤（跨分析記憶）
 - [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
 - [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
@@ -529,6 +558,15 @@
     i18n 的 `movement.Sit-up` 繁中已經是「仰臥起坐」（不是「捲腹」）、卡片插圖也是完整仰臥起坐，
     所以除了 parent spec 以外的每一個既有成品都指向完整版。見
     `docs/superpowers/specs/2026-08-09-situp-detector-design.md` §10。
+  - Shoulder Bridge 具體案例（2026-08-09）：**第一次是好消息**。
+    `Shoulder Bridge:Incomplete Hip Extension` 有**三個非空 bucket**
+    （causes: `Poor Hip Extension`、`Weak Gluteus Maximus`；corrections: `Squeeze Glutes`），
+    是整個 16 動作計畫裡**第一個既不薄、也不共用、也不相反**的 seed，
+    而且它帶的矯正提示正好就是兩篇來源說這個終點在練的東西。
+    另外兩個 `Shoulder Bridge:` 節點仍有問題：`No Segmental Spinal Articulation` 是 dangling、
+    `Loss Of Core Engagement` 只有一個 `quality_impacts`。
+    而 `Pelvic Drop` 在 movement=`Shoulder Bridge` 下**連一個節點都 match 不到**
+    （不是薄、不是相反，是完全沒有），這是撤掉 `asymmetric_pelvic_drop` 的四個理由之一。
 - [ ] **每一條「整下 rep 行程不足」的規則在完全靜止的片段上都會 fire，且是滿分**
   （2026-08-09 由 review 發現、實測重現，非測試抓到；影響整個 registry，不是單一動作）。
   `segment_reps` 的 hysteresis 是**對訊號自身百分位**取閾值，故 scale-free——這正是「很淺的一下

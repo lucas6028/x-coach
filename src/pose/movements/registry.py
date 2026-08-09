@@ -21,7 +21,8 @@ def list_detectors() -> list[MovementDetector]:
 
     Registration order is the import order at the bottom of this module (Squat, Overhead
     Press, Push-up, Lunge, Deadlift, Row, Band Pull Apart, Bicep Curl, Arm Abduction, Arm VW,
-    Sit-up) -- deterministic, and it puts the validated detector first without encoding a UI
+    Sit-up, Shoulder Bridge) -- deterministic, and it puts the validated detector first without
+    encoding a UI
     preference in the ML layer. Backs GET /api/movements, which is why the frontend needs no
     hand-maintained list of analyzable movements.
     """
@@ -40,3 +41,4 @@ from src.pose.movements import bicep_curl  # noqa: E402,F401
 from src.pose.movements import arm_abduction  # noqa: E402,F401
 from src.pose.movements import arm_vw  # noqa: E402,F401
 from src.pose.movements import situp  # noqa: E402,F401
+from src.pose.movements import shoulder_bridge  # noqa: E402,F401
