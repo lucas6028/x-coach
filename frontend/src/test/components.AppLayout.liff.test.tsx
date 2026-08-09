@@ -67,14 +67,13 @@ describe("AppLayout — inside the LINE app", () => {
     await waitFor(() => expect(screen.getByText("page body")).toBeInTheDocument());
   });
 
-  it("threads the studio's new-analysis/library actions into the shell header", async () => {
+  it("threads the studio's new-analysis action into the shell header", async () => {
     renderLayout();
     await waitFor(() => expect(screen.getByRole("navigation")).toBeInTheDocument());
-    // The point here is that the shell actually renders and wires the actions, not stranding the
+    // The point here is that the shell actually renders and wires the action, not stranding the
     // user with tabs and no way to start a second analysis. "New analysis" appears twice by
     // design in the phone shell — the header's upload button and the bar's raised centre action.
     expect(screen.getAllByRole("button", { name: /New analysis/i }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Library/i })).toBeInTheDocument();
   });
 
   // End-to-end for the Fix 1 blocker: a real click, through a real router, actually lands the

@@ -460,18 +460,6 @@ export class ChatError extends Error {
   }
 }
 
-export interface LibraryItem {
-  video_id: string;
-  split: string;
-  view_type: string;
-  fault_count: number;
-  faults: string[];
-}
-export interface LibraryPage {
-  total: number;
-  items: LibraryItem[];
-}
-
 // Bearer header for the current Supabase session, or {} when logged out / not configured.
 // Returning {} (not a header with an empty token) keeps anonymous requests single-arg.
 async function authHeader(): Promise<Record<string, string>> {
@@ -612,13 +600,6 @@ export const api = {
   // registry. Backs the /movements cards and the studio selector.
   getMovements: () =>
     getJSON<{ movements: AnalyzableMovement[] }>("/api/movements").then((r) => r.movements),
-
-  listVideos: (limit = 50, offset = 0, fault?: string) =>
-    getJSON<LibraryPage>(
-      `/api/videos?limit=${limit}&offset=${offset}` + (fault ? `&fault=${fault}` : "")
-    ),
-
-  getAnalysis: (videoId: string) => getJSON<Analysis>(`/api/analysis/${videoId}`),
 
   graph: (query: string, movement?: string) =>
     getJSON<RetrievalContext>(

@@ -18,7 +18,6 @@ const en: Dict = {
   // Sidebar
   "nav.newAnalysis": "New analysis",
   "nav.analyse": "Analyse",
-  "nav.library": "Library",
   "nav.games": "Games",
   "nav.hide": "Hide navigation",
   "nav.show": "Show navigation",
@@ -123,15 +122,6 @@ const en: Dict = {
   "loader.step3": "Lighting the why",
   "loader.neutral": "Loading…",
 
-  // Library picker
-  "library.title": "Sample Library",
-  "library.loading": "Loading…",
-  "library.clean": "clean",
-  "library.filter.all": "All",
-  "library.filter.knees_inward": "Knee Valgus",
-  "library.filter.knees_forward": "Knees Forward",
-  "library.filter.shallow_depth": "Shallow",
-  "library.filter.excessive_forward_lean": "Forward Lean",
   "a11y.close": "Close",
 
   // Reasoning / coaching feedback
@@ -193,7 +183,6 @@ const en: Dict = {
   "kg.evidence": "Evidence",
 
   // App shell
-  "app.pickSample": "…or pick a clip from the sample library",
   "app.loading": "Loading {id}…",
   "app.analysing": "Extracting pose & analysing… (this can take ~20s)",
   "tab.coaching": "Coaching",
@@ -220,9 +209,7 @@ const en: Dict = {
 
   // Demo onboarding (empty state)
   "demo.heading": "Analyze your {movement} in about 20 seconds.",
-  "demo.sub": "Upload a clip or open a labeled sample. You get a skeleton overlay, a fault timeline, and coaching feedback x-coach can trace to the cause.",
-  "demo.sampleBtn": "Open a sample clip",
-  "demo.or": "or",
+  "demo.sub": "Upload or record a clip. You get a skeleton overlay, a fault timeline, and coaching feedback x-coach can trace to the cause.",
   "demo.getTitle": "What comes back",
   "demo.get1.title": "Skeleton and faults",
   "demo.get1.body": "Pose overlay with every detected fault marked on the timeline.",
@@ -386,7 +373,7 @@ const en: Dict = {
   // Landing — closing CTA
   "landing.cta.title": "See it analyze a real squat.",
   "landing.cta.sub":
-    "Upload a clip or open a labeled sample, and watch the skeleton, the faults, and the grounded feedback come back together.",
+    "Upload or record a clip, and watch the skeleton, the faults, and the grounded feedback come back together.",
 
   // Landing — footer
   "landing.footer.pipeline": "Pipeline",
@@ -854,7 +841,6 @@ const zhHant: Dict = {
   // Sidebar
   "nav.newAnalysis": "新增分析",
   "nav.analyse": "分析",
-  "nav.library": "資料庫",
   "nav.games": "小遊戲",
   "nav.hide": "隱藏導覽列",
   "nav.show": "顯示導覽列",
@@ -951,15 +937,6 @@ const zhHant: Dict = {
   "loader.step3": "照亮原因",
   "loader.neutral": "載入中…",
 
-  // Library picker
-  "library.title": "範例資料庫",
-  "library.loading": "載入中…",
-  "library.clean": "標準",
-  "library.filter.all": "全部",
-  "library.filter.knees_inward": "膝蓋內夾",
-  "library.filter.knees_forward": "膝蓋前移",
-  "library.filter.shallow_depth": "深度不足",
-  "library.filter.excessive_forward_lean": "軀幹前傾",
   "a11y.close": "關閉",
 
   // Reasoning / coaching feedback
@@ -1016,7 +993,6 @@ const zhHant: Dict = {
   "kg.evidence": "證據",
 
   // App shell
-  "app.pickSample": "…或從範例資料庫挑選片段",
   "app.loading": "載入 {id} 中…",
   "app.analysing": "擷取姿態並分析中…（約需 20 秒）",
   "tab.coaching": "教練回饋",
@@ -1043,9 +1019,7 @@ const zhHant: Dict = {
 
   // Demo onboarding (empty state)
   "demo.heading": "約 20 秒，分析一段{movement}。",
-  "demo.sub": "上傳影片或開啟已標註的範例。你會得到骨架疊圖、錯誤時間軸，以及能追溯成因的教練回饋。",
-  "demo.sampleBtn": "開啟範例片段",
-  "demo.or": "或",
+  "demo.sub": "上傳或直接錄一段影片。你會得到骨架疊圖、錯誤時間軸，以及能追溯成因的教練回饋。",
   "demo.getTitle": "你會得到",
   "demo.get1.title": "骨架與錯誤",
   "demo.get1.body": "骨架疊圖，並在時間軸上標出每個偵測到的錯誤。",
@@ -1207,7 +1181,7 @@ const zhHant: Dict = {
   // Landing — closing CTA
   "landing.cta.title": "看它分析一段真實深蹲。",
   "landing.cta.sub":
-    "上傳影片或開啟已標註的範例，看著骨架、錯誤與有據回饋一同呈現。",
+    "上傳或直接錄一段影片，看著骨架、錯誤與有據回饋一同呈現。",
 
   // Landing — footer
   "landing.footer.pipeline": "處理流程",

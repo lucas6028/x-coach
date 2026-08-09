@@ -4,7 +4,6 @@ import { api, UploadLimitError, type Analysis } from "./api";
 import AppLayout from "./components/AppLayout";
 import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
-import LibraryPicker from "./components/LibraryPicker";
 import DemoIntro from "./components/DemoIntro";
 import StudioTitleBar from "./components/StudioTitleBar";
 import StudioMobile from "./components/mobile/StudioMobile";
@@ -28,7 +27,6 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
   const [error, setError] = useState<string>("");
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
 
@@ -53,22 +51,6 @@ export default function App() {
       v.play().catch(() => undefined);
     }
   }, []);
-
-  const loadLibrary = useCallback(async (videoId: string) => {
-    setLoading(true);
-    setError("");
-    setStatusMsg(t("app.loading", { id: videoId }));
-    setAnalysis(null);
-    try {
-      const data = await api.getAnalysis(videoId);
-      setAnalysis(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-      setStatusMsg("");
-    }
-  }, [t]);
 
   const [movements, setMovements] = useState<AnalyzableMovement[]>([
     { name: "Squat", validated: true },
@@ -188,12 +170,11 @@ export default function App() {
   }, [t]);
 
   // Reset the studio to a fresh upload state — clears the loaded analysis, any transient
-  // status/error, the picker, and the shareable ?analysis= param so the URL matches the empty view.
+  // status/error, and the shareable ?analysis= param so the URL matches the empty view.
   const newAnalysis = useCallback(() => {
     setAnalysis(null);
     setError("");
     setStatusMsg("");
-    setPickerOpen(false);
     skipReloadId.current = null;
     if (searchParams.get("analysis")) setSearchParams({}, { replace: true });
   }, [searchParams, setSearchParams]);
@@ -225,10 +206,10 @@ export default function App() {
   // coach banner) saying one thing, and leaves the next upload defaulted to the same movement.
   //
   // The `?? "Squat"` is the SAME fallback CoachTray applies to its clean-rep banner, and it has to
-  // be: library clips and analyses predating per-movement selection carry no `movement` at all, so
-  // leaving those alone let the title keep the previous clip's name — an overhead-press header
-  // over a squat from the sample library. Two surfaces guessing differently is the failure this
-  // whole sync exists to prevent, so they guess together.
+  // be: analyses predating per-movement selection carry no `movement` at all, so leaving those
+  // alone let the title keep the previous clip's name — an overhead-press header over a squat
+  // replayed from history. Two surfaces guessing differently is the failure this whole sync
+  // exists to prevent, so they guess together.
   useEffect(() => {
     if (analysis) setMovement(analysis.movement ?? "Squat");
   }, [analysis?.video_id, analysis?.movement]);
@@ -237,7 +218,6 @@ export default function App() {
 
   return (
     <AppLayout
-      onOpenLibrary={() => setPickerOpen(true)}
       onNewAnalysis={newAnalysis}
       title={t("studio.title", { movement: movementLabel(t, canonicalMovement) })}
       // The studio's header goes in the shell's top row, so its movement / precision / start
@@ -273,7 +253,6 @@ export default function App() {
         <DemoIntro
           onBlob={runPoseAnalysis}
           onError={setError}
-          onOpenLibrary={() => setPickerOpen(true)}
           loading={loading}
           statusMsg={statusMsg}
           error={error}
@@ -315,16 +294,6 @@ export default function App() {
             />
           </aside>
         </div>
-      )}
-
-      {pickerOpen && (
-        <LibraryPicker
-          onClose={() => setPickerOpen(false)}
-          onPick={(id) => {
-            setPickerOpen(false);
-            loadLibrary(id);
-          }}
-        />
       )}
     </AppLayout>
   );

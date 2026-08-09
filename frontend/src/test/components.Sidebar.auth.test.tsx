@@ -22,7 +22,6 @@ function renderRail(open = true) {
           open={open}
           width={open ? 236 : 76}
           animate
-          onOpenLibrary={vi.fn()}
           onNewAnalysis={vi.fn()}
         />
       </I18nProvider>

@@ -154,44 +154,6 @@ describe("api.setUserRole", () => {
   });
 });
 
-describe("api.listVideos", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it("builds the URL with default limit and offset", async () => {
-    mockFetch({ total: 0, items: [] });
-    await api.listVideos();
-    expect(fetch).toHaveBeenCalledWith("/api/videos?limit=50&offset=0");
-  });
-
-  it("appends the fault filter when provided", async () => {
-    mockFetch({ total: 1, items: [] });
-    await api.listVideos(10, 0, "knees_inward");
-    expect(fetch).toHaveBeenCalledWith("/api/videos?limit=10&offset=0&fault=knees_inward");
-  });
-
-  it("omits the fault param when not provided", async () => {
-    mockFetch({ total: 0, items: [] });
-    await api.listVideos(5, 0);
-    const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    expect(url).not.toContain("fault=");
-  });
-});
-
-describe("api.getAnalysis", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it("fetches the correct endpoint", async () => {
-    mockFetch({ video_id: "abc" });
-    await api.getAnalysis("abc");
-    expect(fetch).toHaveBeenCalledWith("/api/analysis/abc");
-  });
-
-  it("throws on non-ok responses", async () => {
-    mockFetch({}, false, 404);
-    await expect(api.getAnalysis("missing")).rejects.toThrow("404");
-  });
-});
-
 describe("api.videoFileUrl", () => {
   it("returns the correct URL string", () => {
     expect(api.videoFileUrl("vid_001")).toBe("/api/video-file/vid_001");
