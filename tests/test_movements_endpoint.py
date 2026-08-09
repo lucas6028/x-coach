@@ -23,7 +23,7 @@ class TestMovementsEndpoint(unittest.TestCase):
             names,
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction",
             ],
         )
 
@@ -49,6 +49,10 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # registration comment).
                 "Band Pull Apart": False,
                 "Bicep Curl": False,
+                # Arm Abduction ships Beta for a NEW reason: labeled data finally exists
+                # (REHAB24-6 Ex1, 178 reps, 90 correct / 88 incorrect) and nothing has run the
+                # check. See src/pose/movements/arm_abduction.py's registration comment.
+                "Arm Abduction": False,
             },
         )
 

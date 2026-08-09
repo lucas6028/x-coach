@@ -237,6 +237,12 @@ class MovementRegistryTests(unittest.TestCase):
             # phase and the mean halves per-arm landmark noise. Verified end-to-end in
             # tests/test_bicep_curl.py::EndToEndSegmentationTest.
             "Bicep Curl": ("avg_elbow_angle", "min", "extended"),
+            # The second averaging signal, and the first whose polarity and averaging BOTH come
+            # from measurement rather than inference: left/right arm elevation correlates
+            # r=0.9896-0.9964 across all 8 Fit3D `side_lateral_raise` subjects. Peaks at its
+            # MAXIMUM (arms down -> raised -> down). Verified end-to-end in
+            # tests/test_arm_abduction.py::EndToEndSegmentationTest.
+            "Arm Abduction": ("avg_arm_elevation_deg", "max", "extended"),
         }
         for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
@@ -245,7 +251,7 @@ class MovementRegistryTests(unittest.TestCase):
                 self.assertEqual(detector.rep_polarity, polarity)
                 self.assertIn(detector.rep_signal, detector.metric_keys)
                 # `rep_rectify` exists for movements RS-SP1 does not implement (spec §3.4);
-                # all eight registered detectors use the default.
+                # all nine registered detectors use the default.
                 self.assertFalse(detector.rep_rectify)
                 self.assertEqual(detector.rep_start, rep_start)
 
@@ -282,7 +288,7 @@ class TestMovementRegistry(unittest.TestCase):
             names,
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction",
             ],
         )
 
@@ -303,6 +309,12 @@ class TestMovementRegistry(unittest.TestCase):
                 "Row": False,
                 "Band Pull Apart": False,
                 "Bicep Curl": False,
+                # Arm Abduction ships Beta even though REHAB24-6 Ex1 IS arm abduction with 178
+                # human-labeled reps. Lunge got there first (Ex5, validated in
+                # notes/lunge-rule-validation.md); this is the first movement whose labeled data
+                # EXISTS while the check has NOT been run. See arm_abduction.py's registration
+                # comment for what Ex1 can and cannot decide.
+                "Arm Abduction": False,
             },
         )
 
@@ -322,6 +334,6 @@ class TestMovementRegistry(unittest.TestCase):
             {d.name for d in registry.list_detectors()},
             {
                 "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction",
             },
         )

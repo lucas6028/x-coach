@@ -968,6 +968,39 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0°) →
 **concentric** (abduction/raise) → **top** (target ≈90°) → **eccentric** (controlled lower).
 
+> **NOTE (2026-08-09) — three section-wide corrections made at implementation time.** Recorded
+> here so a reader who arrives at the original wording alone cannot silently re-introduce any of
+> them. None changes a threshold or a citation. Implementation:
+> `src/pose/movements/arm_abduction.py`; design spec:
+> `docs/superpowers/specs/2026-08-09-arm-abduction-detector-design.md`.
+>
+> 1. **The `fault_id`s below are unprefixed and ship prefixed `arm_abd_*`.** Every movement after
+>    Squat prefixes, because `merge_by_fault`, the analyses table and the frontend's `byFault` map
+>    all key on `fault_id` with **no movement qualifier**. The prefix is `arm_abd_` rather than
+>    `abduction_` as a deliberate collision guard: Group E's **Leg Abduction** is also coming.
+>    Shipped ids: `arm_abd_shoulder_shrug`, `arm_abd_contralateral_trunk_lean`,
+>    `arm_abd_lr_asymmetry`.
+> 2. **"target ≈90°" above is not a value this pipeline has.** Grepped across `src/pose/` and
+>    `backend/app/`: there is no prescribed target angle, no per-user ROM goal, nothing. The
+>    two datasets for this movement disagree about the height anyway — REHAB24-6 Ex1's median
+>    peak elevation is **130.2°** and Fit3D `side_lateral_raise`'s is **97.1°**, both performed
+>    as instructed. This is why `excessive_elevation_impingement_arc` is withdrawn (below).
+> 3. **LABELED CORRECT/INCORRECT GROUND TRUTH EXISTS FOR THIS MOVEMENT, and it is the first.**
+>    REHAB24-6 `Ex1` **is** arm abduction (`src/rehab24/dataset.py` `EXERCISE_NAMES["1"]`): 178
+>    repetitions, 9 subjects each contributing both classes, **90 correct / 88 incorrect**, 0
+>    flagged mocap-erroneous, with marker-driven 3-D and cached MediaPipe landmarks for all 13
+>    videos. §8.4's standing "no labeled data" caveat therefore does **not** apply here, and the
+>    Deadlift / Row / Band Pull Apart / Bicep Curl docstrings that assert it must not be copied
+>    forward. **Lunge got there first** — REHAB24-6 `Ex5` is lunge and
+>    `notes/lunge-rule-validation.md` is the 174-rep validation actually run against it — so this
+>    is the **second** such movement and the **first whose data exists while the check has not been
+>    run**.
+>    `validated` is still `False` because **nothing has run the check** — and Ex1 is
+>    **unilateral on 178/178 reps** (`exercise_subtype == "right arm"`), a variant this rule set
+>    does not model, which by itself makes `lr_abduction_asymmetry` unvalidatable there in either
+>    direction. The bilateral variant comes from Fit3D `side_lateral_raise` (8 subjects × 5 reps
+>    of mocap 3-D, no correctness label) instead.
+
 #### Shoulder shrug (upper-trap dominance)
 - **fault_id**: `shoulder_shrug_elevation`
 - **fault_name**: Shrugging / scapular elevation
@@ -977,6 +1010,57 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **biomechanical_rationale**: Persistent upper-trapezius overactivation with under-active lower scapular stabilizers drives scapular dyskinesis and raises the risk of subacromial impingement and glenohumeral instability.
 - **citation**: Mun WL, Jung EY, Lei S, Roh SY, *Medicina* (2025), PMC12029123, DOI 10.3390/medicina61040645.
 - **citation_support**: "Persistent overactivity of the UT can lead to scapular dysfunction (or dyskinesia), such as subacromial impingement or glenohumeral instability," and UT activation "consistently increases as the shoulder abduction angle surpasses 120°" so "care should be taken to avoid the excessive activation of the UT" at higher angles. (Verified — read in RAG doc.)
+
+> **NOTE (2026-08-09) — REGISTERED BUT PERMANENTLY SILENT.** Implemented as
+> `arm_abduction.rule_shoulder_shrug`, which always returns `[]`. Mun genuinely backs the fault,
+> so this is a **sensing** failure, not a citation failure, and it takes the silent treatment
+> (`pushup.rule_scapular_winging`, `band_pull_apart.rule_loss_of_scapular_retraction`) rather
+> than withdrawal. **It is the first silent rule in this project justified by a measurement
+> rather than an argument**, and the measurement has two independent halves:
+>
+> - **The metric collapses during abduction as a matter of anatomy, in 3-D ground truth, on the
+>   BILATERAL variant, with no pose estimator in the path.** On Fit3D `side_lateral_raise` the
+>   within-clip Spearman correlation between the head→shoulder vertical gap and the arm's own
+>   elevation is **−0.699 to −0.954 across all 8 subjects**, the gap travels **27%–94% of its own
+>   baseline**, and the `18%` threshold fires on **34 of 40** reps performed deliberately for a
+>   mocap capture. Both endpoints move the same way — the shoulder joint rises (ρ +0.00 to +0.94)
+>   *and* the head drops (ρ −0.32 to −0.86). The glenohumeral joint rising during abduction is
+>   scapulohumeral rhythm: it is the movement, not a fault. Because it is measured on the
+>   bilateral variant, the confound is **variant-independent** — on a bilateral raise both
+>   shoulders ride their own humerus, so nothing is left to read the shrug against.
+> - **MediaPipe reports the glenohumeral joint, not the acromion**, so the one reading that could
+>   rescue the metric is unavailable. On REHAB24-6 Ex1, as a fraction of its own baseline height
+>   above the mid-hip: the marker **clavicle** travels **1.0%**, the marker **glenohumeral** joint
+>   **13.9%**, and **MediaPipe's landmark 11/12 travels 11.2%**. The fire rates split on the same
+>   line — `18%` fires on **1/178** reps read off the marker clavicle and **172/178 = 96.6%** read
+>   off MediaPipe, with the working-side gap at **ρ = −0.957** against true arm elevation *on
+>   correct reps alone*, against **ρ = +0.068** for the resting arm (the control that makes this a
+>   statement about the arm rather than the head or the framing).
+>
+> **The heuristic's own prescribed mitigation was measured and does not rescue it**: restricting
+> to frames below 90° of elevation (its "early or disproportionate shrug") takes the MediaPipe
+> fire rate only from 96.6% to **49.4%** — half of every rep in a dataset that is half correct.
+>
+> Two further notes on the citation, neither of which changes the treatment but both of which
+> would matter a great deal to anyone who repairs the sensing. (i) **The `18%` carries no
+> provenance**: Mun measures **EMG** during a Pilates Reformer arm-work movement at four
+> abduction angles and supplies no landmark-displacement magnitude in any units. (ii) The
+> citation_support's "consistently increases as the shoulder abduction angle surpasses 120°" is a
+> **loose attribution** — in the source UT was highest at **160°** across all phases (the measured
+> conditions were 0°/90°/135°/160°), and `120°` appears there only as a citation to a different
+> study on elastic-band scapular retraction.
+>
+> This measurement also converts `band_pull_apart.rule_loss_of_scapular_retraction`'s **asserted**
+> premise ("MediaPipe's shoulder landmark is a GLENOHUMERAL point … and it moves with the
+> humerus") into a measured one. Whether the same confound reaches `band_pull_apart
+> .rule_shrugging` — which ships **live** on this construction — is **not** claimed: that
+> movement's excursion is horizontal abduction at roughly fixed elevation, so it plausibly
+> differs in kind. Logged in TODO.md as a check to run, not a defect found.
+>
+> **Open, recorded, not resolved:** a working shrug rule needs shoulder height read *at matched
+> arm elevation*, comparing like with like across the rep rather than against a setup baseline
+> taken at a different arm position. Novel construction, no citation, no validation — not
+> invented here.
 
 #### Excessive elevation through the impingement arc
 - **fault_id**: `excessive_elevation_impingement_arc`
@@ -988,6 +1072,47 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **citation**: Creech JA, Busse A, Li D, et al. *Shoulder Impingement Syndrome*, StatPearls (NCBI Bookshelf NBK554518, updated 2026); supported by Mun WL et al., *Medicina* (2025), PMC12029123.
 - **citation_support**: StatPearls: the painful arc occurs "between approximately 70° and 120° of active shoulder abduction," where the subacromial space (normally 1–1.5 cm) "narrows physiologically with abduction," compressing the supraspinatus tendon, long head of biceps, and subacromial–subdeltoid bursa. Mun et al. corroborate elevated UT/impingement risk above 120°. (Verified — fetched StatPearls + read RAG doc.)
 
+> **WITHDRAWN — excessive elevation through the impingement arc.** This rule is **withdrawn**
+> (2026-08-09) and is **NOT implemented** in `src/pose/movements/arm_abduction.py` — absent, not
+> silent. It fails three independent ways, and any one of them would be sufficient.
+>
+> 1. **The citation does not say what the rule says.** StatPearls NBK554518 was re-fetched and
+>    read. It describes the painful arc as a **diagnostic sign**: *"Pain is reproduced between
+>    approximately 70° and 120° of active shoulder abduction, with relative relief beyond 120°,
+>    which is supportive of subacromial pathology."* Asked directly for any statement that raising
+>    the arm through the arc, or above a specific angle, is itself a fault, an error, or a thing
+>    to avoid during exercise, the source yields **nothing**. The arc is where a person who
+>    *already has* subacromial pathology hurts; the rule's rationale reads that sign as a cause,
+>    a step no source read here takes.
+> 2. **The first disjunct is vacuous and is a restatement of another rule.** "Sustained
+>    `arm_elevation_angle` in ~70–120° **with a concurrent shrug**" — measured on REHAB24-6 Ex1's
+>    marker 3-D, **178 of 178 reps enter that band**, spending a median 30% of their frames there.
+>    Passing through 70–120° *is* what an abduction is, so the arc conjunct is always true and the
+>    cue reduces to "`shoulder_shrug_elevation` fired" — which, per the NOTE above, is never. Same
+>    defect as `row.rule_momentum_jerk`'s second condition and the Bicep Curl elbow-displacement
+>    disjunct: a branch that reads as coverage and can never change a verdict.
+> 3. **The second disjunct has no referent.** "`> target + 15°`" needs a prescribed target, and
+>    **this pipeline has none** (grepped across `src/pose/` and `backend/app/`). Fixing 90° would
+>    be an uncited rule-level number, and the two datasets show it cannot be fixed at all: `>105°`
+>    fires on **168/178 = 94.4%** of REHAB24-6 Ex1 reps but **8/40 = 20%** of Fit3D
+>    `side_lateral_raise` reps. A threshold whose fire rate swings ~5× between two datasets of the
+>    same named movement measures which variant was performed, not a fault. And on Ex1 the
+>    direction is wrong too: **correct reps go higher than incorrect ones** (median 132.4° vs
+>    125.2°; AUC that incorrect reps rank high = **0.333**, an inversion).
+>
+> **Withdrawn, not registered-silent, and the distinction is load-bearing.** A silent rule says
+> "real, well-cited fault; the sensor cannot see it". The sensor reads elevation angles perfectly
+> well — MediaPipe's arm elevation tracks the markers at within-rep ρ = +0.995. It is the
+> citation and the arithmetic that fail, so the rule is **absent**; a silent stub would assert the
+> wrong diagnosis.
+>
+> **Open spec question, recorded not resolved.** The KG's own Arm Abduction fault list contains
+> **`Arm Abduction:Incomplete Elevation`** — the *opposite* fault, and the richest of the three
+> nodes (`quality_impacts: Humerus Abduction`; `causes: Limited Shoulder ROM`). Every other
+> movement in this spec got an incomplete-ROM rule; Arm Abduction got "raised too high" instead
+> and now has no ROM rule at all. Filling that gap needs a source that puts a number on
+> insufficient abduction. **No rule was invented to fill it.**
+
 #### Contralateral trunk lean
 - **fault_id**: `contralateral_trunk_lean`
 - **fault_name**: Trunk lean to the opposite side
@@ -998,6 +1123,37 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **citation**: Creech JA, Busse A, Li D, et al. *Shoulder Impingement Syndrome*, StatPearls (NCBI Bookshelf NBK554518, updated 2026).
 - **citation_support**: StatPearls attributes impingement in part to "inadequate scapular upward rotation and posterior tilt" — i.e., compensation that fails to control the scapula during elevation, which contralateral trunk lean is a gross form of. The injury mechanism (impingement from poor scapular control during elevation) is verified via StatPearls. The specific frontal-plane trunk-lean substitution during abduction is **UNVERIFIED** in a peer-reviewed source (no read source isolated trunk lateral flexion during abduction; only fitness-coaching sources describe it, which do not qualify as injury-risk support). (Partially verified — injury mechanism verified; trunk-lean-specific EMG/kinematic finding UNVERIFIED.)
 
+> **NOTE (2026-08-09) — SHIPS despite the UNVERIFIED line, and two sub-criteria are dropped.**
+> Implemented as `arm_abduction.rule_contralateral_trunk_lean`, threshold unchanged at 12°.
+>
+> **Why an UNVERIFIED citation line did not withdraw this rule, when it withdrew curl
+> wrist-flexion.** Re-fetching StatPearls NBK554518 confirms the paraphrase — asked for any
+> mention of trunk lean, lateral trunk flexion, side-bending or contralateral compensation during
+> abduction, it yields **nothing**. That is where wrist-flexion started too, and it lands
+> differently for three **measured** reasons: (a) the cue **orders incorrect reps above correct
+> ones** — per-subject median **AUC 0.800** across 9 subjects on REHAB24-6 Ex1's 178 human-labeled
+> reps (pooled 0.647; 0.760 against the rep's own setup baseline), where wrist-flexion had no such
+> measurement and no way to obtain one; (b) observability is `high` on front/rear and **those
+> views are reachable**, where wrist-flexion was `low` on every view; (c) the injury **mechanism**
+> is verified — only the specific frontal-plane substitution finding is not. That is the
+> `lunge_insufficient_depth` shape — real cue, cited cut in the tail — whose settled treatment
+> (`notes/lunge-rule-validation.md` §5.4) is *"Neither threshold moves."*
+>
+> **The threshold's placement, recorded rather than repaired.** 12° fires on **0/178** REHAB24-6
+> Ex1 reps (max lean observed **7.6°**) and **1/40** Fit3D reps (max 14.1°). As shipped this rule
+> will almost never fire, and when it does the lean is gross. Both figures are 3-D ground truth;
+> image-plane obliquity foreshortens a frontal lean, so the projection error runs in the same
+> direction as the threshold placement — a missed fault, never a false one.
+>
+> **Two sub-criteria are dropped, both unimplementable rather than unwanted.** (i) *"away from the
+> raising arm"* — on a **bilateral** raise there is no raising arm, so the qualifier is undefined
+> for the variant this app models, and on the unilateral variant it would need a working-side
+> determination the detector cannot make. The metric is taken **unsigned** (the same construction
+> the Bicep Curl NOTE records): an unsigned departure is what the verified mechanism describes,
+> and the cost is that a lean *toward* the working arm also fires. (ii) *"or if it grows with load
+> across a set"* — this pipeline has no load, and `run_detector` scores one rep at a time with no
+> cross-rep state anywhere. Absent rather than approximated.
+
 #### Left/right asymmetry
 - **fault_id**: `lr_abduction_asymmetry`
 - **fault_name**: Left vs right asymmetry
@@ -1007,6 +1163,48 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **biomechanical_rationale**: Inter-limb asymmetry reflects unbalanced strength/scapular control; asymmetries in the ~10–15% range are associated with elevated injury risk and reduced performance.
 - **citation**: Terré M, Solana-Tramunt M, *Healthcare (Basel)* (2025), 13(10):1153, PMC12110944, DOI 10.3390/healthcare13101153.
 - **citation_support**: The paper states "asymmetries between 10% and 15% are often associated with a higher risk of injury and reduced performance," and uses a limb-symmetry scale (asymmetry 0–79%, limit 80–89%, normal/symmetrical 90–100%). (Verified — fetched PMC article.)
+
+> **NOTE (2026-08-09) — SHIPS with the spec's 12°, the second cue is dropped, and the citation's
+> units need stating.** Implemented as `arm_abduction.rule_lr_asymmetry`, scoped to `peak` (the
+> spec's own "top-hold").
+>
+> **The 12° has no provenance in its citation, and the mismatch is a category one, not just a
+> unit one.** Terré & Solana-Tramunt PMC12110944 was re-fetched: it measures **middle- and
+> lower-trapezius EMG symmetry** during bilateral scapular retraction at 45° and 90° of shoulder
+> abduction, and every threshold in it is a **percentage** — "10% and 15%", on a limb-symmetry
+> scale of 0–79 / 80–89 / 90–100. **No angular threshold appears anywhere in the paper.** A 12°
+> difference on a 90° raise is ~13%, inside the cited band — but that correspondence is a
+> **reconstruction, not a provenance**, it silently assumes the 90° target the section-wide NOTE
+> above shows the pipeline does not have, and this spec never states it. Shipped unchanged anyway,
+> following `ohp_asymmetric_press` (cited at 7° of scapular angle / 1.5 cm of lateral shift,
+> shipped as 0.15 of normalized wrist height): the mismatch is written at the constant.
+> Re-expressing the rule as a percentage was considered and **rejected** — changing units changes
+> what fires, which the no-tuning rule covers, and it would still transfer an EMG figure to a
+> kinematic quantity.
+>
+> **The wrist-height disjunct is NOT implemented, and for a reason no previously dropped disjunct
+> had.** "peak wrist heights differ by `> 0.05` normalized units" is **not** redundant with the
+> angular cue the way the Bicep Curl elbow-displacement disjunct was. It is dropped because
+> **`0.05` in raw normalized image units is not a well-defined criterion**: normalized coordinates
+> scale with how much of the frame the subject occupies. Measured across the 43 production pose
+> JSONs under `data/runtime/pose_json` carrying a usable shoulder width, the per-clip median
+> `shoulder_width` runs **0.0591 to 0.4923** — an **8.3× spread** — so 0.05 units is **0.102
+> shoulder-widths** on the widest-framed clip and **0.846** on the narrowest. The same physical
+> asymmetry fires or does not depending on how far the phone was from the lifter. `shoulder_width`
+> is emitted as a diagnostic so this stays checkable; the arithmetic is pinned by
+> `tests/test_arm_abduction.py::AsymmetryRuleTest::test_the_wrist_height_disjunct_is_frame_scale_dependent`.
+> The trailing *"sustained across reps"* is dropped too: no rule in this codebase carries cross-rep
+> state.
+>
+> **This rule is the one the only labeled dataset cannot check, and the reason is a variant
+> mismatch rather than a defect** — see the section-wide NOTE: REHAB24-6 Ex1 is unilateral on
+> 178/178 reps, where the two arms' elevations differ by 64.3–132.2° (median 104.2°), so the
+> threshold is exceeded on every rep of both classes. That **is not a false-positive rate**: a
+> rule reporting "your two arms did completely different things" is correct about a one-armed
+> raise. On the bilateral variant (Fit3D `side_lateral_raise`) the same threshold at the same
+> phase fires on **2/40** reps — median asymmetry at the peak 4.4°, max 16.8°. **No bilateral
+> precondition is implemented**: gating on "both arms are actually raising" needs an elevation
+> floor no cited source supplies.
 
 ---
 
@@ -1071,6 +1269,29 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 - Depth-dependent scapular protraction/retraction (A-P motion) is inherently low-observability
   from monocular front-view pose; the VW heuristics fall back to visible arm-elevation proxies
   and say so.
+
+> **UPDATE (2026-08-09) — how the two UNVERIFIED items above actually resolved at implementation
+> time, and one this section did not anticipate.** Both were re-checked against the sources
+> rather than against this paraphrase, and they resolved in **opposite** directions, which is the
+> point: an "UNVERIFIED" line is a prompt to read the source, not a verdict.
+>
+> - `wrist_flexion_curl` → **WITHDRAWN** (Bicep Curl, above). Parpa never discusses wrist
+>   flexion at all; every wrist statement in it is about forearm rotation or grip.
+> - `contralateral_trunk_lean` → **SHIPS**. StatPearls does contain nothing about trunk lean, but
+>   the cue orders REHAB24-6 Ex1's incorrect reps above its correct ones at a per-subject median
+>   AUC of **0.800**, and the injury mechanism is verified. Real cue, cited cut in the tail.
+> - **Not anticipated here:** `excessive_elevation_impingement_arc` → **WITHDRAWN**, and this
+>   section rated it fully verified. The quote was accurate; the **inference** was not. StatPearls
+>   describes the 70–120° arc as a **diagnostic sign of existing pathology**, never as a fault to
+>   avoid during exercise — so "Verified — fetched StatPearls" was true of the quotation and false
+>   of the rule built on it. The lesson generalises past this movement: verifying that a source
+>   contains a quoted string is not verifying that it supports the claim the quote is attached to.
+>
+> Two further corrections to the ratings above, recorded where a reader will meet them:
+> `shoulder_shrug_elevation` is rated `high` on front/rear here and is **registered permanently
+> silent** — the *view* rating was right and the *metric* is unusable (see its NOTE); and
+> `lr_abduction_asymmetry`'s Terré citation is an **EMG-symmetry** finding, not a kinematic one,
+> so its `12°` has no provenance in the cited source.
 
 
 ---
@@ -2169,3 +2390,31 @@ documented in-code:
   threshold when rep segmentation *succeeds* than when it *fails*** — a torso-rising fault a
   lifter actually committed can go undetected specifically because the pipeline segmented their
   rep correctly. Direction is always toward MISSED faults, never false ones.
+
+---
+
+**Status (2026-08-09) — Arm Abduction registered, and §8.4 changes meaning for the first time.**
+
+- **Arm Abduction — IMPLEMENTED 2026-08-09, UNVALIDATED.** `src/pose/movements/arm_abduction.py`,
+  ninth of sixteen. **Two rules live** (`arm_abd_contralateral_trunk_lean`,
+  `arm_abd_lr_asymmetry`), **one registered permanently silent** (`arm_abd_shoulder_shrug`), **one
+  withdrawn** (`excessive_elevation_impingement_arc`). Each treatment is argued at its own rule
+  above; design spec `docs/superpowers/specs/2026-08-09-arm-abduction-detector-design.md`.
+
+- **§8.4 — "validate thresholds against labeled data per movement" — is now BLOCKED ON WORK
+  RATHER THAN ON DATA, for the first time outside Squat and Lunge.** REHAB24-6 `Ex1` **is** arm
+  abduction: **178 repetitions, 9 subjects, 90 correct / 88 incorrect**, marker 3-D and cached
+  MediaPipe landmarks for all 13 videos. Every detector status note since OHP has said "no labeled
+  data exists"; for this movement that is simply false, and the accurate statement is **nothing has
+  run the check**. What running it looks like is `notes/lunge-rule-validation.md`.
+
+- **Three things bound that future check in advance, and they are worth reading before it is
+  scoped.** (i) Ex1 is **unilateral on 178/178 reps**, a variant this rule set does not model, so
+  `arm_abd_lr_asymmetry` is unvalidatable there in either direction. (ii) `arm_abd_shoulder_shrug`
+  is silent, so there is nothing to validate. (iii) `arm_abd_contralateral_trunk_lean` is the one
+  rule Ex1 can genuinely speak to, and its cue already scores a **per-subject median AUC of 0.800**
+  on the marker 3-D while the shipped 12° threshold fires on **0/178** — i.e. the check would
+  measure a real cue against a cut sitting past the end of the observed distribution.
+
+- **`validated=False`**, and the Beta tag stands. No threshold moved to produce any number above.
+
