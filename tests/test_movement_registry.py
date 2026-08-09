@@ -243,6 +243,14 @@ class MovementRegistryTests(unittest.TestCase):
             # MAXIMUM (arms down -> raised -> down). Verified end-to-end in
             # tests/test_arm_abduction.py::EndToEndSegmentationTest.
             "Arm Abduction": ("avg_arm_elevation_deg", "max", "extended"),
+            # The third averaging signal, sharing Arm Abduction's metric and INVERTING its
+            # polarity: this movement's effort peak is the W, where arm elevation is at its
+            # LOWEST. Measured on REHAB24-6 Ex2's 208 annotated reps -- median start 140.4 deg,
+            # median trough 54.7 at position 0.508 of the rep, median end 141.1 -- and the arms
+            # correlate r=0.9977 within-rep (min 0.9628), which is what justifies averaging them.
+            # Verified end-to-end in tests/test_arm_vw.py::EndToEndSegmentationTest, which
+            # asserts WHICH end of the signal `peak` lands on so it cannot pass under `max`.
+            "Arm VW": ("avg_arm_elevation_deg", "min", "extended"),
         }
         for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
@@ -288,7 +296,7 @@ class TestMovementRegistry(unittest.TestCase):
             names,
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl", "Arm Abduction",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW",
             ],
         )
 
@@ -315,6 +323,12 @@ class TestMovementRegistry(unittest.TestCase):
                 # EXISTS while the check has NOT been run. See arm_abduction.py's registration
                 # comment for what Ex1 can and cannot decide.
                 "Arm Abduction": False,
+                # Arm VW is the SECOND movement whose labeled data exists unchecked, and the
+                # first whose labeled data matches the variant the app models: REHAB24-6 Ex2 is
+                # arm VW, 208 reps (the largest labeled set of any non-squat movement), 94
+                # correct / 114 incorrect, and BILATERAL on measurement. See arm_vw.py's
+                # registration comment for what Ex2 does and does not decide.
+                "Arm VW": False,
             },
         )
 
@@ -334,6 +348,6 @@ class TestMovementRegistry(unittest.TestCase):
             {d.name for d in registry.list_detectors()},
             {
                 "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl", "Arm Abduction",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW",
             },
         )

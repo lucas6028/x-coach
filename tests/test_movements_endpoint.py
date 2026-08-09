@@ -23,7 +23,7 @@ class TestMovementsEndpoint(unittest.TestCase):
             names,
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl", "Arm Abduction",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW",
             ],
         )
 
@@ -53,6 +53,11 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # (REHAB24-6 Ex1, 178 reps, 90 correct / 88 incorrect) and nothing has run the
                 # check. See src/pose/movements/arm_abduction.py's registration comment.
                 "Arm Abduction": False,
+                # Arm VW ships Beta for the same new reason, on the largest labeled non-squat
+                # set yet (REHAB24-6 Ex2, 208 reps, 94 correct / 114 incorrect) and the first
+                # that is BILATERAL, i.e. the variant the app actually models. Nothing has run
+                # the check. See src/pose/movements/arm_vw.py's registration comment.
+                "Arm VW": False,
             },
         )
 
