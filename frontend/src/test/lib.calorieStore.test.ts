@@ -9,7 +9,7 @@ describe("calorie store", () => {
   it("starts at zero", () => {
     expect(loadCalories()).toEqual({
       total: 0,
-      byGame: { sixseven: 0, ninja: 0 },
+      byGame: { sixseven: 0, ninja: 0, webslinger: 0 },
       sessions: 0,
     });
   });
@@ -18,7 +18,7 @@ describe("calorie store", () => {
     addCalories("ninja", 12);
     addCalories("sixseven", 3);
     const t = addCalories("ninja", 8);
-    expect(t.byGame).toEqual({ ninja: 20, sixseven: 3 });
+    expect(t.byGame).toEqual({ ninja: 20, sixseven: 3, webslinger: 0 });
     expect(t.total).toBe(23);
     expect(t.sessions).toBe(3);
     // Persisted across a fresh read.
@@ -37,7 +37,7 @@ describe("calorie store", () => {
     localStorage.setItem(KEY, JSON.stringify({ total: "lots" }));
     expect(loadCalories()).toEqual({
       total: 0,
-      byGame: { sixseven: 0, ninja: 0 },
+      byGame: { sixseven: 0, ninja: 0, webslinger: 0 },
       sessions: 0,
     });
   });
