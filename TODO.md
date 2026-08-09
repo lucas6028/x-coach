@@ -513,6 +513,22 @@
     詞彙裡是同一件事；兩條規則仍靠 fault_id / fault_name / citation / evidence 區分。
     再記一筆**與 Arm Abduction 方向相反的洞**：圖上有 **`Arm VW:Trunk Lean Compensation`**，
     但 parent spec 對這個動作**沒有** trunk-lean 規則。兩個動作、兩個沒用到的節點、方向相反。
+  - Sit-up 具體案例（2026-08-09）：這是**至今最嚴重的一次**，因為問題不是「節點薄」或「節點缺」，
+    而是**圖與 parent spec 在講兩個不同的動作**。圖上四個 `Sit-up:` fault 節點
+    （`Feet Not Together`、`Arms Not Extended Overhead`、`Incomplete Forward Reach`、
+    `Abdominal Disengagement`）全部來自 EgoExo-Fitness 的 TKV 條目，描述的是**完整仰臥起坐**；
+    parent spec 四條規則描述的是**捲腹 curl-up**。交集為零。
+    後果：`situp_excessive_rom`（「起得太高、超過捲腹範圍」）**沒有任何語意正確的 seed**——
+    圖上唯一沾到 ROM 的 `Sit-up:Incomplete Forward Reach` 意思正好**相反**（起得不夠高），
+    而泛用 `Range Of Motion` 依舊是那個 `corrections = Wrapping Surface Adjustment` 的節點。
+    這是本專案第一次因為 **seed 語意相反**（而非薄或缺）而**撤掉**一條規則。
+    `Feet Not Together` 與 `Arms Not Extended Overhead` 兩個節點 connectivity 為 0（dangling）。
+    出貨的 `situp_incomplete_rom` seed 是活的但薄（`Sit-up:Incomplete Forward Reach` →
+    `quality_impacts: Range Of Motion`），且語意**方向一致**，故保留。
+    真正該做的不是補節點，而是先決定**app 到底要出哪一種仰臥起坐**——
+    i18n 的 `movement.Sit-up` 繁中已經是「仰臥起坐」（不是「捲腹」）、卡片插圖也是完整仰臥起坐，
+    所以除了 parent spec 以外的每一個既有成品都指向完整版。見
+    `docs/superpowers/specs/2026-08-09-situp-detector-design.md` §10。
 - [ ] **檢查 `band_pull_apart.rule_shrugging` 是否也吃到同一個 confound**（2026-08-09 開，未跑）：
   Arm Abduction 量到 `neck_gap = ear_y - shoulder_y` 在手臂外展時會因**解剖學**而塌陷——
   Fit3D `side_lateral_raise` 的 3D ground truth 上，gap 與手臂仰角的 within-clip Spearman 是
