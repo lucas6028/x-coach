@@ -529,6 +529,25 @@
     i18n 的 `movement.Sit-up` 繁中已經是「仰臥起坐」（不是「捲腹」）、卡片插圖也是完整仰臥起坐，
     所以除了 parent spec 以外的每一個既有成品都指向完整版。見
     `docs/superpowers/specs/2026-08-09-situp-detector-design.md` §10。
+- [ ] **每一條「整下 rep 行程不足」的規則在完全靜止的片段上都會 fire，且是滿分**
+  （2026-08-09 由 review 發現、實測重現，非測試抓到；影響整個 registry，不是單一動作）。
+  `segment_reps` 的 hysteresis 是**對訊號自身百分位**取閾值，故 scale-free——這正是「很淺的一下
+  仍能被切成 rep 並送進規則」的原因，但同一性質也讓 **0.4° 的抖動被切成 3 個 rep**。
+  實測（真正的 `run_detector`，60 frames、hip angle 抖動 0.4°）：`fallback=None`、`reps=3`、
+  `situp_incomplete_rom` 以 `severity=1.0 / confidence=1.0 / observability=high` 觸發，
+  evidence 寫著 excursion 0.74°。**同一個探針打在已合併的 `arm_vw.rule_incomplete_excursion`
+  上結果相同**（3 reps、severity 1.0）；`band_pull_apart` 只是因為 fixture 訊號是位元級常數才逃過，
+  真實影片不會如此。
+  可達性：註冊即上線，而 Sit-up 的 validity gate 只要肩/髖/膝，幾乎任何上傳都滿足；
+  `wasMeasured()` 抓不到（frame 確實「有量到」，與 squat-analysed-as-OHP 同一類）。
+  **Sit-up 受害最深**——它只有一條 live 規則，所以誤判就是全部的判定，還會被 `chat.py` 拿去餵教練。
+  **刻意不在規則內修**：任何 in-rule guard 都是一個「最小 excursion 下限」，
+  也就是沒有來源、也沒有量測依據的發明數字。正解是 framework 層二選一——
+  `segment_reps` 加 noise floor，或把 `RunResult.fallback` 接進 `RuleContext`
+  （後者本來就是 Deadlift setup-baseline 缺陷記錄下來的升級路徑）。
+  現況已由 `tests/test_situp.py::test_a_motionless_clip_fires_this_rule_at_full_severity` 釘住，
+  修好之後那個測試會轉紅，那正是預期的訊號。見
+  `docs/superpowers/specs/2026-08-09-situp-detector-design.md` §8.5。
 - [ ] **檢查 `band_pull_apart.rule_shrugging` 是否也吃到同一個 confound**（2026-08-09 開，未跑）：
   Arm Abduction 量到 `neck_gap = ear_y - shoulder_y` 在手臂外展時會因**解剖學**而塌陷——
   Fit3D `side_lateral_raise` 的 3D ground truth 上，gap 與手臂仰角的 within-clip Spearman 是

@@ -331,6 +331,29 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
     still handed to this rule with its small excursion intact. Contrast the Bicep Curl extension
     term, which was silenced by an absolute interaction (`phase_fraction * T` against `min_frames`).
 
+    AND THAT SAME SCALE-FREEDOM MAKES THIS RULE FAIL OPEN ON A CLIP CONTAINING NO MOVEMENT AT ALL.
+    Stated here rather than in a follow-up, because the property that protects the rule from one
+    failure is the property that causes the other, and only one of them was noticed first. Measured
+    through the real `run_detector`: 60 frames of a subject holding still, with the hip angle
+    oscillating by 0.4 deg of jitter, segments into THREE reps and fires this rule at
+    `severity=1.0, confidence=1.0, observability="high"`, quoting an excursion of 0.74 deg.
+
+    IT IS NOT SPECIFIC TO THIS MODULE AND WAS NOT INTRODUCED HERE -- the identical probe against
+    `arm_vw.rule_incomplete_excursion`, already shipped and merged, gives 3 reps and
+    `severity=1.0, confidence=1.0`. Every whole-rep "not enough travel" rule in the registry
+    inherits it, because `segment_reps`'s hysteresis has no noise floor by design (that design is
+    what lets a genuinely shallow rep be found at all). `band_pull_apart` escapes only when the
+    signal is bit-exactly constant, which real footage never is.
+
+    NOT REPAIRED HERE, AND THE REASON IS THE NO-INVENTED-NUMBERS RULE. Any in-rule guard is a
+    minimum-excursion floor, i.e. a threshold no source states and no measurement here places. The
+    honest repairs are both framework-level: a noise floor in `segment_reps`, or threading
+    `RunResult.fallback` into `RuleContext` so a rule can decline a window it was handed by the
+    whole-clip path (the upgrade path already recorded for the Deadlift setup-baseline defect).
+    `test_a_motionless_clip_fires_this_rule_at_full_severity` PINS the current behaviour so the next
+    reader meets it instead of rediscovering it. IT MATTERS MORE HERE THAN ON ARM VW: this is the
+    detector's ONLY live rule, so a false positive is the entire verdict. Design spec section 8.6.
+
     NO VIEW GATE AND NO VIEW DISCOUNT -- THE FIRST RULE IN THIS REGISTRY WITH NEITHER. See the
     module header: for a horizontal subject `view_estimation`'s own docstring says its labels carry
     no validated meaning, so both a gate and a discount would dress an unvalidated label as

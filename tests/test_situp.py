@@ -501,6 +501,38 @@ class EndToEndSegmentationTest(unittest.TestCase):
         self.assertGreaterEqual(len(result.reps), 3)
         self.assertEqual(len(result.detections), 1)
 
+    def test_a_motionless_clip_fires_this_rule_at_full_severity(self) -> None:
+        """PINS A KNOWN, MEASURED, DELIBERATELY UNREPAIRED FAILURE -- read this before "fixing" it.
+
+        `segment_reps` has no noise floor by design: it thresholds on PERCENTILES of the signal's
+        own range, which is exactly what lets a genuinely shallow curl be found as a rep at all.
+        The cost is that 0.4 deg of jitter on a motionless subject also segments, and this rule
+        then reports the resulting ~0.7 deg excursion as a maximally severe incomplete range.
+
+        NOT INTRODUCED BY THIS MODULE: the identical probe against
+        `arm_vw.rule_incomplete_excursion` (shipped and merged) also yields 3 reps at severity 1.0.
+        Every whole-rep "not enough travel" rule inherits it. Any in-rule guard would be a
+        minimum-excursion floor -- an invented threshold. The honest repairs are framework-level
+        (a noise floor in `segment_reps`, or `RunResult.fallback` threaded into `RuleContext`).
+
+        WHEN THAT REPAIR LANDS THIS TEST SHOULD FAIL, and its failure is the intended signal.
+        """
+        frames = [
+            situp_frame(hip_angle_deg=140.0 + 0.4 * math.sin(i / 3.0), frame_index=i)
+            for i in range(60)
+        ]
+        result = run_detector(
+            SITUP_DETECTOR, frames, fps=30.0, view_type="rear_oblique", view_confidence=0.8
+        )
+        self.assertIsNone(result.fallback, "the jitter is segmented, not sent to the fallback path")
+        self.assertEqual(len(result.detections), 1)
+        detection = result.detections[0]
+        self.assertEqual(detection.fault_id, "situp_incomplete_rom")
+        self.assertEqual(detection.severity, 1.0)
+        self.assertEqual(detection.confidence, 1.0)
+        self.assertEqual(detection.observability, "high")
+        self.assertLess(detection.evidence["hip_angle_excursion_deg"], 1.0)
+
     def test_a_good_clip_produces_no_detections_end_to_end(self) -> None:
         frames: list[dict] = []
         for index in range(3):

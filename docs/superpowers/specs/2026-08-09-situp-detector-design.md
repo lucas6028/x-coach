@@ -513,7 +513,53 @@ and roughly **half the fire threshold**, produced by camera roll alone. No landm
 remove it — it needs either a roll-normalising preprocessing step or an estimator trained
 roll-invariantly, and neither is in scope here.
 
-### 8.5 What this section does not license
+### 8.5 The rule FAILS OPEN on a clip containing no movement, and it is not this module's bug
+
+Found by review, not by tests, and reproduced through the real `run_detector`. 60 frames of a
+subject holding still, hip angle oscillating by **0.4°** of jitter:
+
+```
+fallback   : None          <- the jitter is SEGMENTED, not sent to the whole-clip path
+reps       : 3
+FIRES situp_incomplete_rom  severity=1.0  confidence=1.0  observability=high
+  hip_angle_excursion_deg: 0.74
+```
+
+**The cause is the property §7.2 praises.** `segment_reps` thresholds on percentiles of the signal's
+own range, so it is scale-free — which is exactly what stops a genuinely shallow curl from being
+structurally hidden from this rule. The same scale-freedom means 0.4° of noise segments too. One
+property, two consequences; only the favourable one was noticed first.
+
+**It is pre-existing and framework-wide, verified rather than assumed.** The identical probe against
+`arm_vw.rule_incomplete_excursion` — shipped, reviewed and merged — gives 3 reps at
+`severity=1.0, confidence=1.0`. `band_pull_apart.rule_incomplete_rom` escapes only because its
+fixture signal is bit-exactly constant, which real footage never is. Every whole-rep "not enough
+travel" rule in the registry inherits this.
+
+**Why it is reachable in production.** Registration ships the movement, and this module's validity
+gate needs only shoulders, hips and knees — satisfied by almost any upload, including a standing
+clip where the hip angle barely moves. `wasMeasured()` cannot catch it, for the reason already
+recorded for squat-analysed-as-OHP: the frames genuinely *are* measured. **And it matters more here
+than on Arm VW, not less** — this is the detector's only live rule, so a false positive is the
+entire verdict, at maximum severity, and `chat.py` grounds the coach in it.
+
+**Not repaired, and the reason is the no-invented-numbers rule.** Any in-rule guard is a
+minimum-excursion floor: a threshold no source states and no measurement here places. The honest
+repairs are both framework-level and out of this branch's scope — a noise floor in `segment_reps`,
+or threading `RunResult.fallback` into `RuleContext` so a rule can decline a window handed to it by
+the whole-clip path (the upgrade path already recorded for the Deadlift setup-baseline defect).
+`test_a_motionless_clip_fires_this_rule_at_full_severity` pins the current behaviour, and its
+failure when the repair lands is the intended signal. Logged in TODO.md as a registry-wide item.
+
+### 8.6 The payload is NaN-free end to end
+
+`json.dumps(detect_pose_rules_from_payload(payload, movement="Sit-up"), allow_nan=False)` passes on
+a 90-frame clip in which every seventh frame drops a required landmark (so `hip_angle_deg` is NaN
+throughout those frames). Row's entry records this check being needed per-detector because a NaN in
+`evidence` or the per-frame metrics reaches the API and is swallowed by a broad `except`; the
+generic path was not assumed to cover it. `movement` echoes back the canonical `"Sit-up"`.
+
+### 8.7 What this section does not license
 
 No fire rate, no AUC, no threshold. The clips are a different variant (§2.2b), there are six of
 them, and REHAB24-6-style correctness labels do not exist for any of them at the repetition level —
