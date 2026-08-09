@@ -46,6 +46,7 @@ describe("web slinger engine", () => {
     expect(first.targets.map((target) => target.id)).toEqual([2]);
     expect(first.score).toBe(100);
     expect(first.combo).toBe(1);
+    expect(first.traces[0]).toMatchObject({ hit: true, progress: 0, hand: 0 });
     const second = fireWeb(first, { x: 0.5, y: 0.8, x2: 0.5, y2: 0 });
     expect(second.score).toBe(225);
     expect(second.bestCombo).toBe(2);
@@ -65,5 +66,21 @@ describe("web slinger engine", () => {
     const next = advanceWorld(thinned, 50, 20, () => 0.5);
     expect(next.targets).toHaveLength(2);
     expect(next.nextId).toBe(thinned.nextId + 1);
+  });
+
+  it("advances the silk head before fading an attached web", () => {
+    const state = createWebGameState(0, () => 0.5);
+    const fired = fireWeb(
+      {
+        ...state,
+        targets: [{ id: 7, x: 0.5, y: 0.3, vx: 0, vy: 0, radius: 0.05 }],
+      },
+      { x: 0.5, y: 0.8, x2: 0.5, y2: 0, hand: 1 }
+    );
+    const advanced = advanceWorld(fired, 50, 50, () => 0.5);
+    expect(advanced.traces[0].progress).toBeGreaterThan(0);
+    expect(advanced.traces[0].progress).toBeLessThan(1);
+    expect(advanced.traces[0].life).toBeGreaterThan(0.95);
+    expect(advanced.traces[0].hand).toBe(1);
   });
 });

@@ -9,9 +9,16 @@ export type WebTarget = {
   radius: number;
 };
 
-export type WebRay = Point & { x2: number; y2: number };
+export type WebRay = Point & { x2: number; y2: number; hand?: 0 | 1 };
 
-export type WebTrace = WebRay & { life: number; hit: boolean };
+export type WebTrace = WebRay & {
+  hand: 0 | 1;
+  life: number;
+  hit: boolean;
+  progress: number;
+  seed: number;
+  impactRadius: number;
+};
 
 export type WebGameState = {
   targets: WebTarget[];
@@ -112,7 +119,11 @@ export function advanceWorld(
     ...state,
     targets,
     traces: state.traces
-      .map((trace) => ({ ...trace, life: trace.life - dt * 3.5 }))
+      .map((trace) => {
+        const progress = Math.min(1, trace.progress + dt * (trace.hit ? 6.2 : 7.5));
+        const fadeRate = progress < 1 ? 0.12 : trace.hit ? 0.72 : 1.8;
+        return { ...trace, progress, life: trace.life - dt * fadeRate };
+      })
       .filter((trace) => trace.life > 0),
     nextId,
     nextSpawnAt,
@@ -141,11 +152,36 @@ export function fireWeb(state: WebGameState, ray: WebRay): WebGameState {
   }
 
   if (!hit) {
-    return { ...state, combo: 0, traces: [...state.traces, { ...ray, life: 1, hit: false }] };
+    return {
+      ...state,
+      combo: 0,
+      traces: [
+        ...state.traces,
+        {
+          ...ray,
+          hand: ray.hand ?? 0,
+          life: 1,
+          hit: false,
+          progress: 0,
+          seed: ((state.hits + state.traces.length + 1) * 0.61803398875) % 1,
+          impactRadius: 0,
+        },
+      ],
+    };
   }
 
   const combo = state.combo + 1;
-  const trace = { ...ray, x2: hit.x, y2: hit.y, life: 1, hit: true };
+  const trace: WebTrace = {
+    ...ray,
+    x2: hit.x,
+    y2: hit.y,
+    hand: ray.hand ?? 0,
+    life: 1,
+    hit: true,
+    progress: 0,
+    seed: ((state.hits + state.traces.length + 1) * 0.61803398875) % 1,
+    impactRadius: hit.radius,
+  };
   return {
     ...state,
     targets: state.targets.filter((target) => target.id !== hit?.id),
