@@ -20,6 +20,7 @@ vi.mock("../pages/History", () => ({ default: () => <div>history page</div> }));
 vi.mock("../pages/Movements", () => ({ default: () => <div>movements page</div> }));
 vi.mock("../pages/Settings", () => ({ default: () => <div>settings page</div> }));
 vi.mock("../pages/Games", () => ({ default: () => <div>games page</div> }));
+vi.mock("../pages/WebSlinger", () => ({ default: () => <div>web slinger page</div> }));
 vi.mock("../pages/LiffDiag", () => ({ default: () => <div>liff diag page</div> }));
 vi.mock("../pages/admin/AdminLogin", () => ({ default: () => <div>admin login page</div> }));
 vi.mock("../pages/admin/AdminLayout", () => ({ default: () => <div>admin page</div> }));
@@ -70,6 +71,11 @@ describe("AppRoutes — public routes", () => {
   ])("serves %s to a signed-out visitor", (path, marker) => {
     renderAnonymousAt(path);
     expect(screen.getByText(marker)).toBeInTheDocument();
+  });
+
+  it("serves the lazy web-slinger route to a signed-out visitor", async () => {
+    renderAnonymousAt("/web-slinger");
+    expect(await screen.findByText("web slinger page")).toBeInTheDocument();
   });
 });
 

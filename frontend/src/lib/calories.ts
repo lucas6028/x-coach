@@ -4,7 +4,7 @@
 // ceiling. The UI always labels the number an estimate — the goal is a fun, directionally-honest
 // "you burned about this much", not clinical accuracy. Pure + unit-tested.
 
-export type GameId = "sixseven" | "ninja";
+export type GameId = "sixseven" | "ninja" | "webslinger";
 
 // Assumed body weight — the app has no weight field yet, so every estimate uses this default.
 export const DEFAULT_WEIGHT_KG = 65;
@@ -25,6 +25,8 @@ export const EFFORT: Record<GameId, GameEffort> = {
   sixseven: { floorMet: 2.5, peakMet: 5, movesForPeakPerMin: 120 },
   // Fruit Ninja: larger whole-arm swipes, so a slightly higher ceiling. `moves` = fruit sliced.
   ninja: { floorMet: 2.5, peakMet: 5.5, movesForPeakPerMin: 90 },
+  // Web Slinger: repeated arm extensions from both sides. `moves` = targets webbed.
+  webslinger: { floorMet: 2.5, peakMet: 5.2, movesForPeakPerMin: 70 },
 };
 
 // MET for a given movement rate, linearly interpolated from floor to peak and clamped.

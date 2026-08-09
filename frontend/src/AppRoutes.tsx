@@ -21,6 +21,7 @@ import RequireAuth from "./components/RequireAuth";
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
 const SixSeven = lazy(() => import("./pages/SixSeven"));
 const FruitNinja = lazy(() => import("./pages/FruitNinja"));
+const WebSlinger = lazy(() => import("./pages/WebSlinger"));
 
 // The route table, extracted from main.tsx so WHICH ROUTES ARE PUBLIC is testable rather than
 // being untested configuration. main.tsx still owns bootstrap (createRoot, providers, LIFF init);
@@ -48,6 +49,14 @@ export default function AppRoutes() {
         element={
           <Suspense fallback={null}>
             <FruitNinja />
+          </Suspense>
+        }
+      />
+      <Route
+        path="/web-slinger"
+        element={
+          <Suspense fallback={null}>
+            <WebSlinger />
           </Suspense>
         }
       />
