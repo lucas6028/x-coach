@@ -142,7 +142,7 @@ export default function WebSlinger() {
         if (wrist && elbow && now - current.lastShotAt[hand] >= SHOT_COOLDOWN_MS) {
           const ray = detectWebFlick(elbow, wrist, current.previousWrists[hand], detectionDtMs);
           if (ray) {
-            current.state = fireWeb(current.state, ray);
+            current.state = fireWeb(current.state, { ...ray, hand: hand as 0 | 1 });
             current.lastShotAt[hand] = now;
           }
         }
