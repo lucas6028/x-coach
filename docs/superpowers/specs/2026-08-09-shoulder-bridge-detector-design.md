@@ -277,13 +277,34 @@ rep; a **peak position** is a property of the moment the position is held, and s
 stops a transient overshoot during the concentric from standing in for a hold that never got there.
 
 The cost is the Bicep Curl phase-fraction interaction, which binds here (it did not for Sit-up,
-whose shipped rule is not phase-scoped). `base.py:197` sets `min_frames = max(3, ceil(0.20 · fps))`;
-a rule scoped to a phase covering fraction `f` of a rep of `T` seconds needs `f · T · fps ≥
-min_frames`. With `f = 0.30` and the default `min_rep_seconds = 0.4` this is `T ≥ 0.67 s` — **1.67×
-the segmentation floor**, so the shortest repetition segmentation will emit is one this rule cannot
-score. Not closed by raising `min_rep_seconds`, because a bridge shorter than 0.67 s is not a
-bridge. No analyzed repetition on the real footage fell inside the gap (durations 0.40–17.2 s; one
-0.40 s window exists and is correctly unscored).
+whose shipped rule is not phase-scoped). **It was measured through `run_detector`, not derived —
+and deriving it gets both the number and the mechanism wrong.** That is the Arm VW lesson restated:
+a phase-scoped fire condition must be measured on SEGMENTED windows, never computed from a clip
+length.
+
+The tempting derivation is `min_frames = max(3, ceil(0.20 · fps)) = 6` at 30 fps, `top` covers 30%
+of a rep, so `0.30 · T · fps ≥ 6` ⟹ `T ≥ 0.67 s`. Measured:
+
+| clip | reps | rep **window** | `top` frames in window | fires |
+|---|---|---|---|---|
+| 0.83 s | 1 | 0.57 s (17 fr) | 5 | **no** |
+| 0.93 s | 1 | 0.60 s (18 fr) | 6 | yes |
+| 1.00 s | 1 | 0.67 s (20 fr) | 6 | yes |
+| 1.33 s | 1 | 0.87 s (26 fr) | 8 | yes |
+| ≤ 0.67 s | **0** | — | — | whole-clip fallback |
+
+Two corrections fall out. **The boundary is ~0.60 s, not 0.67 s**, because `top` is a *percentile*
+cut rather than a fixed 30% and lands on ~33% of a short window. And **the quantity that binds is
+the TRIMMED REP WINDOW, not the clip**: `segment_reps` climbs to the plateaus and returns a window
+shorter than the clip that produced it, so a 0.83 s clip yields a 0.57 s window this rule cannot
+score. Below roughly 0.7 s of clip there is no repetition at all (`no_reps_detected`), so those
+take the whole-clip fallback and are scored by a different path entirely.
+
+So the gap is not "the shortest repetition segmentation will emit" — it is a **band of rep windows
+between `min_rep_seconds` and ~0.60 s**. Not closed by raising `min_rep_seconds`: that would tune a
+framework constant to flatter one rule, and a bridge held for under 0.6 s is not a bridge. No
+analyzed repetition on the real footage fell inside the band (window durations 0.40–17.2 s; the one
+0.40 s window is correctly unscored).
 
 ### 5.6 It does not fail open on a motionless clip — a first for a "not enough" rule here
 

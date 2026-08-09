@@ -248,6 +248,16 @@ class MetricConflationTest(unittest.TestCase):
     rediscovering it on a user's screen.
     """
 
+    def test_the_arched_fixture_really_is_a_different_posture(self) -> None:
+        """Guards the premise of the test below, which asserts two readings are EQUAL and would
+        therefore also pass if `arched=True` moved nothing at all."""
+        sagging = bridge_frame(hip_angle_deg=160.0)["landmarks"]
+        arched = bridge_frame(hip_angle_deg=160.0, arched=True)["landmarks"]
+        for index in (11, 12):
+            with self.subTest(landmark=index):
+                self.assertNotAlmostEqual(sagging[index]["y"], arched[index]["y"], places=2)
+                self.assertNotAlmostEqual(sagging[index]["x"], arched[index]["x"], places=2)
+
     def test_the_metric_cannot_distinguish_a_sag_from_an_arch(self) -> None:
         for offset in (10.0, 20.0, 30.0):
             with self.subTest(offset=offset):
@@ -507,18 +517,54 @@ class PhaseScopeFloorTest(unittest.TestCase):
     """The Bicep Curl phase-fraction interaction binds here, because this module's shipped rule IS
     phase-scoped (Sit-up's is not).
 
-    `min_frames = max(3, ceil(0.20 * fps))` and `top` covers 30% of a rep, so a rep needs
-    `0.30 * T * fps >= min_frames`, i.e. `T >= 0.67 s` -- 1.67x the 0.4 s segmentation floor. A rep
-    that segments but cannot be scored is a real gap, documented rather than closed by tuning
-    `min_rep_seconds`. Design spec section 5.5.
+    DRIVEN THROUGH THE REAL `run_detector`, NOT A HAND-FED `min_frames`, and that is the point.
+    The arithmetic answer -- `min_frames = 6` at 30 fps, `top` covers 30% of a rep, so
+    `0.30 * T * fps >= 6` gives `T >= 0.67 s` -- gets BOTH the number and the mechanism wrong.
+    The measured boundary is a rep WINDOW near 0.60 s (`top` is a percentile cut, not a fixed 30%,
+    and lands on ~33% of a short window), and the quantity that binds is the TRIMMED window
+    `segment_reps` returns rather than the clip that produced it. This is the Arm VW lesson:
+    measure a phase-scoped fire condition on SEGMENTED windows, never compute it from clip length.
+    Design spec section 5.5.
     """
 
-    def test_a_rep_below_the_phase_scope_floor_segments_but_is_not_scored(self) -> None:
-        short = _rep(n=15, top_deg=140.0)  # 0.5 s at 30 fps, above 0.4 s and below 0.67 s
-        core = _core(short)
-        top_frames = [f for f in core if f.phase == TOP_PHASE and f.valid]
-        self.assertLess(len(top_frames), 6)
-        self.assertEqual(rule_incomplete_hip_extension(core, _ctx(min_frames=6)), [])
+    @staticmethod
+    def _window(clip_frames: int):
+        frames = _rep(n=clip_frames, top_deg=140.0)
+        result = run_detector(SHOULDER_BRIDGE_DETECTOR, frames, 30.0, "rear_oblique", 0.8)
+        if not result.analyzed:
+            return result, None, 0
+        rep = result.analyzed[0]
+        window = result.core[rep.start : rep.end + 1]
+        return result, window, sum(1 for f in window if f.phase == TOP_PHASE and f.valid)
+
+    def test_a_rep_window_below_the_phase_scope_floor_is_not_scored(self) -> None:
+        """A 0.83 s clip segments into ONE repetition whose trimmed window is 0.57 s, giving 5
+        `top` frames against `min_frames = 6`. The rep exists and is analyzed; the rule declines
+        it."""
+        result, window, tops = self._window(25)
+        self.assertEqual(len(result.reps), 1, msg="the premise: a repetition really was found")
+        self.assertIsNone(result.fallback, msg="not the whole-clip path")
+        self.assertLess(len(window) / 30.0, 0.60)
+        self.assertLess(tops, 6)
+        self.assertEqual(result.detections, [])
+
+    def test_a_rep_window_just_above_the_floor_is_scored(self) -> None:
+        """One frame of `top` more, and the same fault fires -- which is what makes the test above
+        a statement about the floor rather than about the fixture being faultless."""
+        result, window, tops = self._window(28)
+        self.assertEqual(len(result.reps), 1)
+        self.assertGreaterEqual(tops, 6)
+        self.assertEqual(
+            [d.fault_id for d in result.detections], ["bridge_incomplete_hip_extension"]
+        )
+
+    def test_a_clip_too_short_to_segment_takes_the_whole_clip_path_instead(self) -> None:
+        """Below roughly 0.7 s of CLIP there is no repetition at all, so such clips never reach
+        the band above -- they are scored by the fallback path. Recorded so the gap is not
+        overstated as covering every short clip."""
+        result, _, _ = self._window(15)
+        self.assertEqual(result.reps, [])
+        self.assertEqual(result.fallback, "no_reps_detected")
 
 
 class SilentRuleTest(unittest.TestCase):

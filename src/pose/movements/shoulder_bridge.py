@@ -211,14 +211,28 @@ def shoulder_bridge_assign_phases(raw: list[dict]) -> list[str]:
     NOT labelled `setup`).
 
     THE SHIPPED RULE IS PHASE-SCOPED TO `top`, WHICH SIT-UP'S WAS NOT, so the Bicep Curl
-    phase-fraction trap DOES bind here and was checked rather than assumed. `base.py:197` sets
-    `min_frames = max(3, ceil(0.20 * fps))`, and a rule scoped to a phase covering a fraction `f`
-    of a rep of `T` seconds needs `f * T * fps >= min_frames`. With `f = 0.30` and the default
-    `min_rep_seconds = 0.4` the requirement is `0.30 * T >= 0.20`, i.e. `T >= 0.67 s` -- 1.67x the
-    segmentation floor, so the shortest rep segmentation will emit is one this rule cannot score.
-    That gap is REAL and is not closed by raising `min_rep_seconds`, because a bridge shorter than
-    0.67 s is not a bridge. Measured on the six real clip-views, no analyzed repetition fell in it.
-    Design spec section 9, test 6.
+    phase-fraction trap DOES bind here -- and it was MEASURED THROUGH `run_detector` rather than
+    derived, because deriving it gets the wrong number and the wrong mechanism.
+
+    THE ARITHMETIC ANSWER IS WRONG ON BOTH COUNTS, AND THE ARM VW LESSON IS WHY. `base.py:197`
+    sets `min_frames = max(3, ceil(0.20 * fps))` = 6 at 30 fps, and the tempting derivation is
+    `0.30 * T * fps >= 6`, i.e. `T >= 0.67 s`. Measured, the boundary is a rep window of about
+    **0.60 s** (18 frames: 6 `top` frames, fires) against 0.57 s (17 frames: 5 `top` frames,
+    silent) -- because `top` is a PERCENTILE cut, not a fixed 30%, and lands on ~33% of a short
+    window. This is the Arm VW finding restated: a phase-scoped fire condition must be measured on
+    SEGMENTED windows through `run_detector`, never computed from a clip length.
+
+    AND THE QUANTITY THAT BINDS IS THE TRIMMED REP WINDOW, NOT THE CLIP. `segment_reps` climbs to
+    the plateaus and hands back a window SHORTER than the clip that produced it -- a 0.83 s clip
+    yields a 0.57 s window, which this rule cannot score. Below roughly 0.7 s of CLIP there is no
+    rep at all (`no_reps_detected`), so those take the whole-clip fallback instead and are scored
+    by a different path. The gap is therefore not "the shortest rep segmentation will emit"; it is
+    a band of rep WINDOWS between `min_rep_seconds` and ~0.60 s.
+
+    NOT CLOSED BY RAISING `min_rep_seconds`, because that would be tuning a framework constant to
+    flatter one rule, and because a bridge held for under 0.6 s is not a bridge. Measured on the
+    six real clip-views, no analyzed repetition fell in the band (window durations 0.40-17.2 s,
+    and the single 0.40 s window is correctly unscored). Design spec section 5.5, test 6.
     """
     frame_count = len(raw)
     if frame_count == 0:
