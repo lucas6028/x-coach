@@ -23,7 +23,7 @@ class TestMovementsEndpoint(unittest.TestCase):
             names,
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
             ],
         )
 
@@ -58,6 +58,12 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # that is BILATERAL, i.e. the variant the app actually models. Nothing has run
                 # the check. See src/pose/movements/arm_vw.py's registration comment.
                 "Arm VW": False,
+                # Sit-up ships Beta for a THIRD reason: labeled data exists (EgoExo-Fitness, 82
+                # human-judged sit-up actions) but describes a DIFFERENT VARIANT -- its canonical
+                # guidance is a full sit-up while the parent spec specifies a curl-up, so a
+                # validation run against it would be measuring another exercise. See
+                # src/pose/movements/situp.py's registration comment.
+                "Sit-up": False,
             },
         )
 

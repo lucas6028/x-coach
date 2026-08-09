@@ -251,6 +251,15 @@ class MovementRegistryTests(unittest.TestCase):
             # Verified end-to-end in tests/test_arm_vw.py::EndToEndSegmentationTest, which
             # asserts WHICH end of the signal `peak` lands on so it cannot pass under `max`.
             "Arm VW": ("avg_arm_elevation_deg", "min", "extended"),
+            # The fourth averaging signal, and the FIRST that is not an arm quantity: the trunk's
+            # own `angle(shoulder, hip, knee)`. Peaks at its MINIMUM (supine -> curled -> supine),
+            # sharing Arm VW's polarity. Chosen because it is JOINT-RELATIVE and therefore
+            # invariant under camera roll -- the parent spec's "trunk flexion vs the
+            # floor/horizontal" is not recoverable from the image, and EgoExo-Fitness ships its
+            # sagittal sit-up frames rolled 90 degrees with no EXIF tag. Verified end-to-end in
+            # tests/test_situp.py::EndToEndSegmentationTest, and the roll invariance is pinned
+            # separately by tests/test_situp.py::RollInvarianceTest.
+            "Sit-up": ("hip_angle_deg", "min", "extended"),
         }
         for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
@@ -296,7 +305,7 @@ class TestMovementRegistry(unittest.TestCase):
             names,
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
             ],
         )
 
@@ -329,6 +338,15 @@ class TestMovementRegistry(unittest.TestCase):
                 # correct / 114 incorrect, and BILATERAL on measurement. See arm_vw.py's
                 # registration comment for what Ex2 does and does not decide.
                 "Arm VW": False,
+                # Sit-up is Beta for a THIRD distinct reason. Deadlift, Row, Band Pull Apart and
+                # Bicep Curl are False because no labeled data exists; Arm Abduction and Arm VW
+                # because nobody ran the check against data that does. Sit-up is False because the
+                # labeled data that exists -- EgoExo-Fitness, 82 human-judged sit-up actions --
+                # describes a DIFFERENT VARIANT: its canonical guidance is a full sit-up ("touch
+                # your feet with your hands") while the parent spec specifies a curl-up. REHAB24-6
+                # has no sit-up and Fit3D has no supine action at all. See situp.py's registration
+                # comment.
+                "Sit-up": False,
             },
         )
 
@@ -348,6 +366,6 @@ class TestMovementRegistry(unittest.TestCase):
             {d.name for d in registry.list_detectors()},
             {
                 "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
-                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
             },
         )

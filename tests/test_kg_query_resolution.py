@@ -37,6 +37,7 @@ MODULE_MOVEMENTS = {
     "bicep_curl.py": "Bicep Curl",
     "arm_abduction.py": "Arm Abduction",
     "arm_vw.py": "Arm VW",
+    "situp.py": "Sit-up",
 }
 
 

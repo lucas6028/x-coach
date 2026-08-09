@@ -1763,6 +1763,85 @@ Rep phases: **setup (neutral hip)** → **concentric abduction (lift/step leg ou
 
 All citation_support paraphrases/quotes above were taken from the six RAG docs actually read in this session (PMC4519219, PMC9505236, PMC11981018, PMC11048684, PMC12372021, PMC12416692). Two items are honestly down-graded to MODERATE support where the exact clinical cue exceeds the literal wording of the source: the "toes-up external-rotation" component of `abd_hip_flexion_er_substitution`, and the velocity thresholds of `abd_momentum` (the sources support the frontal-plane-neutrality and movement-control principles, respectively, but do not state the specific pose thresholds). No fault rests on an unsupported injury-risk claim.
 
+> **UPDATE (2026-08-09, Sit-up implemented — 11/16) — THREE OF THIS SECTION'S FOUR SIT-UP RULES DO
+> NOT SHIP, AND THE CENTRAL FINDING IS ABOUT THIS GROUP AS A WHOLE, NOT ABOUT SIT-UP.**
+> Design spec: `docs/superpowers/specs/2026-08-09-situp-detector-design.md`. Module:
+> `src/pose/movements/situp.py`. `situp_incomplete_rom` ships; `situp_hip_flexor_dominance` is
+> registered permanently silent; `excessive_speed` and `excessive_rom` are withdrawn.
+>
+> - **GROUP E'S MEASUREMENT CONVENTION IS NOT RECOVERABLE FROM AN IMAGE, AND THAT APPLIES TO ALL
+>   THREE MOVEMENTS.** The convention block above defines trunk-flexion, pelvic-tilt and trunk
+>   lateral-lean against "the floor/horizontal". The image horizontal is not the floor: EgoExo-
+>   Fitness, the only dataset with labeled sit-ups, ships its two near-sagittal views (`exo_l`,
+>   `exo_r`) **rotated a quarter turn with no EXIF orientation tag** (PIL `getexif()` is empty on
+>   all three exo views). Every rule shipped in this project before Sit-up was immune by accident —
+>   they all read joint-relative `angle_degrees(a, b, c)`, invariant under camera roll. Sit-up
+>   re-anchors to the body (hip-angle excursion) deliberately. **Shoulder Bridge and Leg Abduction
+>   must do the same**; their `hip angle`, `pelvic-tilt` and `knee_width/ankle_width` quantities are
+>   already body-relative, but `lumbar_hyperextension_overarch`'s "hip-midpoint y rises above the
+>   shoulder–knee line" proxy is not, and neither is any reading of pelvic tilt "vs horizontal".
+> - **RE-ANCHORING FIXES THE REPRESENTATION, NOT THE ESTIMATOR — MEASURED.** Rotating 300 real
+>   `zOfbr6/exo_l` frames by 90° and re-running MediaPipe moves the same frame's hip angle by a
+>   **median 9.8° (p90 18.6, max 32.5)**, with detection succeeding 300/300 either way. MediaPipe is
+>   not roll-equivariant. That residue is half the shipped 20° threshold, produced by camera roll
+>   alone, and no landmark convention removes it.
+> - **THE `side` RATINGS IN THIS SECTION ARE FICTION, AND THE ESTIMATOR IS NOT MERELY SILENT ON A
+>   SUPINE SUBJECT — IT IS INVERTED.** Three of four Sit-up rules are rated on `side`, which
+>   production has emitted on 0 of 49 clips. Run over the six real sit-up clips in all three
+>   exocentric views: the **near-sagittal** `exo_l`/`exo_r` come back **`rear`** and the **head-on**
+>   `exo_m` comes back **`rear_oblique`**, deterministically, with `side` and `unknown` never
+>   emitted. `view_estimation.py`'s docstring limit 1 already forbids gating a horizontal-movement
+>   rule on these labels; this is the measurement behind it. `situp_incomplete_rom` is accordingly
+>   **the first shipped rule in the project with neither a view gate nor a view discount** — a
+>   discount keyed on a meaningless label is arbitrary, not conservative.
+> - **A FOURTH AND A FIFTH CITATION FAILURE MODE, after inference (impingement arc), absence (curl
+>   wrist flexion) and exercise identity (all four Arm VW sources).**
+>   **(4) SECONDARY SOURCING** — right paper, right exercise, but the paper is quoting someone else.
+>   Both numbers this section draws from Mandroukas PMC9505236 are things he reports from other
+>   literature behind reference markers: "limiting the amount of trunk flexion to 35–40° [ ]" and
+>   "Nachemson [ ] reported increased pressure on the intervertebral disc". His own result is the
+>   EMG finding that RA activity "decreased as the range of motion became greater, more than
+>   35–40°".
+>   **(5) SOURCE-MEASURED NULL ON THE PROPOSED PROXY** — `excessive_speed`'s secondary signal
+>   ("medial-lateral wobble of the shoulder midpoint") *is* Barbado PMC4519219's `SG_ML`, and
+>   Barbado's headline result is that it **did not change significantly with speed**. The quantity
+>   that did rise, `COP_ML`, is force-plate centre of pressure and is not observable from video.
+>   This is the only one of the five that survives checking what a source *says* and falls only to
+>   checking what it *found*. Its `~1.0 s` threshold is separately just the fastest metronome
+>   cadence tested, and its primary signal ("exceeds a per-user baseline") does not exist in this
+>   architecture at all.
+> - **THE FIRST RULE WITHDRAWN BECAUSE ITS KNOWLEDGE-GRAPH SEED WOULD BE SEMANTICALLY INVERTED.**
+>   The graph's four `Sit-up:` fault nodes are the EgoExo TKV criteria — Feet Not Together, Arms Not
+>   Extended Overhead (both dangling), Incomplete Forward Reach, Abdominal Disengagement. There is
+>   no excessive-ROM node and the only ROM-adjacent one means the **opposite**. Band Pull Apart,
+>   Bicep Curl, Arm Abduction and Arm VW all accepted **thin** seeds and Arm VW accepted a **shared**
+>   one; none accepted an **inverted** one.
+> - **THE SPEC AND THE APP MODEL DIFFERENT EXERCISES, and this section is the odd one out.** This
+>   section says curl-up. The knowledge graph, EgoExo-Fitness's canonical guidance ("touch your feet
+>   with your hands", faulted on 28/82 judged actions when not achieved), the frontend's Traditional
+>   Chinese string (**仰臥起坐**, not 捲腹) and the shipped card artwork all say **full sit-up**. Two
+>   of the three non-shipping outcomes turn on that disagreement. It is a product decision, recorded
+>   in TODO.md, not taken here.
+> - **A FOURTH VACUOUS-BRANCH DEFECT, AND THE FIRST CAUGHT BEFORE IMPLEMENTATION.**
+>   `hip_flexor_dominance_anchored`'s heuristic asks that "shoulder–hip–knee remain close to
+>   collinear" *while* "the trunk-thigh (hip) angle closes rapidly" — and this section's own
+>   convention block defines the hip angle AS shoulder→hip→knee. Both clauses name the same
+>   quantity, so the rule can never fire. Same class as `row.rule_momentum_jerk`'s second condition,
+>   Bicep Curl's elbow-displacement disjunct and the impingement arc's first conjunct.
+> - **A NEW REASON FOR `validated=False`, THE THIRD IN THIS REGISTRY.** Not "no labeled data exists"
+>   (Deadlift, Row, Band Pull Apart, Bicep Curl) and not "nobody ran the check" (Arm Abduction, Arm
+>   VW), but **the labeled data that exists describes a different variant**. REHAB24-6 has no sit-up
+>   and Fit3D has no supine action among its 47 activity types, so there was no escape hatch of the
+>   kind Arm Abduction used.
+> - **ONE LIVE RULE IS THE HONEST OUTCOME.** Padding the detector to look comparable to Squat's five
+>   would mean inventing thresholds.
+>
+> **What Group E still has going for it:** Leg Abduction is REHAB24-6 `Ex4` — **210 reps, 120
+> correct / 90 incorrect, 12 videos** — the largest labeled non-squat set after Arm VW's 208 and the
+> only Group E movement with matching-variant ground truth. It should be the best-evidenced detector
+> in this group by a wide margin, and the Sit-up findings about reference frames and view labels
+> apply to it directly.
+
 
 ---
 
