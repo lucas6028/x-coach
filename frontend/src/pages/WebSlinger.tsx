@@ -27,6 +27,8 @@ import {
 import {
   createPoseLandmarker,
   drawWebSlingerScene,
+  extractFaceLandmarks,
+  type FaceLandmarks,
 } from "../components/webslinger/webSlingerDetector";
 
 type Phase = "intro" | "countdown" | "playing" | "over";
@@ -69,6 +71,8 @@ export default function WebSlinger() {
     state: createWebGameState(0),
     previousWrists: [null, null] as (Point | null)[],
     wrists: [null, null] as (Point | null)[],
+    face: null as FaceLandmarks | null,
+    lastFaceAt: 0,
     lastShotAt: [0, 0],
   });
 
@@ -127,6 +131,23 @@ export default function WebSlinger() {
       const detectionDtMs = current.lastDetectionAt ? now - current.lastDetectionAt : 33;
       current.lastDetectionAt = now;
       const landmarks = landmarker.detectForVideo(video, now).landmarks?.[0] ?? null;
+      const detectedFace = extractFaceLandmarks(landmarks);
+      if (detectedFace) {
+        const smoothPoint = (previous: Point | undefined, next: Point): Point =>
+          previous
+            ? { x: previous.x + (next.x - previous.x) * 0.5, y: previous.y + (next.y - previous.y) * 0.5 }
+            : next;
+        current.face = {
+          nose: smoothPoint(current.face?.nose, detectedFace.nose),
+          leftEye: smoothPoint(current.face?.leftEye, detectedFace.leftEye),
+          rightEye: smoothPoint(current.face?.rightEye, detectedFace.rightEye),
+          leftEar: smoothPoint(current.face?.leftEar, detectedFace.leftEar),
+          rightEar: smoothPoint(current.face?.rightEar, detectedFace.rightEar),
+        };
+        current.lastFaceAt = now;
+      } else if (now - current.lastFaceAt > 220) {
+        current.face = null;
+      }
       WRISTS.forEach((wristIndex, hand) => {
         const wristLandmark = landmarks?.[wristIndex];
         const elbowLandmark = landmarks?.[ELBOWS[hand]];
@@ -158,7 +179,12 @@ export default function WebSlinger() {
     if (context) {
       drawWebSlingerScene(
         context,
-        { targets: current.state.targets, traces: current.state.traces, wrists: current.wrists },
+        {
+          targets: current.state.targets,
+          traces: current.state.traces,
+          wrists: current.wrists,
+          face: current.face,
+        },
         canvas.width,
         canvas.height
       );
@@ -194,6 +220,8 @@ export default function WebSlinger() {
         current.state = createWebGameState(now);
         current.previousWrists = [null, null];
         current.wrists = [null, null];
+        current.face = null;
+        current.lastFaceAt = 0;
         current.lastShotAt = [0, 0];
         setScore(0);
         setCombo(0);
