@@ -21,7 +21,10 @@ class TestMovementsEndpoint(unittest.TestCase):
         names = [m["name"] for m in resp.json()["movements"]]
         self.assertEqual(
             names,
-            ["Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row", "Band Pull Apart"],
+            [
+                "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
+                "Band Pull Apart", "Bicep Curl",
+            ],
         )
 
     def test_reports_validation_status(self) -> None:
@@ -45,6 +48,7 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # for it anywhere in this repository (src/pose/movements/band_pull_apart.py's
                 # registration comment).
                 "Band Pull Apart": False,
+                "Bicep Curl": False,
             },
         )
 
