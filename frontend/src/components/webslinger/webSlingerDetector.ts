@@ -21,6 +21,21 @@ export type FaceLandmarks = {
 const mirrorX = (x: number, width: number) => (1 - x) * width;
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const easeOutCubic = (value: number) => 1 - Math.pow(1 - clamp01(value), 3);
+const PHOTOGRAPHIC_MASK_SRC = "/assets/web-slinger/spider-mask-photo.jpg";
+
+let photographicMask: HTMLImageElement | null = null;
+
+function getPhotographicMask(): HTMLImageElement | null {
+  if (typeof Image === "undefined") return null;
+  if (!photographicMask) {
+    photographicMask = new Image();
+    photographicMask.decoding = "async";
+    photographicMask.src = PHOTOGRAPHIC_MASK_SRC;
+  }
+  return photographicMask.complete && photographicMask.naturalWidth > 0
+    ? photographicMask
+    : null;
+}
 
 type CanvasPoint = { x: number; y: number };
 
@@ -52,20 +67,69 @@ function drawEyeLens(
 ): void {
   ctx.save();
   ctx.translate(center.x, center.y);
-  ctx.rotate(direction * -0.12);
-  ctx.beginPath();
-  ctx.moveTo(-width * 0.52, 0);
-  ctx.bezierCurveTo(-width * 0.2, -height * 0.7, width * 0.38, -height * 0.58, width * 0.52, -height * 0.12);
-  ctx.bezierCurveTo(width * 0.3, height * 0.58, -width * 0.28, height * 0.72, -width * 0.52, 0);
-  ctx.closePath();
-  ctx.fillStyle = "rgba(245,248,250,0.98)";
-  ctx.strokeStyle = "#17191f";
-  ctx.lineWidth = Math.max(3, width * 0.11);
-  ctx.fill();
-  ctx.stroke();
-  ctx.strokeStyle = "rgba(255,255,255,0.8)";
-  ctx.lineWidth = Math.max(1, width * 0.025);
-  ctx.stroke();
+  ctx.rotate(direction * -0.08);
+  ctx.scale(direction, 1);
+
+  const lens = new Path2D();
+  lens.moveTo(-width * 0.45, -height * 0.18);
+  lens.bezierCurveTo(-width * 0.18, -height * 0.42, width * 0.19, -height * 0.63, width * 0.48, -height * 0.48);
+  lens.bezierCurveTo(width * 0.54, -height * 0.05, width * 0.38, height * 0.42, -width * 0.34, height * 0.56);
+  lens.bezierCurveTo(-width * 0.48, height * 0.24, -width * 0.5, height * 0.02, -width * 0.45, -height * 0.18);
+  lens.closePath();
+
+  // A deep offset shadow and layered bevel make the frames feel attached to the suit.
+  ctx.save();
+  ctx.translate(direction * width * 0.025, height * 0.06);
+  ctx.fillStyle = "rgba(0,0,0,0.52)";
+  ctx.filter = `blur(${Math.max(1, width * 0.025)}px)`;
+  ctx.fill(lens);
+  ctx.restore();
+
+  ctx.lineJoin = "round";
+  ctx.fillStyle = "#080a0d";
+  ctx.strokeStyle = "#030405";
+  ctx.lineWidth = Math.max(4, width * 0.13);
+  ctx.fill(lens);
+  ctx.stroke(lens);
+
+  const pearl = ctx.createLinearGradient(-width * 0.4, -height * 0.55, width * 0.38, height * 0.5);
+  pearl.addColorStop(0, "#ffffff");
+  pearl.addColorStop(0.32, "#dce8eb");
+  pearl.addColorStop(0.72, "#aebfc3");
+  pearl.addColorStop(1, "#f9ffff");
+  ctx.fillStyle = pearl;
+  ctx.strokeStyle = "rgba(116,132,138,0.95)";
+  ctx.lineWidth = Math.max(1.5, width * 0.035);
+  ctx.fill(lens);
+  ctx.stroke(lens);
+
+  ctx.save();
+  ctx.clip(lens);
+  ctx.strokeStyle = "rgba(76,96,102,0.28)";
+  ctx.lineWidth = Math.max(0.55, width * 0.009);
+  const mesh = Math.max(3, width * 0.075);
+  for (let x = -width; x < width; x += mesh) {
+    ctx.beginPath();
+    ctx.moveTo(x, -height);
+    ctx.lineTo(x + height * 0.72, height);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, -height);
+    ctx.lineTo(x - height * 0.72, height);
+    ctx.stroke();
+  }
+
+  const reflection = ctx.createRadialGradient(-width * 0.24, -height * 0.38, 0, -width * 0.24, -height * 0.38, width * 0.42);
+  reflection.addColorStop(0, "rgba(255,255,255,0.8)");
+  reflection.addColorStop(0.35, "rgba(255,255,255,0.22)");
+  reflection.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = reflection;
+  ctx.fillRect(-width, -height, width * 2, height * 2);
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(112,124,130,0.9)";
+  ctx.lineWidth = Math.max(1, width * 0.022);
+  ctx.stroke(lens);
   ctx.restore();
 }
 
@@ -87,11 +151,11 @@ function drawTrackedMask(
   if (earDistance < height * 0.035) return;
 
   const angle = Math.atan2(earDy, earDx);
-  const maskWidth = earDistance * 1.34;
-  const maskHeight = maskWidth * 1.28;
+  const maskWidth = earDistance * 1.3;
+  const maskHeight = maskWidth * 1.44;
   const center = {
     x: (leftEar.x + rightEar.x) / 2,
-    y: (leftEar.y + rightEar.y) / 2 + maskHeight * 0.055,
+    y: (leftEar.y + rightEar.y) / 2 + maskHeight * 0.025,
   };
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
@@ -102,105 +166,192 @@ function drawTrackedMask(
   };
   const localLeftEye = toLocal(rightEye);
   const localRightEye = toLocal(leftEye);
+  const localNose = toLocal({ x: mirrorX(face.nose.x, width), y: face.nose.y * height });
 
   ctx.save();
   ctx.translate(center.x, center.y);
   ctx.rotate(angle);
 
   const maskPath = new Path2D();
-  maskPath.moveTo(0, -maskHeight * 0.5);
+  maskPath.moveTo(0, -maskHeight * 0.53);
   maskPath.bezierCurveTo(
-    maskWidth * 0.33,
-    -maskHeight * 0.5,
-    maskWidth * 0.5,
-    -maskHeight * 0.27,
-    maskWidth * 0.47,
-    maskHeight * 0.04
-  );
-  maskPath.bezierCurveTo(
-    maskWidth * 0.44,
-    maskHeight * 0.3,
     maskWidth * 0.2,
-    maskHeight * 0.49,
+    -maskHeight * 0.54,
+    maskWidth * 0.42,
+    -maskHeight * 0.38,
+    maskWidth * 0.46,
+    -maskHeight * 0.16
+  );
+  maskPath.bezierCurveTo(
+    maskWidth * 0.5,
+    maskHeight * 0.14,
+    maskWidth * 0.27,
+    maskHeight * 0.45,
     0,
-    maskHeight * 0.52
+    maskHeight * 0.53
   );
   maskPath.bezierCurveTo(
-    -maskWidth * 0.2,
-    maskHeight * 0.49,
-    -maskWidth * 0.44,
-    maskHeight * 0.3,
-    -maskWidth * 0.47,
-    maskHeight * 0.04
-  );
-  maskPath.bezierCurveTo(
+    -maskWidth * 0.27,
+    maskHeight * 0.45,
     -maskWidth * 0.5,
-    -maskHeight * 0.27,
-    -maskWidth * 0.33,
-    -maskHeight * 0.5,
+    maskHeight * 0.14,
+    -maskWidth * 0.46,
+    -maskHeight * 0.16
+  );
+  maskPath.bezierCurveTo(
+    -maskWidth * 0.42,
+    -maskHeight * 0.38,
+    -maskWidth * 0.2,
+    -maskHeight * 0.54,
     0,
-    -maskHeight * 0.5
+    -maskHeight * 0.53
   );
   maskPath.closePath();
 
   ctx.clip(maskPath);
-  const red = ctx.createRadialGradient(
-    -maskWidth * 0.12,
-    -maskHeight * 0.2,
-    maskWidth * 0.05,
-    0,
-    0,
-    maskWidth * 0.62
-  );
-  red.addColorStop(0, "#ef334f");
-  red.addColorStop(0.5, "#be123c");
-  red.addColorStop(1, "#70162a");
+  const maskPhoto = getPhotographicMask();
+  // Avoid ever flashing the old illustrated fallback while the real texture loads.
+  if (!maskPhoto) {
+    ctx.restore();
+    return;
+  }
+  if (maskPhoto) {
+    // This crop is a real photographed fabric mask. A small counter-rotation
+    // levels the source eyes before the whole texture follows the player's head.
+    ctx.save();
+    ctx.rotate(-0.11);
+    ctx.drawImage(
+      maskPhoto,
+      390,
+      245,
+      175,
+      255,
+      -maskWidth * 0.52,
+      -maskHeight * 0.56,
+      maskWidth * 1.04,
+      maskHeight * 1.12
+    );
+    ctx.restore();
+
+    // Preserve the photograph while adding live contouring at the temples and jaw.
+    const photoContour = ctx.createLinearGradient(-maskWidth * 0.5, 0, maskWidth * 0.5, 0);
+    photoContour.addColorStop(0, "rgba(3,0,2,0.48)");
+    photoContour.addColorStop(0.2, "rgba(3,0,2,0.04)");
+    photoContour.addColorStop(0.5, "rgba(255,255,255,0.035)");
+    photoContour.addColorStop(0.8, "rgba(3,0,2,0.04)");
+    photoContour.addColorStop(1, "rgba(3,0,2,0.48)");
+    ctx.fillStyle = photoContour;
+    ctx.fillRect(-maskWidth, -maskHeight, maskWidth * 2, maskHeight * 2);
+
+    const photoJaw = ctx.createLinearGradient(0, maskHeight * 0.18, 0, maskHeight * 0.54);
+    photoJaw.addColorStop(0, "rgba(0,0,0,0)");
+    photoJaw.addColorStop(1, "rgba(5,0,2,0.3)");
+    ctx.fillStyle = photoJaw;
+    ctx.fillRect(-maskWidth, maskHeight * 0.12, maskWidth * 2, maskHeight * 0.46);
+    ctx.restore();
+
+    ctx.save();
+    ctx.translate(center.x, center.y);
+    ctx.rotate(angle);
+    ctx.strokeStyle = "rgba(12,4,7,0.82)";
+    ctx.lineWidth = Math.max(1.5, maskWidth * 0.008);
+    ctx.stroke(maskPath);
+    ctx.restore();
+    return;
+  }
+
+  const red = ctx.createRadialGradient(-maskWidth * 0.12, -maskHeight * 0.22, 0, 0, 0, maskWidth * 0.7);
+  red.addColorStop(0, "#f0444f");
+  red.addColorStop(0.32, "#c8172d");
+  red.addColorStop(0.7, "#8f0c22");
+  red.addColorStop(1, "#3e0713");
   ctx.fillStyle = red;
   ctx.fillRect(-maskWidth, -maskHeight, maskWidth * 2, maskHeight * 2);
 
-  // A fine woven texture keeps the overlay from looking like a flat sticker.
-  ctx.strokeStyle = "rgba(255,255,255,0.075)";
-  ctx.lineWidth = Math.max(0.5, maskWidth * 0.0025);
-  const weave = Math.max(4, maskWidth * 0.026);
-  for (let y = -maskHeight * 0.55; y < maskHeight * 0.55; y += weave) {
+  // Sculpt cheekbones, brow, nose and jaw with soft suit-conforming shadows.
+  const sideShade = ctx.createLinearGradient(-maskWidth * 0.5, 0, maskWidth * 0.5, 0);
+  sideShade.addColorStop(0, "rgba(20,0,7,0.62)");
+  sideShade.addColorStop(0.22, "rgba(20,0,7,0.08)");
+  sideShade.addColorStop(0.5, "rgba(255,116,116,0.08)");
+  sideShade.addColorStop(0.78, "rgba(20,0,7,0.08)");
+  sideShade.addColorStop(1, "rgba(20,0,7,0.62)");
+  ctx.fillStyle = sideShade;
+  ctx.fillRect(-maskWidth, -maskHeight, maskWidth * 2, maskHeight * 2);
+
+  const noseShade = ctx.createRadialGradient(localNose.x, localNose.y - maskHeight * 0.04, 0, localNose.x, localNose.y, maskWidth * 0.24);
+  noseShade.addColorStop(0, "rgba(255,122,122,0.27)");
+  noseShade.addColorStop(0.36, "rgba(111,0,19,0.04)");
+  noseShade.addColorStop(1, "rgba(45,0,10,0.32)");
+  ctx.fillStyle = noseShade;
+  ctx.fillRect(-maskWidth, -maskHeight, maskWidth * 2, maskHeight * 2);
+
+  const jawShade = ctx.createLinearGradient(0, maskHeight * 0.12, 0, maskHeight * 0.54);
+  jawShade.addColorStop(0, "rgba(0,0,0,0)");
+  jawShade.addColorStop(1, "rgba(20,0,6,0.5)");
+  ctx.fillStyle = jawShade;
+  ctx.fillRect(-maskWidth, maskHeight * 0.08, maskWidth * 2, maskHeight * 0.5);
+
+  // Interlocking micro-mesh reads as real technical fabric at webcam scale.
+  ctx.strokeStyle = "rgba(255,171,171,0.13)";
+  ctx.lineWidth = Math.max(0.45, maskWidth * 0.0018);
+  const weave = Math.max(3.5, maskWidth * 0.021);
+  for (let y = -maskHeight * 0.58; y < maskHeight * 0.58; y += weave) {
     ctx.beginPath();
-    ctx.moveTo(-maskWidth * 0.55, y);
-    ctx.lineTo(maskWidth * 0.55, y + weave * 0.45);
+    ctx.moveTo(-maskWidth * 0.58, y);
+    ctx.lineTo(maskWidth * 0.58, y + weave * 0.55);
     ctx.stroke();
   }
-  for (let x = -maskWidth * 0.55; x < maskWidth * 0.55; x += weave) {
+  ctx.strokeStyle = "rgba(36,0,8,0.2)";
+  for (let x = -maskWidth * 0.58; x < maskWidth * 0.58; x += weave) {
     ctx.beginPath();
-    ctx.moveTo(x, -maskHeight * 0.55);
-    ctx.lineTo(x + weave * 0.35, maskHeight * 0.55);
+    ctx.moveTo(x, -maskHeight * 0.58);
+    ctx.lineTo(x + weave * 0.55, maskHeight * 0.58);
     ctx.stroke();
   }
 
-  const webOrigin = { x: 0, y: -maskHeight * 0.05 };
-  ctx.strokeStyle = "rgba(22,24,30,0.9)";
-  ctx.lineWidth = Math.max(1.5, maskWidth * 0.013);
-  for (let i = 0; i < 14; i += 1) {
-    const rayAngle = (i / 14) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(webOrigin.x, webOrigin.y);
-    ctx.lineTo(
-      webOrigin.x + Math.cos(rayAngle) * maskWidth,
-      webOrigin.y + Math.sin(rayAngle) * maskHeight
-    );
-    ctx.stroke();
+  // Deterministic fiber flecks break up the synthetic smoothness without shimmer.
+  for (let i = 0; i < 180; i += 1) {
+    const noiseX = ((Math.sin(i * 91.17) + 1) * 0.5 - 0.5) * maskWidth;
+    const noiseY = ((Math.sin(i * 47.31 + 1.7) + 1) * 0.5 - 0.5) * maskHeight * 1.08;
+    ctx.fillStyle = i % 3 === 0 ? "rgba(255,190,190,0.075)" : "rgba(20,0,6,0.085)";
+    ctx.fillRect(noiseX, noiseY, Math.max(0.5, maskWidth * 0.002), Math.max(0.5, maskWidth * 0.002));
   }
-  for (const ring of [0.16, 0.29, 0.43, 0.58, 0.76]) {
-    ctx.beginPath();
-    ctx.ellipse(
-      webOrigin.x,
-      webOrigin.y,
-      maskWidth * ring,
-      maskHeight * ring,
-      0,
-      0,
-      Math.PI * 2
-    );
-    ctx.stroke();
-  }
+
+  const webOrigin = { x: 0, y: (localLeftEye.y + localRightEye.y) * 0.5 + maskHeight * 0.035 };
+  const drawWeb = (offsetY: number, color: string, lineWidth: number): void => {
+    ctx.save();
+    ctx.translate(0, offsetY);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (let i = 0; i < 12; i += 1) {
+      const rayAngle = -Math.PI / 2 + (i / 12) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(webOrigin.x, webOrigin.y);
+      ctx.lineTo(
+        webOrigin.x + Math.cos(rayAngle) * maskWidth * 0.68,
+        webOrigin.y + Math.sin(rayAngle) * maskHeight * 0.76
+      );
+      ctx.stroke();
+    }
+    for (const ring of [0.18, 0.32, 0.48, 0.65, 0.84]) {
+      ctx.beginPath();
+      for (let step = 0; step <= 48; step += 1) {
+        const theta = (step / 48) * Math.PI * 2;
+        const scallop = 1 - 0.055 * Math.abs(Math.sin(theta * 6));
+        const x = webOrigin.x + Math.cos(theta) * maskWidth * ring * 0.68 * scallop;
+        const y = webOrigin.y + Math.sin(theta) * maskHeight * ring * 0.76 * scallop;
+        if (step === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+  drawWeb(maskWidth * 0.009, "rgba(20,0,5,0.58)", Math.max(2.5, maskWidth * 0.017));
+  drawWeb(0, "rgba(12,14,17,0.96)", Math.max(1.5, maskWidth * 0.011));
+  drawWeb(-maskWidth * 0.0025, "rgba(125,132,138,0.5)", Math.max(0.6, maskWidth * 0.003));
 
   ctx.restore();
 
@@ -208,12 +359,16 @@ function drawTrackedMask(
   ctx.save();
   ctx.translate(center.x, center.y);
   ctx.rotate(angle);
-  const lensWidth = maskWidth * 0.27;
-  const lensHeight = maskHeight * 0.18;
+  const lensWidth = maskWidth * 0.225;
+  const lensHeight = maskHeight * 0.16;
   drawEyeLens(ctx, localLeftEye, lensWidth, lensHeight, -1);
   drawEyeLens(ctx, localRightEye, lensWidth, lensHeight, 1);
-  ctx.strokeStyle = "rgba(255,255,255,0.24)";
-  ctx.lineWidth = Math.max(1, maskWidth * 0.007);
+  const rim = ctx.createLinearGradient(-maskWidth * 0.5, 0, maskWidth * 0.5, 0);
+  rim.addColorStop(0, "rgba(15,0,4,0.9)");
+  rim.addColorStop(0.5, "rgba(255,120,120,0.34)");
+  rim.addColorStop(1, "rgba(15,0,4,0.9)");
+  ctx.strokeStyle = rim;
+  ctx.lineWidth = Math.max(1.5, maskWidth * 0.009);
   ctx.stroke(maskPath);
   ctx.restore();
 }
