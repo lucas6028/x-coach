@@ -231,6 +231,12 @@ class MovementRegistryTests(unittest.TestCase):
             # together. Assigned by RS-SP1 spec §3.4; verified end-to-end in
             # tests/test_band_pull_apart.py::EndToEndSegmentationTest.
             "Band Pull Apart": ("wrist_spread_shoulder_norm", "max", "extended"),
+            # The only detector whose rep signal AVERAGES the two arms rather than taking an
+            # extremum, and the choice was measured rather than preferred: left/right elbow
+            # angles correlate r=0.992-0.996 across all 8 Fit3D subjects, so the arms are in
+            # phase and the mean halves per-arm landmark noise. Verified end-to-end in
+            # tests/test_bicep_curl.py::EndToEndSegmentationTest.
+            "Bicep Curl": ("avg_elbow_angle", "min", "extended"),
         }
         for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
@@ -239,7 +245,7 @@ class MovementRegistryTests(unittest.TestCase):
                 self.assertEqual(detector.rep_polarity, polarity)
                 self.assertIn(detector.rep_signal, detector.metric_keys)
                 # `rep_rectify` exists for movements RS-SP1 does not implement (spec §3.4);
-                # all seven registered detectors use the default.
+                # all eight registered detectors use the default.
                 self.assertFalse(detector.rep_rectify)
                 self.assertEqual(detector.rep_start, rep_start)
 
@@ -274,7 +280,10 @@ class TestMovementRegistry(unittest.TestCase):
         names = [d.name for d in registry.list_detectors()]
         self.assertEqual(
             names,
-            ["Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row", "Band Pull Apart"],
+            [
+                "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
+                "Band Pull Apart", "Bicep Curl",
+            ],
         )
 
     def test_only_squat_is_validated(self) -> None:
@@ -293,6 +302,7 @@ class TestMovementRegistry(unittest.TestCase):
                 "Deadlift": False,
                 "Row": False,
                 "Band Pull Apart": False,
+                "Bicep Curl": False,
             },
         )
 
@@ -310,5 +320,8 @@ class TestMovementRegistry(unittest.TestCase):
 
         self.assertEqual(
             {d.name for d in registry.list_detectors()},
-            {"Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row", "Band Pull Apart"},
+            {
+                "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
+                "Band Pull Apart", "Bicep Curl",
+            },
         )
