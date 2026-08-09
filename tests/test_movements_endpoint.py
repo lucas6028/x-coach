@@ -24,7 +24,7 @@ class TestMovementsEndpoint(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge",
+                "Shoulder Bridge", "Leg Abduction",
             ],
         )
 
@@ -72,6 +72,14 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # part `.ac` is absent from the download, leaving 2 of the 77 recoverable. See
                 # src/pose/movements/shoulder_bridge.py's registration comment.
                 "Shoulder Bridge": False,
+                # Leg Abduction ships Beta for a FIFTH reason, and it is the first one that is
+                # not a gap: the check WAS run. REHAB24-6 Ex4 is standing leg abduction, 210
+                # human-labeled repetitions of the variant the app models, and the run decided
+                # this detector's roster -- it silenced one rule and confirmed the other. What
+                # it cannot do is confirm a FAULT-level claim: REHAB24-6 labels repetitions
+                # correct/incorrect and never names the fault. See
+                # src/pose/movements/leg_abduction.py's registration comment.
+                "Leg Abduction": False,
             },
         )
 

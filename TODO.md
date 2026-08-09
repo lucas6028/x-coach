@@ -443,9 +443,16 @@
     Band Pull Apart 的 scapular retraction 條恆為 silent、Bicep Curl 撤回 wrist flexion、
     Arm Abduction 撤回 impingement arc 且 shoulder shrug 恆為 silent、
     Arm VW 撤回 loss_of_elevation 的 W 分支且 shrug substitution 恆為 silent）
-  - [ ] 其餘 5 個動作的 rule pack 未做（Group E：leg abduction；
-    Group F：torso twist、jumping jacks、high knee；Group A：無）
+  - [ ] 其餘 3 個動作的 rule pack 未做（Group F：torso twist、jumping jacks、high knee；
+    Group A、Group E：無）
     ※ Shoulder Bridge 已於 2026-08-09 完成（12/16）：1 條 live、1 條永久 silent、2 條撤回。
+    ※ Leg Abduction 已於 2026-08-09 完成（13/16），**Group E 收尾**：1 條 live、1 條永久
+    silent、2 條撤回，另有 1 個 sub-clause 不實作。**這是整個計畫裡第一次「標註資料有權改變
+    規則名冊、而且真的改了」**——REHAB24-6 `Ex4` 就是站姿單腿外展、210 個人工標註 rep、
+    9 位受試者、變體與 app 完全相符，驗證跑在設計階段而非事後，直接讓
+    `rule_insufficient_abduction_rom` 永久 silent。沒有任何門檻被調去迎合標註。
+    見 `docs/superpowers/specs/2026-08-09-leg-abduction-detector-design.md`、
+    `notes/leg-abduction-rule-validation.md`。
 - [ ] **下載 `frames_open.tar.gz.ac`，跑 Shoulder Bridge 的 77 動作驗證**（2026-08-09 開）。
   這是整個 16 動作計畫裡**第一個 `validated=False` 的原因是「檔案沒下載完」而不是研究缺口**的動作。
   EgoExo-Fitness 有 **77 個人工評分的 Shoulder Bridge action、130 筆標註記錄**，
@@ -459,6 +466,31 @@
   補完 `.ac` 之後，這會是繼 Squat 之後**第二個真正有標註驗證的動作**，
   而且驗的是規則本身的準則、不是代理指標。見
   `docs/superpowers/specs/2026-08-09-shoulder-bridge-detector-design.md` §2。
+- [ ] **view estimator 在「站姿」受試者上也是系統性反的，不只是躺姿**（2026-08-09 由 Leg
+  Abduction 實測，影響範圍未盤點）。`src/pose/view_estimation.py` 的 module docstring limit 1
+  只把 front/rear/oblique 標籤的失效範圍歸給**水平**受試者，Sit-up（實測「反的」）與
+  Shoulder Bridge（實測「不穩定」）都落在那個範圍內，所以兩者都只是把 view 邏輯關掉。
+  Leg Abduction 是 Group E 第一個**站著**的動作，limit 1 不適用，而且 REHAB24-6 `Ex4`
+  **每個 rep 都記錄了 `cam17_orientation`**，因此可以第一次拿 ground truth 直接對。結果是
+  **系統性反轉**：正面攝影機被判成 oblique、斜側攝影機被判成 sagittal，而且整個 corpus
+  幾乎**吐不出任何一個 `FRONTAL_OBSERVABLE_VIEWS` 標籤**。兩個後果：
+  (1) 出貨規則的 0.65 confidence discount 在這個 corpus 上是**常數**，不區分任何東西，
+  所以這次跑出來的數字**不能當成 view gating 有效的證據**；
+  (2) limit 1 的敘述**低估了失效範圍**——問題不是「受試者躺著」。
+  尚未做的事：盤點還有哪些 shipped 規則 gate 或 discount 在這些標籤上（`squat`
+  的 `rule_knees_inward`、`arm_abduction` 的兩條 frontal 規則至少要查），以及
+  Ex1/Ex2/Ex5 的同類對照。見
+  `docs/superpowers/specs/2026-08-09-leg-abduction-detector-design.md` §1.3。
+- [ ] **citation 與實測資料對「同一個 fault 的方向」講反了**（2026-08-09 由 Leg Abduction 發現，
+  本計畫新的失敗模式）。parent spec 的 `abd_pelvic_drop_trunk_lean` 是兩個 disjunct 的
+  or：骨盆傾斜 + 軀幹側傾。骨盆那一半**沒有實作**，因為三個來源指向兩個相反方向——
+  citation 說的是骨盆**掉下去**（Trendelenburg，而且那句話的主詞是 gait），knowledge graph
+  只有 `Leg Abduction:Pelvic Hiking`（`Pelvic Drop` 連一個節點都 match 不到），
+  210 個標註 rep 分得開的方向是**抬起來**。照 spec 寫會對「資料說是正確執行」的方向 fire；
+  照實測方向寫則是一條**完全沒有 citation** 的規則。Sit-up 曾因 KG seed 語意反轉而撤回一條，
+  這是它的鏡像案例（KG 與資料一致、citation 才是異數），處理方式相同：不出貨。
+  這個問題**只有在號數可還原時才看得見**——Shoulder Bridge 同樣的問題當時無法回答。
+  尚未做的事：其餘 movement 的 `Pelvic Drop` 類規則是否也有同樣的方向錯置。
 - [ ] **`angle_degrees` 是無號的，這件事會靜默地反轉規則語意**（2026-08-09 由 Shoulder Bridge
   發現，影響範圍未盤點）。`src/pose/geometry.py:73` 回傳 `degrees(arccos(...))`，值域 [0, 180]，
   且**對 180° 完全對稱**：實測合成 fixture，離直線 +20° 與 −20° 都讀成 **140.00°**。

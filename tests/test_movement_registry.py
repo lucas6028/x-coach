@@ -268,6 +268,14 @@ class MovementRegistryTests(unittest.TestCase):
             # ways and the framework's is what the flag selects. Roll invariance is pinned by
             # tests/test_shoulder_bridge.py::RollInvarianceTest.
             "Shoulder Bridge": ("hip_angle_deg", "max", "extended"),
+            # Leg Abduction's signal is the only one in the registry that is a MAX OVER TWO
+            # SIDES rather than a mean or a single side, and that is forced: `compute_raw` runs
+            # over the whole clip before `segment_reps`, so there is no repetition boundary yet
+            # and therefore no way to know which leg is working. The trunk-referenced pair is
+            # used rather than the support-limb pair because only the trunk-referenced one is
+            # side-independent -- see `leg_abduction._thigh_trunk_angles`. Roll invariance is
+            # pinned by tests/test_leg_abduction.py::RollInvarianceTest.
+            "Leg Abduction": ("max_thigh_trunk_deg", "max", "extended"),
         }
         for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
@@ -314,7 +322,7 @@ class TestMovementRegistry(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge",
+                "Shoulder Bridge", "Leg Abduction",
             ],
         )
 
@@ -366,6 +374,17 @@ class TestMovementRegistry(unittest.TestCase):
                 # of the 77 judged actions fall in a record that decodes. See shoulder_bridge.py's
                 # registration comment.
                 "Shoulder Bridge": False,
+                # Leg Abduction is Beta for a FIFTH reason, and the first that is not a gap in
+                # the evidence: the check WAS RUN. REHAB24-6 Ex4 is standing leg abduction --
+                # 210 human-labeled repetitions, 120 correct / 90 incorrect, 9 subjects, two
+                # orthogonal cameras -- and it is the matching variant, so unlike Sit-up there
+                # was no escape hatch and unlike Shoulder Bridge the pixels are all present. The
+                # run decided the roster: it silenced `rule_insufficient_abduction_rom` and
+                # confirmed `rule_trunk_lean_compensation`'s signal. What it CANNOT establish is
+                # a fault-level claim, because REHAB24-6 labels each repetition correct or
+                # incorrect and never names which fault occurred. See leg_abduction.py's
+                # registration comment and notes/leg-abduction-rule-validation.md.
+                "Leg Abduction": False,
             },
         )
 
@@ -386,6 +405,6 @@ class TestMovementRegistry(unittest.TestCase):
             {
                 "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge",
+                "Shoulder Bridge", "Leg Abduction",
             },
         )

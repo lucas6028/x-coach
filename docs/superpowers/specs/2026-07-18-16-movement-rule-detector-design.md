@@ -1931,6 +1931,98 @@ All citation_support paraphrases/quotes above were taken from the six RAG docs a
 > vector relative to the pelvis midline / vertical" is a mixed case — the pelvis-midline reading is
 > body-relative and survives, the vertical reading does not.
 
+> **UPDATE (2026-08-09, Leg Abduction implemented — 13/16, GROUP E COMPLETE) — ONE OF THIS
+> SECTION'S FOUR LEG ABDUCTION RULES SHIPS, AND FOR THE FIRST TIME IN THIS PROGRAMME THE LABELED
+> DATA DECIDED THE ROSTER RATHER THAN COMMENTING ON IT.**
+> Design spec: `docs/superpowers/specs/2026-08-09-leg-abduction-detector-design.md`. Module:
+> `src/pose/movements/leg_abduction.py`. Validation: `notes/leg-abduction-rule-validation.md`.
+> `abd_pelvic_drop_trunk_lean` ships — **its trunk-lean disjunct only**;
+> `abd_insufficient_rom` is registered permanently silent; `abd_hip_flexion_er_substitution` and
+> `abd_momentum` are withdrawn.
+>
+> - **THE CHECK RAN DURING DESIGN AND HAD AUTHORITY TO CHANGE THE ANSWER, WHICH IS NEW.** REHAB24-6
+>   `Ex4` is standing unilateral hip abduction — 210 human-labeled repetitions, 120 correct / 90
+>   incorrect, 9 subjects, 12 videos, two orthogonal cameras, and the variant matches the app's own
+>   card art (verified by looking at the frames, not by reading the exercise name). Lunge was
+>   checked after the fact and nothing changed. Here the run **silenced a rule**, **settled a
+>   sub-clause**, and **corrected the working-side resolver's construction**. No threshold was
+>   tuned: the shipped cut is this section's own ratio re-expressed by an identity, and the
+>   silenced rule's cut is this section's own number, left where it is.
+> - **THE SUPPORT LIMB IS THE VERTICAL THIS GROUP HAS BEEN MISSING, AND ONLY A STANDING MOVEMENT
+>   HAS ONE.** The note above asked for `pelvic-tilt vs horizontal` and `trunk lateral-lean` to be
+>   re-anchored. `hip_stance → ankle_stance` does it: in a standing unilateral exercise the stance
+>   leg is planted and load-bearing, so it is a body-internal stand-in for gravity. Measured on the
+>   frontal camera the stance limb sits a **median 2.3° from the image vertical (p90 4.5°)**, so
+>   re-anchoring costs essentially nothing on this corpus and buys roll-invariance for production
+>   video. Neither Sit-up nor Shoulder Bridge could take this route — both subjects are lying down.
+> - **THE SIGN IS RECOVERABLE HERE, AND THE RULE IS "DOT PRODUCTS, NOT CROSS PRODUCTS".** Shoulder
+>   Bridge's two refuted sign constructions were both cross products, which are roll-invariant but
+>   ANTI-invariant under mirroring — the sign flips when the subject faces away from the camera,
+>   which monocular pose cannot tell. Every signed quantity here is a projection onto a body axis,
+>   invariant under both, pinned by a test asserting byte-identical detections under a 90° roll AND
+>   under mirroring. Narrow claim, transferable: **prefer a projection onto a body axis; it needs no
+>   argument about mirroring at all.**
+> - **A NEW CITATION FAILURE MODE, THE SIXTH: THE CITATION AND THE MEASUREMENT DISAGREE ABOUT THE
+>   SIGN OF THE FAULT.** This section's shipped rule is a DISJUNCTION of pelvic tilt and trunk lean.
+>   The pelvic disjunct is not implemented, because three sources point two ways: the citation says
+>   pelvic **DROP** (and its sentence opens "…a characteristic Trendelenburg **gait**"), the
+>   knowledge graph has `Leg Abduction:Pelvic Hiking` and matches **zero** nodes for `Pelvic Drop`,
+>   and 210 labeled repetitions separate on **HIKING**. Firing as written would fire on the
+>   direction the data calls correct; firing the observed direction would be a rule with no
+>   citation. Sit-up withdrew a rule for an inverted KG seed; this is the mirror case — graph and
+>   data agree, the citation is the odd one out — resolved the same way. **It is only visible
+>   because the sign is recoverable at all**; on Shoulder Bridge the same question was unanswerable.
+>   And it is NOT free: ρ(trunk lean, pelvic hike) = **0.713**, so a real detection opportunity is
+>   declined.
+> - **STANDING UP DOES NOT FIX THE VIEW ESTIMATOR, AND THAT BREAKS THE REGIME BOUNDARY
+>   `view_estimation.py` CLAIMS.** Limit 1 voids the front/rear/oblique labels for HORIZONTAL
+>   subjects; Sit-up (inverted) and Shoulder Bridge (unstable) both measured failures inside that
+>   regime. This subject is upright and `Ex4` records the true orientation per repetition, so the
+>   labels could finally be checked: `front` → `rear_oblique` **116/116**, `half-profile` → `side`
+>   **92/94**, and a `FRONTAL_OBSERVABLE_VIEWS` label emitted on **0 of 210**. Systematically
+>   inverted, outside the documented regime. The shipped rule's confidence discount is therefore a
+>   CONSTANT here and proves nothing about gating. Logged in TODO.md as an unscoped audit —
+>   `squat.rule_knees_inward` and both `arm_abduction` frontal rules read these labels.
+> - **THE SILENCED RULE HAS THE BEST KG SEED IN THE SECTION AND STILL DOES NOT SHIP.**
+>   `Leg Abduction:Insufficient Abduction Range` resolves with two non-empty buckets, and the
+>   metric is clean. What is missing is a number: no source states a range of motion (this section
+>   admits as much), and this section's practical ~30° cut fires on **39/93 (42%) of repetitions
+>   humans judged CORRECT** against 8/70 (11%) judged incorrect, with the cue's AUC at **0.206
+>   pooled and below chance in all 9 subjects**. Silent rather than moved, because moving it is
+>   fitting a threshold to labels.
+> - **THE TWO RULES WITH NO GRAPH NODE ARE ALSO THE TWO WITHDRAWN ON CITATION GROUNDS** — but that
+>   is the whole of the agreement, and it is weaker than it first looks. This movement has exactly
+>   three `Leg Abduction:` fault nodes. Node-presence predicts the outcome in 2 of the 5 decisions
+>   taken here: the other three all HAVE nodes and are a ship, a permanent silence, and a
+>   not-implemented sub-clause. So the graph is a useful negative filter and **not** a predictor of
+>   which rules survive. Recorded, not offered as a method.
+> - **THE FIRST SIDE RESOLVER IN THE REGISTRY WITH GROUND TRUTH — AND IT CAUGHT A DESIGN ERROR.**
+>   `exercise_subtype` names the working leg on all 210 repetitions. Final: **163 correct, 1 wrong,
+>   11 declined** of the 175 that reached it (accuracy 0.994, coverage 0.937). The FIRST
+>   construction referenced each thigh to the other leg, making both quantities approximately the
+>   angle *between* the legs — it scored **7 correct / 14 wrong / 30 refused**, worse than a coin
+>   flip, and the data is what exposed it.
+> - **A FIFTH REASON FOR `validated=False`, AND THE FIRST THAT IS NOT A GAP.** Not "no labeled
+>   data" (Deadlift, Row, Band Pull Apart, Bicep Curl), not "nobody ran the check" (Arm Abduction,
+>   Arm VW), not "different variant" (Sit-up), not "the pixels are missing" (Shoulder Bridge), but
+>   **the check ran, it changed the roster, and rep-level labels still cannot confirm a FAULT-level
+>   claim.** REHAB24-6 never names which fault occurred.
+> - **THE EIGHT-LANDMARK GATE IS EXPENSIVE AND THE COST IS STATED.** Requiring both ankles for the
+>   support limb — two more than any other Group E module — yields a median validity rate of
+>   **0.600 with p10 0.000**, and **35 of 210 repetitions (17%) end on a `segment_reps` fallback
+>   path**. Those are excluded from every AUC, which are computed over 163/210 and say so.
+> - **THE CAMERA CENSUS GOES THE OTHER WAY FROM SHOULDER BRIDGE'S, WHICH IS THE BENIGN DIRECTION.**
+>   `front` 30 tp / 5 fp / 23 fn; `half-profile` 9 tp / **0 fp** / 28 fn. An oblique camera costs
+>   SENSITIVITY, not precision — a lean projected obliquely reads smaller than it is, so the rule
+>   goes quiet rather than wrong. Shoulder Bridge's axial views produced near-full-severity false
+>   alarms instead.
+>
+> **Group E is complete: Sit-up 1 live, Shoulder Bridge 1 live, Leg Abduction 1 live.** Three
+> movements, twelve spec rules, three shipped. That ratio is the honest one for this group and the
+> reasons are per-rule rather than systemic — although the recurring theme is real: this section's
+> measurement conventions were written against the image frame, and only the movement with a
+> planted limb could recover one.
+
 
 ---
 
