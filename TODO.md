@@ -5,8 +5,8 @@
 >
 > 現況摘要：
 >
-> - **規則偵測器 7/16 動作**：squat、push-up、overhead press、lunge、deadlift、row、
->   band pull apart（`src/pose/movements/`，registry 驅動；`/api/movements` 由 registry 導出，
+> - **規則偵測器 8/16 動作**：squat、push-up、overhead press、lunge、deadlift、row、
+>   band pull apart、bicep curl（`src/pose/movements/`，registry 驅動；`/api/movements` 由 registry 導出，
 >   新增偵測器不需改前端）。PR #47 #48 #51 #53 #54。
 > - **逐 rep 偵測已上線**（`src/pose/rep_segmentation.py`，PR #49）；RS-SP2「只密集抽取
 >   要評分的 rep」仍在 **PR #50（未合併）**。
@@ -394,12 +394,12 @@
   CoachTray 具名狀態列、pending dots、來源折疊為可點擊計數）
 - [x] 工具呼叫 trace 存進 conversations JSONB（可重播、可稽核；含 per-tool sources）
 
-### P2：多動作 + 記憶 — 🔶 偵測器 7/16，其餘未動
+### P2：多動作 + 記憶 — 🔶 偵測器 8/16，其餘未動
 
 - [x] **多動作規則偵測器（原「Lunge rule pack」已被更大的工程取代）**：
   registry 驅動的 per-movement 偵測器，端到端接進 web app（PR #47、#48、#51、#53、#54）
-  - 已上線 7 個：`squat`、`pushup`、`overhead_press`、`lunge`、`deadlift`、`row`、
-    `band_pull_apart`（`src/pose/movements/`；`GET /api/movements` 直接由 registry 導出，
+  - 已上線 8 個：`squat`、`pushup`、`overhead_press`、`lunge`、`deadlift`、`row`、
+    `band_pull_apart`、`bicep_curl`（`src/pose/movements/`；`GET /api/movements` 直接由 registry 導出，
     新增一個偵測器不需改前端）
   - 皆帶 Beta tag（`validated=False`），唯一有標註驗證的是 Lunge（見上方「規則偵測器的標註驗證」）
   - 部分規則被**證明無法實作**並明白記錄（Row 第 5 條、Deadlift 撤回一條、
@@ -421,7 +421,7 @@
   「x-coach's squat analysis」。（`landing.showcase.squat.*` 與範例教練語句中的 goblet squat
   屬合理保留，不算。）另有硬字串散在 `App.tsx`、`UploadDropzone.tsx`、`CaptureStudio.tsx`、
   `StudioMobile.tsx`、`DemoIntro.tsx`、`history/HistoryStats.tsx` 等，尚未逐一清點。
-  注意 `landing.hero.sub` 目前寫「squat, push-up or overhead-press」——偵測器已到 7 個，
+  注意 `landing.hero.sub` 目前寫「squat, push-up or overhead-press」——偵測器已到 8 個，
   這句本身也過期了。
   使用者 2026-07-17 指定：未來採「完全泛化」而非加註解（en + zhHant 皆需更新；
   品牌／landing 文案已於 commit `4d64e659` 泛化為 multi-exercise）。
@@ -430,13 +430,28 @@
   `landing.showcase.title`（「One pipeline, the whole movement library.」）仍在
   （`frontend/src/lib/i18n.tsx`、`frontend/src/landing/MovementShowcase.tsx`），
   但 showcase 的 push-up/high-knee/sit-up clip 只有 MediaPipe pose tracking、無 fault 偵測。
-  偵測器已到 7 個，落差比原本小但仍存在（16 個動作的知識庫 vs 7 個動作的分析）。
+  偵測器已到 8 個，落差比原本小但仍存在（16 個動作的知識庫 vs 8 個動作的分析）。
 - [ ] 許多動作的錯誤需要脊椎及其他 MediaPipe 無法定義的點，思考其他解決方法。
+- [ ] **骨架疊圖只會 highlight squat 的 5 個 fault**：`frontend/src/lib/pose.ts:55` 的
+  `FAULT_LANDMARKS` 只有 `knees_inward` / `knees_forward` / `shallow_depth` /
+  `excessive_forward_lean` / `heel_rise`，其餘 7 個偵測器（OHP、push-up、lunge、deadlift、
+  row、band pull apart、bicep curl）的 fault_id 都查不到、`SkeletonOverlay` 與
+  `FaultChips` 因此不 highlight 任何關節。這是既有落差、非任一動作引入，但每多一個偵測器
+  就多欠一組 entry，2026-08-09 首次正式記錄。
 - [ ] 許多錯誤沒有對應到 Knowledge Graph 的節點。
   - Band Pull Apart 具體案例（2026-08-09）：`Bent Elbows` 節點存在但 connectivity 0
     （沒有 cause / risk / correction），`trunk_extension_compensation` 則完全沒有對應節點。
     兩者都是 `scripts/knowledge/stub_general_movements_v3.py:80-87` 的一行修正，
     但 graphml 已 gitignore，重新產生屬部署步驟。
+  - Bicep Curl 具體案例（2026-08-09）：`Elbow Drift Forward` 節點存在但 connectivity 0
+    （只有 `HAS_FAULT` 反向邊，沒有 cause / risk / correction），所以
+    `curl_elbow_drift_forward` 的 KG 卡片是空的。另外兩條規則沒問題
+    （`Using Momentum` → `Forward Momentum`，`Incomplete Range Of Motion` → `Range Of Motion`）。
+    修正是 `scripts/knowledge/stub_general_movements_v3.py:71-78` 的一行（該節點的 list 是 `[]`），
+    同樣因 graphml gitignore 而屬部署步驟。
+    **刻意沒有改指向共用的 `Range Of Motion` 節點**——它 bucket 很滿，但 `corrections` 是
+    「Wrapping Surface Adjustment」，對這個動作沒有意義；語意正確的薄卡片勝過語意錯誤的厚卡片
+    （與 Band Pull Apart 當時的判斷一致）。
 - [ ] `src/pose/rep_segmentation.py` 的 `DEFAULT_MIN_REP_SECONDS = 0.4`（30fps 下 12 幀）對
   Band Pull Apart 若真實 clip 每下快於 0.4 秒，整段會被丟成雜訊、退回 whole-clip fallback——
   與 High Knee 需要 `min_rep_seconds` override 是同一類問題。2026-08-09 已用 Fit3D 的
@@ -444,6 +459,16 @@
   1.78–2.92 秒/下，是門檻的 4.45–7.3 倍，方向上不太可能觸發——但只有 5 位受試者且是配合 mocap
   的刻意動作，不能代表真實使用者可能更快更隨便的執行，仍是未證實的殘餘風險，因此不加
   override（沒有可引用的節奏數字可調）。
+  Bicep Curl 同樣量過（2026-08-09）：Fit3D `rep_ann.json` 8 位受試者共 40 下、50fps 經
+  ffprobe verified，1.92–3.68 秒/下（平均 2.54），是門檻的 4.8–9.2 倍，所以也不加 override。
+  殘餘風險與上面同一條（受試者是配合 mocap 的刻意動作），不因 n 變大而消失。
+- [ ] **Bicep Curl 的兩個 ROM 門檻貼著真實 rep 分佈的邊緣**（2026-08-09 記錄，未調整）：
+  用 Fit3D `joints3d_25` 的 3D mocap ground truth 量 40 下 `dumbbell_biceps_curls`，
+  spec 的「伸展不足 `max(elbow_angle) < 150°`」有 **1/40** 會觸發（149.7°），
+  「屈曲不足 `min(elbow_angle) > 60°`」有 **0/40**（最差 59.0°）——兩端都在 1° 以內。
+  Fit3D 沒有 correctness label，所以無法判定那一下究竟是不是真的做短了，因此**只記錄不調整**
+  （no-threshold-tuning）。另外投影誤差方向不對稱：伸展那一項偏向「多觸發」，屈曲那一項偏向
+  「漏掉」，細節寫在 `rule_incomplete_rom` 的 docstring 與設計文件 §2。
 
 ### P3：感知升級 — ⏸ 未開始（但研究面已備妥依據）
 

@@ -846,6 +846,30 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 **concentric** (elbow flexion, lifting) → **top** (peak flexion, `elbow_angle`≈40–55°) →
 **eccentric** (controlled lowering) → return to bottom.
 
+> **NOTE (2026-08-09) — two section-wide corrections made at implementation time.** Recorded
+> here so a reader who arrives at the original wording alone cannot silently re-introduce
+> either. Neither changes a threshold or a citation. Implementation:
+> `src/pose/movements/bicep_curl.py`; design spec:
+> `docs/superpowers/specs/2026-08-09-bicep-curl-detector-design.md`.
+>
+> 1. **The `fault_id`s below are unprefixed and ship prefixed `curl_*`.** Every movement after
+>    Squat prefixes, and the collision is not hypothetical: `row_incomplete_rom` and
+>    `bpa_incomplete_rom` both already exist, and `merge_by_fault`, the analyses table and the
+>    frontend's `byFault` map all key on `fault_id` with **no movement qualifier**, so a third
+>    bare `incomplete_rom` would be indistinguishable from either. Shipped ids:
+>    `curl_elbow_drift_forward`, `curl_trunk_swing_momentum`, `curl_incomplete_rom`.
+> 2. **The directional qualifiers are dropped and both metrics are taken unsigned** — "toward
+>    the anterior (wrist) side" in `elbow_drift_forward`, and "backward lean" in
+>    `trunk_swing_momentum`'s second term. Parpa's protocol is "the elbows kept close to the
+>    torso" and "avoiding trunk movements", **neither of which names a direction**, so the
+>    undirected reading is what the citation actually supports and the signed one asserts more
+>    than the source does. Recovering "anterior" would need a facing proxy whose threshold no
+>    cited source supplies — the construct the OHP bar-path and deadlift bar-drift withdrawals
+>    both rejected. Band Pull Apart's `wrist_depth_offset` facing sign does **not** transfer: it
+>    works only because that movement holds the band in front of the torso by definition,
+>    whereas a curl's wrists change depth sign within the rep. The cost is a wider net (a
+>    backward "drag-curl" drift also fires), in the direction the citation supports.
+
 #### Elbow drift forward
 - **fault_id**: `elbow_drift_forward`
 - **fault_name**: Elbow drifts forward (loss of elbow fixation)
@@ -855,6 +879,19 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 - **biomechanical_rationale**: Forward elbow drift converts the curl into partial shoulder flexion, shifting load from biceps brachii to the anterior deltoid and reducing the target-muscle stimulus (performance loss).
 - **citation**: Parpa K et al., *Muscles* (2025), PMC12550948, DOI 10.3390/muscles4040045.
 - **citation_support**: The paper's validated proper-execution protocol states the arms were "fully extended at the sides, with the elbows kept close to the torso throughout the whole movement," with two investigators visually monitoring execution — i.e., the elbow staying fixed at the torso is the defined correct form, so anterior drift is a deviation from it. (Verified — read in RAG doc.)
+
+> **NOTE (2026-08-09) — the second detection cue is UNREACHABLE and is not implemented.** The
+> heuristic above offers "or if elbow x-displacement anterior of the shoulder–hip vertical line
+> exceeds `0.5 × upper_arm_length`". That is **the first cue restated in different units, and
+> strictly weaker**: displacement `= upper_arm_length · sin(lean)`, so the `0.5` threshold is
+> `lean > arcsin(0.5) = 30°` — always satisfied when the angular term's `25°` already is. Every
+> frame it could catch, the angular term has caught. Implementing it would add a metric, a
+> threshold and a branch that can never change a verdict, which is the exact defect
+> `row.rule_momentum_jerk`'s second condition had: a strict subset of its first, and therefore
+> dead code that *read* as coverage. `upper_arm_length` is still emitted as a diagnostic so the
+> equivalence stays checkable, and the arithmetic is pinned by
+> `tests/test_bicep_curl.py::ElbowDriftRuleTest::test_the_displacement_disjunct_is_unreachable`.
+> (The cue would also need the anterior direction the section-wide NOTE above rejects.)
 
 #### Trunk swing / momentum
 - **fault_id**: `trunk_swing_momentum`
@@ -885,6 +922,44 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 - **biomechanical_rationale**: Wrist flexion recruits wrist flexors and can strain the wrist joint, and diverts effort from the elbow flexors, reducing biceps loading.
 - **citation**: Parpa K et al., *Muscles* (2025), PMC12550948, DOI 10.3390/muscles4040045.
 - **citation_support**: The paper notes the curl "involves elbow flexion accompanied by … wrist supination or pronation" and that grip/wrist positioning influences flexor recruitment; a supinated, controlled grip is the prescribed form. Support for wrist *flexion* as a fault is indirect (grip/wrist position matters), and it is not monocular-observable — flagged low/UNVERIFIED for the specific injury magnitude. (Verified that the source discusses wrist/grip influence; the injury-risk magnitude of wrist flexion is UNVERIFIED in this source.)
+
+> **WITHDRAWN — wrist flexion.** This rule is **withdrawn** (2026-08-09) and is NOT implemented
+> in `src/pose/movements/bicep_curl.py`. It presents two failure modes at once — observability
+> `low` on every view, *and* a `citation_support` that already self-reports "the injury-risk
+> magnitude of wrist flexion is UNVERIFIED in this source" — so which treatment it gets is
+> decided by reading the source rather than this paraphrase of it.
+>
+> **Parpa PMC12550948 was read in full. It never discusses wrist flexion.** Every wrist- and
+> grip-related statement in the paper concerns **forearm rotation** (supination / pronation) or
+> **grip type** — a different degree of freedom from flexion/extension:
+>
+> - "It primarily involves elbow flexion accompanied by either dynamic or mostly isometric
+>   shoulder flexion and **wrist supination or pronation**." (line 18)
+> - "biceps brachii and brachioradialis activation were the highest with the **supinated grip**
+>   during the ascending phase" (line 33, citing Coratella 2023)
+> - The protocol prescribes "holding a dumbbell in each hand in a **supinated grip**." (line 75)
+>
+> Nowhere does the paper state that the wrist bending into flexion is a fault, a cheat, or a
+> loading risk. The rule's asserted mechanism ("Wrist flexion recruits wrist flexors and can
+> strain the wrist joint") and its `30°` threshold **appear nowhere in the cited source** — the
+> OHP bar-path (2026-07-25) and deadlift bar-drift (2026-08-01) pattern exactly: a threshold
+> with no provenance attached to a citation that does not measure it.
+>
+> **Withdrawn, not registered-silent, and the distinction is load-bearing.** A
+> registered-but-permanently-silent rule (`pushup.rule_scapular_winging`,
+> `band_pull_apart.rule_loss_of_scapular_retraction`) is this project's way of saying "real,
+> well-cited fault; the sensor cannot see it". Had the citation held, this rule would have
+> shipped silent — the dumbbell does occlude landmarks 19/20 for much of the rep. It does not
+> hold, so the rule is **absent**; a silent stub would assert the wrong diagnosis.
+>
+> **Open spec question:** does the Bicep Curl rule set want a genuine wrist rule? It would need
+> (a) a source that measures wrist *flexion* under curl load with a number, and (b) a
+> hand-landmark reading that survives dumbbell occlusion. Neither exists today. This is a
+> withdrawal pending a decision, not a silent deletion.
+>
+> **The KG node is not the gap.** `Bicep Curl:Wrist Flexion Under Load` resolves with a
+> non-empty `corrections` bucket (`Wrists In Line With Forearms`). The node stays; nothing in
+> the detector points at it.
 
 ---
 
