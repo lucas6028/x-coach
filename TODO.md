@@ -48,22 +48,22 @@
 > （例如 `notes/rtmpose_result_analysis_and_backend_comparison.md` 記了 `n=1623`），
 > 尚未正式整理成一份資料集規格文件。
 
-- [ ] 確認已可直接使用的標註與切分：
+- [x] 確認已可直接使用的標註與切分：
   - `data/Squat/Labeled_Dataset/Splits/train_keys.json`
   - `data/Squat/Labeled_Dataset/Splits/val_keys.json`
   - `data/Squat/Labeled_Dataset/Splits/test_keys.json`
-- [ ] 記錄目前資料規模：
+- [x] 記錄目前資料規模：
   - `Labeled_Dataset/videos`: 1739 支影片
   - split union: 1623 支有正式 train/val/test key
   - `Unlabeled_Dataset/videos`: 4970 支影片
-- [ ] 記錄標註類型：
+- [x] 記錄標註類型：
   - `error_knees_forward.json`: 影片 key 對應錯誤時間區段
   - `error_knees_inward.json`: 影片 key 對應錯誤時間區段
   - `labels_shallow_depth.json`: 片段/局部 label
-- [ ] 記錄標註格式：
+- [x] 記錄標註格式：
   - `[video_id]: [error_start_time, error_end_time]`
   - 無錯誤時為空陣列
-- [ ] 記錄影片基本特性：
+- [x] 記錄影片基本特性：
   - 多數影片約 `30 FPS`
   - 長度約 `3 秒`
   - 解析度約 `480x600`
