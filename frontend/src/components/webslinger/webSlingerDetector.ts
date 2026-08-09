@@ -143,15 +143,15 @@ function drawTrackedMask(
   const rightEar = { x: mirrorX(face.rightEar.x, width), y: face.rightEar.y * height };
   const leftEye = { x: mirrorX(face.leftEye.x, width), y: face.leftEye.y * height };
   const rightEye = { x: mirrorX(face.rightEye.x, width), y: face.rightEye.y * height };
-  const screenLeftEar = rightEar;
-  const screenRightEar = leftEar;
+  const screenLeftEar = leftEar;
+  const screenRightEar = rightEar;
   const earDx = screenRightEar.x - screenLeftEar.x;
   const earDy = screenRightEar.y - screenLeftEar.y;
   const earDistance = Math.hypot(earDx, earDy);
   if (earDistance < height * 0.035) return;
 
   const angle = Math.atan2(earDy, earDx);
-  const maskWidth = earDistance * 1.3;
+  const maskWidth = earDistance * 1.5;
   const maskHeight = maskWidth * 1.44;
   const center = {
     x: (leftEar.x + rightEar.x) / 2,
