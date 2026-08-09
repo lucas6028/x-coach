@@ -1842,6 +1842,95 @@ All citation_support paraphrases/quotes above were taken from the six RAG docs a
 > in this group by a wide margin, and the Sit-up findings about reference frames and view labels
 > apply to it directly.
 
+> **UPDATE (2026-08-09, Shoulder Bridge implemented — 12/16) — ONE OF THIS SECTION'S FOUR
+> SHOULDER BRIDGE RULES SHIPS, AND THE CENTRAL FINDING IS THAT `angle_degrees` IS UNSIGNED.**
+> Design spec: `docs/superpowers/specs/2026-08-09-shoulder-bridge-detector-design.md`. Module:
+> `src/pose/movements/shoulder_bridge.py`. `bridge_incomplete_hip_extension` ships;
+> `bridge_lumbar_hyperextension` is registered permanently silent; `asymmetric_pelvic_drop` and
+> `knee_valgus` are withdrawn.
+>
+> - **`angle_degrees` RETURNS `arccos`, RANGE [0, 180], AND THAT BREAKS TWO OF THESE FOUR RULES AT
+>   ONCE.** `lumbar_hyperextension`'s "peak hip angle > ~190deg" **can never fire** — the FIFTH
+>   vacuous-branch defect in this registry (after `row.rule_momentum_jerk`, Bicep Curl's elbow
+>   disjunct, the impingement arc's first conjunct and `situp_hip_flexor_dominance`), and the second
+>   caught BEFORE implementation. Worse, and NOT anticipated anywhere in this section: the function
+>   is **exactly symmetric about 180deg**, so `incomplete_hip_extension`'s "< 160deg" also fires on
+>   a bridge arched 20deg PAST neutral and reports it as one that never got there. Measured on a
+>   synthetic fixture: +20deg and −20deg from the straight line both read **140.00deg**. The shipped
+>   rule carries that mislabel, stated at its definition site and pinned by a test, because in the
+>   only labeled data the direction it assumes is the direction annotators fault (16/77) and the
+>   other direction is not among the twelve criteria at all.
+> - **THE SIGN THAT WOULD REPAIR BOTH IS NOT RECOVERABLE — TWO CONSTRUCTIONS, BOTH MEASURED, BOTH
+>   REFUTED.** (A) hip vs ANKLE about the shoulder→knee line is provably invariant under rotation
+>   AND mirroring, recovers 120/160/180/200/240 on a synthetic fixture where the unsigned angle
+>   gives 120/160/180/160/120 — and on real footage reads "arched" on **57.0%** and **62.3%** of
+>   frames of repetitions annotators marked correct. (B) hip vs KNEE about the shoulder→ankle line
+>   (the mat, being the two contact points) **disagrees with the subject's own other side** on 21 of
+>   24 sampled frames. Near the straight line, where the rule must decide, both cross products go to
+>   zero and the sign is noise. This is Sit-up's lesson recurring: re-anchoring fixes the
+>   REPRESENTATION, not the ESTIMATOR.
+> - **THE VIEW LABELS ARE NOT MERELY INVERTED ON A SUPINE SUBJECT — THEY ARE UNSTABLE.** Sit-up
+>   measured a deterministic per-camera inversion. Re-measured on a different record and movement:
+>   `rear` three times, `rear_oblique` three times, `side` and `unknown` never — and the SAME
+>   CAMERA disagrees with itself between two clips of the same person in the same room (`exo_l` →
+>   `rear` on one, `rear_oblique` on the other), at confidences from 0.02 to 0.72. So this is the
+>   second shipped rule with neither a view gate nor a view discount.
+> - **THE SHIPPED RULE FIRES ON 5 OF THE 6 REAL CLIP-VIEWS, ALL OF THEM CORRECT REPETITIONS, AND
+>   THE CENSUS SPLITS BY CAMERA GEOMETRY.** On the four near-sagittal clip-views it is silent once
+>   and otherwise fires at 0.02, 0.08, 0.15. On the two AXIAL (head-on, down the body's long axis)
+>   clip-views it fires at **0.95 and 1.00** — because that camera foreshortens the sagittal hip
+>   angle into meaninglessness (median 90deg vs 128–134deg on the sagittal cameras, same
+>   repetitions). The same repetitions read **110.6 to 167.9deg** across three SIMULTANEOUS cameras:
+>   a ~50–58deg spread against the 20deg margin this threshold relies on. That establishes the
+>   MAGNITUDE of the measurement error and NOT a fire rate (n = 2 actions, 1 subject) and NOT a bias
+>   direction — the tempting "MediaPipe under-reads a straight-line bridge by about 20deg" is
+>   consistent with the data and is deliberately not claimed.
+> - **TWO RULES WITHDRAWN ON EXERCISE IDENTITY, WHICH IS NOW THIS PROGRAMME'S MOST COMMON CITATION
+>   FAILURE.** `asymmetric_pelvic_drop`'s citation_support quotes a passage that announces its own
+>   subject in its first words — "**In a Trendelenburg gait** …" — and Escamilla, who studies
+>   UNIPEDAL bridging directly, never mentions pelvic drop at all (checked). `knee_valgus`'s quotes
+>   "**Powers [ ] theorized** …" from Colonna's section on hip dysfunction and knee pathology, whose
+>   surrounding sentences are about ACL injury during LANDING. Neither fault is observed in a bridge
+>   by either bridge source.
+> - **AND `knee_valgus` FAILS INDEPENDENTLY ON MEASUREMENT.** Median `knee_width/ankle_width` across
+>   the six clip-views: **0.726, 0.895, 0.911, 0.927, 1.020, 1.027**, per-clip minimum **0.043**,
+>   against this section's 0.85 cut (squat's shipped one is 0.82). Two of six sit below the cut on
+>   their MEDIAN frame, on repetitions judged correct. Its `|x(25)-x(26)|` form is also not
+>   roll-invariant, and the codebase's own precedent (`pose_feature_extraction.py:296`) already uses
+>   the full 2-D distance — the measurement above used the INVARIANT form, so fixing the form does
+>   not rescue the rule.
+> - **A FOURTH REASON FOR `validated=False`, AND THE FIRST THAT A DOWNLOAD FIXES.** Not "no labeled
+>   data" (Deadlift, Row, Band Pull Apart, Bicep Curl), not "nobody ran the check" (Arm Abduction,
+>   Arm VW), not "the labeled data describes a different variant" (Sit-up), but **the labels exist
+>   and match and the PIXELS are missing**. EgoExo-Fitness has **77 human-judged Shoulder Bridge
+>   actions / 130 annotator records**, guidance identical across all 77 and naming this rule's
+>   endpoint verbatim, and one of its twelve criteria IS this rule ("Progressively raise your body
+>   until your knees, hips, and shoulders align in a straight line", faulted **16/77**). The
+>   `frames_open` archive is missing part `.ac`, so **2 of the 77** are recoverable. This is the most
+>   actionable finding in the movement and is recorded in TODO.md as an action, not a limitation.
+> - **THE GOOD NEWS THIS GROUP HAS NOT HAD: AN EXACT KG SEED AND A DOUBLY-PRIMARY ENDPOINT.**
+>   `Shoulder Bridge:Incomplete Hip Extension` resolves with THREE non-empty buckets (causes: Poor
+>   Hip Extension, Weak Gluteus Maximus; corrections: Squeeze Glutes) — the first seed in the whole
+>   programme that is neither thin, shared, nor inverted. And the endpoint is stated in the OWN
+>   WORDS of both sources with no reference marker: Escamilla's Methods give BOTH ends ("hips flexed
+>   approximately 50deg" → "0deg hip flexion, with the knees, hips, and shoulders approximately in a
+>   straight line"), which no rule in this programme has previously had. What is secondary here is
+>   the RATIONALE, not the definition: Colonna's hip-extension-torque and GM-recruitment sentences
+>   both carry reference markers, so this section's "VERIFIED" is true of the strings and not of
+>   their authorship.
+> - **`only_partial_reps` BITES HARDEST ON THE BEST FOOTAGE.** On the one clip-view with 100%
+>   landmark detection, `segment_reps` found 2 repetitions and marked both partial, so the rule was
+>   handed the entire 16-second clip as a single window. Same gap as the Deadlift setup-baseline
+>   defect: `RunResult.fallback` is not threaded into `RuleContext`, so a rule cannot decline a
+>   window handed to it by the whole-clip path. Recorded, not fixed.
+>
+> **What this leaves for Leg Abduction:** the note above still stands — REHAB24-6 `Ex4` is 210 reps
+> of the matching variant and should make it the best-evidenced detector in Group E. Two findings
+> here transfer directly: `pelvic-tilt vs horizontal` and `trunk lateral-lean` are BOTH specified
+> against the image horizontal and both need re-anchoring, and `abd_insufficient_rom`'s "thigh
+> vector relative to the pelvis midline / vertical" is a mixed case — the pelvis-midline reading is
+> body-relative and survives, the vertical reading does not.
+
 
 ---
 
