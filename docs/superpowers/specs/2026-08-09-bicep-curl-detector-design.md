@@ -206,6 +206,32 @@ override against, so none is set.
   the opening 15% is not labelled `setup` (which matters because `_setup_baseline` reduces
   over exactly those frames).
 
+**The extension term's `setup` window is narrow enough to silence it, and the boundary was
+measured rather than assumed.** Two framework interactions bite:
+
+1. `setup` is 15% of the rep window and `contiguous_true_segments` needs
+   `min_frames = max(3, ceil(0.20·fps))` consecutive frames, so the term needs
+   `0.15·fps·T ≥ 0.20·fps` — i.e. **T ≥ 1.333 s per rep**, fps-independent above 15 fps. Against
+   the measured 1.92–3.68 s/rep, the fastest real rep sits at **1.44× this floor**. That is a
+   materially tighter constraint than `DEFAULT_MIN_REP_SECONDS` (0.4 s), which is what §4.2's
+   cadence figure was checked against — the 4.8× margin recorded there is *not* the binding one
+   for this rule.
+2. Worse, `segment_reps` trims each window to the signal's **excursion**. A lifter who pauses
+   with the arms extended between reps has that hold cut away, so `setup` covers mid-range
+   frames rather than the bottom, and the shorter window can push `setup` back under
+   `min_frames` on its own. Measured on a 63-frame-per-rep fixture with a between-reps hold:
+   windows came out **37 frames**, `setup` **5 frames** (one short of 6), and the frames it did
+   cover read **84–110°** instead of the true 130° bottom — so the term both measured the wrong
+   part of the rep and then reported nothing.
+
+**So whether this term fires depends on the shape of the rep, not only its duration.** It is
+fragile, not dead: on a smooth excursion it fires at 1.92 s and 2.54 s/rep. Not repaired — the
+15% setup fraction and `min_frames` are shared framework constants and neither has a cited basis
+to move for one movement. The failure mode is a missed fault, never a false one. Both facts are
+pinned by `PhaseWindowWidthTest` and
+`EndToEndSegmentationTest::test_rep_trimming_can_silence_the_extension_term`, and recorded in
+TODO.md.
+
 **Why incomplete extension is scoped to `setup` and not to the end of the eccentric.** The
 lifter who fails to lower all the way finishes rep *N* short — but reps are contiguous, so
 that same short position **is** rep *N+1*'s `setup`, and the rule catches it there. The one

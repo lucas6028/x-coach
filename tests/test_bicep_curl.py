@@ -567,16 +567,28 @@ class BicepCurlDetectorRegistrationTest(unittest.TestCase):
         self.assertTrue(all(d.fault_id.startswith("curl_") for d in detections))
 
 
-_FRAMES_PER_SAMPLE = 3
-# One curl, extended -> flexed -> extended. `avg_elbow_angle` peaks at its MINIMUM, and the rep
-# starts extended, which is what `rep_polarity="min"` / `rep_start="extended"` encode.
-_ANGLES = [170.0, 140.0, 100.0, 55.0, 45.0, 55.0, 100.0, 140.0, 170.0]
+# 7 frames per sample x 9 samples = 63 frames = 2.1 s per rep at 30 fps, chosen to sit inside
+# the 1.92-3.68 s/rep measured on real Fit3D curls rather than at some convenient round number.
+# It is ALSO above the ~1.33 s floor derived in PhaseWindowWidthTest below, without which
+# `test_a_clean_clip_raises_no_faults` would pass vacuously for the extension term -- an earlier
+# version of this fixture used 3 frames per sample (0.9 s/rep), where that term CANNOT fire at
+# all and the clean-clip assertion proved nothing about it.
+_FRAMES_PER_SAMPLE = 7
+# One curl, extended -> flexed -> extended, as a SHAPE in [0, 1] rather than fixed angles:
+# 1.0 is the bottom (arms extended), 0.0 the top. `avg_elbow_angle` peaks at its MINIMUM and the
+# rep starts extended, which is what `rep_polarity="min"` / `rep_start="extended"` encode.
+# Parametrising the shape rather than the angle list is what lets `bottom_angle` be lowered
+# without inverting the excursion -- a fixed list with the ends replaced put a 140-degree
+# mid-frame ABOVE a 130-degree "bottom", which is not a curl.
+_SHAPE = [1.0, 0.77, 0.46, 0.12, 0.0, 0.12, 0.46, 0.77, 1.0]
+_TOP_ANGLE = 45.0
 
 
-def _three_rep_clip() -> list[dict]:
+def _three_rep_clip(bottom_angle: float = 170.0) -> list[dict]:
     frames: list[dict] = []
     for _ in range(3):
-        for angle in _ANGLES:
+        for fraction in _SHAPE:
+            angle = _TOP_ANGLE + fraction * (bottom_angle - _TOP_ANGLE)
             for _ in range(_FRAMES_PER_SAMPLE):
                 frames.append(curl_frame(elbow_angle_deg=angle, frame_index=len(frames)))
     return frames
@@ -620,6 +632,105 @@ class EndToEndSegmentationTest(unittest.TestCase):
             view_confidence=0.8,
         )
         self.assertEqual(result.detections, [])
+
+    def test_rep_trimming_can_silence_the_extension_term(self) -> None:
+        """A LIMITATION, pinned rather than hidden -- and the reason the clean-clip assertion
+        above must not be read as "no false positives, therefore the rule works".
+
+        `segment_reps` trims each window to the signal's EXCURSION, so a clip that holds the
+        arms extended between reps has that hold cut away: this 63-frame-per-rep fixture yields
+        37-frame windows whose `setup` (15%) is 5 frames, one short of `min_frames = 6`. The
+        extension term therefore reports nothing even though the bottom position really is
+        130 degrees, and the frames `setup` does cover sit at 84-110 degrees -- mid-range, not
+        the bottom at all.
+
+        This is `_setup_baseline`'s documented trimming caveat in its sharpest form, and it bites
+        `rule_incomplete_rom` harder than it bites the baseline rules: those degrade toward a
+        missed fault, whereas here the term measures the WRONG PART OF THE REP first and then
+        goes silent on segment width anyway. Recorded in the design spec and TODO.md; not
+        repaired, because both the 15% setup fraction and `min_frames` are shared framework
+        constants and neither has a cited basis to move for one movement.
+        """
+        result = run_detector(
+            BICEP_CURL_DETECTOR,
+            _three_rep_clip(bottom_angle=130.0),
+            fps=30.0,
+            view_type="rear_oblique",
+            view_confidence=0.8,
+        )
+        self.assertEqual(len(result.reps), 3)
+        self.assertEqual(result.detections, [])
+        window = result.core[result.reps[0].start : result.reps[0].end + 1]
+        setup = [f for f in window if f.phase == "setup"]
+        self.assertLess(len(setup), 6, "the point of this test is that setup is under-width")
+        self.assertLess(
+            max(f.m("max_elbow_angle") for f in setup),
+            150.0,
+            "and that the frames it does cover are already loaded, not the extended bottom",
+        )
+
+
+class PhaseWindowWidthTest(unittest.TestCase):
+    """`rule_incomplete_rom`'s EXTENSION term is structurally silent on short reps, and the
+    boundary is derived rather than guessed.
+
+    `setup` is the first 15% of the rep window (`bicep_curl_assign_phases`) and
+    `contiguous_true_segments` needs `min_frames = max(3, ceil(0.20 * fps))` consecutive frames
+    (`run_detector`). So the term can only fire when `0.15 * fps * T >= 0.20 * fps`, i.e.
+    **T >= 1.333 s per rep** -- independent of fps for any fps >= 15, since `min_frames` scales
+    with fps too.
+
+    This is a TIGHTER constraint than `DEFAULT_MIN_REP_SECONDS` (0.4 s), which is what the
+    design spec's cadence measurement was checked against, and it is the quantitative form of
+    the setup-window narrowness that spec section 4.3/4.4 discusses qualitatively. Measured
+    Fit3D cadence is 1.92-3.68 s/rep, so the fastest real rep observed sits at 1.44x this floor
+    -- it holds on the measured distribution, with less margin than the 4.8x the
+    DEFAULT_MIN_REP_SECONDS check suggested. NOT repaired by widening the setup fraction or
+    lowering `min_frames`: both are shared framework constants and neither has a cited basis to
+    move for one movement.
+
+    The `peak` term is far safer: 30% of the window rather than 15% gives T >= 0.667 s.
+    """
+
+    def _clip(self, rep_seconds: float, bottom_angle: float = 130.0) -> list[dict]:
+        n = int(round(30.0 * rep_seconds))
+        frames: list[dict] = []
+        for _ in range(3):
+            for i in range(n):
+                t = i / (n - 1)
+                angle = bottom_angle - (bottom_angle - 40.0) * math.sin(math.pi * t) ** 2
+                frames.append(curl_frame(elbow_angle_deg=angle, frame_index=len(frames)))
+        return frames
+
+    def _fired(self, rep_seconds: float) -> set:
+        result = run_detector(
+            BICEP_CURL_DETECTOR,
+            self._clip(rep_seconds),
+            fps=30.0,
+            view_type="rear_oblique",
+            view_confidence=0.8,
+        )
+        self.assertEqual(len(result.reps), 3, "fixture must segment into three reps")
+        return {d.evidence["fired_on"] for d in result.detections}
+
+    def test_extension_term_fires_at_realistic_cadence(self) -> None:
+        """The term is fragile, not dead: on a SMOOTH excursion (no extended hold for
+        `segment_reps` to trim away) it does fire at real cadence. 1.92 s is the fastest rep
+        measured across the 40 real Fit3D curls; 2.54 s is their mean.
+
+        Contrast `test_rep_trimming_can_silence_the_extension_term`, where a between-reps hold
+        is trimmed off and the same fault goes unreported. Whether this term fires depends on
+        the SHAPE of the rep, not only its duration -- which is the honest characterisation.
+        """
+        self.assertIn("extension", self._fired(1.92))
+        self.assertIn("extension", self._fired(2.54))
+
+    def test_extension_term_is_structurally_silent_below_the_derived_floor(self) -> None:
+        """Pins the limitation rather than hiding it: a genuinely short bottom position on a
+        1.0 s/rep clip produces NO extension detection, because `setup` is only 4 frames wide
+        against a 6-frame minimum."""
+        self.assertEqual(self._fired(1.0), set())
+        self.assertEqual(self._fired(1.2), set())
 
 
 if __name__ == "__main__":
