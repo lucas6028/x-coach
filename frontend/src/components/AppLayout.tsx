@@ -20,8 +20,6 @@ interface Props {
   header?: ReactNode;
   /** Short page name for the phone header's centred title. */
   title?: string;
-  // The studio supplies a picker opener; other pages fall back to navigating into the studio.
-  onOpenLibrary?: () => void;
   // The studio resets its own state for a fresh session; other pages just route into the studio.
   onNewAnalysis?: () => void;
   // Whether the desktop sidebar starts expanded. Defaults to open; the games opt to start it
@@ -43,7 +41,6 @@ export default function AppLayout({
   children,
   header,
   title,
-  onOpenLibrary,
   onNewAnalysis,
   initialSidebarOpen = true,
 }: Props) {
@@ -56,20 +53,18 @@ export default function AppLayout({
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const [mobileNav, setMobileNav] = useState(false);
 
-  // Off the studio there is no picker, so "Library" just routes into the studio.
-  const openLibrary = onOpenLibrary ?? (() => navigate("/app"));
   // Off the studio, "New analysis" routes into the studio; the studio resets in place.
   const newAnalysis = onNewAnalysis ?? (() => navigate("/app"));
 
   // Inside the LINE app the whole web chrome is replaced by the app shell: bottom tabs instead
   // of a sidebar, no marketing navbar. Every page renders through here, so this one branch
-  // converts the entire app without any page knowing about LIFF. openLibrary/newAnalysis are the
-  // same resolved actions the (now-hidden) Sidebar would have gotten — without threading them
-  // through, the shell's four tabs would be the whole app and there'd be no way to start a
-  // second analysis without leaving LINE.
+  // converts the entire app without any page knowing about LIFF. newAnalysis is the same resolved
+  // action the (now-hidden) Sidebar would have gotten — without threading it through, the shell's
+  // four tabs would be the whole app and there'd be no way to start a second analysis without
+  // leaving LINE.
   if (isInClient) {
     return (
-      <LiffAppShell onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis} title={title}>
+      <LiffAppShell onNewAnalysis={newAnalysis} title={title}>
         {children}
       </LiffAppShell>
     );
@@ -83,7 +78,7 @@ export default function AppLayout({
       <div className="ms-shell flex h-[100dvh] w-full flex-col overflow-hidden bg-[#eef0fb] pt-[env(safe-area-inset-top)] font-body text-[#1e2142]">
         <MobileTopBar title={title ?? "X-Coach"} onNewAnalysis={newAnalysis} />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
-        <MobileTabBar onNewAnalysis={newAnalysis} onOpenLibrary={openLibrary} />
+        <MobileTabBar onNewAnalysis={newAnalysis} />
       </div>
     );
   }
@@ -107,7 +102,6 @@ export default function AppLayout({
             width={sidebarOpen ? WIDTH_OPEN : WIDTH_CLOSED}
             animate
             onToggle={() => setSidebarOpen((v) => !v)}
-            onOpenLibrary={openLibrary}
             onNewAnalysis={newAnalysis}
           />
         </div>
@@ -144,10 +138,6 @@ export default function AppLayout({
             width={240}
             animate={false}
             onClose={() => setMobileNav(false)}
-            onOpenLibrary={() => {
-              setMobileNav(false);
-              openLibrary();
-            }}
             onNewAnalysis={() => {
               setMobileNav(false);
               newAnalysis();

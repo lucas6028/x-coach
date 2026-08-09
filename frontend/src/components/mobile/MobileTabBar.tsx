@@ -1,12 +1,16 @@
-import { ClockCounterClockwise, Folders, GearSix, Plus, VideoCamera } from "@phosphor-icons/react";
+import {
+  ClockCounterClockwise,
+  GameController,
+  GearSix,
+  Plus,
+  VideoCamera,
+} from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useI18n } from "../../lib/i18n";
 
 interface Props {
   /** Start a fresh session — the raised centre action. */
   onNewAnalysis: () => void;
-  /** Open the sample-clip picker. A tab rather than a route: the picker is a modal. */
-  onOpenLibrary: () => void;
 }
 
 /**
@@ -14,12 +18,11 @@ interface Props {
  * phones get the same navigation.
  *
  * Its slots carry real destinations rather than the mock's Home / Progress / Library / Profile:
- * Analyse, My records, the new-analysis FAB, Library, Settings. Games loses the tab it had in the
- * old four-tab LIFF bar — the centre slot is a raised action in this design, so five slots buy
- * four destinations, and Games is the one of the five that is not part of the core analyse loop.
- * Its route still resolves and the desktop rail still links it.
+ * Analyse, My records, the new-analysis FAB, Games, Settings. The centre slot is a raised action
+ * rather than a destination, so the four real tabs split two either side of it — which is also
+ * what keeps the FAB on the bar's centre line.
  */
-export default function MobileTabBar({ onNewAnalysis, onOpenLibrary }: Props) {
+export default function MobileTabBar({ onNewAnalysis }: Props) {
   const { t } = useI18n();
   const { pathname } = useLocation();
 
@@ -37,6 +40,13 @@ export default function MobileTabBar({ onNewAnalysis, onOpenLibrary }: Props) {
     },
   ];
   const right = [
+    {
+      to: "/games",
+      label: t("nav.games"),
+      Icon: GameController,
+      // The rail's own definition of "on Games": the hub and both game routes.
+      active: pathname === "/games" || pathname === "/67" || pathname === "/ninja",
+    },
     {
       to: "/settings",
       label: t("nav.settings"),
@@ -74,11 +84,6 @@ export default function MobileTabBar({ onNewAnalysis, onOpenLibrary }: Props) {
           <Plus size={26} weight="bold" />
         </button>
       </div>
-
-      <button onClick={onOpenLibrary} className={`${cell} ${idle}`}>
-        <Folders size={21} weight="duotone" />
-        <span className="max-w-full truncate px-0.5">{t("nav.library")}</span>
-      </button>
 
       {right.map(({ to, label, Icon, active }) => (
         <Link

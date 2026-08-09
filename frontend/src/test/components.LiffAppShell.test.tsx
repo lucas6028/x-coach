@@ -8,27 +8,22 @@ import { AuthProvider } from "../lib/auth";
 
 // The shell no longer owns its chrome: it composes MobileTopBar + MobileTabBar, the same pair the
 // phone web shell uses, so both phone surfaces are one design (motion_analysis_mobile.png). The
-// old four-tab bar is gone — the bar now has five slots, one of which is the raised new-analysis
-// action, so Games lost its tab (its route still resolves; the desktop rail still links it).
+// bar has five slots, the middle one being the raised new-analysis action rather than a
+// destination — so four tabs, two either side of it.
 const renderAt = (path: string, title?: string) => {
-  const onOpenLibrary = vi.fn();
   const onNewAnalysis = vi.fn();
   render(
     <MemoryRouter initialEntries={[path]}>
       <AuthProvider>
         <I18nProvider>
-          <LiffAppShell
-            onOpenLibrary={onOpenLibrary}
-            onNewAnalysis={onNewAnalysis}
-            title={title}
-          >
+          <LiffAppShell onNewAnalysis={onNewAnalysis} title={title}>
             <p>page body</p>
           </LiffAppShell>
         </I18nProvider>
       </AuthProvider>
     </MemoryRouter>
   );
-  return { onOpenLibrary, onNewAnalysis };
+  return { onNewAnalysis };
 };
 
 describe("LiffAppShell — structure", () => {
@@ -37,13 +32,13 @@ describe("LiffAppShell — structure", () => {
     expect(screen.getByText("page body")).toBeInTheDocument();
   });
 
-  it("shows three destination tabs, and nothing else links out of the bar", () => {
+  it("shows four destination tabs, and nothing else links out of the bar", () => {
     renderAt("/app");
     const bar = screen.getByRole("navigation");
     const links = screen.getAllByRole("link");
-    expect(links).toHaveLength(3);
+    expect(links).toHaveLength(4);
     links.forEach((l) => expect(bar).toContainElement(l));
-    ["Analyse", "My records", "Settings"].forEach((label) => {
+    ["Analyse", "My records", "Games", "Settings"].forEach((label) => {
       expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
     });
   });
@@ -72,8 +67,8 @@ describe("LiffAppShell — structure", () => {
 
 describe("LiffAppShell — title", () => {
   // Titles came BACK with the phone design: the mock centres the page name between two round
-  // buttons, and with Games gone from the bar the active tab no longer names every page on its
-  // own. It is the shell's only heading.
+  // buttons, and the active tab does not name every page on its own (Movements and Admin have no
+  // tab at all). It is the shell's only heading.
   it("renders the supplied title as the header's heading", () => {
     renderAt("/history", "My records");
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("My records");
@@ -97,16 +92,17 @@ describe("LiffAppShell — actions", () => {
     expect(onNewAnalysis).toHaveBeenCalledTimes(2);
   });
 
-  it("offers a Library action with an accessible name", async () => {
-    const { onOpenLibrary } = renderAt("/app");
-    await userEvent.click(screen.getByRole("button", { name: /Library/i }));
-    expect(onOpenLibrary).toHaveBeenCalledTimes(1);
-  });
-
-  it("offers both actions on a non-studio page too", () => {
+  it("offers the new-analysis action on a non-studio page too", () => {
     renderAt("/history");
     expect(screen.getAllByRole("button", { name: /New analysis/i }).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Library/i })).toBeInTheDocument();
+  });
+
+  // The sample library is gone, and with it the bar's Library tab. Pinned because the bar is the
+  // whole of the in-LINE navigation: a leftover button here is an in-app route to a picker that
+  // no longer exists.
+  it("offers no Library action", () => {
+    renderAt("/app");
+    expect(screen.queryByRole("button", { name: /Library/i })).toBeNull();
   });
 });
 
@@ -114,6 +110,10 @@ describe("LiffAppShell — active tab", () => {
   it.each([
     ["/app", "Analyse"],
     ["/history", "My records"],
+    ["/games", "Games"],
+    // The Games tab owns the two game routes as well as the hub, matching the desktop rail.
+    ["/67", "Games"],
+    ["/ninja", "Games"],
     ["/settings", "Settings"],
   ])("highlights exactly %s and marks it aria-current", (path, label) => {
     renderAt(path);
@@ -127,9 +127,9 @@ describe("LiffAppShell — active tab", () => {
     });
   });
 
-  // Games gave up its tab to the raised centre action. Pinned so the route staying reachable is
-  // not mistaken for it still being in the bar.
-  it.each(["/games", "/67", "/ninja", "/movements"])(
+  // Movements has no tab. Pinned so the route staying reachable is not mistaken for it being in
+  // the bar.
+  it.each(["/movements"])(
     "highlights nothing on the tab-less route %s",
     (path) => {
       renderAt(path);

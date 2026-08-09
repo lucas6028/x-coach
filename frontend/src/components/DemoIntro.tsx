@@ -1,4 +1,4 @@
-import { Brain, FilmSlate, Graph, PersonSimpleRun, Sparkle, WarningCircle, type Icon } from "@phosphor-icons/react";
+import { Brain, Graph, PersonSimpleRun, Sparkle, WarningCircle, type Icon } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
 import { movementLabel, useI18n } from "../lib/i18n";
 import CaptureStudio from "./CaptureStudio";
@@ -8,7 +8,6 @@ import { LumenLoader } from "./LumenLoader";
 interface Props {
   onBlob: (blob: Blob, tier: PoseTier) => void;
   onError: (msg: string) => void;
-  onOpenLibrary: () => void;
   loading: boolean;
   statusMsg: string;
   error: string;
@@ -36,7 +35,6 @@ const STEPS: { Icon: Icon; titleKey: string; bodyKey: string }[] = [
 export default function DemoIntro({
   onBlob,
   onError,
-  onOpenLibrary,
   loading,
   statusMsg,
   error,
@@ -90,21 +88,6 @@ export default function DemoIntro({
                 tier={tier}
               />
             )}
-
-            <div className="my-4 flex items-center gap-3 text-[11px] uppercase tracking-wider text-[#63709f]">
-              <span className="h-px flex-1 bg-[#ebeaf6]" />
-              {t("demo.or")}
-              <span className="h-px flex-1 bg-[#ebeaf6]" />
-            </div>
-
-            <button
-              onClick={onOpenLibrary}
-              disabled={loading}
-              className="glass-control flex w-full items-center justify-center gap-2 rounded-2xl px-5 py-3.5 text-sm font-medium text-[#1e2142] transition-colors active:scale-[0.99] disabled:opacity-50"
-            >
-              <FilmSlate size={18} weight="duotone" className="text-primary" />
-              {t("demo.sampleBtn")}
-            </button>
 
             {error && (
               <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-[#ffe0e0] bg-[#fff5f5] p-3.5 text-sm text-[#e05252]">

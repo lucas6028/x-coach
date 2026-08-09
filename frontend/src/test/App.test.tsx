@@ -84,33 +84,16 @@ describe("App — initial state", () => {
   });
 });
 
-describe("App — library picker", () => {
-  it("opens the library picker when 'Open a sample clip' is clicked", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ total: 0, items: [] }),
-    } as Response);
-
-    const user = userEvent.setup();
+// The sample library is gone: uploading (or recording) a clip is the only way into an analysis
+// from the studio. Pinned through App because the picker had THREE entry points — the studio's
+// own button, the sidebar and the mobile tab bar — and each one was its own way back to a modal
+// that no longer exists.
+describe("App — no sample library", () => {
+  it("offers no route into a sample picker", () => {
     renderApp();
-    await user.click(screen.getByRole("button", { name: /Open a sample clip/i }));
-    expect(screen.getByText("Sample Library")).toBeInTheDocument();
-  });
-
-  it("closes the library picker when the close button is clicked", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ total: 0, items: [] }),
-    } as Response);
-
-    const user = userEvent.setup();
-    renderApp();
-    await user.click(screen.getByRole("button", { name: /Open a sample clip/i }));
-    await waitFor(() => expect(screen.getByText("Sample Library")).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: /Close/i }));
-    expect(screen.queryByText("Sample Library")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sample/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Library/i })).toBeNull();
+    expect(screen.queryByText("Sample Library")).toBeNull();
   });
 });
 
@@ -122,22 +105,11 @@ describe("App — analysis loaded", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
-      json: async () => ({ total: 1, items: [{ video_id: "vid_001", split: "test", view_type: "side", fault_count: 1, faults: ["knees_inward"] }] }),
-    } as Response);
-
-    const user = userEvent.setup();
-    renderApp();
-    await user.click(screen.getByRole("button", { name: /Open a sample clip/i }));
-    await waitFor(() => screen.getByText("vid_001"));
-
-    // Now mock getAnalysis and click the video
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
       json: async () => mockAnalysis,
     } as Response);
 
-    await user.click(screen.getByText("vid_001").closest("button")!);
+    renderApp();
+    await uploadAClip();
     await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
   });
 

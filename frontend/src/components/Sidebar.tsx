@@ -3,7 +3,6 @@ import {
   CaretDoubleLeft,
   CaretDoubleRight,
   ClockCounterClockwise,
-  Folders,
   GameController,
   GearSix,
   Plus,
@@ -36,7 +35,6 @@ interface Props {
   width: number;
   // Animate width changes (toggle) but not while the user is dragging the resize handle.
   animate: boolean;
-  onOpenLibrary: () => void;
   // Start a fresh studio session (clears the current analysis / routes into the studio).
   onNewAnalysis: () => void;
   // Mobile drawer only: when provided, the sidebar renders a brand + close row at the top and
@@ -55,7 +53,6 @@ export default function Sidebar({
   open,
   width,
   animate,
-  onOpenLibrary,
   onNewAnalysis,
   onClose,
   onToggle,
@@ -172,9 +169,6 @@ export default function Sidebar({
           >
             <Cell icon={VideoCamera} text={t("nav.analyse")} active={onStudio} />
           </Link>
-          <button onClick={onOpenLibrary} title={t("nav.library")} className={`${cell} ${cellIdle}`}>
-            <Cell icon={Folders} text={t("nav.library")} active={false} />
-          </button>
           <Link
             to="/movements"
             title={t("nav.movements")}

@@ -15,7 +15,6 @@ describe("Sidebar — desktop rail (open)", () => {
         width={236}
         animate
         onToggle={onToggle}
-        onOpenLibrary={vi.fn()}
         onNewAnalysis={vi.fn()}
       />
     );
@@ -23,7 +22,14 @@ describe("Sidebar — desktop rail (open)", () => {
   it("shows the nav labels when open", () => {
     renderRail();
     expect(screen.getByText("Analyse")).toBeInTheDocument();
-    expect(screen.getByText("Library")).toBeInTheDocument();
+    expect(screen.getByText("Movements")).toBeInTheDocument();
+  });
+
+  // The sample library is gone. The rail is the desktop app's whole navigation, so a leftover
+  // entry here is a dead route rather than a cosmetic slip.
+  it("carries no Library entry", () => {
+    renderRail();
+    expect(screen.queryByText("Library")).not.toBeInTheDocument();
   });
 
   // The footer used to carry a version tag and a tagline ("Prototype v0.1" / "Pose · Rules ·
@@ -61,21 +67,11 @@ describe("Sidebar — desktop rail (open)", () => {
     expect(onToggle).toHaveBeenCalledOnce();
   });
 
-  it("calls onOpenLibrary when the Library button is clicked", async () => {
-    const user = userEvent.setup();
-    const onOpenLibrary = vi.fn();
-    renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onOpenLibrary={onOpenLibrary} onNewAnalysis={vi.fn()} />
-    );
-    await user.click(screen.getByRole("button", { name: /Library/i }));
-    expect(onOpenLibrary).toHaveBeenCalledOnce();
-  });
-
   it("calls onNewAnalysis when the New analysis button is clicked", async () => {
     const user = userEvent.setup();
     const onNewAnalysis = vi.fn();
     renderWithProviders(
-      <Sidebar open={true} width={240} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={onNewAnalysis} />
+      <Sidebar open={true} width={240} animate={false} onNewAnalysis={onNewAnalysis} />
     );
     await user.click(screen.getByRole("button", { name: /New analysis/i }));
     expect(onNewAnalysis).toHaveBeenCalledOnce();
@@ -94,7 +90,6 @@ describe("Sidebar — games hub active state", () => {
               open
               width={240}
               animate={false}
-              onOpenLibrary={vi.fn()}
               onNewAnalysis={vi.fn()}
             />
           </I18nProvider>
@@ -123,7 +118,6 @@ describe("Sidebar — collapsed rail", () => {
         width={76}
         animate
         onToggle={vi.fn()}
-        onOpenLibrary={vi.fn()}
         onNewAnalysis={vi.fn()}
       />
     );
@@ -131,7 +125,7 @@ describe("Sidebar — collapsed rail", () => {
   it("hides the nav labels when collapsed", () => {
     renderCollapsed();
     expect(screen.queryByText("Analyse")).not.toBeInTheDocument();
-    expect(screen.queryByText("Library")).not.toBeInTheDocument();
+    expect(screen.queryByText("Movements")).not.toBeInTheDocument();
   });
 
   // The wordmark is the one piece of the brand lockup that cannot survive the 76px strip. Once
@@ -148,7 +142,7 @@ describe("Sidebar — collapsed rail", () => {
   it("keeps every destination named by its tooltip", () => {
     renderCollapsed();
     expect(screen.getByRole("link", { name: "Analyse" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Library" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Movements" })).toBeInTheDocument();
   });
 
   it("flips the toggle's label to expand", () => {
@@ -161,7 +155,7 @@ describe("Sidebar — collapsed rail", () => {
 describe("Sidebar — mobile drawer (onClose)", () => {
   it("shows the brand when rendered as a drawer", () => {
     renderWithProviders(
-      <Sidebar open width={270} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} onClose={vi.fn()} />
+      <Sidebar open width={270} animate={false} onNewAnalysis={vi.fn()} onClose={vi.fn()} />
     );
     expect(screen.getByText("X-Coach")).toBeInTheDocument();
   });
@@ -170,7 +164,7 @@ describe("Sidebar — mobile drawer (onClose)", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     renderWithProviders(
-      <Sidebar open width={270} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} onClose={onClose} />
+      <Sidebar open width={270} animate={false} onNewAnalysis={vi.fn()} onClose={onClose} />
     );
     await user.click(screen.getByRole("button", { name: /Hide navigation/i }));
     expect(onClose).toHaveBeenCalledOnce();
@@ -180,7 +174,7 @@ describe("Sidebar — mobile drawer (onClose)", () => {
   // the page would be a second, worse way to dismiss it. It closes outright instead.
   it("renders no collapse toggle", () => {
     renderWithProviders(
-      <Sidebar open width={270} animate={false} onOpenLibrary={vi.fn()} onNewAnalysis={vi.fn()} onClose={vi.fn()} />
+      <Sidebar open width={270} animate={false} onNewAnalysis={vi.fn()} onClose={vi.fn()} />
     );
     expect(screen.queryByRole("button", { name: /collapse navigation/i })).not.toBeInTheDocument();
   });
