@@ -1,3 +1,4 @@
+import type { NormalizedLandmark } from "@mediapipe/tasks-vision";
 import type { WebTarget, WebTrace, Point } from "../../lib/webslinger/engine";
 
 export { createPoseLandmarker } from "../poseLandmarker";
@@ -6,6 +7,15 @@ export type WebSlingerScene = {
   targets: WebTarget[];
   traces: WebTrace[];
   wrists: (Point | null)[];
+  face: FaceLandmarks | null;
+};
+
+export type FaceLandmarks = {
+  nose: Point;
+  leftEye: Point;
+  rightEye: Point;
+  leftEar: Point;
+  rightEar: Point;
 };
 
 const mirrorX = (x: number, width: number) => (1 - x) * width;
@@ -13,6 +23,200 @@ const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
 const easeOutCubic = (value: number) => 1 - Math.pow(1 - clamp01(value), 3);
 
 type CanvasPoint = { x: number; y: number };
+
+const FACE_INDICES = { nose: 0, leftEye: 2, rightEye: 5, leftEar: 7, rightEar: 8 } as const;
+
+export function extractFaceLandmarks(
+  landmarks: NormalizedLandmark[] | null
+): FaceLandmarks | null {
+  if (!landmarks) return null;
+  const points = Object.entries(FACE_INDICES).map(([key, index]) => {
+    const landmark = landmarks[index];
+    return [
+      key,
+      landmark && (landmark.visibility ?? 1) >= 0.35
+        ? { x: landmark.x, y: landmark.y }
+        : null,
+    ] as const;
+  });
+  if (points.some(([, point]) => point === null)) return null;
+  return Object.fromEntries(points) as FaceLandmarks;
+}
+
+function drawEyeLens(
+  ctx: CanvasRenderingContext2D,
+  center: CanvasPoint,
+  width: number,
+  height: number,
+  direction: -1 | 1
+): void {
+  ctx.save();
+  ctx.translate(center.x, center.y);
+  ctx.rotate(direction * -0.12);
+  ctx.beginPath();
+  ctx.moveTo(-width * 0.52, 0);
+  ctx.bezierCurveTo(-width * 0.2, -height * 0.7, width * 0.38, -height * 0.58, width * 0.52, -height * 0.12);
+  ctx.bezierCurveTo(width * 0.3, height * 0.58, -width * 0.28, height * 0.72, -width * 0.52, 0);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(245,248,250,0.98)";
+  ctx.strokeStyle = "#17191f";
+  ctx.lineWidth = Math.max(3, width * 0.11);
+  ctx.fill();
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(255,255,255,0.8)";
+  ctx.lineWidth = Math.max(1, width * 0.025);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawTrackedMask(
+  ctx: CanvasRenderingContext2D,
+  face: FaceLandmarks,
+  width: number,
+  height: number
+): void {
+  const leftEar = { x: mirrorX(face.leftEar.x, width), y: face.leftEar.y * height };
+  const rightEar = { x: mirrorX(face.rightEar.x, width), y: face.rightEar.y * height };
+  const leftEye = { x: mirrorX(face.leftEye.x, width), y: face.leftEye.y * height };
+  const rightEye = { x: mirrorX(face.rightEye.x, width), y: face.rightEye.y * height };
+  const screenLeftEar = rightEar;
+  const screenRightEar = leftEar;
+  const earDx = screenRightEar.x - screenLeftEar.x;
+  const earDy = screenRightEar.y - screenLeftEar.y;
+  const earDistance = Math.hypot(earDx, earDy);
+  if (earDistance < height * 0.035) return;
+
+  const angle = Math.atan2(earDy, earDx);
+  const maskWidth = earDistance * 1.34;
+  const maskHeight = maskWidth * 1.28;
+  const center = {
+    x: (leftEar.x + rightEar.x) / 2,
+    y: (leftEar.y + rightEar.y) / 2 + maskHeight * 0.055,
+  };
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  const toLocal = (point: CanvasPoint): CanvasPoint => {
+    const dx = point.x - center.x;
+    const dy = point.y - center.y;
+    return { x: dx * cos + dy * sin, y: -dx * sin + dy * cos };
+  };
+  const localLeftEye = toLocal(rightEye);
+  const localRightEye = toLocal(leftEye);
+
+  ctx.save();
+  ctx.translate(center.x, center.y);
+  ctx.rotate(angle);
+
+  const maskPath = new Path2D();
+  maskPath.moveTo(0, -maskHeight * 0.5);
+  maskPath.bezierCurveTo(
+    maskWidth * 0.33,
+    -maskHeight * 0.5,
+    maskWidth * 0.5,
+    -maskHeight * 0.27,
+    maskWidth * 0.47,
+    maskHeight * 0.04
+  );
+  maskPath.bezierCurveTo(
+    maskWidth * 0.44,
+    maskHeight * 0.3,
+    maskWidth * 0.2,
+    maskHeight * 0.49,
+    0,
+    maskHeight * 0.52
+  );
+  maskPath.bezierCurveTo(
+    -maskWidth * 0.2,
+    maskHeight * 0.49,
+    -maskWidth * 0.44,
+    maskHeight * 0.3,
+    -maskWidth * 0.47,
+    maskHeight * 0.04
+  );
+  maskPath.bezierCurveTo(
+    -maskWidth * 0.5,
+    -maskHeight * 0.27,
+    -maskWidth * 0.33,
+    -maskHeight * 0.5,
+    0,
+    -maskHeight * 0.5
+  );
+  maskPath.closePath();
+
+  ctx.clip(maskPath);
+  const red = ctx.createRadialGradient(
+    -maskWidth * 0.12,
+    -maskHeight * 0.2,
+    maskWidth * 0.05,
+    0,
+    0,
+    maskWidth * 0.62
+  );
+  red.addColorStop(0, "#ef334f");
+  red.addColorStop(0.5, "#be123c");
+  red.addColorStop(1, "#70162a");
+  ctx.fillStyle = red;
+  ctx.fillRect(-maskWidth, -maskHeight, maskWidth * 2, maskHeight * 2);
+
+  // A fine woven texture keeps the overlay from looking like a flat sticker.
+  ctx.strokeStyle = "rgba(255,255,255,0.075)";
+  ctx.lineWidth = Math.max(0.5, maskWidth * 0.0025);
+  const weave = Math.max(4, maskWidth * 0.026);
+  for (let y = -maskHeight * 0.55; y < maskHeight * 0.55; y += weave) {
+    ctx.beginPath();
+    ctx.moveTo(-maskWidth * 0.55, y);
+    ctx.lineTo(maskWidth * 0.55, y + weave * 0.45);
+    ctx.stroke();
+  }
+  for (let x = -maskWidth * 0.55; x < maskWidth * 0.55; x += weave) {
+    ctx.beginPath();
+    ctx.moveTo(x, -maskHeight * 0.55);
+    ctx.lineTo(x + weave * 0.35, maskHeight * 0.55);
+    ctx.stroke();
+  }
+
+  const webOrigin = { x: 0, y: -maskHeight * 0.05 };
+  ctx.strokeStyle = "rgba(22,24,30,0.9)";
+  ctx.lineWidth = Math.max(1.5, maskWidth * 0.013);
+  for (let i = 0; i < 14; i += 1) {
+    const rayAngle = (i / 14) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(webOrigin.x, webOrigin.y);
+    ctx.lineTo(
+      webOrigin.x + Math.cos(rayAngle) * maskWidth,
+      webOrigin.y + Math.sin(rayAngle) * maskHeight
+    );
+    ctx.stroke();
+  }
+  for (const ring of [0.16, 0.29, 0.43, 0.58, 0.76]) {
+    ctx.beginPath();
+    ctx.ellipse(
+      webOrigin.x,
+      webOrigin.y,
+      maskWidth * ring,
+      maskHeight * ring,
+      0,
+      0,
+      Math.PI * 2
+    );
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // Draw eye lenses after restoring the clip so the black rims stay sharp.
+  ctx.save();
+  ctx.translate(center.x, center.y);
+  ctx.rotate(angle);
+  const lensWidth = maskWidth * 0.27;
+  const lensHeight = maskHeight * 0.18;
+  drawEyeLens(ctx, localLeftEye, lensWidth, lensHeight, -1);
+  drawEyeLens(ctx, localRightEye, lensWidth, lensHeight, 1);
+  ctx.strokeStyle = "rgba(255,255,255,0.24)";
+  ctx.lineWidth = Math.max(1, maskWidth * 0.007);
+  ctx.stroke(maskPath);
+  ctx.restore();
+}
 
 function curvePoint(
   start: CanvasPoint,
@@ -165,6 +369,8 @@ export function drawWebSlingerScene(
   height: number
 ): void {
   ctx.clearRect(0, 0, width, height);
+
+  if (scene.face) drawTrackedMask(ctx, scene.face, width, height);
 
   for (const target of scene.targets) {
     const x = mirrorX(target.x, width);
