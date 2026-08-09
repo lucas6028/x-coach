@@ -38,6 +38,7 @@ MODULE_MOVEMENTS = {
     "arm_abduction.py": "Arm Abduction",
     "arm_vw.py": "Arm VW",
     "situp.py": "Sit-up",
+    "shoulder_bridge.py": "Shoulder Bridge",
 }
 
 

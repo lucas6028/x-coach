@@ -260,6 +260,14 @@ class MovementRegistryTests(unittest.TestCase):
             # tests/test_situp.py::EndToEndSegmentationTest, and the roll invariance is pinned
             # separately by tests/test_situp.py::RollInvarianceTest.
             "Sit-up": ("hip_angle_deg", "min", "extended"),
+            # Shoulder Bridge reads the SAME signal as Sit-up on the SAME supine body, with the
+            # INVERSE polarity: a bridge's effort peak is the hip OPENING to the shoulder-hip-knee
+            # straight line, so it peaks at the signal's MAXIMUM, where a sit-up's curl peaks at
+            # its minimum. `extended` names the end away from the effort peak -- here the hips
+            # FLEXED on the mat, so the framework's word and the anatomy's word point opposite
+            # ways and the framework's is what the flag selects. Roll invariance is pinned by
+            # tests/test_shoulder_bridge.py::RollInvarianceTest.
+            "Shoulder Bridge": ("hip_angle_deg", "max", "extended"),
         }
         for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
@@ -306,6 +314,7 @@ class TestMovementRegistry(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
+                "Shoulder Bridge",
             ],
         )
 
@@ -347,6 +356,16 @@ class TestMovementRegistry(unittest.TestCase):
                 # has no sit-up and Fit3D has no supine action at all. See situp.py's registration
                 # comment.
                 "Sit-up": False,
+                # Shoulder Bridge is Beta for a FOURTH distinct reason, and the only one that a
+                # DOWNLOAD fixes rather than research. The labels exist AND match the variant:
+                # EgoExo-Fitness has 77 human-judged Shoulder Bridge actions whose canonical
+                # guidance names this detector's endpoint verbatim, and one of its twelve criteria
+                # IS this rule ("Progressively raise your body until your knees, hips, and
+                # shoulders align in a straight line", faulted on 16/77). What is missing is the
+                # PIXELS: `frames_open` downloads in 3 GiB parts, part `.ac` is absent, and only 2
+                # of the 77 judged actions fall in a record that decodes. See shoulder_bridge.py's
+                # registration comment.
+                "Shoulder Bridge": False,
             },
         )
 
@@ -367,5 +386,6 @@ class TestMovementRegistry(unittest.TestCase):
             {
                 "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
+                "Shoulder Bridge",
             },
         )

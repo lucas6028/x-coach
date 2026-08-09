@@ -24,6 +24,7 @@ class TestMovementsEndpoint(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
+                "Shoulder Bridge",
             ],
         )
 
@@ -64,6 +65,13 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # validation run against it would be measuring another exercise. See
                 # src/pose/movements/situp.py's registration comment.
                 "Sit-up": False,
+                # Shoulder Bridge ships Beta for a FOURTH reason, and the only one a DOWNLOAD
+                # fixes: the labels exist AND match the variant (EgoExo-Fitness, 77 human-judged
+                # Shoulder Bridge actions, one of whose twelve criteria is verbatim this
+                # detector's rule, faulted on 16/77) but the PIXELS are missing -- `frames_open`
+                # part `.ac` is absent from the download, leaving 2 of the 77 recoverable. See
+                # src/pose/movements/shoulder_bridge.py's registration comment.
+                "Shoulder Bridge": False,
             },
         )
 
