@@ -113,14 +113,14 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         # frontend lists (frontend/src/lib/movements.ts) that has NO registered detector, so it
         # necessarily goes stale as the 16-movement programme lands one movement at a time. It
         # has already moved "Deadlift" -> "Row" -> "Band Pull Apart" -> "Bicep Curl" -> "Arm
-        # Abduction" -> "Arm VW"; when Arm VW is implemented, move it again to any still-
-        # unimplemented movement. The `assertNotIn` is what turns that staleness into a loud
-        # failure instead of a silently vacuous test.
-        self.assertNotIn("Arm VW", [d.name for d in registry.list_detectors()])
+        # Abduction" -> "Arm VW" -> "Sit-up"; when Sit-up is implemented, move it again to any
+        # still-unimplemented movement. The `assertNotIn` is what turns that staleness into a
+        # loud failure instead of a silently vacuous test.
+        self.assertNotIn("Sit-up", [d.name for d in registry.list_detectors()])
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
         pose_json_path = self._pose_json_path()
         result = svc.analyze_pose_payload(
-            payload, movement="Arm VW", video_id="v2", pose_json_path=pose_json_path
+            payload, movement="Sit-up", video_id="v2", pose_json_path=pose_json_path
         )
         self.assertEqual(result["analysis_pending"], True)
         self.assertEqual(result["detections"], [])

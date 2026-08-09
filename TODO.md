@@ -5,9 +5,10 @@
 >
 > 現況摘要：
 >
-> - **規則偵測器 8/16 動作**：squat、push-up、overhead press、lunge、deadlift、row、
->   band pull apart、bicep curl（`src/pose/movements/`，registry 驅動；`/api/movements` 由 registry 導出，
->   新增偵測器不需改前端）。PR #47 #48 #51 #53 #54。
+> - **規則偵測器 10/16 動作**：squat、push-up、overhead press、lunge、deadlift、row、
+>   band pull apart、bicep curl、arm abduction、arm VW（`src/pose/movements/`，registry 驅動；
+>   `/api/movements` 由 registry 導出，新增偵測器不需改前端）。PR #47 #48 #51 #53 #54。
+>   **Group D（Bicep Curl / Arm Abduction / Arm VW）於 2026-08-09 完成。**
 > - **逐 rep 偵測已上線**（`src/pose/rep_segmentation.py`，PR #49）；RS-SP2「只密集抽取
 >   要評分的 rep」仍在 **PR #50（未合併）**。
 > - **chat 已升級為 tool-calling 迴圈**（PR #57）：`get_analysis` / `kg_query` / `rag_search`
@@ -192,7 +193,7 @@
     規格書自己定義的另一半替代量測從單目 2D 拿到 0.959/0.894。
   - 注意：**沒有任何閾值因此被調整**，`LUNGE_DETECTOR.validated` 仍為 `False`。
 - [ ] Squat / Overhead Press / Push-up / Deadlift / Row / Band Pull Apart / Bicep Curl / Arm
-  Abduction 八個偵測器仍是「spec-derived、UNVALIDATED」，前端以 Beta tag 標示
+  Abduction / Arm VW 九個偵測器仍是「spec-derived、UNVALIDATED」，前端以 Beta tag 標示
   （`/api/movements` 的 `validated` 欄位）
 - [ ] **Arm Abduction 的標註驗證：第一次「有資料、只是還沒跑」**（2026-08-09 記錄）。
   REHAB24-6 `Ex1` 就是 arm abduction：**178 下、9 位受試者（每位都同時有正反例）、
@@ -206,6 +207,29 @@
   (iii) `arm_abd_contralateral_trunk_lean` 是唯一 Ex1 真的講得上話的規則，而它的 cue 在
   marker 3D 上已經拿到 **per-subject median AUC 0.800**，出貨的 12° 門檻卻是 **0/178** 觸發
   ——驗證會量到「真 cue vs 落在分佈尾巴外的切點」。
+- [ ] **Arm VW 的標註驗證：第一次「資料就是 app 模型化的那個變體」**（2026-08-09 記錄）。
+  REHAB24-6 `Ex2` 就是 arm VW：**208 下——非深蹲類動作裡最大的一組標註**（Lunge 174、
+  Arm Abduction 178）、9 位受試者（每位都同時有正反例）、**94 correct / 114 incorrect**，
+  0 筆標記 mocap 有誤，12 支影片的 marker 3D 與 MediaPipe landmark cache 都在。
+  而且**是雙手動作**——不是從空白的 `exercise_subtype` 推的，是量出來的：每下左右
+  excursion 比值中位數 **0.954**（最小 0.791）、within-rep r(L,R) 中位數 **0.9977**。
+  Arm Abduction 因為 Ex1 是單手才得去借 Fit3D，這裡不需要。三個先驗限制：
+  (i) `vw_shrug_substitution` 恆為 silent，沒有東西可驗；
+  (ii) `vw_incomplete_excursion` 與 `vw_lr_asymmetry` 對 Ex2 的標註都在**隨機水準**
+  （per-subject 0.494 與 0.375–0.513）——這是關於 **Ex2 的錯誤型態**的證據，不是關於規則的；
+  (iii) `vw_loss_of_elevation` 是唯一 Ex2 講得清楚的規則，去掉退化的 person 8（2 correct /
+  20 incorrect）後 per-subject AUC **0.735**，而出貨門檻在 3D 上觸發 31/208、經估測器 9/208。
+- [ ] **檢查 `arm_abd_lr_asymmetry`（與 `ohp_asymmetric_press`）是否該加 view gate**
+  （2026-08-09 開，未跑）。`arm_abduction.rule_lr_asymmetry` 不 gate 的理由寫成「斜角會把兩隻手
+  一起壓縮，所以真實不對稱只會讀小——只會漏報不會誤報」。在 **Ex2**（arm VW、雙手、208 下）
+  上按攝影機朝向拆開量，這個理由**被推翻**：`front` 片段 MediaPipe 的 `|L−R|` 中位數 **5.9°**
+  對 marker 的 4.6°（理由成立），`half-profile` 片段是 **16.0°** 對 **4.1°**，同一個 12° 切點在
+  3D 判定為對稱的 99 下裡觸發 **66 下**。斜角不是壓縮不對稱，是**製造**不對稱。
+  `arm_vw.rule_lr_asymmetry` 因此 gate 到 `{front, rear}`（代價：production 49 支裡只活 9 支）。
+  **`arm_abduction.py` 刻意沒動**，因為量測離那條規則的運作條件有三步推論：資料是 Ex2 不是 Ex1
+  （Ex1 單手，那條規則的誤報率在那裡量不到）、是 `image` 2D cache 而 production 走
+  `angle_degrees(dims=3)`（cache 沒有 image-z）、是前半球斜角而 production 是 37/49 `rear_oblique`。
+  要跑的是：拿 Arm Abduction 自己的資料量一次，然後決定 gate 或用量測而非論證來支持折扣。
 - [ ] 把 `validated` 從「人工判斷」變成「有標註集撐腰」：每個動作至少一組標註資料 + 回歸腳本
 
 ### 多類別 / 多標籤
@@ -407,18 +431,20 @@
   CoachTray 具名狀態列、pending dots、來源折疊為可點擊計數）
 - [x] 工具呼叫 trace 存進 conversations JSONB（可重播、可稽核；含 per-tool sources）
 
-### P2：多動作 + 記憶 — 🔶 偵測器 8/16，其餘未動
+### P2：多動作 + 記憶 — 🔶 偵測器 10/16，其餘未動
 
 - [x] **多動作規則偵測器（原「Lunge rule pack」已被更大的工程取代）**：
   registry 驅動的 per-movement 偵測器，端到端接進 web app（PR #47、#48、#51、#53、#54）
-  - 已上線 9 個：`squat`、`pushup`、`overhead_press`、`lunge`、`deadlift`、`row`、
-    `band_pull_apart`、`bicep_curl`、`arm_abduction`（`src/pose/movements/`；`GET /api/movements`
-    直接由 registry 導出，新增一個偵測器不需改前端）
+  - 已上線 10 個：`squat`、`pushup`、`overhead_press`、`lunge`、`deadlift`、`row`、
+    `band_pull_apart`、`bicep_curl`、`arm_abduction`、`arm_vw`（`src/pose/movements/`；
+    `GET /api/movements` 直接由 registry 導出，新增一個偵測器不需改前端）
   - 皆帶 Beta tag（`validated=False`），唯一有標註驗證的是 Lunge（見上方「規則偵測器的標註驗證」）
   - 部分規則被**證明無法實作**並明白記錄（Row 第 5 條、Deadlift 撤回一條、
     Band Pull Apart 的 scapular retraction 條恆為 silent、Bicep Curl 撤回 wrist flexion、
-    Arm Abduction 撤回 impingement arc 且 shoulder shrug 恆為 silent）
-  - [ ] 其餘 7 個動作的 rule pack 未做
+    Arm Abduction 撤回 impingement arc 且 shoulder shrug 恆為 silent、
+    Arm VW 撤回 loss_of_elevation 的 W 分支且 shrug substitution 恆為 silent）
+  - [ ] 其餘 6 個動作的 rule pack 未做（Group E：sit-up、shoulder bridge、leg abduction；
+    Group F：torso twist、jumping jacks、high knee）
 - [ ] `compare_analyses` / `list_user_history` 工具 + 進步追蹤（跨分析記憶）
 - [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
 - [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
@@ -477,6 +503,16 @@
     另外記一筆：圖上第三個 Arm Abduction fault 是 **`Incomplete Elevation`**（bucket 最滿的一個），
     但 parent spec 對這個動作根本沒有 incomplete-ROM 規則——每個其他動作都有。要補需要一個
     對「抬不夠高」給出數字的來源，**沒有為了填洞而發明規則**。
+  - Arm VW 具體案例（2026-08-09）：同樣**沒有 Arm VW 的 asymmetry fault 節點**，
+    `Muscle Imbalance` 一樣只回傳 bucket 全空的泛用節點——與 Arm Abduction 相同處理，保留。
+    另兩條規則的 seed 是活的（`Insufficient Scapular Retraction` →
+    `Arm VW:Insufficient Scapular Retraction` → `causes: Limited Scapular Retraction`；
+    `Shoulder Shrug` → `Arm VW:Compensatory Shoulder Shrug` → `Shoulder Depression`）。
+    **`vw_incomplete_excursion` 與 `vw_loss_of_elevation` 刻意共用同一個 seed**：圖上 Arm VW
+    只有三個 fault 節點，沒有 incomplete-elevation 的，而「擺幅不足」與「V 抬不夠高」在圖的
+    詞彙裡是同一件事；兩條規則仍靠 fault_id / fault_name / citation / evidence 區分。
+    再記一筆**與 Arm Abduction 方向相反的洞**：圖上有 **`Arm VW:Trunk Lean Compensation`**，
+    但 parent spec 對這個動作**沒有** trunk-lean 規則。兩個動作、兩個沒用到的節點、方向相反。
 - [ ] **檢查 `band_pull_apart.rule_shrugging` 是否也吃到同一個 confound**（2026-08-09 開，未跑）：
   Arm Abduction 量到 `neck_gap = ear_y - shoulder_y` 在手臂外展時會因**解剖學**而塌陷——
   Fit3D `side_lateral_raise` 的 3D ground truth 上，gap 與手臂仰角的 within-clip Spearman 是
@@ -488,6 +524,13 @@
   **這裡不宣稱**——要量過才知道。順帶：這個量測也把
   `band_pull_apart.rule_loss_of_scapular_retraction` docstring 裡「MediaPipe 的 shoulder 是
   glenohumeral 點、會跟著肱骨動」從斷言變成量測。
+  **2026-08-09 更新（Arm VW 之後）：這一項被「縮小」但沒有「結案」。** 在 REHAB24-6 Ex2 上
+  同一套構造再量一次，仰角方向相反（下拉而非上舉），gap 對仰角的 within-rep Spearman 仍是
+  MediaPipe **−0.957**、marker glenohumeral **−0.998**、marker clavicle 只有 −0.305；
+  shoulder 高度相對 baseline 的位移是 clavicle 0.6%、glenohumeral 9.8%。所以 confound 隨
+  **仰角行程的大小**放大，而不是隨方向。Band Pull Apart 的行程是仰角大致固定，
+  confound 理應**小**——這是**支持** `bpa_shrugging` 的論據，不是反對它——但仍未在它自己的
+  資料上量過。
 - [ ] `src/pose/rep_segmentation.py` 的 `DEFAULT_MIN_REP_SECONDS = 0.4`（30fps 下 12 幀）對
   Band Pull Apart 若真實 clip 每下快於 0.4 秒，整段會被丟成雜訊、退回 whole-clip fallback——
   與 High Knee 需要 `min_rep_seconds` override 是同一類問題。2026-08-09 已用 Fit3D 的
