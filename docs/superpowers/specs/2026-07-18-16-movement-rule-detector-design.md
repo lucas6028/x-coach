@@ -989,8 +989,12 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 >    REHAB24-6 `Ex1` **is** arm abduction (`src/rehab24/dataset.py` `EXERCISE_NAMES["1"]`): 178
 >    repetitions, 9 subjects each contributing both classes, **90 correct / 88 incorrect**, 0
 >    flagged mocap-erroneous, with marker-driven 3-D and cached MediaPipe landmarks for all 13
->    videos. §8.4's standing "no labeled data" caveat therefore does **not** apply here, and
->    every detector docstring since Push-up that asserts it must not be copied forward.
+>    videos. §8.4's standing "no labeled data" caveat therefore does **not** apply here, and the
+>    Deadlift / Row / Band Pull Apart / Bicep Curl docstrings that assert it must not be copied
+>    forward. **Lunge got there first** — REHAB24-6 `Ex5` is lunge and
+>    `notes/lunge-rule-validation.md` is the 174-rep validation actually run against it — so this
+>    is the **second** such movement and the **first whose data exists while the check has not been
+>    run**.
 >    `validated` is still `False` because **nothing has run the check** — and Ex1 is
 >    **unilateral on 178/178 reps** (`exercise_subtype == "right arm"`), a variant this rule set
 >    does not model, which by itself makes `lr_abduction_asymmetry` unvalidatable there in either

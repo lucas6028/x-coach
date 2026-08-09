@@ -309,9 +309,10 @@ class TestMovementRegistry(unittest.TestCase):
                 "Row": False,
                 "Band Pull Apart": False,
                 "Bicep Curl": False,
-                # Arm Abduction ships Beta even though REHAB24-6 Ex1 IS arm abduction with
-                # 178 human-labeled reps -- the FIRST non-squat movement for which labeled data
-                # exists at all. Nothing has run the check; see arm_abduction.py's registration
+                # Arm Abduction ships Beta even though REHAB24-6 Ex1 IS arm abduction with 178
+                # human-labeled reps. Lunge got there first (Ex5, validated in
+                # notes/lunge-rule-validation.md); this is the first movement whose labeled data
+                # EXISTS while the check has NOT been run. See arm_abduction.py's registration
                 # comment for what Ex1 can and cannot decide.
                 "Arm Abduction": False,
             },

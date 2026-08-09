@@ -9,13 +9,18 @@
 # ---------------------------------------------------------------------------------------
 # LABELED CORRECT/INCORRECT GROUND TRUTH EXISTS FOR THIS MOVEMENT. IT IS THE FIRST.
 # ---------------------------------------------------------------------------------------
-# Every detector since Push-up carries the sentence "no labeled repetition of this movement
-# exists anywhere in this repository". For Arm Abduction that sentence is FALSE and must not be
-# copied forward: REHAB24-6 `Ex1` IS arm abduction (src/rehab24/dataset.py EXERCISE_NAMES["1"]),
-# 178 repetitions, 9 subjects, 90 correct / 88 incorrect, with marker-driven 3-D alongside the
-# video and cached MediaPipe landmarks for all 13 videos. `validated` is still False because
-# NOTHING RAN THE CHECK -- see the registration site at the bottom of this module for what Ex1
-# can and cannot decide. Design spec section 2.
+# Deadlift, Row, Band Pull Apart and Bicep Curl each carry the sentence "no labeled repetition of
+# this movement exists anywhere in this repository". For Arm Abduction that sentence is FALSE and
+# must not be copied forward: REHAB24-6 `Ex1` IS arm abduction (src/rehab24/dataset.py
+# EXERCISE_NAMES["1"]), 178 repetitions, 9 subjects, 90 correct / 88 incorrect, with
+# marker-driven 3-D alongside the video and cached MediaPipe landmarks for all 13 videos.
+#
+# LUNGE GOT THERE FIRST and this module is the SECOND such movement, not the first: REHAB24-6
+# `Ex5` is lunge, and notes/lunge-rule-validation.md is the 174-rep validation that was actually
+# run against it. What is new here is the gap between the two -- Arm Abduction is the first
+# movement whose labeled data EXISTS while the check has NOT been run. `validated` is still False
+# for that reason and no other; see the registration site at the bottom of this module for what
+# Ex1 can and cannot decide. Design spec section 2.
 #
 # ---------------------------------------------------------------------------------------
 # TWO RULES SHIP, ONE IS PERMANENTLY SILENT, ONE IS ABSENT. THE THREE ARE NOT THE SAME THING.
@@ -47,6 +52,11 @@
 # a lateral trunk lean are the RIGHT quantity from every reachable view, and obliquity makes them
 # noisier rather than different -- so `rear_oblique` and `unknown` take the x0.65 discount and
 # stay live. Design spec section 6.6.
+#
+# STATE THE CEILING ALONGSIDE THE NOVELTY: because `front` is unreachable under
+# allow_front=False, `rear` is the ONLY production view that ever earns `high` here. That is 9 of
+# 49 real clips at full confidence and the other 40 at x0.65 -- better than every previous
+# detector (whose `high` view occurs zero times), and still a minority.
 #
 # ---------------------------------------------------------------------------------------
 # ONE DROPPED LANDMARK SILENCES EVERY ARM ABDUCTION RULE FOR THAT FRAME.
@@ -270,20 +280,33 @@ def arm_abduction_assign_phases(raw: list[dict]) -> list[str]:
 #   "Trunk Lean Compensation"  -> Arm Abduction:Trunk Lean Compensation
 #       quality_impacts: No Compensatory Trunk Movement                               NON-EMPTY
 #   "Muscle Imbalance"         -> Muscle Imbalance (generic Cause node)
-#       NO buckets under this movement                                                THIN
+#       ZERO buckets, 1 edge                                                          DANGLING
 #
-# The one gap is recorded rather than masked: the graph has NO Arm Abduction asymmetry fault
-# node. "Asymmetry" and "Left Right Asymmetry" both resolve to the generic `Symmetry`
-# QualityDimension whose inbound edges are all Squat and Overhead Press, and "Muscle Imbalance"
-# returns only the bare generic node here -- under movement="Overhead Press" that same query
-# ALSO returns the OHP-scoped fault that carries the content, which is why
-# `ohp_asymmetric_press` uses it. It is kept anyway because it is the semantically correct thin
-# card and matches the sibling rule; pointing at the shared `Range Of Motion` QualityDimension
-# WOULD return a rich bucket set, and was rejected for the same reason Band Pull Apart and Bicep
-# Curl rejected it -- that node's `corrections` bucket is "Wrapping Surface Adjustment",
-# meaningless here. A semantically correct thin card beats a semantically wrong full one. The
-# gap is logged against TODO.md's existing "many faults have no KG node" item; the graphml is
-# gitignored, so adding the node is a deploy step.
+# THE THIRD ROW IS THE `Row:Compensatory Movements` CASE, NOT THE "thin card" CASE, and the two
+# must not be conflated. Rows 1 and 2 are thin-but-non-empty -- one populated bucket each, which
+# is what Band Pull Apart and Bicep Curl accepted. Row 3 has NO buckets at all, which is the
+# dangling-seed trap the OHP KG fix (PR #48) existed to eliminate and which `row.py`'s Step 0
+# names explicitly. It is accepted here anyway, for a reason that was CHECKED rather than
+# assumed:
+#
+#   * There is no better query. The graph has NO Arm Abduction asymmetry fault node at all.
+#     "Asymmetry" and "Left Right Asymmetry" resolve to the generic `Symmetry` QualityDimension,
+#     which is ALSO zero-bucket (its 7 inbound edges are all Squat and Overhead Press). Under
+#     movement="Overhead Press" the same "Muscle Imbalance" query ALSO returns the OHP-scoped
+#     fault that carries the content, which is why `ohp_asymmetric_press` uses it and gets a real
+#     card; there is no Arm-Abduction-scoped counterpart to return.
+#   * The user-visible failure the OHP fix targeted DOES NOT OCCUR. Verified by reading the
+#     frontend rather than inferring: `FaultCard.tsx:55-57` pushes a causes/risks/cue rung only
+#     `if (...).length`, and wraps the whole block in `rungs.length > 0`. A zero-bucket seed
+#     therefore renders a THINNER card -- fault name, severity, evidence -- never an empty
+#     "Causes:" heading with nothing under it.
+#   * Substituting a rich node was rejected for the reason Band Pull Apart and Bicep Curl both
+#     rejected it: the shared `Range Of Motion` QualityDimension returns full buckets whose
+#     `corrections` entry is "Wrapping Surface Adjustment", meaningless for this movement. A
+#     semantically correct empty card beats a semantically wrong full one.
+#
+# The gap is logged against TODO.md's existing "many faults have no KG node" item; the graphml is
+# gitignored, so authoring the node is a deploy step.
 #
 # NOTE, recorded and NOT acted on: the graph's third Arm Abduction fault is `Arm Abduction:
 # Incomplete Elevation` -- the OPPOSITE fault to the parent spec's withdrawn "raised too high"

@@ -29,11 +29,17 @@ That is structurally the same shape as Push-up (4 live + 1 silent) and Band Pull
 
 ### 1.1 Three things make this movement different from the eight already shipped
 
-**(a) Labeled correct/incorrect ground truth EXISTS for this movement.** Every design spec since
-Push-up has opened with "no labeled data exists, so `validated` stays `False`." That sentence is
-**false here** and must not be inherited: REHAB24-6 `Ex1` **is** arm abduction, and it carries a
-per-repetition human `correctness` label — 178 reps, 9 subjects, 90 correct / 88 incorrect. §2
-scopes what that does and does not license, and why `validated` is *still* `False`.
+**(a) Labeled correct/incorrect ground truth EXISTS for this movement.** The Deadlift, Row, Band
+Pull Apart and Bicep Curl specs each open with "no labeled data exists, so `validated` stays
+`False`." That sentence is **false here** and must not be inherited: REHAB24-6 `Ex1` **is** arm
+abduction, and it carries a per-repetition human `correctness` label — 178 reps, 9 subjects, 90
+correct / 88 incorrect.
+
+**Lunge got there first, and this is the second such movement, not the first.** REHAB24-6 `Ex5` is
+lunge, and `notes/lunge-rule-validation.md` is the 174-rep validation that was actually run against
+it. What is new here is the **gap between the two**: this is the first movement whose labeled data
+exists while the check has **not** been run. §2 scopes what that licenses, and why `validated` is
+*still* `False`.
 
 **(b) This is the first detector whose spec-rated `high` view is actually reachable in
 production.** Every previous movement's best rules wanted `side`, and `side` never occurs
@@ -169,9 +175,9 @@ labeled ground truth" — is a product claim. **Nothing in this task runs the ch
 precedent (`notes/lunge-rule-validation.md`, 869 lines, its own phase) is what a validation of
 this detector would look like: a replay harness over the production path, per-subject AUC,
 structural-silence accounting, a camera-routing decision, and a written verdict. What §2 does is
-establish that the check is now *possible* for the first time on a non-squat movement, and scope
-it: rule 4 is unvalidatable on Ex1 (§2.2), rule 1 is silent so there is nothing to validate, and
-rule 3 is the one rule Ex1 could genuinely speak to.
+establish that the check is *possible* — the second time on a non-squat movement, after Lunge —
+and scope it: rule 4 is unvalidatable on Ex1 (§2.2), rule 1 is silent so there is nothing to
+validate, and rule 3 is the one rule Ex1 could genuinely speak to.
 
 Recorded in TODO.md as a scoped follow-up, not attempted here.
 
@@ -537,6 +543,11 @@ here, which is itself the novelty; `unknown` and the obliques take the discount.
 On `rear_oblique` — 37 of 49 clips — the frontal axis is foreshortened, so a real lean or
 asymmetry reads **smaller** than it is: a missed fault, never a false one.
 
+**State the ceiling alongside the novelty.** Because `front` is unreachable, `rear` is the *only*
+production view that ever earns `high` here — 9 of 49 clips at full confidence and the other 40 at
+×0.65. That is strictly better than every previous detector, whose `high` view occurs zero times,
+and it is still a minority.
+
 ### 6.7 Rule 4's wrist-height disjunct is NOT implemented — its threshold is frame-scale dependent
 
 The parent spec offers a second cue: "or if peak wrist heights differ by `> 0.05` normalized
@@ -573,19 +584,32 @@ not `resolve_nodes`. Observed results, not predicted ones:
 |---|---|---|---|
 | 1 (silent) | `Shoulder Shrug` | `Arm Abduction:Compensatory Shoulder Shrug` | `quality_impacts: Shoulder Depression` |
 | 3 | `Trunk Lean Compensation` | `Arm Abduction:Trunk Lean Compensation` | `quality_impacts: No Compensatory Trunk Movement` |
-| 4 | `Muscle Imbalance` | `Muscle Imbalance` (generic Cause node) | **THIN — no buckets under this movement** |
+| 4 | `Muscle Imbalance` | `Muscle Imbalance` (generic Cause node) | **ZERO buckets, 1 edge — DANGLING** |
 
-**The one gap is recorded, not masked.** The graph has **no Arm Abduction asymmetry fault node**
-— `Asymmetry` and `Left Right Asymmetry` both resolve to the generic `Symmetry` QualityDimension
-whose inbound edges are all Squat and Overhead Press, and `Muscle Imbalance` returns the bare
-generic node with empty buckets (under `movement="Overhead Press"` the same query additionally
-returns the OHP-scoped fault that carries the content, which is why `ohp_asymmetric_press` uses
-it). `Muscle Imbalance` is kept because it is the semantically correct thin card and matches the
-sibling rule; the alternative — pointing at `Range Of Motion`, which returns a rich bucket set
-whose `corrections` entry is `Wrapping Surface Adjustment` — is the substitution Band Pull Apart
-and Bicep Curl both rejected. **A semantically correct thin card beats a semantically wrong full
-one.** Because the graphml is gitignored, adding the node is a deploy step; logged against
-TODO.md's existing "many faults have no KG node" item.
+**Row 4 is the `Row:Compensatory Movements` case, not the "thin card" case, and conflating them
+would be the mistake.** Rows 1–3 are thin-but-non-empty — one populated bucket each, which is what
+Band Pull Apart and Bicep Curl accepted. Row 4 has **no buckets at all**, which is the
+dangling-seed trap the OHP KG fix (PR #48) existed to eliminate and which `row.py`'s Step 0 names
+explicitly. It is accepted anyway, and each leg of that decision was checked rather than assumed:
+
+- **There is no better query.** The graph has **no Arm Abduction asymmetry fault node**.
+  `Asymmetry` and `Left Right Asymmetry` resolve to the generic `Symmetry` QualityDimension, which
+  is *also* zero-bucket (its 7 inbound edges are all Squat and Overhead Press). Under
+  `movement="Overhead Press"` the same `Muscle Imbalance` query *additionally* returns the
+  OHP-scoped fault that carries the content — which is why `ohp_asymmetric_press` gets a real card
+  and there is no Arm-Abduction-scoped counterpart to return.
+- **The user-visible failure the OHP fix targeted does not occur**, verified by reading the
+  frontend rather than inferring: `frontend/src/components/FaultCard.tsx:55-57` pushes a
+  causes/risks/cue rung only `if (...).length` and wraps the whole block in `rungs.length > 0`. A
+  zero-bucket seed renders a **thinner** card — fault name, severity, evidence — never an empty
+  "Causes:" heading with nothing under it.
+- **Substituting a rich node was rejected** for the reason Band Pull Apart and Bicep Curl both
+  rejected it: `Range Of Motion` returns full buckets whose `corrections` entry is
+  `Wrapping Surface Adjustment`, meaningless for this movement. **A semantically correct empty
+  card beats a semantically wrong full one.**
+
+Because the graphml is gitignored, authoring the node is a deploy step; logged against TODO.md's
+existing "many faults have no KG node" item.
 
 ---
 
