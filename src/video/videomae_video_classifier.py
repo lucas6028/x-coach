@@ -102,8 +102,7 @@ class FeatureDataset(Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         sample = self.samples[index]
-        with np.load(sample.feature_path, allow_pickle=False) as data:
-            feature = data["video_feature"].astype(np.float32)
+        feature = load_video_feature(sample.feature_path)
         if self.normalization is not None:
             feature = self.normalization.apply(feature)
         return torch.from_numpy(feature), torch.tensor(sample.label, dtype=torch.float32)
@@ -123,15 +122,38 @@ class VideoFeatureClassifier(nn.Module):
         return self.network(x).squeeze(-1)
 
 
+#: Stem -> path index per feature dir. Globbing once per sample id walks the whole
+#: tree each time, which is O(ids x files): ~25 s per call on a 2144-sample dir, and
+#: a LOSO fold calls this three times. Building one index per dir makes it one walk.
+_DIR_INDEX_CACHE: dict[Path, dict[str, Path]] = {}
+
+
+def feature_path_index(feature_dir: Path) -> dict[str, Path]:
+    """Map sample id -> feature path for one dir, built once and memoized.
+
+    Ties are broken by sorted path order. The previous per-id ``rglob`` took whatever
+    the directory walk yielded first, which is not deterministic across platforms;
+    duplicates are a defect the feature audit fails on regardless.
+    """
+    index = _DIR_INDEX_CACHE.get(feature_dir)
+    if index is None:
+        index = {}
+        for path in sorted(feature_dir.rglob("*.npz")):
+            index.setdefault(path.stem, path)
+        _DIR_INDEX_CACHE[feature_dir] = index
+    return index
+
+
 def build_samples(feature_dir: Path, video_ids: list[str], labels: dict[str, int]) -> list[Sample]:
     samples: list[Sample] = []
     missing: list[str] = []
+    index = feature_path_index(feature_dir)
     for video_id in video_ids:
-        candidates = list(feature_dir.rglob(f"{video_id}.npz"))
-        if not candidates:
+        path = index.get(video_id)
+        if path is None:
             missing.append(video_id)
             continue
-        samples.append(Sample(video_id=video_id, feature_path=candidates[0], label=labels[video_id]))
+        samples.append(Sample(video_id=video_id, feature_path=path, label=labels[video_id]))
 
     if missing:
         preview = ", ".join(missing[:10])
@@ -156,9 +178,33 @@ def make_loader(
     )
 
 
+#: Feature vectors keyed by path. Reading an ``.npz`` costs ~2.6 ms, almost all of it
+#: zip-container overhead rather than decompression, and ``FeatureDataset`` re-reads
+#: every sample on every epoch -- ~34k reads per LOSO fold, which dominates runtime.
+#: A repetition vector is 768 float32 (3 KB), so a whole feature dir is ~6.6 MB.
+#: Values are unchanged by caching; only the number of disk reads differs.
+_FEATURE_CACHE: dict[Path, np.ndarray] = {}
+
+
 def load_video_feature(path: Path) -> np.ndarray:
-    with np.load(path, allow_pickle=False) as data:
-        return data["video_feature"].astype(np.float32)
+    """Load one repetition vector, memoized by path.
+
+    Returns a copy: ``FeatureDataset`` hands the array to ``torch.from_numpy``, which
+    shares memory, so returning the cached array itself would expose it to in-place
+    modification by any downstream consumer.
+    """
+    cached = _FEATURE_CACHE.get(path)
+    if cached is None:
+        with np.load(path, allow_pickle=False) as data:
+            cached = data["video_feature"].astype(np.float32)
+        _FEATURE_CACHE[path] = cached
+    return cached.copy()
+
+
+def clear_feature_cache() -> None:
+    """Drop memoized features and dir indexes (for tests, or if files change on disk)."""
+    _FEATURE_CACHE.clear()
+    _DIR_INDEX_CACHE.clear()
 
 
 def compute_feature_normalization(samples: list[Sample], epsilon: float = 1e-6) -> FeatureNormalization:
