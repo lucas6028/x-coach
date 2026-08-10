@@ -2082,6 +2082,115 @@ Rep phases: **center (braced setup) → rotate to side A (peak) → return throu
 
 ---
 
+> **UPDATE (2026-08-10, Torso Twist implemented — 14/16, GROUP F OPENS) — ONE OF THIS SECTION'S
+> FOUR TORSO TWIST RULES SHIPS, AND THE TWO WITHDRAWALS WERE DECIDED BY EVIDENCE RATHER THAN
+> JUDGEMENT: A PROJECTION MEASUREMENT AGAINST 3-D GROUND TRUTH, AND A SOURCE THAT PRESCRIBES THE
+> BEHAVIOUR ITS OWN RULE FLAGS.**
+> Design spec: `docs/superpowers/specs/2026-08-10-torso-twist-detector-design.md`. Module:
+> `src/pose/movements/torso_twist.py`. Tests: `tests/test_torso_twist.py` (37 cases).
+> `tt_trunk_not_braced` ships — **its brace disjunct only**; `tt_insufficient_rotation_rom` is
+> registered permanently silent; `tt_lumbar_rotation_dominant` and `tt_momentum_over_control` are
+> withdrawn.
+>
+> - **FOUR ARTIFACTS IN THIS PROJECT NAME "TORSO TWIST" AND THEY DESCRIBE FOUR DIFFERENT
+>   EXERCISES.** This section's own rep phases, the RAG doc and the app card art all say **seated
+>   Russian twist**, and that is the contract the module implements. The app's icon
+>   (`MovementIcon.tsx:148`) draws a **standing** figure in both its comment and its strokes — an
+>   asset defect, recorded and not fixed. Fit3D's `standing_ab_twists` is a **standing cross-body
+>   knee-to-elbow twist** (looked at, not inferred from the name). EgoExo-Fitness's 95 judged
+>   `Kneeling Side Torso Twist` actions are, by their own criteria text, a **prone lateral
+>   flexion**. Nothing in this repository films the exercise the app depicts, so `validated=False`
+>   for **Sit-up's** reason — the labeled data describes a different variant — held three times
+>   over, and **not** a sixth distinct reason.
+>
+> - **THE KNOWLEDGE GRAPH'S THREE TORSO TWIST FAULTS ARE SEEDED FROM THE WRONG EXERCISE, AND THE
+>   SEEDING SCRIPT SAYS SO IN ITS OWN WORDS.** `scripts/knowledge/stub_general_movements_v3.py:152`
+>   records this movement's grounding as *"EgoExo-Fitness TKV (Kneeling Side Torso Twist:
+>   pause-at-bottom 23%, lateral-flexion depth 21%, base 13%, abs)"*. That is PRIMARY provenance,
+>   not an inference from node names, and it explains why a graph backing four **axial rotation**
+>   rules contains `Torso Twist:Insufficient Lateral Flexion Depth`. Leg Abduction §7.3 established
+>   that a MISSING node reliably predicts a rule should not exist while a PRESENT node predicts
+>   nothing; this movement adds the sharper case — **a present node can be actively misleading**,
+>   because it faithfully describes a different movement pattern. Sit-up refused an INVERTED seed;
+>   this module refuses a WRONG-AXIS one.
+>
+> - **THIS SECTION'S PROJECTED-WIDTH ROTATION PROXY IS UNFIT, AND IT IS NOW MEASURED RATHER THAN
+>   ARGUED.** The heuristic reads axial rotation as the change in `|x11−x12|` / `|x23−x24|`, i.e.
+>   `width · |cos θ|` — a quantity whose derivative is **zero at the braced centre** and which is
+>   **even in θ**, so it is blind exactly where the rule must discriminate and cannot tell one side
+>   from the other. This section's remedy for the second defect, the left–right x-ordering flip,
+>   requires **>90°** of rotation and the true relative trunk twist measured here peaks at a
+>   **median 44.9° per repetition** (max 58.8), so the flip never happens.
+>   **Measured with a PERFECT detector** — Fit3D mocap ground truth projected through the real
+>   calibration, 8 subjects × 4 cameras × 45 repetitions of `standing_ab_twists`, so every error is
+>   projection alone: per-frame MAE **20.4°** on the shoulder line and **17.2°** on the hip line
+>   (against a true hip peak of only 19.7°), and on the hip line — the ratio's decisive term — the
+>   proxy is **anti-correlated with the truth on 35% of repetitions**. Carried to the decision the
+>   rule makes, at this section's own 0.6 cut: truth fires 64/180, proxy fires 86/180, **disagreeing
+>   on 30/180 = 16.7%**, of which **26 are the proxy firing where the truth does not**. The rank
+>   correlation is 0.877, so the honest reading is that **the proxy is biased, not noisy** — and the
+>   bias runs toward false positives. Small-angle resolution against a real floor: one degree of
+>   rotation moves the shoulder width by 0.00016 of the image width at 0–15° and 0.00102 at 45–75°,
+>   while MediaPipe's own frame-to-frame width jitter over 30 REHAB24-6 videos is 0.000242 — **one
+>   frame of jitter is worth ~1.5° near the centre and ~0.24° near the peak**.
+>   *Variant caveat, stated:* `standing_ab_twists` has a FREE pelvis, so the truth *distribution*
+>   of the ratio does not transfer to a seated twist with the hips pinned. What transfers is the
+>   projection geometry, and no threshold was taken from this corpus.
+>   **This also pays the debt the Row status note left open** — that Fit3D can support a
+>   2-D-cue-vs-3-D-truth fidelity comparison even though it carries no correctness labels.
+>
+> - **A SEVENTH CITATION FAILURE MODE: THE PARAPHRASE INVERTS THE SOURCE'S INSTRUCTION.**
+>   `tt_momentum_over_control` flags repetitions showing "no near-zero-velocity dwell at the
+>   side-peaks (no control pause)", and its `citation_support` claims the RAG doc "warns not to rely
+>   on between-rep momentum". Read in place, the doc says it is *"crucial to **not stop** between
+>   repetitions or else one will lose the effect of working the abdomen"* — an instruction to keep
+>   moving. The rule would fault a user for obeying its own source. This is sharper than Leg
+>   Abduction's citation/observation sign disagreement, because **the contradiction is inside the
+>   quoted document**.
+>
+> - **ALL FOUR RULES REST ON ONE PAPER THAT NEVER MENTIONS THE EXERCISE.** McGill 1991 (PMID
+>   1824571), re-fetched: 25 adults, isometric plus dynamic axial twists at 30 and 60 °/s, EMG +
+>   kinematics + torque. It supports the *mechanism* primarily and in his own words ("stabilization
+>   of the joints during twisting is far more important to the lumbar spine than production of
+>   large levels of axial torque"; obliques 52/55% MVC vs rectus abdominis 22%) and supplies **no
+>   range of motion, no tempo cut, no thoracic-vs-lumbar contribution claim, and no exercise**. Its
+>   30/60 °/s are protocol conditions performed by healthy subjects; adopting either as a fault cut
+>   would convert a condition into a fault. This is a new shading of the exercise-identity mode —
+>   Arm VW's sources were about *adjacent* exercises, whereas McGill is not about an exercise at
+>   all.
+>
+> - **THE THIRD PER-USER-BASELINE WALL, AND IT IS NOW THE MOST COMMON SINGLE BLOCKER.**
+>   `tt_insufficient_rotation_rom` has a working, roll- and mirror-invariant metric and a real
+>   fault, and is silenced only because no source states a range; the obvious repair — "this swing
+>   is shorter than your own usual" — needs cross-clip state this architecture does not have. Same
+>   wall as `situp_excessive_speed` and `abd_momentum`.
+>
+> - **NO VIEW GATE AND NO VIEW DISCOUNT, FOR THE FOURTH TIME, WITH A NEW REASON.** `view_estimation`
+>   limit 1 voids the labels for a HORIZONTAL subject and Leg Abduction measured them systematically
+>   inverted on an UPRIGHT one. A seated twister's trunk is held at ~45°, i.e. **between two regimes
+>   in both of which the labels have been measured wrong**, and no seated-twist footage exists here
+>   to settle it.
+>
+> - **WHAT CAMERA PLACEMENT ALONE COSTS THE SHIPPED RULE, MEASURED.** Four simultaneous Fit3D
+>   cameras, mocap-2D: the **absolute** trunk-thigh angle is robust (cross-camera spread of the
+>   per-rep median **4.5°**, p90 10.6) but the **peak deviation the rule scores** is not (**13.5°**,
+>   p90 25.0, max 30.5) — a maximum over a window picks up the worst projection excursion, so the
+>   derived quantity is **3× less camera-robust than the angle it is built from**, and the spread is
+>   the size of the 15° cut. Transferable figure: the spread is ~0.30 of the measured deviation.
+>
+> - **THE SETUP-BASELINE DEFECT, MEASURED AND ATTRIBUTED.** Effective threshold **18.0°** against a
+>   nominal 15.0 (1.20×) through the real `run_detector` — and **none of it is Row's trimming**,
+>   because on the fixture `segment_reps` returns the windows untrimmed; the whole residual is the
+>   3-frame `setup` median already carrying part of the ramp, `15 / (1 − f) = 17.36°`. Stated as a
+>   property of that fixture, not a proof the trimming cannot bite on a swing that does not start
+>   from rest.
+>
+> - **FIRST USER OF `rep_rectify`.** `base.py:55` declared the flag for this movement by name in
+>   RS-SP1 and it had no user until the fourteenth detector. One swing is one repetition, which is
+>   the RAG doc's own definition.
+
+---
+
 ### Jumping Jacks
 
 Rep phases: **closed (feet together, arms at sides) → open (feet spread wide, arms overhead) → landing back to closed**. Impact/landing events occur at each touchdown (both the open-stance touchdown and the return-to-closed touchdown). Landmarks: shoulders 11/12, wrists 15/16, hips 23/24, knees 25/26, ankles 27/28, nose 0.
@@ -2977,3 +3086,52 @@ documented in-code:
 
 - **`validated=False`**, and the Beta tag stands. No threshold moved to produce any number above.
 
+
+---
+
+**Status (2026-08-10) — Torso Twist registered, 14/16, and Group F opens.**
+
+- **Torso Twist — IMPLEMENTED 2026-08-10, UNVALIDATED.** `src/pose/movements/torso_twist.py`,
+  fourteenth of sixteen. **One rule live** (`tt_trunk_not_braced`, its brace disjunct only),
+  **one registered permanently silent** (`tt_insufficient_rotation_rom`), **two withdrawn**
+  (`tt_lumbar_rotation_dominant`, `tt_momentum_over_control`). Each treatment is argued at the
+  Group F update block above; design spec
+  `docs/superpowers/specs/2026-08-10-torso-twist-detector-design.md`; 37 tests in
+  `tests/test_torso_twist.py`.
+
+- **§8.4 is BLOCKED ON DATA HERE, and it is worth being precise about which kind of gap that is.**
+  Three corpora contain something called a torso twist and each contains a different exercise:
+  REHAB24-6 has none at all, Fit3D's `standing_ab_twists` is a standing cross-body knee-to-elbow
+  twist, and EgoExo-Fitness's **95 judged `Kneeling Side Torso Twist` actions** — the richest
+  labelling this programme has met, per-criterion True/False rather than binary correctness — are
+  a prone **lateral flexion**. So this is not Arm Abduction's "nobody ran the check" and not
+  Shoulder Bridge's "the pixels are missing": the labels exist, they are good, and they are about
+  other movements. Closing §8.4 for Torso Twist needs footage of a **seated Russian twist**, which
+  no dataset in this repository supplies.
+
+- **What DID run, and what it is allowed to conclude.** Fit3D's twist data was used for a
+  **sensing-fidelity** pass — mocap 3-D ground truth projected through the real per-camera
+  calibration, i.e. a *perfect detector*, measuring how much true axial rotation survives into
+  this section's 2-D proxy. That is **projection geometry**, which is about cameras and transfers
+  across the variant mismatch; it withdrew `tt_lumbar_rotation_dominant` (16.7% decision
+  disagreement at the section's own cut, 26 of 30 flips being false positives) and quantified the
+  shipped rule's camera sensitivity. **No threshold was taken from that corpus**, because a
+  threshold is about the exercise and does not transfer. This is also the first payment on the
+  fidelity-comparison debt the Row status note recorded above as "future work, not blocked on
+  absent data".
+
+- **A defect in this document is recorded rather than silently worked around.**
+  `tt_momentum_over_control`'s `citation_support` paraphrases the RAG doc as warning against
+  between-rep momentum; the doc instructs the opposite ("it is crucial to **not stop** between
+  repetitions"). The rule as written would fault a user for following its own source. Seventh
+  distinct citation failure mode, and the first in which the contradiction sits inside the quoted
+  document.
+
+- **An app asset defect is recorded rather than fixed.**
+  `frontend/src/components/movements/MovementIcon.tsx:148` draws a standing figure — comment and
+  strokes both — for a movement whose card art, RAG doc and rep phases here are all seated.
+  Changing it is a frontend change on a movement this branch is not about.
+
+- **`validated=False`**, and the Beta tag stands. It is **Sit-up's** reason (the labeled data
+  describes a different variant), not a sixth one; the count of distinct reasons stays at five.
+  No threshold moved to produce any number above.
