@@ -31,6 +31,10 @@ from src.video.stage_b_report import (
 )
 
 
+#: The seed set fixed in the pre-registration; every published number uses it.
+PRE_REGISTERED_SEEDS = [1, 2, 3, 4, 5]
+
+
 def parse_arm(value: str) -> tuple[str, Path]:
     if "=" not in value:
         raise argparse.ArgumentTypeError(f"--arm expects name=path, got {value!r}")
@@ -44,11 +48,22 @@ def main() -> None:
     parser.add_argument("--videomae-predictions", type=Path, required=True, help="Corrected VideoMAE predictions dir.")
     parser.add_argument("--arm", type=parse_arm, action="append", default=[], help="Extra arm as name=predictions_dir.")
     parser.add_argument("--label-mode", default="combined")
-    parser.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3, 4, 5])
+    parser.add_argument("--seeds", type=int, nargs="+", default=list(PRE_REGISTERED_SEEDS))
     parser.add_argument("--fusion-weight", type=float, default=0.5, help="Pose branch's share; 0.5 is pre-registered.")
     parser.add_argument("--resamples", type=int, default=2000)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+
+    # The gate and every delta are means over whatever seeds are passed. A short seed
+    # list moves them: seeds [1,2] alone put the denominator at 0.644 (inside the
+    # published band) where all five put it at 0.650 (outside). Anything but the
+    # pre-registered set is a diagnostic run and says so.
+    if args.seeds != PRE_REGISTERED_SEEDS:
+        print(
+            f"WARNING: seeds {args.seeds} are not the pre-registered {PRE_REGISTERED_SEEDS}. "
+            "Treat this run as diagnostic -- the gate and the retention conditions are "
+            "defined over the pre-registered set."
+        )
 
     pose = load_single_arm("pose_only_normalized", args.pose_predictions, args.label_mode, args.seeds)
     videomae = load_single_arm("videomae_corrected", args.videomae_predictions, args.label_mode, args.seeds)
