@@ -42,6 +42,7 @@ MODULE_MOVEMENTS = {
     "leg_abduction.py": "Leg Abduction",
     "torso_twist.py": "Torso Twist",
     "jumping_jacks.py": "Jumping Jacks",
+    "high_knee.py": "High Knee",
 }
 
 # Modules whose every rule is permanently silent or withdrawn, so they contain NO
@@ -54,6 +55,10 @@ ALL_SILENT_MODULES = {
     # See src/pose/movements/jumping_jacks.py and
     # docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md.
     "jumping_jacks.py",
+    # High Knee: one rule permanently silent, four withdrawn, detector not registered. See
+    # src/pose/movements/high_knee.py and
+    # docs/superpowers/specs/2026-08-10-high-knee-detector-design.md.
+    "high_knee.py",
 }
 
 

@@ -2444,6 +2444,96 @@ Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) 
 - **citation**: Bramah, C. et al. (2018), *Am J Sports Med* 46(12):3023–3031, PMID 30193080 (as above).
 - **citation_support**: VERIFIED (application). Bramah's CPD finding supports singling out the worse side; the asymmetry framing is an application of that result, not a dedicated asymmetry study (stated honestly).
 
+> **IMPLEMENTATION UPDATE (2026-08-10) — sixteenth and last of sixteen. `src/pose/movements/high_knee.py`,
+> design spec `docs/superpowers/specs/2026-08-10-high-knee-detector-design.md`, measurements
+> `notes/high-knee-rule-validation.md`. ONE RULE PERMANENTLY SILENT, FOUR WITHDRAWN, AND THE
+> DETECTOR IS NOT REGISTERED — the second after Jumping Jacks. The programme closes at 16 designed,
+> 14 registered.**
+>
+> - **ZERO OVERLAPPING PAIRS, WHICH IS A FIRST.** EgoExo-Fitness judges 68 High Knee actions of
+>   exactly this exercise on seven criteria, and **not one** of them judges any of the five rules
+>   above. Its two largest faults — cadence (44.1% of actions) and arm rhythm (26.5%) — are
+>   unmodelled here, and "Keep your back straight", the criterion the two trunk rules would model,
+>   is failed by **0 of 68**. Jumping Jacks had one overlapping pair; this has none. `validated`
+>   stays False for Jumping Jacks' sixth reason, not a seventh.
+>
+> - **`hk_insufficient_knee_lift` IS SILENT BECAUSE THIS SECTION SUPPLIES TWO NUMBERS THAT DISAGREE.**
+>   Matijašević's Table 1 scores the **A-skip** at "the thigh ... reaches 45° relative to the ground"
+>   and Table 2 the **B-skip** at "90°". The `biomechanical_rationale` above cites the 45°; the
+>   `detection_heuristic` above implements "the knee at hip height", which is the 90°. Measured over
+>   146 scored repetitions, the implemented cut fires on **100% of every repetition of every action**,
+>   including both actions judged faultless on every criterion by every annotator; observed peak hip
+>   flexion is 40–65°, i.e. real performers land *between* the source's two targets. The cited cut
+>   sorts the corpus **backwards** (0.0% on all three actions whose comments complain about leg
+>   height, 7.1–71.1% on the three that do not). Neither number was moved.
+>
+> - **A NINTH CITATION FAILURE MODE, HALF-NEW.** The prose above — "thigh at least ~45° above
+>   horizontal" — puts the source's number on the wrong side of horizontal (45° to the ground is
+>   *below* horizontal); that is Torso Twist's inverted paraphrase recurring, not new. The new mode
+>   is underneath it: **the source states a graded family of targets and this spec cites one grade
+>   while implementing the other.** Nothing is misquoted; the quote simply does not govern the code.
+>   Four further transfers, all stated in the paper: it scores a *skipping drill*, performed
+>   *travelling on a track*, by participants *excluded for athletics experience*, and A-skip had "a
+>   trivial correlation" with the sprint outcome it was built to predict.
+>
+> - **BOTH TRUNK RULES ARE WITHDRAWN ON THEIR REFERENCE AXIS, NOT ON THEIR THRESHOLD.** A trunk lean
+>   is an angle from the **world vertical**, and this drill has none: Group E established the image
+>   vertical is not the world vertical, and this corpus ships its side cameras rolled 90°. Leg
+>   Abduction's substitute — the support limb — is **8.6–23.6° off the trunk (median 13.1°) during
+>   normal marching**, against thresholds of 10–15° and 15–20°. Part of that is pure anatomy: the
+>   stance foot sits under the hip *joint* while the axis is drawn from the pelvis *midpoint*, ≈6°
+>   on adult proportions, which no performer can remove. And the error runs one way: the 10°
+>   backward cut fires on **69.7% of scored frames** (56–83% on the faultless actions) while the
+>   15° forward cut fires on **0.0%** — `pushup_head_drop`'s finding a third time, now sinking both
+>   signs at once.
+>
+> - **`hk_contralateral_pelvic_drop` IS WITHDRAWN BY A ZERO-PARAMETER CONTROL THE CORPUS SUPPLIES
+>   FREE.** Three exo cameras film the SAME instant, so any disagreement is pure projection. On the
+>   two cameras the view gate admits, median obliquity spreads by **0.97, 2.72, 5.49, 7.90, 8.52
+>   and 13.68°** across the six actions, against this section's "> ~5–8°" threshold — the camera
+>   alone clears the low end on four of six and the high end on two. Frame by frame the two
+>   cameras are **anti-correlated on four of six** (r = −0.48 to +0.12): they disagree about which way the
+>   pelvis is tilting. Not a comment on Bramah, whose association is the strongest result any
+>   citation here carries — a comment on monocular measurability.
+>
+> - **`hk_stride_asymmetry` IS WITHDRAWN FOR `jj_landing_asymmetry`'s THREE REASONS**: no scoped KG
+>   node, a disjunction of two quantities behind one `fault_id` (one of them the quantity just
+>   refuted), and "consistently across reps" being cross-rep state the architecture lacks — here
+>   *structurally*, since one repetition contains one side's drive.
+>
+> - **THE GRAPH'S NEGATIVE FILTER IS PERFECT IN BOTH DIRECTIONS FOR THE FIRST TIME.** The four rules
+>   with no scoped KG node are exactly the four withdrawn; the one rule with a scoped node is
+>   exactly the one kept as silent. And the positive signal still predicts nothing on its own: that
+>   node is DANGLING, and its stated grounding ("knee lift 10%") reproduces from a criterion about
+>   *alternation and speed*. A third variety of misleading-but-present node, after Torso Twist's
+>   wrong movement and Jumping Jacks' blend: **the wrong criterion of the right movement.**
+>
+> - **THE FRAMEWORK KNOB RESERVED FOR THIS MOVEMENT BY NAME IS FINALLY NEEDED — AND ONLY BY IT.**
+>   `base.py:55` names "jumping jacks, high knees"; Jumping Jacks measured that it did not need it.
+>   Here the default 0.4 s floor finds 52 repetitions where a 0.15 s floor finds **150** — it
+>   discards **65.3%** (150 segmented vs 52; fire rates use the 146 SCORED reps instead). Measured non-circularly by differencing two segmentations. The corpus makes
+>   it stronger: 30 of 68 actions are judged *too slow*, and the default still throws away two
+>   repetitions in three. The shipped 0.15 s is half the 0.33 s this framework comment itself
+>   states, not a value fitted to the observed 1.31 Hz.
+>
+> - **SIT-UP'S 90° ROLL IS NOT A SUPINE-FILMING QUIRK.** It recurs on a standing movement, so it is
+>   a property of these cameras. **Every heuristic in this section is written in image y** and none
+>   of them is usable on this corpus; the module's metrics are cosines and ratios between body
+>   vectors, which is the only reason numbers exist. The corollary is a caveat: MediaPipe is not
+>   roll-equivariant, so those landmarks are degraded even where the metrics are well defined.
+>
+> - **THE VIEW GATE IS THE RULE'S OWN.** `anterior_axis_length` separates this corpus's cameras with
+>   **no overlap** (0.156–0.318 side, 0.027–0.044 frontal), so nothing keys on `view_estimation.py`
+>   — measured inverted once (Sit-up) and outside its regime once (Leg Abduction). It also refutes
+>   this section's own "front view is a usable proxy" for knee lift: the frontal camera reports peak
+>   elevations of −0.92 to −0.99 where the side cameras report −0.43 to −0.77 on the same repetition.
+>
+> - **THE MOST PROMISING RULE IS ONE THIS SPEC NEVER WROTE.** Cadence is the corpus's largest fault
+>   by a wide margin, the KG carries `High Knee:Slow Cadence` with a real correction bucket, and
+>   cadence is the one quantity here that is fully roll-, view- and scale-invariant because it is
+>   counted in time rather than measured in space. Recorded, not built: this programme implements
+>   this spec's roster and does not author new rules.
+
 ---
 
 ### Summary of citations used

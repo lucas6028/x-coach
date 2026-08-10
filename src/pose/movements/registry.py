@@ -49,3 +49,13 @@ from src.pose.movements import torso_twist  # noqa: E402,F401
 # silent or withdrawn, so registering it would offer users an analysis that can never report a
 # fault. See that module's closing block; design spec
 # docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md section 7.4.
+#
+# NO `high_knee` IMPORT EITHER, FOR THE SAME REASON AND ON THE SAME EVIDENCE STANDARD.
+# `src/pose/movements/high_knee.py` exists, is tested, and defines `HIGH_KNEE_DETECTOR` -- one rule
+# permanently silent, four withdrawn. Two of the four withdrawals are measurements rather than
+# arguments: the trunk rules' reference axis (the support limb) sits 6.4-14.2 deg off the trunk
+# during normal marching, against thresholds of 10-15 deg, and three SIMULTANEOUS cameras disagree
+# about pelvic obliquity by 1.9-12.9 deg against a 5-8 deg threshold. See that module's closing
+# block; design spec docs/superpowers/specs/2026-08-10-high-knee-detector-design.md section 7.
+#
+# That makes 16 movements designed and 14 registered, which is where the programme closes.
