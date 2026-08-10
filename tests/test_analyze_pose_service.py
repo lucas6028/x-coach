@@ -114,14 +114,15 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         # necessarily goes stale as the 16-movement programme lands one movement at a time. It
         # has already moved "Deadlift" -> "Row" -> "Band Pull Apart" -> "Bicep Curl" -> "Arm
         # Abduction" -> "Arm VW" -> "Sit-up" -> "Shoulder Bridge" -> "Leg Abduction" -> "Torso
-        # Twist"; when Torso Twist is implemented, move it again to any still-unimplemented
-        # movement. The `assertNotIn` is what turns that staleness into a loud failure instead
-        # of a silently vacuous test.
-        self.assertNotIn("Torso Twist", [d.name for d in registry.list_detectors()])
+        # Twist" -> "Jumping Jacks"; only "High Knee" is left after this one, so when Jumping
+        # Jacks is implemented the LAST rotation is available and after that this test needs a
+        # different construction entirely. The `assertNotIn` is what turns that staleness into a
+        # loud failure instead of a silently vacuous test.
+        self.assertNotIn("Jumping Jacks", [d.name for d in registry.list_detectors()])
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
         pose_json_path = self._pose_json_path()
         result = svc.analyze_pose_payload(
-            payload, movement="Torso Twist", video_id="v2", pose_json_path=pose_json_path
+            payload, movement="Jumping Jacks", video_id="v2", pose_json_path=pose_json_path
         )
         self.assertEqual(result["analysis_pending"], True)
         self.assertEqual(result["detections"], [])

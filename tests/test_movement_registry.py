@@ -276,16 +276,26 @@ class MovementRegistryTests(unittest.TestCase):
             # side-independent -- see `leg_abduction._thigh_trunk_angles`. Roll invariance is
             # pinned by tests/test_leg_abduction.py::RollInvarianceTest.
             "Leg Abduction": ("max_thigh_trunk_deg", "max", "extended"),
+            # Torso Twist is the FIRST AND ONLY user of `rep_rectify`, which base.py:55 declared
+            # for it by name and which had no user until the fourteenth detector. Its signal is
+            # BIPOLAR -- the hands swing to both sides of the body -- so rectifying makes each
+            # swing its own excursion from zero, and one swing is one repetition, which is the
+            # cited source's own definition ("each swing to a side counting as one repetition").
+            # `max` then orients the rectified signal so the effort peak is the low value
+            # `segment_reps` looks for. Roll invariance is pinned by
+            # tests/test_torso_twist.py::InvarianceTest.
+            "Torso Twist": ("twist_offset_ratio", "max", "extended"),
         }
+        rectified = {"Torso Twist"}
         for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
                 detector = registry.get_detector(name)
                 self.assertEqual(detector.rep_signal, signal)
                 self.assertEqual(detector.rep_polarity, polarity)
                 self.assertIn(detector.rep_signal, detector.metric_keys)
-                # `rep_rectify` exists for movements RS-SP1 does not implement (spec §3.4);
-                # all nine registered detectors use the default.
-                self.assertFalse(detector.rep_rectify)
+                # `rep_rectify` was declared by RS-SP1 (spec §3.4) for bipolar signals and went
+                # unused for thirteen detectors; every one of them still takes the default.
+                self.assertEqual(detector.rep_rectify, name in rectified)
                 self.assertEqual(detector.rep_start, rep_start)
 
     def test_multi_rep_clip_is_mis_phased_by_the_legacy_path_and_fixed_by_the_new_one(self) -> None:
@@ -322,7 +332,7 @@ class TestMovementRegistry(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge", "Leg Abduction",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
             ],
         )
 
@@ -385,6 +395,16 @@ class TestMovementRegistry(unittest.TestCase):
                 # incorrect and never names which fault occurred. See leg_abduction.py's
                 # registration comment and notes/leg-abduction-rule-validation.md.
                 "Leg Abduction": False,
+                # Torso Twist is Beta for SIT-UP'S reason -- the labeled data describes a
+                # different variant -- and deliberately NOT a sixth one. What is new is only that
+                # the same reason holds three times over: REHAB24-6 has no twist at all, Fit3D's
+                # `standing_ab_twists` is a standing cross-body knee-to-elbow twist (looked at,
+                # not inferred from the name), and EgoExo-Fitness's 95 judged `Kneeling Side
+                # Torso Twist` actions are a prone LATERAL FLEXION exercise. Fit3D's twist data
+                # WAS used here, for a sensing-fidelity measurement of how much true 3-D rotation
+                # survives projection -- that is camera geometry and transfers across variants;
+                # a threshold would not. See torso_twist.py's registration comment.
+                "Torso Twist": False,
             },
         )
 
@@ -405,6 +425,6 @@ class TestMovementRegistry(unittest.TestCase):
             {
                 "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge", "Leg Abduction",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
             },
         )
