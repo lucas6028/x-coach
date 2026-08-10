@@ -4,6 +4,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import cv2
 import numpy as np
@@ -263,3 +264,22 @@ class ReencodedVariantTests(unittest.TestCase):
     def test_reencoded_ignores_a_missing_box(self) -> None:
         frames = [np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)]
         self.assertTrue(np.array_equal(apply_variant(frames, "reencoded", None)[0], frames[0]))
+
+
+class AtomicWriteTests(unittest.TestCase):
+    """A killed build must not leave a truncated video that the resume path skips."""
+
+    def test_no_partial_file_survives_a_successful_write(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "v.mp4"
+            write_video([np.zeros((8, 8, 3), dtype=np.uint8)] * 3, out, 30.0)
+            self.assertTrue(out.exists())
+            self.assertEqual(list(Path(tmp).glob("*.partial.mp4")), [])
+
+    def test_a_failed_encode_leaves_the_destination_absent(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "v.mp4"
+            with mock.patch.object(cv2.VideoWriter, "write", side_effect=RuntimeError("disk full")):
+                with self.assertRaises(RuntimeError):
+                    write_video([np.zeros((8, 8, 3), dtype=np.uint8)] * 3, out, 30.0)
+            self.assertFalse(out.exists())

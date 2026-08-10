@@ -240,16 +240,27 @@ def apply_variant(frames: list[np.ndarray], variant: str, box: Box | None) -> li
 
 
 def write_video(frames: list[np.ndarray], output_path: Path, fps: float) -> None:
+    """Encode ``frames`` to ``output_path``, atomically.
+
+    Written to a sibling ``.partial.mp4`` and renamed only once the writer has closed.
+    A 1600-video build is interrupted often enough that this matters: the resume path
+    skips any output that already exists, so a half-written file from a killed run
+    would be silently accepted as a finished variant and would extract features from
+    a truncated video.
+    """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     height, width = frames[0].shape[:2]
-    writer = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
+    partial_path = output_path.with_suffix(".partial.mp4")
+    writer = cv2.VideoWriter(str(partial_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height))
     if not writer.isOpened():
-        raise RuntimeError(f"Could not open a writer for {output_path}.")
+        raise RuntimeError(f"Could not open a writer for {partial_path}.")
     try:
         for frame in frames:
             writer.write(frame)
     finally:
         writer.release()
+
+    partial_path.replace(output_path)
 
 
 def build_variant_video(
