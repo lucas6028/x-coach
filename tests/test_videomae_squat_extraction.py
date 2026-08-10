@@ -11,6 +11,7 @@ from src.video.videomae_feature_extraction import (
     ClipRequest,
     build_requests,
     iter_requests,
+    load_variant_boxes,
     sample_clip_starts,
     save_feature_bundle,
     select_chunk,
@@ -122,6 +123,46 @@ class SaveFeatureBundleTests(unittest.TestCase):
         requests = [ClipRequest(video_id=str(i), split="train", video_path=Path("x.mp4")) for i in range(5)]
         self.assertEqual(len(list(iter_requests(requests, 2))), 2)
         self.assertEqual(len(list(iter_requests(requests, None))), 5)
+
+
+
+class VariantBoxLoadingTests(unittest.TestCase):
+    """Controls travel as boxes, not as re-encoded videos.
+
+    Shipping variant videos would put one extra lossy generation between the control
+    arms and the untouched full_frame arm -- measured at cos 0.997 between the two
+    routes on real clips, i.e. small but real, and in the direction that would let a
+    dropped control be blamed on the codec instead of on the missing person.
+    """
+
+    def test_boxes_are_read_per_video_id(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "variant": "person_crop",
+                        "rows": [
+                            {"video_id": "a", "box": [1, 2, 3, 4]},
+                            {"video_id": "b", "box": None},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            boxes = load_variant_boxes(manifest)
+
+            self.assertEqual(boxes["a"].as_tuple(), (1, 2, 3, 4))
+            self.assertIsNone(boxes["b"])
+
+    def test_a_video_absent_from_the_manifest_is_absent_from_the_mapping(self) -> None:
+        """main() turns this into a refusal: a control covering fewer videos than the
+        main arm is not a paired comparison."""
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(json.dumps({"rows": [{"video_id": "a", "box": [0, 0, 2, 2]}]}), encoding="utf-8")
+            self.assertNotIn("zz", load_variant_boxes(manifest))
 
 
 if __name__ == "__main__":

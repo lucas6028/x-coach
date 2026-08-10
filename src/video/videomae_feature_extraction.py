@@ -26,6 +26,7 @@ Run ``src.video.videomae_materialize`` afterwards to derive the classifier-ready
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -34,6 +35,7 @@ import cv2
 import numpy as np
 
 from src.video.squat_dataset import SPLIT_NAMES, SQUAT_LABELED_ROOT, load_json_list
+from src.video.squat_video_variants import Box, apply_variant
 from src.video.videomae_backbone import encode_clip, load_backbone, resolve_device
 from src.video.videomae_pooling import LEGACY_FIRST_TOKEN, MEAN_POOL_FC_NORM, build_provenance
 
@@ -139,6 +141,25 @@ def read_clip_frames(
     return frames
 
 
+def load_variant_boxes(manifest_path: Path) -> dict[str, Box | None]:
+    """Read ``video_id -> box`` from a ``build_video_variants`` manifest.
+
+    The controls are a deterministic function of (source video, one box), so the box
+    is the only thing that has to travel. Applying it here rather than shipping
+    re-encoded videos removes an entire lossy generation that the untouched
+    ``full_frame`` arm would not have paid -- which is the difference between a
+    control that can be read directly and one confounded with codec loss.
+    """
+    with manifest_path.open("r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    boxes: dict[str, Box | None] = {}
+    for row in manifest["rows"]:
+        box = row.get("box")
+        boxes[str(row["video_id"])] = Box(*box) if box else None
+    return boxes
+
+
 def extract_video_features(
     backbone,
     processor: VideoMAEImageProcessor,
@@ -150,6 +171,8 @@ def extract_video_features(
     fc_norm_weight: np.ndarray,
     fc_norm_bias: np.ndarray,
     fc_norm_eps: float,
+    variant: str = "full_frame",
+    box: Box | None = None,
 ) -> dict[str, np.ndarray]:
     """Both token-pooling modes for one video, from one forward pass per clip."""
     total_frames = read_total_frames(video_path)
@@ -165,6 +188,11 @@ def extract_video_features(
             frames = read_clip_frames(cap, start_frame, clip_length, frame_stride, total_frames)
             if not frames:
                 continue
+            if variant != "full_frame":
+                # Box ops are channel-agnostic (crop, edge-blend, grey pad), so applying
+                # them to the RGB frames the reader produced matches what the BGR video
+                # builder writes.
+                frames = apply_variant(frames, variant, box)
             legacy, corrected = encode_clip(
                 backbone=backbone,
                 processor=processor,
@@ -247,7 +275,15 @@ def main() -> None:
         "--variant",
         choices=VARIANTS,
         default="full_frame",
-        help="Which pixels these videos show; stamped into provenance.",
+        help="Which pixels to feed the model; stamped into provenance.",
+    )
+    parser.add_argument(
+        "--variant-manifest",
+        type=Path,
+        default=None,
+        help="build_video_variants manifest supplying one box per video. Required for "
+        "every variant except full_frame; the transform is applied in memory so the "
+        "controls decode the same source file as the main arm.",
     )
     parser.add_argument("--model-name", type=str, default="MCG-NJU/videomae-base-finetuned-kinetics")
     parser.add_argument("--clip-length", type=int, default=16)
@@ -263,6 +299,19 @@ def main() -> None:
     requests = build_requests(args.video_root, args.split_dir, args.splits)
     if not requests:
         raise SystemExit("No videos were found to process.")
+
+    boxes: dict[str, Box | None] = {}
+    if args.variant != "full_frame":
+        if args.variant_manifest is None:
+            raise SystemExit(f"--variant {args.variant} needs --variant-manifest to supply its boxes.")
+        boxes = load_variant_boxes(args.variant_manifest)
+        uncovered = [request.video_id for request in requests if request.video_id not in boxes]
+        if uncovered:
+            raise SystemExit(
+                f"{len(uncovered)} videos are missing from {args.variant_manifest} "
+                f"({uncovered[:5]}). A control arm covering fewer videos than the main arm "
+                "is not a paired comparison."
+            )
     requests = select_chunk(requests, args.num_chunks, args.chunk_index)
     if args.num_chunks > 1:
         print(f"Chunk {args.chunk_index + 1}/{args.num_chunks}: {len(requests)} videos")
@@ -302,6 +351,8 @@ def main() -> None:
             fc_norm_weight=fc_weight,
             fc_norm_bias=fc_bias,
             fc_norm_eps=fc_eps,
+            variant=args.variant,
+            box=boxes.get(request.video_id),
         )
         save_feature_bundle(output_path, request, bundle, provenance)
         written += 1
