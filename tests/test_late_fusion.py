@@ -246,3 +246,14 @@ class PairedBootstrapTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DuplicateIdTests(unittest.TestCase):
+    def test_a_repeated_video_id_is_refused_rather_than_scattered(self) -> None:
+        """The position map would collapse the repeat and leave one slot of the
+        reordered array unwritten -- uninitialised memory scored as a probability."""
+        left = split_predictions(["a", "a", "b"], [0.1, 0.2, 0.3], [0, 0, 1])
+        right = split_predictions(["a", "a", "b"], [0.4, 0.5, 0.6], [0, 0, 1])
+        with self.assertRaises(ValueError) as ctx:
+            align(left, right)
+        self.assertIn("Duplicate", str(ctx.exception))

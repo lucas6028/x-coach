@@ -99,6 +99,13 @@ def align(left: SplitPredictions, right: SplitPredictions) -> tuple[np.ndarray, 
             f"{len(only_right)} only in the second ({only_right[:5]})."
         )
 
+    # A repeated id would collapse in the position map below and leave one slot of the
+    # reordered array unwritten -- i.e. uninitialised memory scored as a probability.
+    if len(set(left.video_ids)) != len(left.video_ids):
+        seen: set[str] = set()
+        duplicates = sorted({vid for vid in left.video_ids if vid in seen or seen.add(vid)})
+        raise ValueError(f"Duplicate video ids in a single split cannot be aligned: {duplicates[:5]}")
+
     order = {video_id: index for index, video_id in enumerate(left.video_ids)}
     right_index = np.asarray([order[video_id] for video_id in right.video_ids])
     right_probabilities = np.empty_like(right.probabilities)
