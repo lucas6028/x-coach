@@ -76,6 +76,10 @@ Corrected VideoMAE 的 token pooling 與 clip aggregation 組合**沿用 Stage A
   `model_complexity=2`)→ `pose_feature_extraction` → grid runner 加 `--normalize-features`。
 - **判準:重抽後的 normalized pose-only combined balanced accuracy 必須落在
   `0.635 ± 0.010` 內。** 落在區間內,分母成立,所有 delta 以 0.635 這條線陳述。
+- 附帶:歷史表其實同時公布了三個 label mode 的 normalized pose-only 數字
+  (combined `0.635 ± 0.010`、knees_forward `0.615 ± 0.030`、knees_inward
+  `0.608 ± 0.054`),grid runner 預設就會跑完三個,所以重現檢核有**三個**獨立的靶,
+  不是一個。只有 combined 是門檻;另外兩個作為佐證一併報告。
 - 若落在區間外:**不得默默吸收進 delta**。改以重抽值為分母,並同時列出兩個數字與差距。
 - 附帶檢核:`tests/test_view_regression_corpus.py` 會用重抽出的那 5 個 test pose JSON
   對照凍結的 view baseline。verdict 若不動,就是重抽 recipe 與歷史一致的獨立證據。
