@@ -10,6 +10,12 @@ from pathlib import Path
 
 import numpy as np
 
+from src.video.classification_metrics import (  # noqa: F401 - re-exported for existing callers/tests
+    compute_metrics,
+    find_best_threshold,
+    sigmoid,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LABEL_MODES = ("combined", "knees_forward", "knees_inward")
 THRESHOLD_KINDS = (
@@ -239,78 +245,6 @@ def set_seed(seed: int) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def sigmoid(logits: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-logits))
-
-
-def compute_metrics(probabilities: np.ndarray, labels: np.ndarray, threshold: float = 0.5) -> dict[str, float]:
-    if probabilities.size == 0:
-        return {
-            "threshold": float(threshold),
-            "accuracy": 0.0,
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "tp": 0.0,
-            "fp": 0.0,
-            "tn": 0.0,
-            "fn": 0.0,
-            "specificity": 0.0,
-            "false_positive_rate": 0.0,
-            "balanced_accuracy": 0.0,
-            "negative_precision": 0.0,
-            "negative_recall": 0.0,
-            "negative_f1": 0.0,
-            "macro_f1": 0.0,
-            "youden_j": 0.0,
-        }
-
-    preds = (probabilities >= threshold).astype(np.int32)
-    labels = labels.astype(np.int32)
-
-    tp = int(((preds == 1) & (labels == 1)).sum())
-    fp = int(((preds == 1) & (labels == 0)).sum())
-    tn = int(((preds == 0) & (labels == 0)).sum())
-    fn = int(((preds == 0) & (labels == 1)).sum())
-
-    accuracy = float((preds == labels).mean())
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    specificity = tn / (tn + fp) if tn + fp else 0.0
-    false_positive_rate = fp / (fp + tn) if fp + tn else 0.0
-    balanced_accuracy = (recall + specificity) / 2
-    negative_precision = tn / (tn + fn) if tn + fn else 0.0
-    negative_recall = specificity
-    negative_f1 = (
-        2 * negative_precision * negative_recall / (negative_precision + negative_recall)
-        if negative_precision + negative_recall
-        else 0.0
-    )
-    macro_f1 = (f1 + negative_f1) / 2
-    youden_j = recall + specificity - 1
-
-    return {
-        "threshold": float(threshold),
-        "accuracy": accuracy,
-        "precision": float(precision),
-        "recall": float(recall),
-        "f1": float(f1),
-        "tp": float(tp),
-        "fp": float(fp),
-        "tn": float(tn),
-        "fn": float(fn),
-        "specificity": float(specificity),
-        "false_positive_rate": float(false_positive_rate),
-        "balanced_accuracy": float(balanced_accuracy),
-        "negative_precision": float(negative_precision),
-        "negative_recall": float(negative_recall),
-        "negative_f1": float(negative_f1),
-        "macro_f1": float(macro_f1),
-        "youden_j": float(youden_j),
-    }
-
-
 def collect_predictions(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
     logits_list: list[np.ndarray] = []
@@ -339,34 +273,6 @@ def collect_sample_predictions(
     probabilities, labels = collect_predictions(model, loader, device)
     video_ids = [sample.video_id for sample in samples]
     return video_ids, probabilities, labels
-
-
-def find_best_threshold(
-    probabilities: np.ndarray,
-    labels: np.ndarray,
-    objective: str,
-) -> tuple[float, dict[str, float]]:
-    if probabilities.size == 0:
-        return 0.5, compute_metrics(probabilities, labels, threshold=0.5)
-
-    candidate_thresholds = np.unique(
-        np.concatenate(
-            [
-                np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], dtype=np.float32),
-                probabilities.astype(np.float32),
-            ]
-        )
-    )
-
-    best_threshold = 0.5
-    best_metrics = compute_metrics(probabilities, labels, threshold=0.5)
-    for threshold in candidate_thresholds.tolist():
-        metrics = compute_metrics(probabilities, labels, threshold=float(threshold))
-        if metrics[objective] > best_metrics[objective]:
-            best_threshold = float(threshold)
-            best_metrics = metrics
-
-    return best_threshold, best_metrics
 
 
 def baseline_metrics(labels: np.ndarray, positive: bool) -> dict[str, float]:
