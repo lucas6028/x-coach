@@ -300,6 +300,17 @@ python scripts/video/run_stage_b_report.py \
 | Kaggle 抽取 × 3 | *(待執行,等 videos.zip 上傳)* |
 | 各臂訓練與證據表 | *(待執行)* |
 
+**Kaggle 執行的兩個小坑(都被 kernel 自帶的檢查擋下,沒有污染結果):**
+
+1. **staleness guard 用錯 token。** kernel 在跑之前會確認掛載到的 extractor 是 Stage B
+   那一版。Stage A 的檢查抓字串 `mean_pool_fc_norm`,但 Stage B 的抽取器引用的是**常數**
+   `MEAN_POOL_FC_NORM`,從未把值寫成小寫字面量——於是正確的樹被判成舊版而中止。
+   改抓 `MEAN_POOL_FC_NORM` 與 `--variant-manifest`。
+2. **`src.zip` 是舊的。** 記憶體內套用變體那次改動之後,只重建了 `meta.zip`,忘了重建
+   `src.zip`,所以 Kaggle 上掛的抽取器沒有 `--variant-manifest`。**這正是 guard 存在的
+   理由**:它在第二次執行就把這件事指名道姓地講出來,而不是讓 kernel 用舊程式跑完 5 小時
+   再產出一批無法辨識的特徵。
+
 已完成的前置檢核:
 
 - 抽取器 CPU smoke test 通過(3 支影片),`fc_norm` weight mean 0.6832 / bias mean 0.0083,
