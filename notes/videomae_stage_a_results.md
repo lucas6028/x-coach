@@ -212,6 +212,54 @@ corrected 較穩定。引用時應以 +0.08~0.12 這個區間、而非單一 +0.
 獲益更多(+0.144 vs +0.104)**,所以 §0 記的 crop 不對稱並沒有壓制修正效果——它仍是
 未來的 lever,但不是本次結論的威脅。一致性最弱的是 squats(5/9),平均仍為 +0.098。
 
+### 2.5 Skeleton-only 與 Skeleton + corrected VideoMAE(計畫矩陣的後兩列)
+
+計畫的 Vicon mocap `skeleton_features/` 目錄**在本機已不存在**(與舊的 `videomae_features/`
+一起消失),所以計畫引用的 0.702 無法直接重現。改用三個仍完整的 skeleton 目錄,
+以 `fuse_features.py` 做 early fusion(直接 concat,per-dim 正規化由訓練 fold 統計):
+
+| skeleton backbone | skeleton-only | + VideoMAE | delta | 為正 folds | p |
+| --- | --- | --- | --- | --- | --- |
+| RTMPose 2D(1188d)| 0.571 | 0.628 | **+0.057** | 9/9 | 0.004 |
+| MediaPipe(2970d)| 0.634 | 0.661 | +0.027 | 6/9 | 0.098 |
+| NLF 3D(2160d)| **0.668** | 0.657 | −0.012 | 2/9 | 0.164 |
+
+skeleton-only 的兩個數字**完全重現既有基線**(NLF 0.668、MediaPipe 0.634,見
+`nlf-direct-3d-recovers-depth`),所以這組比較的分母是可信的。
+
+**單看 RTMPose 那列(+0.057、9/9、p=0.004)很像「RGB context 提供了增量資訊」。
+把三列放在一起看,這個解讀站不住。**
+
+corrected VideoMAE 單獨是 0.657。每一列的 delta 幾乎正好等於
+「VideoMAE 單獨」與「該 skeleton 單獨」之間的差距:
+
+| skeleton | 與 VideoMAE 的差距 | 實測 delta |
+| --- | --- | --- |
+| RTMPose | +0.086 | +0.057 |
+| MediaPipe | +0.023 | +0.027 |
+| NLF 3D | −0.011 | −0.012 |
+
+也就是說,fusion 的結果**只是收斂到兩個 branch 中比較強的那一個**,並沒有超越它。
+決定性的數字:
+
+- 最好的 fusion = 0.661
+- VideoMAE 單獨 = 0.657
+- **NLF skeleton 單獨 = 0.668 —— 比每一個 fusion 都高**
+
+分類器在 RTMPose 那列做的事,不是「把 RGB 資訊加到 pose 上」,而是**繞過較弱的 pose
+branch、改用較強的 VideoMAE branch**。這正是計畫結果解讀表的那一列:
+「VideoMAE 有獨立訊號,但 pose 已捕捉同一資訊 → 保留選配或診斷 branch,不作預設輸入」。
+
+**必須連帶說明的限制:**
+
+1. **只測了 early fusion(concat)。** 計畫把 calibrated late fusion / gating 放在
+   Stage B,正是為了緩解弱 branch 稀釋強 branch。所以結論是「**這個** fusion 方法測不到
+   互補性」,不是「互補性不存在」。
+2. **維度不對等**:VideoMAE 只佔 concat 後的 21–39%,正規化能處理尺度、處理不了容量。
+3. **各一個 seed(42)**,fold-to-fold std 有報,無跨 seed 重複。
+4. **缺 Vicon mocap 那一臂**(計畫的 0.702 上限),需要重新產生才能補。
+5. NLF 那列 p=0.164 是「沒有證據顯示有增益」,不是「證明沒有增益」;n=9 fold 的檢定力有限。
+
 ---
 
 ## 3. 對照計畫的四個通過條件
@@ -238,9 +286,10 @@ corrected 較穩定。引用時應以 +0.08~0.12 這個區間、而非單一 +0.
 1. **這 0.657 有多少是動作品質、有多少是場景/視角捷徑?** REHAB24-6 是單一實驗室場景,
    本階段沒有 background-only 或 person-crop 對照——計畫把那個對照放在 Stage B,
    在此之前不能宣稱模型學到的是動作而非場景。
-2. **與 skeleton 是否互補?** 本階段只做 VideoMAE-only 與 null,未做
-   skeleton-only / skeleton+VideoMAE 的 fusion 對照(計畫實驗矩陣的後兩列)。
-   0.657 < 0.702 只說明單獨用比不上,不代表沒有增量資訊。
+2. ~~與 skeleton 是否互補?~~ —— 已於 §2.5 補跑。結論:**early fusion 測不到互補性**,
+   三個 skeleton backbone 的 fusion 全都只收斂到較強的那個 branch,且沒有一個 fusion
+   贏過 NLF skeleton 單獨的 0.668。改為待答:**calibrated late fusion / gating 是否能
+   測到 concat 測不到的互補性**(計畫已排在 Stage B),以及補回 Vicon mocap 那一臂。
 3. **cam18 的 center crop 切掉雙腳**仍未修。它現在是個「已知會損失資訊、但效果依然出現」
    的因素,修掉後 corrected 應該只會更好——這是 Stage B 前可低成本一試的 lever。
 4. ~~只有一個 seed~~ —— 已於 §2.3b 補跑 seed 7 與 1234,方向一致且都顯著。改為:
