@@ -41,6 +41,19 @@ MODULE_MOVEMENTS = {
     "shoulder_bridge.py": "Shoulder Bridge",
     "leg_abduction.py": "Leg Abduction",
     "torso_twist.py": "Torso Twist",
+    "jumping_jacks.py": "Jumping Jacks",
+}
+
+# Modules whose every rule is permanently silent or withdrawn, so they contain NO
+# `build_detection` call and therefore no `kg_query` for this gate to resolve. Listing them
+# explicitly keeps `test_every_module_is_covered` honest -- a new detector still cannot be added
+# without touching this file -- while letting `test_queries_were_actually_found` stay a real
+# assertion for every module that does emit detections.
+ALL_SILENT_MODULES = {
+    # Jumping Jacks: two rules permanently silent, three withdrawn, detector not registered.
+    # See src/pose/movements/jumping_jacks.py and
+    # docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md.
+    "jumping_jacks.py",
 }
 
 
@@ -101,8 +114,28 @@ class TestKgQueryCorpus(unittest.TestCase):
     def test_queries_were_actually_found(self) -> None:
         """A parser that silently returns [] would make the resolution test vacuously pass."""
         for filename in MODULE_MOVEMENTS:
+            if filename in ALL_SILENT_MODULES:
+                continue
             with self.subTest(module=filename):
                 self.assertGreater(len(_kg_queries(MOVEMENTS_DIR / filename)), 0)
+
+    def test_the_all_silent_exemption_is_earned_not_asserted(self) -> None:
+        """An exemption from the gate above must be a FACT about the module, not a way to hide a
+        parser that stopped working. A module is only allowed in `ALL_SILENT_MODULES` if it really
+        contains no `build_detection` call at all."""
+        for filename in ALL_SILENT_MODULES:
+            with self.subTest(module=filename):
+                source = (MOVEMENTS_DIR / filename).read_text(encoding="utf-8")
+                tree = ast.parse(source)
+                calls = [
+                    node
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "build_detection"
+                ]
+                self.assertEqual(calls, [])
+                self.assertEqual(_kg_queries(MOVEMENTS_DIR / filename), [])
 
     @unittest.skipUnless(
         GRAPH_FILE.exists(),

@@ -114,10 +114,13 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         # necessarily goes stale as the 16-movement programme lands one movement at a time. It
         # has already moved "Deadlift" -> "Row" -> "Band Pull Apart" -> "Bicep Curl" -> "Arm
         # Abduction" -> "Arm VW" -> "Sit-up" -> "Shoulder Bridge" -> "Leg Abduction" -> "Torso
-        # Twist" -> "Jumping Jacks"; only "High Knee" is left after this one, so when Jumping
-        # Jacks is implemented the LAST rotation is available and after that this test needs a
-        # different construction entirely. The `assertNotIn` is what turns that staleness into a
-        # loud failure instead of a silently vacuous test.
+        # Twist" -> "Jumping Jacks"; only "High Knee" is left after this one. NOTE that Jumping
+        # Jacks stays valid here even though its module now EXISTS: every one of its rules is
+        # silent or withdrawn, so `src/pose/movements/jumping_jacks.py` deliberately does not
+        # register, and this branch is exactly the behaviour that decision buys -- the app tells a
+        # Jumping Jacks user "coming soon" rather than running an analysis that can never report a
+        # fault. The `assertNotIn` is what turns staleness into a loud failure instead of a
+        # silently vacuous test.
         self.assertNotIn("Jumping Jacks", [d.name for d in registry.list_detectors()])
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
         pose_json_path = self._pose_json_path()

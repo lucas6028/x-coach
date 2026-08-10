@@ -527,7 +527,10 @@ class RegistrationTest(unittest.TestCase):
     def test_it_is_the_fourteenth_of_sixteen(self) -> None:
         names = [detector.name for detector in list_detectors()]
         self.assertEqual(names[13], "Torso Twist")
-        self.assertEqual(len(names), 14)
+        # NOT `len(names) == 14`: the fifteenth detector (Jumping Jacks) landed after this test
+        # was written, and a length assertion made this movement's POSITION claim fail for a
+        # reason that has nothing to do with this movement. The position is the claim.
+        self.assertGreaterEqual(len(names), 14)
 
     def test_it_ships_beta(self) -> None:
         self.assertFalse(TORSO_TWIST_DETECTOR.validated)

@@ -2259,6 +2259,137 @@ Rep phases: **closed (feet together, arms at sides) → open (feet spread wide, 
 
 ---
 
+---
+
+> **UPDATE (2026-08-10, Jumping Jacks implemented — 15/16) — NONE OF THIS SECTION'S FIVE JUMPING
+> JACKS RULES SHIPS LIVE, AND THE LABELED DATA DECIDED IT. THIS IS THE FIRST MOVEMENT IN THE
+> PROGRAMME WHOSE DETECTOR IS WRITTEN, TESTED, MEASURED AND DELIBERATELY NOT REGISTERED.**
+> Design spec: `docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md`. Module:
+> `src/pose/movements/jumping_jacks.py`. Tests: `tests/test_jumping_jacks.py` (32 cases).
+> Validation: `notes/jumping-jacks-rule-validation.md`, harness
+> `src/egoexo/jumping_jacks_validation.py` + `scripts/egoexo/run_jumping_jacks_validation.py`
+> (18 cases). `jj_incomplete_leg_rom` and `jj_incomplete_arm_rom` are registered permanently
+> silent; `jj_knee_valgus_landing`, `jj_stiff_landing` and `jj_landing_asymmetry` are withdrawn.
+>
+> - **THE VARIANT FINALLY MATCHES AND THE LABELS JUDGE DIFFERENT FAULTS — A SIXTH REASON FOR
+>   `validated=False`, WHICH THE TORSO TWIST BLOCK ABOVE SAYS "STAYS AT FIVE".** EgoExo-Fitness
+>   carries **121 judged Jumping Jacks actions**, the largest judged class in that dataset, with
+>   per-criterion True/False verification by 2+ annotators — and it is the right exercise. Its
+>   eight criteria and this section's five rules **overlap in exactly one pair**
+>   (`jj_incomplete_leg_rom` ↔ "Perform the jump by opening and closing your feet", the
+>   most-failed criterion at 9.9%). Nothing in the corpus judges valgus, landing stiffness,
+>   overhead reach or asymmetry; nothing in this section models arm tension, back-driven arm
+>   return, calf relaxation or head steadiness. Sit-up's reason does not apply and folding this
+>   into it would be the tidier, wrong answer.
+>
+> - **`jj_incomplete_leg_rom` HAD MORE GOING FOR IT THAN ANY RULE IN GROUP F AND THE DATA STILL
+>   SILENCED IT.** A primary sentence naming the exercise, a KG node grounded in *this* exercise
+>   (the seeding script's "foot split 10%" reproduces from the labels as 9.9%), human
+>   corroboration that the fault is real, and a roll-, mirror-, scale- and obliquity-invariant
+>   metric. Replayed through the real `run_detector` over the 11 reachable judged actions — 31
+>   (action, camera) pairs, 91 scored repetitions, **every action judged correct on that exact
+>   criterion** — this section's 1.3 cut fires on **79.1% of scored repetitions** (90.3% of
+>   pairs) against a median widest stance of **1.163 shoulder widths**. The correct population
+>   sits below the cut. Silenced rather than moved, `abd_insufficient_rom`'s treatment.
+>   **Its upgrade path is a DOWNLOAD, which is new for a silent rule**: 12 of the 121 actions are
+>   judged FAILED on this criterion, so a cut could be read off human judgement — but the missing
+>   `.ac` archive part leaves 11 reachable and all 11 negative.
+>
+> - **`jj_knee_valgus_landing` IS WITHDRAWN BY A ZERO-PARAMETER CONTROL, AND THE DESIGN DOC
+>   CHANGED ITS OWN MIND.** It was drafted shipping this rule: `notes/fit3d_view_dependence_
+>   summary.md` ranks `knee_width_ratio` the **most view-robust cue this project has ever
+>   measured** (MAE 0.02 against the 0.82 cut, r=0.90). That is true and it is about the wrong
+>   thing. In a wide side-straddle the legs splay from a pelvis that does not widen, so a knee
+>   sits partway along the hip→ankle line and its separation is *necessarily* smaller than the
+>   ankles' — with no valgus at all. Replacing both knees with **perfectly straight-limb
+>   positions** and recomputing over 2 353 open-phase frames: the aligned knees fall below 0.82 on
+>   **68.5%** of frames against **79.4%** for the real ones (medians 0.810 vs 0.769) — and the
+>   JOINT counts, because two marginal rates are not a decomposition, are **63.2% fires with a
+>   straight limb too, 16.2% needed real deviation, 5.2% the straight limb would condemn and the
+>   real knees do not**. **Four firings in five need no inward deviation whatsoever.** The rule
+>   reads the movement, not the fault.
+>   Pinned independently of the corpus by `StanceGeometryConfoundTest`, so it does not rest on
+>   EgoExo's 456×256 frames. What would work — knee deviation from its own hip→ankle line — is
+>   recorded and **not built**, because no source states a threshold for it.
+>
+> - **`jj_stiff_landing`'s CITED PAPER'S OWN STIFF CONDITION WOULD NOT FIRE IT.** DeVita & Skelly
+>   (1992, PMID 1548984), re-fetched: a 59 cm drop landing, soft and stiff conditions "averaged
+>   117 and 77 degrees of knee flexion". This section's heuristic flags a knee angle above ~160°,
+>   i.e. **fewer than 20° of bend** — so the very condition the paper measured larger GRFs on
+>   (77° of bend, a knee angle of ~103°) sits nowhere near the cut, and 160 appears in the paper
+>   nowhere. This section's further claim that "the ≥/<90° soft/stiff convention originates here"
+>   is not in the abstract either. Second failure: the 2-D knee angle is measured **view-corrupted
+>   with a systematic +41.2° bias toward 180°** — the direction this rule fires in. The bound is
+>   stated rather than glossed: the bias cannot exceed `180° − θ_true`, so it cannot manufacture a
+>   fault from a fully-extended landing, but it can open a moderately absorbed 140° landing past
+>   the cut, which is **precisely the band the rule must discriminate in**.
+>
+> - **AN EIGHTH DISTINCT CITATION FAILURE MODE: A COUNTER-INDICATION INSIDE THE SUPPORTING
+>   SOURCE.** `jj_incomplete_arm_rom` needs **no threshold at all** — its criterion is a landmark
+>   comparison — and its metric is clean, so neither of the usual reasons for silence applies. It
+>   is silent because `data/rag/docs/jumping_jacks_wiki.txt`, the only source that states its
+>   target ("the hands go overhead"), records four sections later that half-jacks "were created to
+>   prevent rotator cuff injuries, which have been linked to the repetitive movements of the
+>   exercise". Nothing is misquoted — this section noticed it and wrote it into the rule's own
+>   rationale while still proposing the rule. It is a source that cautions against the range of
+>   motion its rule would coach users toward.
+>
+> - **THE KG'S THREE JUMPING JACKS FAULTS ARE SEEDED FROM TWO EXERCISES BLENDED, AND THE BLEND
+>   REPRODUCES TO THE DECIMAL.** `scripts/knowledge/stub_general_movements_v3.py:133` grounds this
+>   movement in "Jumping/Clap Jacks: arm tension 8-27%, foot split 10%". `Clap Jacks` is a
+>   separate EgoExo class of 74 judged actions — "clap your hands while jumping back and forth
+>   with **alternating feet**", no side-straddle. Recomputed per class: arm tension is **8.3%** on
+>   Jumping Jacks and **27.0%** on Clap Jacks, i.e. the two ends of a range spanning two
+>   exercises, while "foot split 10%" is this exercise alone (9.9%). Torso Twist found a node
+>   describing the *wrong* movement; this is the milder cousin — a **blend**, of which the one
+>   correct component is the node the silent ROM rule uses. And the negative filter holds a third
+>   time: the two rules with no node at all are two of the three withdrawn.
+>
+> - **`.ab` HAD NEVER BEEN TRIED, AND IT DOUBLES THE RECOVERABLE EgoExo CORPUS.** Sit-up recorded
+>   that `frames_open`'s `.ac` part is missing and decoded `.aa` alone, reaching 3 complete
+>   records; Shoulder Bridge inherited that set and found only 2 of its 77 matching actions inside
+>   it. `.aa`+`.ab` is **also** a contiguous gzip prefix and decodes roughly twice as far: **6
+>   complete records plus a partial 7th** (`yT4RK3` upgraded from partial to complete), holding 11
+>   judged Jumping Jacks actions with 3 simultaneous exo cameras each. A recipe correction, not a
+>   new capability.
+>
+> - **THE PIPELINE IS THE STRONGEST RESULT IN GROUP F, WHICH IS WHAT ISOLATES THE FAILURE.** On 31
+>   (action, camera) pairs of real footage of the right exercise: median validity **1.000**, **0**
+>   pairs on the whole-clip fallback, **255** repetitions found. The validity gate, the phases, the
+>   landing-window substitution and the segmentation all work; two numbers do not.
+>
+> - **THE FRAMEWORK KNOB RESERVED FOR THIS MOVEMENT BY NAME IS NOT NEEDED BY IT.** `base.py:55`
+>   says `min_rep_seconds` must be lowered for "jumping jacks, high knees". Re-segmenting all 31
+>   pairs at a 0.15 s floor finds **exactly the same 255 repetitions**; the fastest performer holds
+>   1.14 Hz (0.88 s/rep) against a 0.40 s floor, and even the RAG doc's Guinness record (2.27 Hz)
+>   clears it. Measured non-circularly, by differencing two segmentations rather than by reading
+>   the shortest returned window. The comment is left alone because it also names High Knee.
+>
+> - **CAMERA PLACEMENT IS NOT THIS MOVEMENT'S PROBLEM, WHICH IS A FIRST.** Three simultaneous exo
+>   cameras: median cross-camera spread 0.107 shoulder widths on the stance ratio and 0.067 on the
+>   knee ratio, against cut-to-population distances of 0.137 and 0.051. Sit-up had a 20° cut
+>   against a 28.2° spread and Torso Twist a 15° cut against a p90 spread of 15.7°; here the
+>   thresholds are wrong for a reason the cameras cannot explain. (2 of 10 actions would still have
+>   received a different verdict depending on which camera filmed them.)
+>
+> - **NO VIEW GATE AND NO VIEW DISCOUNT, FOR THE FIFTH TIME — AND HERE IT COSTS NOTHING.** Leg
+>   Abduction measured the estimator's labels systematically inverted on an upright subject, and a
+>   jumping jack is the same regime. Unlike the previous four, that is not a limitation here: both
+>   metrics are ratios of two frontal-plane widths, which an oblique camera compresses together, so
+>   the obliquity cancels to first order rather than needing a label.
+>
+> - **THE DETECTOR IS NOT REGISTERED, AND THAT IS THE HONEST STATE.** Registration is what makes a
+>   movement analyzable in the app; with every rule silent or withdrawn it would offer an analysis
+>   that can never report a fault while wearing the Beta tag that says faults are possible.
+>   `registry.py` carries the reason in place of the import. Everything that works is kept, so
+>   waking the movement is a threshold plus one line.
+>
+> - **NO THRESHOLD MOVED.** The 1.3 stays 1.3 in the module and the 0.82 stays in
+>   `squat.rule_knees_inward`. The measured distributions would have made either trivial to fit,
+>   which is exactly why neither was.
+
+---
+
 ### High Knee
 
 Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) → foot strike (stance) → alternate to opposite knee-up**. Single-leg support alternates each stride. Landmarks: nose 0, shoulders 11/12, hips 23/24, knees 25/26, ankles 27/28.
