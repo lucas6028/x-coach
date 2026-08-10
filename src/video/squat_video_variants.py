@@ -263,6 +263,24 @@ def write_video(frames: list[np.ndarray], output_path: Path, fps: float) -> None
     partial_path.replace(output_path)
 
 
+def verify_variant_video(output_path: Path, expected_frames: int) -> int | None:
+    """Return the output's frame count when it disagrees with the source, else None.
+
+    Runs over the whole tree after a build. Six of the first 837 person-crop videos
+    were 0-frame stubs ("moov atom not found") left by interrupted runs before writes
+    became atomic, and the resume path skips whatever already exists -- so without
+    this check they would have reached the extractor as finished variants.
+    """
+    if not output_path.exists():
+        return 0
+    cap = cv2.VideoCapture(str(output_path))
+    try:
+        frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    finally:
+        cap.release()
+    return None if frames == expected_frames else frames
+
+
 def build_variant_video(
     video_path: Path,
     pose_path: Path,

@@ -18,6 +18,7 @@ from src.video.squat_video_variants import (
     read_all_frames,
     expand_box,
     letterbox_to_square,
+    verify_variant_video,
     write_video,
 )
 
@@ -283,3 +284,28 @@ class AtomicWriteTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     write_video([np.zeros((8, 8, 3), dtype=np.uint8)] * 3, out, 30.0)
             self.assertFalse(out.exists())
+
+
+class VerifyVariantTests(unittest.TestCase):
+    def test_a_matching_video_reports_no_problem(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "v.mp4"
+            write_video([np.zeros((8, 8, 3), dtype=np.uint8)] * 4, out, 30.0)
+            self.assertIsNone(verify_variant_video(out, 4))
+
+    def test_a_truncated_video_reports_its_actual_count(self) -> None:
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "v.mp4"
+            write_video([np.zeros((8, 8, 3), dtype=np.uint8)] * 4, out, 30.0)
+            self.assertEqual(verify_variant_video(out, 7), 4)
+
+    def test_a_zero_byte_stub_is_reported_rather_than_crashing(self) -> None:
+        """The exact shape of the six corrupt files an interrupted build left behind."""
+        with TemporaryDirectory() as tmp:
+            out = Path(tmp) / "v.mp4"
+            out.write_bytes(b"")
+            self.assertEqual(verify_variant_video(out, 10), 0)
+
+    def test_a_missing_output_counts_as_zero_frames(self) -> None:
+        with TemporaryDirectory() as tmp:
+            self.assertEqual(verify_variant_video(Path(tmp) / "nope.mp4", 5), 0)

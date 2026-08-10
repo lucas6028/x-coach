@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.video.squat_dataset import SPLIT_NAMES, SQUAT_LABELED_ROOT, load_json_list
-from src.video.squat_video_variants import VARIANTS, build_variant_video
+from src.video.squat_video_variants import VARIANTS, build_variant_video, verify_variant_video
 
 
 def find_video_path(video_root: Path, video_id: str) -> Path | None:
@@ -90,12 +90,30 @@ def main() -> None:
             if index % 100 == 0:
                 print(f"  {index}/{len(work)} done")
 
+    print("Verifying every output against its source frame count...")
+    corrupt: list[tuple[str, int]] = []
+    for video_id, split_name, _, pose_path, output_path in work:
+        with pose_path.open("r", encoding="utf-8") as f:
+            expected = int(json.load(f)["metadata"]["total_frames"])
+        found = verify_variant_video(output_path, expected)
+        if found is not None:
+            corrupt.append((video_id, found))
+            output_path.unlink(missing_ok=True)
+
     fallbacks = [row["video_id"] for row in rows if row.get("pose_detected") is False]
     manifest_output.parent.mkdir(parents=True, exist_ok=True)
     with manifest_output.open("w", encoding="utf-8") as f:
         json.dump({"variant": args.variant, "n_videos": len(rows), "fallbacks": fallbacks, "rows": rows}, f, indent=2)
 
     print(f"Wrote {len(rows)} videos and {manifest_output}")
+    if corrupt:
+        preview = ", ".join(f"{video_id}({frames} frames)" for video_id, frames in corrupt[:10])
+        raise SystemExit(
+            f"{len(corrupt)} outputs did not match their source frame count and were deleted: "
+            f"{preview}\n"
+            "Re-run this command to rebuild them -- a variant off the source's frame "
+            "grid samples different clips and silently breaks the pairing."
+        )
     if fallbacks:
         print(
             f"WARNING: {len(fallbacks)} videos had no visible pose and were copied unmodified: "
