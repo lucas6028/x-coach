@@ -235,18 +235,25 @@ python -m src.pose.pose_feature_extraction \
   --split-dir     data/Fitness-AQA/Squat/Labeled_Dataset/Splits \
   --output-dir    data/Fitness-AQA/Squat/Labeled_Dataset/pose_features
 
-# 3. 控制組變體影片(需要步驟 1 的 pose)
-python scripts/video/build_video_variants.py --variant person_crop     --jobs 6
-python scripts/video/build_video_variants.py --variant background_only --jobs 6
-python scripts/video/build_video_variants.py --variant reencoded       --jobs 6   # 只在控制組下降時才需要
+# 3. 控制組的 box(需要步驟 1 的 pose)。變體影片本身只是可目視檢查的產物,
+#    真正被消費的是 manifest.json 裡的 box——抽取器在記憶體中套用。
+python scripts/video/build_video_variants.py --variant person_crop     --jobs 4
+python scripts/video/build_video_variants.py --variant background_only --jobs 4
 
-# 4. VideoMAE 抽取(Kaggle,每個變體一個 kernel;本機 CPU 實測 5.3 s/clip ⇒ 每個變體 7–10 h)
+# 4. VideoMAE 抽取(Kaggle,每個臂一個 kernel;本機 CPU 實測 5.3 s/clip ⇒ 每個臂 7–10 h)
+#    只需上傳原始 videos.zip(0.97 GB);box 隨 src 資料集的 meta.zip 一起走。
 #    上傳必須從資料集目錄「裡面」執行:kaggle CLI 會把 -p 的相對路徑
 #    直接拼進暫存檔名,路徑含斜線就會 [Errno 2]。
 #    (PowerShell)  Push-Location .kaggle_tmp/fitaqa_videomae_input
 #                  uv run --with kaggle kaggle datasets create -p .
 #                  Pop-Location
-#    kernel:       uv run --with kaggle kaggle kernels push -p .kaggle_tmp/fitaqa_videomae_extract
+#    kernels:      uv run --with kaggle kaggle kernels push -p .kaggle_tmp/fitaqa_videomae_extract
+#                  uv run --with kaggle kaggle kernels push -p .kaggle_tmp/fitaqa_videomae_extract_crop
+#                  uv run --with kaggle kaggle kernels push -p .kaggle_tmp/fitaqa_videomae_extract_bg
+#    本機等價指令(不經 Kaggle):
+#      python scripts/video/run_videomae_feature_extraction.py --variant person_crop \
+#        --variant-manifest data/Fitness-AQA/Squat/Labeled_Dataset/videos_person_crop/manifest.json \
+#        --output-dir data/Fitness-AQA/Squat/Labeled_Dataset/videomae_raw_person_crop
 
 # 5. 物化四臂 + 稽核(稽核不過就不准往下跑)
 python scripts/video/materialize_videomae_features.py --raw-dir <解壓後的 videomae_raw>
@@ -285,16 +292,20 @@ python scripts/video/run_stage_b_report.py \
 
 | 項目 | 狀態 |
 | --- | --- |
-| pose 重抽 | *(進行中)* |
-| pose 特徵 / 分母門檻 | *(待執行)* |
-| 變體影片 | *(待執行)* |
-| Kaggle 抽取 × 3 | *(待執行)* |
+| pose 重抽 | **完成**:1623/1623,0 失敗,全數通過完整性檢查 |
+| pose 特徵 | **完成**:1623/1623,654 維 |
+| 分母門檻 | **完成,未通過**(見 §2.1);分母改為 0.650 |
+| 控制組 box | **完成**:person_crop 與 background_only 各 1623,0 個無 pose 的退回、0 個影格數不符 |
+| Kaggle 抽取 × 3 | *(待執行,等 videos.zip 上傳)* |
 | 各臂訓練與證據表 | *(待執行)* |
 
 已完成的前置檢核:
 
 - 抽取器 CPU smoke test 通過(3 支影片),`fc_norm` weight mean 0.6832 / bias mean 0.0083,
   與 Stage A 在本機與 Kaggle 上量到的值**完全一致**。
+- 變體影片與來源影片的影格數/fps 逐支相同(125 / 30.00),所以四個臂的 clip start
+  完全一致。建構過程中有 6 支被中斷寫壞(0 影格),由新增的驗證步驟抓出並刪除重建——
+  這也是把寫檔改成原子性的原因。
 - 物化四臂 + 稽核鏈路通過:稽核在只有 3/1623 覆蓋率時正確地以 FAIL 結束。
 - MediaPipe 與封存的 pose JSON 逐值相同(見 §0.3)。
 
