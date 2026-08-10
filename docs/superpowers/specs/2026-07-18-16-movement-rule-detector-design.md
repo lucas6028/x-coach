@@ -2120,7 +2120,7 @@ Rep phases: **center (braced setup) → rotate to side A (peak) → return throu
 >   **even in θ**, so it is blind exactly where the rule must discriminate and cannot tell one side
 >   from the other. This section's remedy for the second defect, the left–right x-ordering flip,
 >   requires **>90°** of rotation and the true relative trunk twist measured here peaks at a
->   **median 44.9° per repetition** (max 58.8), so the flip never happens.
+>   **median 44.9° per repetition** (p90 54.1, max 58.8), so the flip never happens.
 >   **Measured with a PERFECT detector** — Fit3D mocap ground truth projected through the real
 >   calibration, 8 subjects × 4 cameras × 45 repetitions of `standing_ab_twists`, so every error is
 >   projection alone: per-frame MAE **20.4°** on the shoulder line and **17.2°** on the hip line
@@ -2128,11 +2128,12 @@ Rep phases: **center (braced setup) → rotate to side A (peak) → return throu
 >   proxy is **anti-correlated with the truth on 35% of repetitions**. Carried to the decision the
 >   rule makes, at this section's own 0.6 cut: truth fires 64/180, proxy fires 86/180, **disagreeing
 >   on 30/180 = 16.7%**, of which **26 are the proxy firing where the truth does not**. The rank
->   correlation is 0.877, so the honest reading is that **the proxy is biased, not noisy** — and the
+>   correlation is 0.876, so the honest reading is that **the proxy is biased, not noisy** — and the
 >   bias runs toward false positives. Small-angle resolution against a real floor: one degree of
->   rotation moves the shoulder width by 0.00016 of the image width at 0–15° and 0.00102 at 45–75°,
->   while MediaPipe's own frame-to-frame width jitter over 30 REHAB24-6 videos is 0.000242 — **one
->   frame of jitter is worth ~1.5° near the centre and ~0.24° near the peak**.
+>   rotation moves the shoulder width by 0.00016 of the image width at 0–15° and 0.00109 at 45–75°,
+>   while MediaPipe's own frame-to-frame width movement over all 130 REHAB24-6 cached-landmark
+>   videos is 0.000323 — **one frame of that is worth ~2.0° near the centre and ~0.30° near the
+>   peak**. Harness: `scripts/fit3d/run_rotation_proxy_fidelity.py --jitter`.
 >   *Variant caveat, stated:* `standing_ab_twists` has a FREE pelvis, so the truth *distribution*
 >   of the ratio does not transfer to a seated twist with the hips pinned. What transfers is the
 >   projection geometry, and no threshold was taken from this corpus.
@@ -2173,10 +2174,21 @@ Rep phases: **center (braced setup) → rotate to side A (peak) → return throu
 >
 > - **WHAT CAMERA PLACEMENT ALONE COSTS THE SHIPPED RULE, MEASURED.** Four simultaneous Fit3D
 >   cameras, mocap-2D: the **absolute** trunk-thigh angle is robust (cross-camera spread of the
->   per-rep median **4.5°**, p90 10.6) but the **peak deviation the rule scores** is not (**13.5°**,
->   p90 25.0, max 30.5) — a maximum over a window picks up the worst projection excursion, so the
->   derived quantity is **3× less camera-robust than the angle it is built from**, and the spread is
->   the size of the 15° cut. Transferable figure: the spread is ~0.30 of the measured deviation.
+>   per-rep median **4.5°**, p90 10.6) while the **signed sag the rule scores** — median value only
+>   6.3° on that corpus — has a spread of **5.1°, p90 15.7°**, so a maximum over a window is less
+>   camera-robust than the angle it is built from and its p90 disagreement is the size of the 15°
+>   cut. Caveat that binds hardest: `standing_ab_twists` moves the trunk mostly in FORWARD FLEXION,
+>   the direction this rule does not score, so these figures bound the sag direction only weakly.
+>
+> - **AN UNSIGNED DEVIATION FROM A SETUP BASELINE IS ACTIVELY INVERTED, FOR THE SECOND TIME IN THIS
+>   REGISTRY.** This section says the trunk angle "deviates from baseline by > ~15°", and the first
+>   implementation took that literally. `trunk_thigh_angle_deg` is monotone in sag, so an `abs()`
+>   fires on a twister who TIGHTENED: measured on the shipped path, a subject setting up loose at
+>   95° and tightening to 50° was reported "Braced Torso Lost" at **severity 1.0**. The baseline
+>   makes that the ordinary case rather than an edge one, because `setup` is the frames BEFORE the
+>   subject braces. `pushup_head_drop` records the identical finding in §8 of this document; the
+>   shipped rule is directional, which introduces no new number and fires on a strictly smaller
+>   set. Every fixture ramped in the sag direction, so no green test could have caught it.
 >
 > - **THE SETUP-BASELINE DEFECT, MEASURED AND ATTRIBUTED.** Effective threshold **18.0°** against a
 >   nominal 15.0 (1.20×) through the real `run_detector` — and **none of it is Row's trimming**,
@@ -3112,7 +3124,11 @@ documented in-code:
 - **What DID run, and what it is allowed to conclude.** Fit3D's twist data was used for a
   **sensing-fidelity** pass — mocap 3-D ground truth projected through the real per-camera
   calibration, i.e. a *perfect detector*, measuring how much true axial rotation survives into
-  this section's 2-D proxy. That is **projection geometry**, which is about cameras and transfers
+  this section's 2-D proxy. It ships as `src/fit3d/rotation_proxy_fidelity.py` +
+  `scripts/fit3d/run_rotation_proxy_fidelity.py`, with its pure helpers unit-tested above the
+  corpus banner, so every number quoted above is re-runnable — the Row residual recorded earlier
+  in this section is exactly the failure of not doing that. That is **projection geometry**,
+  which is about cameras and transfers
   across the variant mismatch; it withdrew `tt_lumbar_rotation_dominant` (16.7% decision
   disagreement at the section's own cut, 26 of 30 flips being false positives) and quantified the
   shipped rule's camera sensitivity. **No threshold was taken from that corpus**, because a

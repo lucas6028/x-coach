@@ -2,7 +2,9 @@
 
 Fourteenth of sixteen, and the one that opens Group F. Parent spec:
 `docs/superpowers/specs/2026-07-18-16-movement-rule-detector-design.md`, Group F. Module:
-`src/pose/movements/torso_twist.py`. Tests: `tests/test_torso_twist.py`.
+`src/pose/movements/torso_twist.py`. Tests: `tests/test_torso_twist.py`. Measurement harness:
+`src/fit3d/rotation_proxy_fidelity.py` + `scripts/fit3d/run_rotation_proxy_fidelity.py`, helpers
+tested in `tests/test_rotation_proxy_fidelity.py`.
 
 **Outcome: one rule ships, one is registered permanently silent, two are withdrawn — and the two
 withdrawals are decided by things that are not opinions: a projection measurement against 3-D
@@ -188,6 +190,13 @@ test_the_brace_angle_does_not_move_when_the_subject_only_twists` asserts the con
 asserting it away: with the trunk posture fixed and only the shoulder line foreshortened, the
 midpoint construction is unmoved to 1e-6 and Sit-up's construction moves by degrees.
 
+One difference the comparison should not hide: this module's angle is built from `midpoint(...,
+dims=2)`, i.e. **2-D**, whereas Sit-up's `angle_degrees` consumes `dims=3` and therefore also
+MediaPipe's estimated `z`. The roll- and mirror-invariance argument holds either way, and 2-D is
+the better choice here because `z` is the axis this movement's rotation lives on — including it
+would feed the estimator's weakest coordinate straight into the quantity the midpoint construction
+exists to keep rotation *out* of.
+
 ### 4.2 The twist offset: a translation, not a projected width
 
 `twist_offset_ratio` measures how far the clasped hands have travelled across the body **along the
@@ -263,7 +272,37 @@ ambiguity. `ohp_forward_head` withdrew its bar-path sub-criterion for the same r
 because the id is the join key between the spec, the registry and stored analyses. The id is
 unchanged and the user-facing `fault_name` says "Braced Torso Lost" and nothing about rounding.
 
-### 5.3 What it is blind to, and it is the whole verdict for that user
+### 5.3 The deviation is SIGNED, and the unsigned version fired on the opposite of the fault
+
+The parent spec says "deviates from baseline by > ~15°", and the first implementation took that
+literally with an `abs()`. That is not merely non-directional but **actively inverted**:
+`trunk_thigh_angle_deg` is monotone in sag — larger means the torso has laid further back toward
+the floor, smaller means the subject is sitting *up* — so an unsigned deviation flags a twister
+who **tightened** their posture.
+
+**Measured on the shipped path before the fix:** a subject setting up loose at 95° and then
+tightening to 50° for the swing was reported *"Braced Torso Lost"* at **severity 1.0**, quoting a
+45° deviation.
+
+**And the baseline makes that the ordinary case, not an edge one.** `setup` is the window's first
+15% — the frames *before* the subject braces. Set up loose → brace → swing is a normal way to
+perform the movement and produces exactly a large positive tightening.
+
+This is `pushup_head_drop`'s finding arriving by a third route; the parent spec §8 states it in so
+many words ("a baseline on the unsigned angle is not merely non-directional but *actively
+inverted*"). There it forced a signed metric into the metric layer. Here the sign already lives in
+the comparison, so the fix introduces **no new number** and fires on a strictly smaller set. Roll-
+and mirror-invariance are untouched, because the sign comes from the baseline comparison rather
+than from the frame.
+
+**It was not caught by the green suite, and the reason is worth naming:** every fixture ramped
+`95.0 + deviation`, so the rule tests *and* `EffectiveThresholdTest` were blind to the direction
+by construction. The mirror test now exists —
+`test_a_twister_who_TIGHTENS_is_not_told_they_lost_the_brace`, paired with
+`test_it_still_fires_on_the_sag_direction_so_the_test_above_is_not_vacuous` so the silence is not
+itself vacuous.
+
+### 5.4 What it is blind to, and it is the whole verdict for that user
 
 A baseline measures **change**, not **posture**. A twister who sets up already collapsed and holds
 that position for the entire repetition is never flagged. Push-up recorded this cost for
@@ -375,6 +414,13 @@ AUC-against-correctness validation but *can* support the 2-D-cue-vs-3-D-truth fi
 this project has run elsewhere, and called that "future work, not blocked on absent data". This is
 where it is paid.
 
+**Harness:** `src/fit3d/rotation_proxy_fidelity.py`, runner
+`scripts/fit3d/run_rotation_proxy_fidelity.py --jitter`, pure helpers tested in
+`tests/test_rotation_proxy_fidelity.py`. Every number in §8.1 and §8.2 is that script's output;
+re-run it before editing either section. It exists because a number in a citation of record whose
+script nobody can re-run is a defect this project has already logged once — the Row residual in
+the parent spec.
+
 **Corpus and construction.** Fit3D `standing_ab_twists`, 8 train subjects × 4 cameras × 45
 repetitions = 180 (subject, camera, repetition) records. The 2-D side is **mocap-2D**: the mocap
 ground truth projected through the real per-camera calibration, i.e. a **perfect detector**. Every
@@ -398,30 +444,33 @@ the whole signal (19.7°).
 0.6 cut:
 
 ```
-TRUE  hip/shoulder ratio : median 0.44   p10 0.18   p90 1.36
-PROXY hip/shoulder ratio : median 0.58   p10 0.42   p90 1.05
-rank corr(true, proxy)   : 0.877
+TRUE  hip/shoulder ratio : median 0.44
+PROXY hip/shoulder ratio : median 0.58
+rank corr(true, proxy)   : 0.876
 
 truth fires   64/180 (35.6%)
 proxy fires   86/180 (47.8%)
 DISAGREE      30/180 (16.7%)   — 26 proxy-fires-truth-does-not, 4 the other way
 ```
 
-**The honest qualifier**, because 0.877 is high: the proxy is **not noise, it is biased**. It
+**The honest qualifier**, because 0.876 is high: the proxy is **not noise, it is biased**. It
 inflates, and the inflation runs almost entirely toward false positives. With a perfect detector.
+`DecisionAgreementTest::test_a_high_rank_correlation_does_not_imply_agreement` pins the reason
+both numbers are reported and neither is allowed to stand for the other.
 
 **The small-angle resolution, against a real noise floor.** On the Fit3D projections one degree of
 true rotation moves the shoulder width by **0.00016 of the image width** in the 0–15° band and
-**0.00102** in the 45–75° band. MediaPipe's own frame-to-frame jitter of the shoulder width, over
-30 REHAB24-6 videos, is **0.000242 of the image width** (median; 0.000078 residual against a
-15-frame median). One frame of jitter is therefore worth about **1.5° of rotation near the braced
-centre and 0.24° near the peak** — a tenfold difference in resolution across the range the rule
-must span, exactly as `d/dθ (width·cos θ) = width·sin θ` predicts.
+**0.00109** in the 45–75° band. MediaPipe's own frame-to-frame movement of the shoulder width,
+over **all 130** REHAB24-6 cached-landmark videos, is **0.000323 of the image width** (median;
+the hip width, the narrower and decisive line, moves 0.000191). One frame of that movement is
+therefore worth about **2.0° of rotation near the braced centre and 0.30° near the peak** — a
+sevenfold difference in resolution across the range the rule must span, exactly as
+`d/dθ (width·cos θ) = width·sin θ` predicts.
 
 **And the sign is never recoverable in this movement.** The spec's remedy for the even symmetry is
 the left–right x-ordering flip, which requires more than 90° of rotation. The true relative trunk
-twist measured on this corpus peaks at a **median of 44.9° per repetition** (p10 29.3, p90 55.0,
-max 58.8). The flip never happens.
+twist measured on this corpus peaks at a **median of 44.9° per repetition** (p90 54.1, max 58.8).
+The flip never happens.
 
 **What transfers and what does not.** The corpus is `standing_ab_twists` — a different variant with
 a **free pelvis**, so the *truth distribution* of the hip/shoulder ratio does not transfer to a
@@ -432,21 +481,29 @@ whatever the subject is doing with their legs.
 ### 8.2 What camera placement alone does to the shipped rule
 
 Same corpus, same mocap-2D construction, and four cameras film **simultaneously**, so any
-disagreement between them on the same repetition is pure projection error.
+disagreement between them on the same repetition is pure projection error. The scored quantity is
+the **signed sag** — `max(angle − setup baseline)` — matching §5.4, not its absolute value.
 
-| quantity | cross-camera spread, median | p90 | max |
-|---|---|---|---|
-| **absolute** trunk-thigh angle (per-rep median) | **4.5°** | 10.6° | 15.7° |
-| **peak deviation from the rep's opening baseline** — what the rule scores | **13.5°** | 25.0° | 30.5° |
+| quantity | median | p90 |
+|---|---|---|
+| **absolute** trunk-thigh angle, cross-camera spread of the per-rep median | **4.5°** | 10.6° |
+| the **sag** the rule scores, value | 6.3° | — |
+| the **sag**, cross-camera spread | **5.1°** | 15.7° |
 
-**The derived quantity is three times less camera-robust than the angle it is built from**, because
-taking a maximum over a window picks up the worst projection excursion rather than averaging it
-away. That 13.5° is the size of the 15° cut, so a near-threshold repetition is decided by where the
-phone was put.
+**The derived quantity is less camera-robust than the angle it is built from** (5.1° against 4.5°
+of spread, on a signal whose own median is only 6.3°), because taking a maximum over a window
+picks up the worst projection excursion rather than averaging it away. Against the 15° cut the
+typical disagreement is about a third of the threshold, but **the p90 disagreement is 15.7° — the
+size of the cut**, so an unlucky camera placement can decide a near-threshold repetition on its
+own.
 
-Variant caveat, stated: `standing_ab_twists` moves the trunk far more than a seated twist does
-(median peak deviation **44.5°** there), so the transferable figure is the **ratio** — the spread is
-about **0.30 of the measured deviation** — not the 13.5° itself.
+**Two caveats, and the second is the one that limits this measurement most.** (i)
+`standing_ab_twists` is a different variant. (ii) More importantly, its trunk motion is
+predominantly **forward flexion**, which moves the trunk–thigh angle in the direction this rule
+does *not* score; the sag median of 6.3° is small for that reason. So these figures bound the
+**sag direction weakly** and should not be read as "the rule barely moves on real footage" — they
+say that on a corpus with little sag, camera placement contributes about as much as the sag does.
+A corpus of genuine seated Russian twists would be needed to say more, and none exists.
 
 This is the same shape as Sit-up's finding (a 20° cut against a 28.2° median cross-camera spread)
 and it is recorded for the same reason: the threshold is not moved to make the number look better,
@@ -489,7 +546,8 @@ rest would be trimmed, and Row's mechanism would apply on top of this one.
 
 ## 9. Testing
 
-`tests/test_torso_twist.py`, 37 cases. The ones that carry an argument rather than coverage:
+`tests/test_torso_twist.py`, 39 cases; the Fit3D harness's pure helpers add 23 in
+`tests/test_rotation_proxy_fidelity.py`. The ones that carry an argument rather than coverage:
 
 | test | what it pins |
 |---|---|
@@ -498,7 +556,8 @@ rest would be trimmed, and Row's mechanism would apply on top of this one.
 | `InvarianceTest::test_the_twist_magnitude_survives_mirroring_and_its_sign_does_not` | §4.2 — the honest limit of a monocular pipeline, asserted in both directions |
 | `InvarianceTest::test_detections_survive_roll_and_mirroring_all_the_way_to_the_verdict` | that the invariance reaches a detection, through `segment_reps`' rectification. Compared field-by-field rather than byte-identically, because the metrics agree to ~1e-13 while `build_detection`'s 2-decimal evidence rounding can straddle a boundary — the tolerance is the rounding itself, and it is stated |
 | `BraceRuleTest::test_it_reads_the_thighs_and_not_the_image_vertical` | §4.1 — the distinguishing property against the parent spec's own "relative to vertical" |
-| `BraceRuleTest::test_a_brace_lost_before_the_rep_opens_is_invisible` | §5.3 — Push-up's blindness, inherited and named |
+| `BraceRuleTest::test_a_twister_who_TIGHTENS_is_not_told_they_lost_the_brace` | §5.3 — the false-positive direction of the baseline, which the first implementation had and no green test caught, plus its non-vacuity companion |
+| `BraceRuleTest::test_a_brace_lost_before_the_rep_opens_is_invisible` | §5.4 — Push-up's blindness, inherited and named |
 | `BraceRuleTest::test_the_citation_records_that_mcgill_never_mentions_this_exercise` | §3.1 — that the qualifier reaches the shipped string a reader will meet, not just this document |
 | `BraceRuleTest::test_no_view_gate_and_no_view_discount` | §8.3 |
 | `SilentRomRuleTest::test_the_rom_rule_never_fires_even_on_a_repetition_that_trips_the_specs_cut` | that the silence is real, on the exact case the spec says to flag |
@@ -515,7 +574,12 @@ rest would be trimmed, and Row's mechanism would apply on top of this one.
   and no threshold is taken from it.
 - **The `validated=False` reason is an existing one**, not a new one, and §2.2 says which.
 - **The withdrawn rules' costs are stated, not explained away** (§7.1, §7.2 closing paragraphs).
-- **The shipped rule's blind spot is pinned by a test**, not only described.
+- **The shipped rule's blind spot is pinned by a test**, not only described — and so is the
+  opposite direction, after the first implementation got it wrong (§5.3).
+- **Every number quoted in §8 comes from a script that ships in this repository**
+  (`scripts/fit3d/run_rotation_proxy_fidelity.py`), not from a scratch probe. Re-running it after
+  §5.3's fix corrected five of them, including §8.2's headline: the earlier figures were computed
+  on an unsigned deviation, which is not what the rule scores.
 
 ### Out of scope
 
