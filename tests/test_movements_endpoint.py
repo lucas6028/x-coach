@@ -24,7 +24,7 @@ class TestMovementsEndpoint(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge", "Leg Abduction",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
             ],
         )
 
@@ -80,6 +80,14 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # correct/incorrect and never names the fault. See
                 # src/pose/movements/leg_abduction.py's registration comment.
                 "Leg Abduction": False,
+                # Torso Twist ships Beta for SIT-UP'S reason and NOT a sixth one: the labeled
+                # data describes a different variant. The app models a SEATED Russian twist (its
+                # own card art, the RAG doc and the parent spec's rep phases all agree), while
+                # Fit3D's `standing_ab_twists` is a standing cross-body knee-to-elbow twist and
+                # EgoExo-Fitness's 95 judged `Kneeling Side Torso Twist` actions are a prone
+                # lateral-flexion exercise. See src/pose/movements/torso_twist.py's registration
+                # comment.
+                "Torso Twist": False,
             },
         )
 
