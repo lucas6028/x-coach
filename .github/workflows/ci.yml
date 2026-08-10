@@ -50,6 +50,8 @@ jobs:
             --ignore=tests/test_mediapipe_smoothing.py \
             --ignore=tests/test_rtmpose_pose_extraction.py \
             --ignore=tests/test_videomae_video_classifier.py \
+            --ignore=tests/test_videomae_features_extraction.py \
+            --ignore=tests/test_videomae_stage_a.py \
             --ignore=tests/test_video_level_error_classification.py \
             --ignore=tests/test_backend_analysis.py \
             --cov --cov-branch --cov-report=xml

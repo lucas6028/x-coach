@@ -2,6 +2,13 @@ import unittest
 
 import numpy as np
 
+try:  # CI installs no torch; this module is numpy-only so the rest still runs there.
+    import torch
+
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
 from src.video.videomae_pooling import (
     CLIP_AGGREGATIONS,
     LEGACY_FIRST_TOKEN,
@@ -15,11 +22,12 @@ from src.video.videomae_pooling import (
 
 
 class LayerNormTest(unittest.TestCase):
+    # Only the equivalence check needs torch, so it skips where torch is absent
+    # rather than taking the whole numpy-only module down with it.
+    @unittest.skipUnless(HAS_TORCH, "torch is not installed")
     def test_matches_torch_layer_norm(self):
         """The numpy fc_norm must be numerically identical to torch's, or the
         corrected features would silently differ from the classification path."""
-        torch = __import__("torch")
-
         rng = np.random.default_rng(0)
         features = rng.normal(size=(4, 768)).astype(np.float32)
         weight = rng.normal(size=768).astype(np.float32)
