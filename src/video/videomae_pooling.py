@@ -91,11 +91,14 @@ def build_provenance(
     transformers_version: str,
     token_pooling: str | None = None,
     clip_aggregation: str | None = None,
+    variant: str | None = None,
 ) -> dict[str, str]:
     """Provenance stamped into every ``.npz`` so features can never be silently mixed.
 
     Extraction writes the shared fields; the materialize step adds ``token_pooling``
-    and ``clip_aggregation`` once it has committed to a combination.
+    and ``clip_aggregation`` once it has committed to a combination. ``variant``
+    records which pixels were fed in (full frame vs a shortcut control's cropped or
+    background-only video) and is omitted where a dataset has only one variant.
     """
     record = {
         "model_name": model_name,
@@ -104,6 +107,8 @@ def build_provenance(
         "num_clips": str(num_clips),
         "transformers_version": transformers_version,
     }
+    if variant is not None:
+        record["variant"] = variant
     if token_pooling is not None:
         record["token_pooling"] = token_pooling
     if clip_aggregation is not None:

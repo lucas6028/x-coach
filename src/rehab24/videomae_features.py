@@ -25,17 +25,17 @@ import cv2
 import numpy as np
 
 from src.rehab24.dataset import DEFAULT_DATA_ROOT, DEFAULT_PROCESSED_ROOT, load_manifest, resolve_data_path
-from src.video.videomae_pooling import LEGACY_FIRST_TOKEN, MEAN_POOL_FC_NORM, build_provenance, layer_norm
+from src.video.videomae_backbone import (  # noqa: F401 - assert_fc_norm_pretrained is re-exported
+    assert_fc_norm_pretrained,
+    encode_clip,
+    load_backbone,
+    resolve_device,
+)
+from src.video.videomae_pooling import LEGACY_FIRST_TOKEN, MEAN_POOL_FC_NORM, build_provenance
 
-try:
-    import torch
-    import transformers
-    from transformers import VideoMAEForVideoClassification, VideoMAEImageProcessor
-except ImportError as exc:  # pragma: no cover - imported at runtime for Colab/GPU workflows
-    raise SystemExit(
-        "REHAB24-6 VideoMAE extraction requires `torch` and `transformers`.\n"
-        "Install them with: pip install torch transformers accelerate timm"
-    ) from exc
+import torch
+import transformers
+from transformers import VideoMAEImageProcessor
 
 
 def sample_clip_starts(first_frame: int, last_frame: int, clip_length: int, frame_stride: int, num_clips: int) -> list[int]:
@@ -79,46 +79,6 @@ def read_clip_frames(
     return frames
 
 
-def assert_fc_norm_pretrained(weight: np.ndarray, bias: np.ndarray, model_name: str) -> None:
-    """Fail loudly if ``fc_norm`` is still at LayerNorm default init.
-
-    ``from_pretrained`` warns about missing keys but does not raise, so a checkpoint
-    without ``fc_norm`` yields weight=1/bias=0 -- an identity-ish normalization that
-    would look exactly like "corrected pooling doesn't help" in the Stage A delta.
-    """
-    if np.allclose(weight, 1.0) and np.allclose(bias, 0.0):
-        raise SystemExit(
-            f"fc_norm of `{model_name}` is at LayerNorm default init (weight=1, bias=0), "
-            "so it was NOT loaded from the checkpoint. Refusing to extract features that "
-            "would silently misrepresent the classification path."
-        )
-
-
-def load_backbone(model_name: str, device: torch.device) -> tuple[torch.nn.Module, np.ndarray, np.ndarray, float]:
-    """Load the VideoMAE backbone plus the *pretrained* ``fc_norm`` parameters.
-
-    ``fc_norm`` exists only on ``VideoMAEForVideoClassification``. Loading
-    ``VideoMAEModel`` instead would leave no way to reproduce the classification
-    representation, because ``use_mean_pooling=True`` checkpoints set the backbone's
-    own ``layernorm`` to ``None``.
-    """
-    model = VideoMAEForVideoClassification.from_pretrained(model_name)
-    if model.fc_norm is None:
-        raise SystemExit(
-            f"`{model_name}` has use_mean_pooling=False, so it has no fc_norm and the "
-            "mean_pool_fc_norm mode is undefined for it. Use a mean-pooling checkpoint."
-        )
-
-    weight = model.fc_norm.weight.detach().cpu().numpy().astype(np.float32)
-    bias = model.fc_norm.bias.detach().cpu().numpy().astype(np.float32)
-
-    assert_fc_norm_pretrained(weight, bias, model_name)
-
-    backbone = model.videomae.to(device)
-    backbone.eval()
-    return backbone, weight, bias, float(model.config.layer_norm_eps)
-
-
 def extract_repetition_features(
     backbone: torch.nn.Module,
     processor: VideoMAEImageProcessor,
@@ -144,16 +104,17 @@ def extract_repetition_features(
         frames = read_clip_frames(cap, start_frame, clip_length, frame_stride, total_frames)
         if not frames:
             continue
-        inputs = processor(frames, return_tensors="pt")
-        pixel_values = inputs["pixel_values"].to(device)
-        with torch.no_grad():
-            hidden = backbone(pixel_values=pixel_values).last_hidden_state
-
-        # Index 0 is the first patch token, not a CLS token -- reproduced only so the
-        # paired comparison can isolate the pooling fix.
-        legacy_clips.append(hidden[:, 0, :].squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False))
-        mean_pooled = hidden.mean(dim=1).squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
-        corrected_clips.append(layer_norm(mean_pooled, fc_norm_weight, fc_norm_bias, fc_norm_eps))
+        legacy, corrected = encode_clip(
+            backbone=backbone,
+            processor=processor,
+            frames=frames,
+            device=device,
+            fc_norm_weight=fc_norm_weight,
+            fc_norm_bias=fc_norm_bias,
+            fc_norm_eps=fc_norm_eps,
+        )
+        legacy_clips.append(legacy)
+        corrected_clips.append(corrected)
         used_starts.append(int(start_frame))
 
     if not legacy_clips:
@@ -222,7 +183,7 @@ def main() -> None:
     parser.add_argument("--device", type=str, default=None, help="cuda, cpu, or auto.")
     args = parser.parse_args()
 
-    device = torch.device("cpu") if args.device == "cpu" else torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
 
     print(f"Loading VideoMAE model `{args.model_name}` on {device}...")
     processor = VideoMAEImageProcessor.from_pretrained(args.model_name)
