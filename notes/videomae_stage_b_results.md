@@ -137,9 +137,10 @@ checkpoint 也以 val 目標挑選,test 只在最後評估。歷史的 0.635 與
    transformers 版本也已不同。§0.2 的 legacy 臂就是為了確認重現落在 `0.532–0.584` 內。
 2. **兩個 fusion 的輸入特徵完全相同**,差別只在合併方式;pose branch 一律使用
    train-fold 統計的 normalization,不與未 normalization 的舊 baseline `0.581` 比較。
-3. **控制組的變體影片是新編碼的**。person-crop 與 background-only 由同一組 pose box
-   產生,frame count 補齊到來源 header,確保三個變體的 clip start 完全一致——否則「控制
-   組掉了幾分」會混進「取樣到不同畫格」這個無關因素。
+3. **控制組與主臂讀的是同一個檔案。** 原本寫的是「控制組的變體影片是新編碼的,
+   frame count 補齊到來源 header 以對齊 clip start」;§1.3(d) 之後改為由抽取器在記憶體
+   中套用 box,完全不產生中間影片,所以三個臂的 clip start 是**同一次解碼**的結果,
+   而不是兩條路徑碰巧對齊。這一條因此從「已控制的風險」變成「結構上不存在」。
 
 ### 0.7 停止條件
 
