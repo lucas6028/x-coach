@@ -206,9 +206,82 @@ conv3d。改為載入前先用真正的 conv3d 探測,失敗即退回 CPU。
 方向。因此另建一個 `reencoded` 恆等變體(同一條 decode/encode 路徑、不動任何像素)。
 它只在某個控制組真的下降時才需要抽特徵。
 
-### 1.4 執行紀錄
+### 1.4 完整重跑步驟
 
-*(待填:pose 重抽、變體影片、三個 Kaggle kernel 的實際執行數據)*
+所有指令自 repo 根目錄執行,直譯器一律 `.venv\Scripts\python.exe`。
+
+```bash
+# 1. pose 重抽(分母的來源;6 個平行 worker,約 4–5 小時)
+python scripts/pose/run_pose_extraction.py --dataset labeled --no-video --jobs 6
+
+# 2. pose 特徵
+python -m src.pose.pose_feature_extraction \
+  --pose-json-dir data/Fitness-AQA/Squat/Labeled_Dataset/pose_json \
+  --split-dir     data/Fitness-AQA/Squat/Labeled_Dataset/Splits \
+  --output-dir    data/Fitness-AQA/Squat/Labeled_Dataset/pose_features
+
+# 3. 控制組變體影片(需要步驟 1 的 pose)
+python scripts/video/build_video_variants.py --variant person_crop     --jobs 6
+python scripts/video/build_video_variants.py --variant background_only --jobs 6
+python scripts/video/build_video_variants.py --variant reencoded       --jobs 6   # 只在控制組下降時才需要
+
+# 4. VideoMAE 抽取(Kaggle,每個變體一個 kernel;本機 CPU 實測 5.3 s/clip ⇒ 每個變體 7–10 h)
+#    上傳必須從資料集目錄「裡面」執行:kaggle CLI 會把 -p 的相對路徑
+#    直接拼進暫存檔名,路徑含斜線就會 [Errno 2]。
+#    (PowerShell)  Push-Location .kaggle_tmp/fitaqa_videomae_input
+#                  uv run --with kaggle kaggle datasets create -p .
+#                  Pop-Location
+#    kernel:       uv run --with kaggle kaggle kernels push -p .kaggle_tmp/fitaqa_videomae_extract
+
+# 5. 物化四臂 + 稽核(稽核不過就不准往下跑)
+python scripts/video/materialize_videomae_features.py --raw-dir <解壓後的 videomae_raw>
+python scripts/video/audit_videomae_features.py \
+  data/Fitness-AQA/Squat/Labeled_Dataset/videomae_mean_pool_fc_norm_mean \
+  data/Fitness-AQA/Squat/Labeled_Dataset/videomae_legacy_first_token_max
+
+# 6. 單分支各臂(5 個 seed;pose 臂必須加 --normalize-features)
+python scripts/video/run_videomae_experiment_grid.py \
+  --feature-dir data/Fitness-AQA/Squat/Labeled_Dataset/pose_features \
+  --train-keys  data/Fitness-AQA/Squat/Labeled_Dataset/Splits/train_keys.json \
+  --val-keys    data/Fitness-AQA/Squat/Labeled_Dataset/Splits/val_keys.json \
+  --test-keys   data/Fitness-AQA/Squat/Labeled_Dataset/Splits/test_keys.json \
+  --forward-labels data/Fitness-AQA/Squat/Labeled_Dataset/Labels/error_knees_forward.json \
+  --inward-labels  data/Fitness-AQA/Squat/Labeled_Dataset/Labels/error_knees_inward.json \
+  --output-root data/Fitness-AQA/Squat/experiments/pose_only \
+  --label-modes combined --normalize-features
+# (VideoMAE corrected / legacy / 兩個控制組各一次,--feature-dir 換掉、--output-root 換掉)
+
+# 7. early fusion 的串接特徵(secondary)
+python scripts/video/fuse_feature_dirs.py \
+  --first-feature-dir  data/Fitness-AQA/Squat/Labeled_Dataset/pose_features \
+  --second-feature-dir data/Fitness-AQA/Squat/Labeled_Dataset/videomae_mean_pool_fc_norm_mean \
+  --output-dir         data/Fitness-AQA/Squat/Labeled_Dataset/fused_pose_videomae
+
+# 8. 證據表與四個保留條件(late fusion 在此離線算出,不需再訓練)
+python scripts/video/run_stage_b_report.py \
+  --pose-predictions     data/Fitness-AQA/Squat/experiments/pose_only/predictions \
+  --videomae-predictions data/Fitness-AQA/Squat/experiments/videomae_corrected/predictions \
+  --arm early_fusion=data/Fitness-AQA/Squat/experiments/early_fusion/predictions \
+  --arm videomae_legacy=data/Fitness-AQA/Squat/experiments/videomae_legacy/predictions \
+  --output data/Fitness-AQA/Squat/experiments/stage_b_report.json
+```
+
+### 1.5 執行紀錄
+
+| 項目 | 狀態 |
+| --- | --- |
+| pose 重抽 | *(進行中)* |
+| pose 特徵 / 分母門檻 | *(待執行)* |
+| 變體影片 | *(待執行)* |
+| Kaggle 抽取 × 3 | *(待執行)* |
+| 各臂訓練與證據表 | *(待執行)* |
+
+已完成的前置檢核:
+
+- 抽取器 CPU smoke test 通過(3 支影片),`fc_norm` weight mean 0.6832 / bias mean 0.0083,
+  與 Stage A 在本機與 Kaggle 上量到的值**完全一致**。
+- 物化四臂 + 稽核鏈路通過:稽核在只有 3/1623 覆蓋率時正確地以 FAIL 結束。
+- MediaPipe 與封存的 pose JSON 逐值相同(見 §0.3)。
 
 ---
 
