@@ -542,6 +542,12 @@ Through the real `run_detector` on a three-swing clip:
 swings begin and end at exactly zero, so there is nothing to trim. A swing that does not begin from
 rest would be trimmed, and Row's mechanism would apply on top of this one.
 
+**Re-confirmed after §5.3's sign change**, rather than assumed to have survived it: all three
+figures are unchanged. They are invariant to it because `swing_clip` ramps the angle *upward* from
+the baseline — monotone in the sag direction — so `max(x − b)` and `max|x − b|` coincide on this
+fixture exactly. That is a property of the fixture, not of the rule, which is precisely why it was
+re-run rather than reasoned about: §8.2's headline moved under the same change.
+
 ---
 
 ## 9. Testing
