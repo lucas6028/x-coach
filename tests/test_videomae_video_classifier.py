@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -85,3 +86,50 @@ class VideoMaeVideoClassifierTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FeatureCacheTest(unittest.TestCase):
+    """The cache must change only the number of disk reads, never the values."""
+
+    def setUp(self):
+        from src.video.videomae_video_classifier import clear_feature_cache
+
+        clear_feature_cache()
+        self.tmp = Path(tempfile.mkdtemp())
+        self.path = self.tmp / "s1.npz"
+        self.feature = np.arange(8, dtype=np.float32)
+        np.savez_compressed(self.path, video_feature=self.feature)
+
+    def tearDown(self):
+        from src.video.videomae_video_classifier import clear_feature_cache
+
+        clear_feature_cache()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_returns_the_stored_values(self):
+        from src.video.videomae_video_classifier import load_video_feature
+
+        np.testing.assert_allclose(load_video_feature(self.path), self.feature)
+
+    def test_repeated_loads_are_equal(self):
+        from src.video.videomae_video_classifier import load_video_feature
+
+        np.testing.assert_allclose(load_video_feature(self.path), load_video_feature(self.path))
+
+    def test_mutating_a_returned_array_does_not_poison_the_cache(self):
+        """FeatureDataset passes the array to torch.from_numpy, which shares memory."""
+        from src.video.videomae_video_classifier import load_video_feature
+
+        first = load_video_feature(self.path)
+        first[0] = 999.0
+        np.testing.assert_allclose(load_video_feature(self.path), self.feature)
+
+    def test_dataset_item_matches_an_uncached_read(self):
+        from src.video.videomae_video_classifier import FeatureDataset, Sample, clear_feature_cache
+
+        dataset = FeatureDataset([Sample(video_id="s1", feature_path=self.path, label=1)])
+        cached_feature, cached_label = dataset[0]
+        clear_feature_cache()
+        fresh_feature, fresh_label = dataset[0]
+        np.testing.assert_allclose(cached_feature.numpy(), fresh_feature.numpy())
+        self.assertEqual(float(cached_label), float(fresh_label))

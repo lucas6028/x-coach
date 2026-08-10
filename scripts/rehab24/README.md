@@ -80,6 +80,36 @@ Extract repetition-level VideoMAE features on Colab/GPU:
 python scripts/rehab24/extract_videomae_features.py --device cuda
 ```
 
+This writes *raw* bundles to `data/REHAB24-6/processed/videomae_raw/`, holding the
+per-clip stacks for **both** token-pooling modes from a single forward pass:
+
+- `mean_pool_fc_norm` — mean over patch tokens + the pretrained `fc_norm`, i.e. what
+  `VideoMAEForVideoClassification` actually does.
+- `legacy_first_token` — `last_hidden_state[:, 0, :]`, the historical extraction.
+  VideoMAE has **no CLS token**, so this is the first patch of the first tubelet, not a
+  clip representation. Kept only so a paired comparison can isolate the pooling fix.
+
+Aggregation over clips stays an offline choice (see `src/video/videomae_pooling.py` for
+why `max` is wrong after `fc_norm`). Materialize the LOSO-ready dirs, then audit them:
+
+```bash
+python scripts/rehab24/materialize_videomae_features.py
+python scripts/rehab24/audit_videomae_features.py \
+  data/REHAB24-6/processed/videomae_mean_pool_fc_norm_mean
+```
+
+`materialize` writes one dir per (token pooling x clip aggregation) combination, each
+storing `video_feature` — the key the LOSO drivers already read, so they consume these
+via `--feature-dir` unmodified. `audit` exits non-zero on incomplete coverage, duplicate
+stems, mixed dims/dtypes, non-finite values, split mismatches or mixed provenance.
+
+Run the Stage A evidence matrix (paired deltas, within-subject permuted-label null
+control, and camera/exercise stratification) in one pass:
+
+```bash
+python scripts/rehab24/videomae_stage_a.py --device cpu
+```
+
 Fuse skeleton and VideoMAE features:
 
 ```bash
