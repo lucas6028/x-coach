@@ -15,7 +15,7 @@ Two of the four withdrawals are measurements rather than arguments, which is the
 carrying out of this movement:
 
 - the two trunk rules die on their **reference axis**: a trunk lean is an angle from the vertical,
-  this drill has no vertical, and the substitute (the support limb) is 6.4–14.2° off the trunk in
+  this drill has no vertical, and the substitute (the support limb) is 8.6–23.6° off the trunk in
   normal marching against thresholds of 10–15°;
 - the pelvic-drop rule dies on a **zero-parameter control** that costs nothing because the corpus
   supplies it: three cameras film the same instant and disagree by more than the threshold.
@@ -211,8 +211,8 @@ the substitution it is, not as an equivalence.
 shoulder width. It says how much of the subject's fore-aft direction survives projection into this
 image.
 
-Measured, it separates this corpus's cameras **with no overlap**: 0.160–0.347 on the two side
-cameras, 0.036–0.050 on the frontal one. That matters because `view_estimation.py` has now been
+Measured, it separates this corpus's cameras **with no overlap**: 0.156–0.318 on the two side
+cameras, 0.027–0.044 on the frontal one. That matters because `view_estimation.py` has now been
 measured **inverted** on supine subjects (Sit-up) and **outside its stated regime** on standing ones
 (Leg Abduction, 0/210 frontal-observable). A rule that gates on the magnitude of its own reference
 axis needs neither.
@@ -249,9 +249,9 @@ Over the 18 (action, camera) pairs, through the real `run_detector`:
 |---|---|
 | median validity rate (6-landmark gate) | **1.000** |
 | pairs on the whole-clip fallback | **0 of 18** |
-| repetitions found (shipped 0.15 s floor) | **150** |
-| median cadence | **1.31 Hz** |
-| fastest cadence | **2.20 Hz** |
+| repetitions segmented (shipped 0.15 s floor) | **150** |
+| repetitions SCORED (`select_reps` drops partials) | **146** |
+| cadence | median **1.31 Hz**, range **0.70–2.20 Hz** |
 
 ### 5.3 The framework knob reserved fifteen movements ago is finally needed
 
@@ -264,8 +264,10 @@ same signals at the framework default:
 | 0.15 s (shipped) | **150** |
 | 0.40 s (framework default) | **52** |
 
-**The default discards 65.3% of this movement's repetitions.** The surviving cadence is 0.45–0.75 s
+**The default discards 65.3% of this movement's repetitions.** The surviving cadence is 0.45–1.42 s
 per repetition — physically ordinary, so the low floor is not manufacturing noise repetitions.
+(150 is the SEGMENTED count, partials included, which is the right denominator for a question
+about segmentation. Every fire rate below uses the 146 SCORED repetitions instead.)
 
 **The corpus makes the result stronger, not weaker.** 30 of its 68 actions are judged FAILED on
 "maintain the fastest speed possible", so this is a population humans considered *too slow* — and
@@ -296,7 +298,7 @@ Result: **12 of 62** held-out actions positive (14 of 109 annotations), 3 of the
 
 ### 6.2 The spec supplies two numbers and they give opposite verdicts
 
-Over 150 repetitions, on the two cameras the gate admits:
+Over 146 scored repetitions, on the two cameras the gate admits:
 
 | cut | provenance | fires on |
 |---|---|---|
@@ -310,7 +312,8 @@ picked the far one.
 
 **The cited cut is not the answer either, and its failure is the more interesting one: it sorts
 this corpus BACKWARDS.** It fires on 0.0% of all three actions whose free-text comments complain
-about leg height, and on 7.1–71.1% of the three whose comments do not. The one human signal
+about leg height, and on 7.1–71.1% of the three whose comments do not (two `unattributable`, one
+negative). The one human signal
 available about this fault is *anti*-correlated with the cited threshold.
 
 At n = 6 with a secondary label that is not by itself a refutation — but it removes the only
@@ -328,10 +331,10 @@ what it means: "upper body lacks stability", "excessive upper body sway", "sligh
 "unstable center of gravity". That is **variance**; both trunk rules read a signed **mean**. On the
 gated cameras of the six reachable actions:
 
-| judged on stability | pairs | median trunk lean | median SD |
-|---|---|---|---|
-| FALSE | 4 | −8.02° | 8.69° |
-| TRUE | 8 | −10.38° | 8.52° |
+| judged on stability | actions | pairs | median trunk lean | median SD |
+|---|---|---|---|---|
+| FALSE | 2 | 4 | −10.10° | 5.77° |
+| TRUE | 4 | 8 | −14.77° | 6.19° |
 
 The mean separates **the wrong way** and the variance does not separate at all. At n = 6 actions
 that is not a powered null — but it is the *reading of the criterion*, not the n, that decides:
@@ -361,7 +364,7 @@ corpus proves it twice over by shipping its side cameras rolled 90°. Leg Abduct
 the vertical from the **support limb** — is the only construction available, and here it does not
 hold:
 
-> **the angle between the trunk and the support limb is 6.4–14.2° (median 9.3°) during normal
+> **the angle between the trunk and the support limb is 8.6–23.6° (median 13.1°) during normal
 > marching**, against rule thresholds of 10–15° (backward) and 15–20° (forward).
 
 Part of that is not even marching: **the stance foot sits under the hip *joint* while the axis is
@@ -373,8 +376,8 @@ adult proportions before the subject has moved at all. Nothing a performer does 
 
 | cut | fires on |
 |---|---|
-| 10° backward (`hk_trunk_lean_back`) | **47.0% of frames** (46–56% on the two faultless actions) |
-| 15° forward (`hk_forward_trunk_collapse`) | **0.0% of frames** |
+| 10° backward (`hk_trunk_lean_back`) | **69.7% of scored frames** (56–83% on the two faultless actions) |
+| 15° forward (`hk_forward_trunk_collapse`) | **0.0% of scored frames** |
 
 An unsigned or unvalidated baseline offset running toward the fault is `pushup_head_drop`'s finding
 and Torso Twist's brace finding for the **third** time. What is new is that here it sinks both signs
@@ -396,17 +399,17 @@ Median pelvic obliquity, restricted to the two cameras whose own gate says they 
 
 | action | exo_l vs exo_r spread | frame-by-frame r |
 |---|---|---|
-| yT4RK3_action_2 | 1.89° | −0.554 |
-| yT4RK3_action_9 | 3.97° | −0.166 |
-| yT4RK3_action_14 | 7.17° | −0.145 |
-| xYkvB0_action_9 | 8.86° | +0.217 |
-| xYkvB0_action_15 | 9.33° | +0.122 |
-| zOfbr6_action_14 | 12.85° | −0.426 |
+| yT4RK3_action_2 | 0.97° | −0.483 |
+| yT4RK3_action_9 | 2.72° | −0.217 |
+| yT4RK3_action_14 | 5.49° | +0.116 |
+| xYkvB0_action_15 | 7.90° | −0.413 |
+| xYkvB0_action_9 | 8.52° | −0.026 |
+| zOfbr6_action_14 | 13.68° | −0.114 |
 
-against the parent spec's "> ~5–8°" threshold. **The camera moves the quantity by more than the
-fault does, on four of six actions.**
+against the parent spec's "> ~5–8°" threshold. **The camera alone moves the quantity past the low
+end of that threshold on four of six actions, and past the high end on two.**
 
-**And frame by frame the two cameras are anti-correlated on four of six.** They do not merely offset
+**And frame by frame the two cameras are anti-correlated on four of six** (r = −0.48 to +0.12).** They do not merely offset
 each other — they largely disagree about which way the pelvis is tilting at any instant. A quantity
 that two simultaneous views of one pelvis report in opposite directions is not measuring the pelvis.
 
@@ -460,7 +463,7 @@ author new rules. It is recorded because the evidence for it is already in the m
 
 ## 8. Testing
 
-`tests/test_high_knee.py` (28 cases) and `tests/test_high_knee_validation.py` (21 cases).
+`tests/test_high_knee.py`, `tests/test_high_knee_validation.py` and `tests/test_frame_extraction.py`.
 
 Worth naming:
 
@@ -473,6 +476,11 @@ Worth naming:
   inverted sign during development — in the fixture, which is exactly what they are for.
 - **`SupportLimbGeometryTest`** pins the anatomical floor under §7.1: a stance foot under the hip
   joint tilts the reference axis by ~9.5° in the fixture's proportions before anyone moves.
+- **`SupportLimbSelectionTest` exists because review found a surviving mutant.** Inverting
+  `_support_ankle` to pick the AIRBORNE leg left the whole harness suite green, because every
+  fixture stood on both feet and the tie resolved the same way regardless of the comparator's
+  sign. A drill whose point is that one knee is driven now has fixtures with one knee driven; the
+  mutation kills three tests.
 - **`test_no_withdrawn_rule_leaves_a_metric_behind`** — the trunk scalar and pelvic obliquity are
   absent from `HIGH_KNEE_METRIC_KEYS` and recomputed in the harness instead.
 - **`test_no_rule_produces_any_detection_at_all`** is the claim non-registration rests on.
@@ -489,14 +497,25 @@ Worth naming:
   evidence stays re-runnable, and nowhere else.
 - **`min_rep_seconds` is the one number that changed**, and it comes from `base.py:55`'s own
   arithmetic (half of the 0.33 s it states), not from the 1.31 Hz this corpus shows.
-- **Every figure here is the harness's output.** Three figures quoted from scratch probes during
-  development were corrected when the shipped harness was run — the Row-residual lesson, applied
-  before publication rather than after.
+- **Every figure here is the harness's output**, and that is now true of the criterion table (§2.2)
+  and the comment-mining counts (§2.3, §6.1) as well: `criterion_failure_rates` and
+  `classify_knee_lift_comment` ship in `src/egoexo/high_knee_validation.py`, so the
+  zero-overlapping-pairs finding and the KG grounding misattribution are both re-runnable.
+  Figures quoted from scratch probes during development were corrected when the shipped harness
+  was run — twice, once before review and once after it found that the withdrawn quantities were
+  being measured over whole clips instead of the scored rep windows. The corrected measurement
+  moved the back-lean fire rate from 47.0% to **69.7%**, i.e. AGAINST the rule, which is worth
+  stating: the error had been running toward keeping it.
 - **n = 6 actions is small and is not hidden.** Where a conclusion rests on the corpus rather than on
   a construction (§6.3), that is said. The two withdrawals in §7.1 and §7.2 rest on constructions
   and controls, which is why they are stated as decided.
 - **The reachable set is discovered, not predicted.** `extract_action_frames.py` carries the frame
   ranges of all 68 judged actions and writes whatever the truncated stream reaches.
+- **Two denominators, named apart.** 150 repetitions are SEGMENTED (partials included) and back the
+  `min_rep_seconds` argument; 146 are SCORED (`select_reps` drops partial windows) and back every
+  fire rate. The harness emits both rather than letting one number quietly change meaning.
+- **A pose file whose `sample_id` does not resolve to a judged action aborts the run** rather than
+  defaulting into the judged-correct bucket.
 
 ### Out of scope
 

@@ -28,9 +28,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.egoexo.high_knee_validation import (  # noqa: E402
-    BACK_STRAIGHT_CRITERION, EXO_VIEWS, STABILITY_CRITERION, WITHDRAWN_PELVIC_DROP_CUT_DEG,
-    cross_camera_spread, evaluate_view, floor_discarded, load_judgements, load_pose_frames,
-    pearson,
+    BACK_STRAIGHT_CRITERION, EXO_VIEWS, KNEE_LIFT_COMMENT_DISCLOSED, STABILITY_CRITERION,
+    WITHDRAWN_PELVIC_DROP_CUT_DEG, criterion_failure_rates, cross_camera_spread, evaluate_view,
+    floor_discarded, knee_lift_comment_labels, load_judgements, load_pose_frames, pearson,
 )
 
 # The two cameras whose `anterior_axis_length` says they can see a sagittal quantity at all. Which
@@ -55,6 +55,7 @@ def main() -> None:
     args = ap.parse_args()
 
     judgements = load_judgements(args.judgements)
+    comment_labels = knee_lift_comment_labels(args.judgements)
     actions: dict[str, dict[str, dict]] = defaultdict(dict)
     for path in sorted(args.pose_dir.glob("*.json")):
         sample_id, view = path.stem.rsplit("__", 1)
@@ -67,6 +68,16 @@ def main() -> None:
     gated = [v for views in actions.values() for name, v in views.items() if name in GATED_VIEWS]
     if not all_views:
         raise SystemExit(f"no pose JSON found under {args.pose_dir}")
+
+    # A pose file whose sample_id does not resolve to a judged action must NOT drift into the
+    # judged-correct bucket by defaulting to False. Fail instead of quietly mislabelling.
+    unmatched = sorted(set(actions) - set(judgements))
+    if unmatched:
+        raise SystemExit(f"pose files with no High Knee judgement record: {unmatched}")
+
+    print("=== criteria over all judged High Knee actions (strict-majority FALSE) ===")
+    for criterion, failed, total in criterion_failure_rates(judgements):
+        print(f"  {failed:3d}/{total:3d}  {failed / total * 100:5.1f}%  {criterion}")
 
     print(f"{'pair':34} {'val':>5} {'rep':>4} {'r0.4':>5} {'Hz':>5} {'peak':>7} {'cited%':>7} "
           f"{'impl%':>6} {'gate':>6} {'lean':>7} {'leanSD':>7} {'back%':>6} {'fwd%':>5} "
@@ -88,6 +99,7 @@ def main() -> None:
 
     shipped = sum(v["reps_shipped_floor"] for v in all_views)
     default = sum(v["reps_default_floor"] for v in all_views)
+    cadences = [v["cadence_hz"] for v in all_views if math.isfinite(v["cadence_hz"])]
     summary = {
         "actions": len(actions),
         "pairs": len(all_views),
@@ -97,8 +109,14 @@ def main() -> None:
         "reps_shipped_floor": shipped,
         "reps_default_floor": default,
         "reps_discarded_by_default_floor": floor_discarded(shipped, default),
-        "median_cadence_hz": _median([v["cadence_hz"] for v in all_views]),
-        "max_cadence_hz": max(v["cadence_hz"] for v in all_views if math.isfinite(v["cadence_hz"])),
+        # SEGMENTED reps (partials included) -- the denominator the min_rep_seconds argument uses.
+        "reps_segmented": shipped,
+        # SCORED reps -- `select_reps` drops partial windows, so this is strictly smaller, and it
+        # is the denominator every fire rate below is actually computed over.
+        "reps_scored": sum(v["scored_reps"] for v in all_views),
+        "median_cadence_hz": _median(cadences),
+        "min_cadence_hz": min(cadences) if cadences else math.nan,
+        "max_cadence_hz": max(cadences) if cadences else math.nan,
         "gate_side_cameras": [
             min(v["anterior_axis_median"] for v in gated),
             max(v["anterior_axis_median"] for v in gated),
@@ -159,6 +177,24 @@ def main() -> None:
     summary["actions_failing_back_straight"] = sum(
         1 for sample_id in actions if judgements.get(sample_id, {}).get(BACK_STRAIGHT_CRITERION)
     )
+    summary["actions_majority_false_on_stability"] = sum(
+        1 for sample_id in actions if judgements.get(sample_id, {}).get(STABILITY_CRITERION)
+    )
+
+    print("\n=== knee-lift comment labels (pre-registered rule) vs the cited cut ===")
+    held_out = {k: v for k, v in comment_labels.items() if k not in KNEE_LIFT_COMMENT_DISCLOSED}
+    summary["comment_positive_all"] = sum(1 for v in comment_labels.values() if v == "positive")
+    summary["comment_actions_all"] = len(comment_labels)
+    summary["comment_positive_held_out"] = sum(1 for v in held_out.values() if v == "positive")
+    summary["comment_actions_held_out"] = len(held_out)
+    for sample_id in sorted(actions):
+        rows = [r for v, r in actions[sample_id].items() if v in GATED_VIEWS]
+        if not rows:
+            continue
+        print(f"  {sample_id:24} peak {_median([r['peak_elevation_median'] for r in rows]):7.3f}"
+              f"   cited {_median([r['fire_rate_cited_cut'] for r in rows]) * 100:5.1f}%"
+              f"   implemented {_median([r['fire_rate_implemented_cut'] for r in rows]) * 100:6.1f}%"
+              f"   {comment_labels.get(sample_id, 'unknown')}")
 
     print("\n" + json.dumps(summary, indent=2))
     if args.json:

@@ -19,18 +19,18 @@
 #   hk_trunk_lean_back            WITHDRAWN, absent -- ITS REFERENCE AXIS IS AS BIG AS THE FAULT.
 #                                 A trunk lean is an angle from the VERTICAL, and this drill has
 #                                 no vertical: the support limb, which Leg Abduction established
-#                                 as Group E's substitute, sits 6.4-14.2 deg off the trunk in
+#                                 as Group E's substitute, sits 8.6-23.6 deg off the trunk in
 #                                 normal marching, against a rule threshold of 10-15 deg. The
-#                                 spec's 10 deg cut fires on 47% of frames of judged-CORRECT
-#                                 performances.
+#                                 spec's 10 deg cut fires on a median 69.7% of scored frames, and
+#                                 on 56-83% of the two actions judged CORRECT on every criterion.
 #   hk_forward_trunk_collapse     WITHDRAWN, absent -- the same scalar with the opposite sign, so
 #                                 the same axis failure; and measured, it fires on 0.0% of frames,
 #                                 because the axis error runs entirely into the other rule.
 #   hk_contralateral_pelvic_drop  WITHDRAWN, absent -- refuted by three SIMULTANEOUS cameras:
-#                                 filming the same instant they disagree by 1.9-12.9 deg (median
-#                                 ~8 deg) against a 5-8 deg threshold, and frame by frame the two
-#                                 side cameras are ANTI-correlated (r = -0.55 to +0.22), so they
-#                                 do not even agree on the sign of the wobble.
+#                                 filming the same instant they disagree by 0.97-13.68 deg
+#                                 (median 6.7) against a 5-8 deg threshold, and frame by frame the
+#                                 two side cameras are ANTI-correlated on four of six actions
+#                                 (r = -0.48 to +0.12).
 #   hk_stride_asymmetry           WITHDRAWN, absent -- no scoped KG node, a disjunction of two
 #                                 quantities behind one fault_id (one of which is the quantity the
 #                                 withdrawal above just refuted), and "consistently across reps"
@@ -68,8 +68,8 @@
 #   "Maintain a stable upper body" is the criterion with a real positive class, and the annotator
 #   comments say what it means -- "upper body lacks stability", "excessive upper body sway",
 #   "slightly shaking", "unstable center of gravity". That is VARIANCE. Both trunk rules read a
-#   signed MEAN offset. Measured on the six reachable actions, the three judged FALSE on this
-#   criterion and the three judged TRUE separate on NEITHER the mean nor the variance (design
+#   signed MEAN offset. Measured on the six reachable actions, the TWO judged FALSE on this
+#   criterion and the FOUR judged TRUE separate on NEITHER the mean nor the variance (design
 #   spec section 6.3).
 #   "Keep your back straight" is the criterion the two trunk rules would model, and NO action in
 #   the corpus fails it by majority.
@@ -403,14 +403,14 @@ def rule_insufficient_knee_lift(core: list[CoreFrame], ctx: RuleContext) -> list
       scale-invariant, which on a corpus whose side cameras are rolled 90 degrees is what makes it
       measurable at all.
       A VIEW GATE THAT DOES NOT TRUST THE VIEW ESTIMATOR. `anterior_axis_length` separates the
-      cameras cleanly and by itself: 0.160-0.347 on the two side cameras, 0.036-0.050 on the
+      cameras cleanly and by itself: 0.156-0.318 on the two side cameras, 0.027-0.044 on the
       frontal one, with no overlap.
 
     WHAT FAILS IS THE NUMBER, AND THE SPEC SUPPLIES TWO THAT DISAGREE. The rationale cites the
     A-skip's 45 deg; the detection heuristic implements the knee at hip height, which is the
     B-skip's 90 deg. Replayed over the six judged actions recoverable from the truncated EgoExo
-    archive -- 18 (action, camera) pairs, 150 repetitions -- on the two cameras that can see a
-    sagittal quantity:
+    archive -- 18 (action, camera) pairs, 146 SCORED repetitions (150 segmented; `select_reps`
+    drops partial windows) -- on the two cameras that can see a sagittal quantity:
 
         the IMPLEMENTED cut (90 deg, knee at hip height)   fires on 100.0% of repetitions
         the CITED cut      (45 deg)                        fires on 0.0-71.1%, by action
@@ -422,7 +422,8 @@ def rule_insufficient_knee_lift(core: list[CoreFrame], ctx: RuleContext) -> list
 
     THE CITED CUT IS NOT THE ANSWER EITHER, AND ITS FAILURE IS THE MORE INTERESTING ONE: IT SORTS
     THIS CORPUS BACKWARDS. It fires on 0.0% of all three actions whose free-text comments complain
-    about leg height, and on 7.1-71.1% of the three whose comments do not -- the one human signal
+    about leg height, and on 7.1-71.1% of the three whose comments do not (two `unattributable`,
+    one negative) -- the one human signal
     available about this fault is ANTI-correlated with it. At six actions, with a secondary label,
     that is not by itself a refutation; what it does is remove the only argument that could have
     justified shipping the number, namely that it happened to sort the corpus sensibly.
@@ -577,9 +578,9 @@ HIGH_KNEE_DETECTOR = MovementDetector(
     # DIFFERENCING THE COUNTS can show the floor biting.
     #
     # Over the 18 recovered (action, camera) pairs, the default 0.4 s floor finds 52 repetitions
-    # and a 0.15 s floor finds 150 -- THE DEFAULT DISCARDS 65.3% OF THEM. The surviving cadence is
-    # a median 1.31 Hz and a maximum 2.20 Hz of single knee drives, i.e. 0.45-0.75 s per
-    # repetition, all physically ordinary; the low floor is not manufacturing noise repetitions.
+    # and a 0.15 s floor finds 150 -- THE DEFAULT DISCARDS 65.3% OF THEM. The surviving cadence
+    # spans 0.70-2.20 Hz of single knee drives (median 1.31), i.e. 0.45-1.42 s per repetition, all
+    # physically ordinary; the low floor is not manufacturing noise repetitions.
     #
     # THE CORPUS MAKES THE RESULT STRONGER, NOT WEAKER. 30 of its 68 actions are judged FAILED on
     # "maintain the fastest speed possible", so this is a population humans considered TOO SLOW --
@@ -589,7 +590,7 @@ HIGH_KNEE_DETECTOR = MovementDetector(
     # THE VALUE IS THE FRAMEWORK'S OWN ARITHMETIC, NOT A FITTED ONE. `base.py:55` states "high
     # knees run ~3Hz, about 10 frames per rep at 30fps", i.e. 0.33 s; 0.15 s is half of that,
     # leaving headroom below the fastest cadence the framework itself anticipated. It is not
-    # tuned to the 1.31 Hz this corpus happens to show. Design spec section 5.3.
+    # tuned to the 1.31 Hz median this corpus happens to show. Design spec section 5.3.
     min_rep_seconds=0.15,
 )
 

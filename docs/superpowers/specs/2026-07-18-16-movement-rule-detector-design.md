@@ -2461,7 +2461,7 @@ Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) 
 >   Matijašević's Table 1 scores the **A-skip** at "the thigh ... reaches 45° relative to the ground"
 >   and Table 2 the **B-skip** at "90°". The `biomechanical_rationale` above cites the 45°; the
 >   `detection_heuristic` above implements "the knee at hip height", which is the 90°. Measured over
->   150 repetitions, the implemented cut fires on **100% of every repetition of every action**,
+>   146 scored repetitions, the implemented cut fires on **100% of every repetition of every action**,
 >   including both actions judged faultless on every criterion by every annotator; observed peak hip
 >   flexion is 40–65°, i.e. real performers land *between* the source's two targets. The cited cut
 >   sorts the corpus **backwards** (0.0% on all three actions whose comments complain about leg
@@ -2479,20 +2479,20 @@ Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) 
 > - **BOTH TRUNK RULES ARE WITHDRAWN ON THEIR REFERENCE AXIS, NOT ON THEIR THRESHOLD.** A trunk lean
 >   is an angle from the **world vertical**, and this drill has none: Group E established the image
 >   vertical is not the world vertical, and this corpus ships its side cameras rolled 90°. Leg
->   Abduction's substitute — the support limb — is **6.4–14.2° off the trunk (median 9.3°) during
+>   Abduction's substitute — the support limb — is **8.6–23.6° off the trunk (median 13.1°) during
 >   normal marching**, against thresholds of 10–15° and 15–20°. Part of that is pure anatomy: the
 >   stance foot sits under the hip *joint* while the axis is drawn from the pelvis *midpoint*, ≈6°
 >   on adult proportions, which no performer can remove. And the error runs one way: the 10°
->   backward cut fires on **47.0% of frames** (46–56% on the faultless actions) while the 15°
->   forward cut fires on **0.0%** — `pushup_head_drop`'s finding a third time, now sinking both
+>   backward cut fires on **69.7% of scored frames** (56–83% on the faultless actions) while the
+>   15° forward cut fires on **0.0%** — `pushup_head_drop`'s finding a third time, now sinking both
 >   signs at once.
 >
 > - **`hk_contralateral_pelvic_drop` IS WITHDRAWN BY A ZERO-PARAMETER CONTROL THE CORPUS SUPPLIES
 >   FREE.** Three exo cameras film the SAME instant, so any disagreement is pure projection. On the
->   two cameras the view gate admits, median obliquity spreads by **1.9, 4.0, 7.2, 8.9, 9.3 and
->   12.9°** across the six actions, against this section's "> ~5–8°" threshold — the camera moves
->   the quantity more than the fault does on four of six. Frame by frame the two cameras are
->   **anti-correlated on four of six** (r = −0.55 to +0.22): they disagree about which way the
+>   two cameras the view gate admits, median obliquity spreads by **0.97, 2.72, 5.49, 7.90, 8.52
+>   and 13.68°** across the six actions, against this section's "> ~5–8°" threshold — the camera
+>   alone clears the low end on four of six and the high end on two. Frame by frame the two
+>   cameras are **anti-correlated on four of six** (r = −0.48 to +0.12): they disagree about which way the
 >   pelvis is tilting. Not a comment on Bramah, whose association is the strongest result any
 >   citation here carries — a comment on monocular measurability.
 >
@@ -2511,7 +2511,7 @@ Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) 
 > - **THE FRAMEWORK KNOB RESERVED FOR THIS MOVEMENT BY NAME IS FINALLY NEEDED — AND ONLY BY IT.**
 >   `base.py:55` names "jumping jacks, high knees"; Jumping Jacks measured that it did not need it.
 >   Here the default 0.4 s floor finds 52 repetitions where a 0.15 s floor finds **150** — it
->   discards **65.3%**. Measured non-circularly by differencing two segmentations. The corpus makes
+>   discards **65.3%** (150 segmented vs 52; fire rates use the 146 SCORED reps instead). Measured non-circularly by differencing two segmentations. The corpus makes
 >   it stronger: 30 of 68 actions are judged *too slow*, and the default still throws away two
 >   repetitions in three. The shipped 0.15 s is half the 0.33 s this framework comment itself
 >   states, not a value fitted to the observed 1.31 Hz.
@@ -2523,7 +2523,7 @@ Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) 
 >   roll-equivariant, so those landmarks are degraded even where the metrics are well defined.
 >
 > - **THE VIEW GATE IS THE RULE'S OWN.** `anterior_axis_length` separates this corpus's cameras with
->   **no overlap** (0.160–0.347 side, 0.036–0.050 frontal), so nothing keys on `view_estimation.py`
+>   **no overlap** (0.156–0.318 side, 0.027–0.044 frontal), so nothing keys on `view_estimation.py`
 >   — measured inverted once (Sit-up) and outside its regime once (Leg Abduction). It also refutes
 >   this section's own "front view is a usable proxy" for knee lift: the frontal camera reports peak
 >   elevations of −0.92 to −0.99 where the side cameras report −0.43 to −0.77 on the same repetition.

@@ -14,6 +14,8 @@ import numpy as np
 
 from src.egoexo.high_knee_validation import (
     WITHDRAWN_BACK_LEAN_CUT_DEG,
+    classify_knee_lift_comment,
+    criterion_failure_rates,
     WITHDRAWN_FORWARD_LEAN_CUT_DEG,
     cadence_hz,
     cross_camera_spread,
@@ -268,3 +270,107 @@ class JudgementLoadingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SupportLimbSelectionTest(unittest.TestCase):
+    """THE SUPPORT LIMB MUST BE THE GROUNDED LEG, AND THE FIXTURES MUST STAND ON ONE.
+
+    Every other fixture in this file stands on BOTH feet, where the two ankles sit at the same
+    height and `max` resolves the tie regardless of the comparator's sign -- so an inverted
+    selection survives them all. (Verified: inverting `_support_ankle` left the rest of this file
+    green.) A drill whose whole point is that one knee is driven has to be tested with one knee
+    driven.
+    """
+
+    def _lean_with(self, driven: str, lean_deg: float) -> float:
+        kwargs = {"left_elevation": -0.45, "right_elevation": -1.0} if driven == "left" else {
+            "left_elevation": -1.0, "right_elevation": -0.45
+        }
+        return signed_trunk_lean_deg(_points(trunk_lean_deg=lean_deg, **kwargs))
+
+    def test_the_grounded_leg_is_chosen_whichever_side_it_is_on(self) -> None:
+        """If the AIRBORNE leg were picked, the reference axis would run to a raised ankle and the
+        reported lean would differ between the two mirror-image postures. It must not."""
+        driving_left = self._lean_with("left", 12.0)
+        driving_right = self._lean_with("right", 12.0)
+        self.assertAlmostEqual(driving_left, 12.0, delta=1.0)
+        self.assertAlmostEqual(driving_right, 12.0, delta=1.0)
+        self.assertAlmostEqual(driving_left, driving_right, delta=1.0)
+
+    def test_and_the_sign_survives_the_side_switch(self) -> None:
+        self.assertLess(self._lean_with("left", -14.0), 0.0)
+        self.assertLess(self._lean_with("right", -14.0), 0.0)
+
+    def test_the_axis_error_is_not_inflated_by_the_driven_leg(self) -> None:
+        """`trunk_to_support_limb_deg` must read the STANCE limb too -- otherwise section 7.1's
+        6.4-23.6 degree measurement would be reporting hip flexion, not limb inclination."""
+        upright_one_leg = trunk_to_support_limb_deg(
+            _points(left_elevation=-0.45, right_elevation=-1.0)
+        )
+        upright_two_legs = trunk_to_support_limb_deg(_points())
+        self.assertAlmostEqual(upright_one_leg, upright_two_legs, delta=0.5)
+
+
+class CriterionAggregationTest(unittest.TestCase):
+    def test_failure_rates_are_per_action_and_sorted_worst_first(self) -> None:
+        judgements = {
+            "a": {"speed": True, "back": False},
+            "b": {"speed": True, "back": False},
+            "c": {"speed": False, "back": False},
+        }
+        self.assertEqual(
+            criterion_failure_rates(judgements),
+            [("speed", 2, 3), ("back", 0, 3)],
+        )
+
+    def test_it_survives_a_criterion_missing_from_one_action(self) -> None:
+        rows = {name: (failed, total)
+                for name, failed, total in
+                criterion_failure_rates({"a": {"x": True}, "b": {"y": False}})}
+        self.assertEqual(rows["x"], (1, 1))
+        self.assertEqual(rows["y"], (0, 1))
+
+
+class CommentClassifierTest(unittest.TestCase):
+    """The PRE-REGISTERED rule. These cases are the ones the rule was fixed to discriminate."""
+
+    def test_a_leg_height_complaint_is_positive(self) -> None:
+        for comment in (
+            "The leg raising range is too small, should be lifted higher.",
+            "it is suggested to raise the legs a bit higher",
+            "insufficient height in lifting the legs, and relatively slow",
+        ):
+            with self.subTest(comment=comment):
+                self.assertEqual(classify_knee_lift_comment(comment), "positive")
+
+    def test_a_bare_range_complaint_is_UNATTRIBUTABLE_not_positive(self) -> None:
+        """The load-bearing case: the same phrase is used about the ARM SWING elsewhere in this
+        corpus, so counting it as a leg complaint would manufacture the positive class."""
+        self.assertEqual(
+            classify_knee_lift_comment("The speed is too slow, range of motion is too small."),
+            "unattributable",
+        )
+
+    def test_an_arm_complaint_is_not_a_leg_complaint(self) -> None:
+        self.assertEqual(
+            classify_knee_lift_comment("the amplitude of arm swings was not sufficient"),
+            "negative",
+        )
+
+    def test_praise_and_absence_are_handled(self) -> None:
+        self.assertEqual(classify_knee_lift_comment("The movement was executed very smoothly."),
+                         "negative")
+        self.assertEqual(classify_knee_lift_comment(None), "missing")
+        self.assertEqual(classify_knee_lift_comment(""), "missing")
+
+    def test_the_leg_and_insufficiency_tokens_must_share_a_SENTENCE(self) -> None:
+        """Split on sentence punctuation, NOT on commas -- these are translated comments whose
+        clauses run on commas, and a comma split would fragment the evidence."""
+        self.assertEqual(
+            classify_knee_lift_comment("The legs are fine. The arms are not high enough."),
+            "negative",
+        )
+        self.assertEqual(
+            classify_knee_lift_comment("the legs are fine, but they should be higher"),
+            "positive",
+        )

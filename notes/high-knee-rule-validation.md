@@ -97,12 +97,12 @@ Pipeline properties, through the real `run_detector`:
 |---|---|
 | median validity rate (6-landmark gate) | **1.000** |
 | pairs on the whole-clip fallback | **0 of 18** |
-| repetitions found | **150** |
-| median cadence | **1.31 Hz** |
-| fastest cadence | **2.20 Hz** |
+| repetitions segmented | **150** |
+| repetitions SCORED (partials dropped by `select_reps`) | **146** |
+| cadence | median **1.31 Hz**, range **0.70–2.20 Hz** |
 
-**The view gate separates the cameras with no overlap**: `anterior_axis_length` is 0.160–0.347 on
-the two side cameras and 0.036–0.050 on the frontal one. Nothing keys on `view_estimation.py`, which
+**The view gate separates the cameras with no overlap**: `anterior_axis_length` is 0.156–0.318 on
+the two side cameras and 0.027–0.044 on the frontal one. Nothing keys on `view_estimation.py`, which
 this programme has measured inverted once (Sit-up) and outside its stated regime once (Leg
 Abduction).
 
@@ -110,7 +110,7 @@ Abduction).
 
 The parent spec's rationale cites Matijašević's A-skip criterion ("the thigh of the swinging leg
 reaches **45°** relative to the ground") and its heuristic implements the B-skip's ("**90°**", i.e.
-the knee at hip height). Over 150 repetitions, on the two gated cameras:
+the knee at hip height). Over 146 scored repetitions, on the two gated cameras:
 
 | cut | provenance | fires on |
 |---|---|---|
@@ -121,12 +121,12 @@ Observed peak thigh elevation per action (median over the gated cameras), and th
 
 ```
                      peak    cited cut   implemented cut   free-text label
-xYkvB0_action_15   -0.493      0.0%          100.0%        comment-POSITIVE
-xYkvB0_action_9    -0.513      0.0%          100.0%        comment-POSITIVE
-yT4RK3_action_2    -0.526      0.0%          100.0%        comment-POSITIVE
-yT4RK3_action_14   -0.506      7.1%          100.0%        comment-negative
-yT4RK3_action_9    -0.603     30.0%          100.0%        comment-negative
-zOfbr6_action_14   -0.742     71.1%          100.0%        comment-negative
+xYkvB0_action_15   -0.493      0.0%          100.0%        positive
+xYkvB0_action_9    -0.513      0.0%          100.0%        positive
+yT4RK3_action_2    -0.526      0.0%          100.0%        positive
+yT4RK3_action_14   -0.506      7.1%          100.0%        unattributable
+yT4RK3_action_9    -0.603     30.0%          100.0%        unattributable
+zOfbr6_action_14   -0.742     71.1%          100.0%        negative
 ```
 
 That is **40–65° of hip flexion**: real performers land *between* the source's two targets, and the
@@ -165,7 +165,7 @@ biting:
 | **0.15 s (shipped)** | **150** |
 | 0.40 s (framework default) | 52 |
 
-**The default discards 65.3%.** Surviving repetitions are 0.45–0.75 s each — physically ordinary, so
+**The default discards 65.3%.** Surviving repetitions are 0.45–1.42 s each — physically ordinary, so
 the low floor is not manufacturing noise.
 
 **The corpus makes this stronger, not weaker:** 30 of 68 actions are judged FAILED on "maintain the
@@ -180,7 +180,7 @@ not the world vertical; this corpus proves it twice over by shipping its side ca
 Leg Abduction's substitute — take the vertical from the **support limb** — is the only construction
 available, and here it does not hold:
 
-> **trunk-to-support-limb angle during normal marching: 6.4–14.2°, median 9.3°** (12 gated pairs)
+> **trunk-to-support-limb angle during normal marching: 8.6–23.6°, median 13.1°** (12 gated pairs)
 
 against thresholds of 10–15° (backward) and 15–20° (forward). Part of it is not even marching: the
 stance foot sits under the hip *joint* while the axis is drawn from the pelvis *midpoint*, so the
@@ -190,8 +190,8 @@ axis is tilted by atan(half-pelvis / leg length) ≈ 6° on adult proportions be
 
 | cut | fires on |
 |---|---|
-| 10° backward (`hk_trunk_lean_back`) | **47.0% of frames** — 46–56% on the two faultless actions |
-| 15° forward (`hk_forward_trunk_collapse`) | **0.0% of frames** |
+| 10° backward (`hk_trunk_lean_back`) | **69.7% of scored frames** — 56–83% on the two faultless actions |
+| 15° forward (`hk_forward_trunk_collapse`) | **0.0% of scored frames** |
 
 An unvalidated baseline offset running toward the fault is `pushup_head_drop`'s finding and Torso
 Twist's brace finding for the **third** time. What is new: here it sinks both signs at once, one by
@@ -201,10 +201,10 @@ false-firing and one by never firing at all.
 only criterion close to these rules, and its comments describe **sway** — "excessive upper body
 sway", "slightly shaking", "unstable center of gravity". Both rules read a signed **mean**:
 
-| judged on stability | pairs | median trunk lean | median SD |
-|---|---|---|---|
-| FALSE | 4 | −8.02° | 8.69° |
-| TRUE | 8 | −10.38° | 8.52° |
+| judged on stability | actions | pairs | median trunk lean | median SD |
+|---|---|---|---|---|
+| FALSE | 2 | 4 | −10.10° | 5.77° |
+| TRUE | 4 | 8 | −14.77° | 6.19° |
 
 The mean separates **the wrong way**; the variance does not separate. At n = 6 that is not a powered
 null — but it is the *reading of the criterion*, not the n, that decides.
@@ -216,14 +216,14 @@ pure projection. Restricted to the two cameras the gate admits:
 
 | action | exo_l vs exo_r spread | frame-by-frame r |
 |---|---|---|
-| yT4RK3_action_2 | 1.89° | −0.554 |
-| yT4RK3_action_9 | 3.97° | −0.166 |
-| yT4RK3_action_14 | 7.17° | −0.145 |
-| xYkvB0_action_9 | 8.86° | +0.217 |
-| xYkvB0_action_15 | 9.33° | +0.122 |
-| zOfbr6_action_14 | 12.85° | −0.426 |
+| yT4RK3_action_2 | 0.97° | −0.483 |
+| yT4RK3_action_9 | 2.72° | −0.217 |
+| yT4RK3_action_14 | 5.49° | +0.116 |
+| xYkvB0_action_15 | 7.90° | −0.413 |
+| xYkvB0_action_9 | 8.52° | −0.026 |
+| zOfbr6_action_14 | 13.68° | −0.114 |
 
-against the spec's "> ~5–8°". **The camera moves the quantity by more than the fault does on four of
+against the spec's "> ~5–8°". **The camera moves the quantity by more than the low end of that threshold on four of
 six actions**, and frame by frame the two cameras are **anti-correlated on four of six** — they
 disagree about which way the pelvis is tilting at any instant, not merely about the average.
 

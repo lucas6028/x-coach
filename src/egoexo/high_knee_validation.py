@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -108,8 +109,8 @@ def signed_trunk_lean_deg(points: np.ndarray | None) -> float:
     Positive is FORWARD (shoulders anterior of the hips). The vertical comes from the SUPPORT LIMB
     -- Leg Abduction's construction, and the only one available, since Group E established that
     the image vertical is not the world vertical and this corpus ships its side cameras rolled 90
-    degrees. The support limb is the leg whose thigh hangs lowest relative to the trunk, which is
-    a trunk-relative choice and so does not need the vertical it is being used to find.
+    degrees. The support limb is the leg whose ANKLE sits farthest down the trunk axis from the hips --
+    a trunk-relative choice, so it does not need the vertical it is being used to find.
 
     :func:`trunk_to_support_limb_deg` measures how much this construction can be trusted, and the
     answer is what withdrew both rules.
@@ -279,6 +280,96 @@ def load_judgements(path: Path) -> dict[str, dict[str, bool]]:
     return out
 
 
+def criterion_failure_rates(judgements: dict[str, dict[str, bool]]) -> list[tuple[str, int, int]]:
+    """(criterion, majority-failed actions, total actions), worst first.
+
+    Ships because it carries two findings rather than one: the ZERO-overlapping-pairs result
+    (design spec section 2.2) and the KG grounding misattribution (section 3.3), which turns on
+    "knee lift 10%" reproducing from the alternation-and-speed criterion.
+    """
+    totals: dict[str, int] = {}
+    failed: dict[str, int] = {}
+    for criteria in judgements.values():
+        for criterion, is_fault in criteria.items():
+            totals[criterion] = totals.get(criterion, 0) + 1
+            failed[criterion] = failed.get(criterion, 0) + int(bool(is_fault))
+    return sorted(
+        ((criterion, failed[criterion], totals[criterion]) for criterion in totals),
+        key=lambda row: (-row[1], row[0]),
+    )
+
+
+# ---------------------------------------------------------------------------------------
+# THE PRE-REGISTERED COMMENT RULE for `hk_insufficient_knee_lift`, transcribed verbatim from the
+# form it was fixed in BEFORE any comment other than six disclosed actions' was read.
+#
+# WHY A COMMENT RULE AT ALL: EgoExo's seven-item High Knee checklist contains NO knee-height
+# criterion, so the checklist cannot label this fault at all. The free-text comment can. This is
+# SECONDARY evidence -- Sit-up logged secondary sourcing as a citation failure mode -- and is
+# reported as a strictly weaker tier than a checklist label. It establishes that the fault is real
+# and that human judges care about it; it CANNOT license a threshold, because a comment judges a
+# whole action rather than a repetition.
+KNEE_LIFT_COMMENT_DISCLOSED = frozenset({
+    "xYkvB0_action_9", "xYkvB0_action_15", "yT4RK3_action_2",
+    "yT4RK3_action_9", "yT4RK3_action_14", "zOfbr6_action_14",
+})
+_LEG_TOKEN = re.compile(r"\b(legs?|knees?|thighs?)\b")
+_ARM_TOKEN = re.compile(r"\b(arms?|hands?|swing\w*)\b")
+_RANGE_TOKEN = re.compile(r"\b(range|amplitude|rom)\b")
+_INSUFFICIENCY_TOKEN = re.compile(
+    r"(not (?:high|enough|sufficient)|too small|too low|not sufficient|insufficient|"
+    r"inadequate|higher|increase\w*|enhance\w*|raise\w* higher|lifted higher|"
+    r"as high as possible|small(?:er)? (?:range|amplitude))"
+)
+
+
+def classify_knee_lift_comment(comment: str | None) -> str:
+    """"positive" / "negative" / "unattributable" / "missing", per the pre-registered rule.
+
+    POSITIVE iff one SENTENCE carries both a leg token and an insufficiency token. Sentences split
+    on `.;!?` and NOT on commas -- these are translated comments whose clauses run on commas, and a
+    comma split would fragment the evidence.
+
+    UNATTRIBUTABLE when an insufficiency token appears with a range word but NO leg token and no
+    arm token ("the range of motion is too small", standing alone). Those are counted separately
+    and NEVER scored as positives, because the same phrase is used about the arm swing elsewhere in
+    this corpus.
+    """
+    if not comment:
+        return "missing"
+    lowered = comment.lower()
+    sentences = [part for part in re.split(r"[.;!?\n]", lowered) if part.strip()]
+    for sentence in sentences:
+        if _LEG_TOKEN.search(sentence) and _INSUFFICIENCY_TOKEN.search(sentence):
+            return "positive"
+    for sentence in sentences:
+        if (
+            _INSUFFICIENCY_TOKEN.search(sentence)
+            and _RANGE_TOKEN.search(sentence)
+            and not _LEG_TOKEN.search(sentence)
+            and not _ARM_TOKEN.search(sentence)
+        ):
+            return "unattributable"
+    return "negative"
+
+
+def knee_lift_comment_labels(path: Path) -> dict[str, str]:
+    """sample_id -> "positive" if ANY annotator's comment complains about leg height."""
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    labels: dict[str, str] = {}
+    for sample_id, record in payload.items():
+        annotations = record.get("annotations", [])
+        if not annotations or annotations[0].get("action_name") != "High Knee":
+            continue
+        verdicts = [classify_knee_lift_comment(a.get("comment")) for a in annotations]
+        labels[sample_id] = (
+            "positive" if "positive" in verdicts
+            else "unattributable" if "unattributable" in verdicts
+            else "negative"
+        )
+    return labels
+
+
 def _reps_at_floor(frames: list[dict], fps: float, min_rep_seconds: float) -> int:
     """Re-segment this clip's rep signal at a different duration floor. Nothing else changes."""
     detector = replace(HIGH_KNEE_DETECTOR, min_rep_seconds=min_rep_seconds)
@@ -296,6 +387,34 @@ def _reps_at_floor(frames: list[dict], fps: float, min_rep_seconds: float) -> in
             min_rep_seconds=min_rep_seconds,
         )
     )
+
+
+def _scored_positions(core: Sequence[object], analyzed: Sequence[object]) -> list[int]:
+    """Positions of the frames the detector actually SCORES: valid, inside an analyzed rep.
+
+    `core` is 1:1 with the input frames, so these positions index the landmark list too. Falls
+    back to every valid frame when nothing was analyzed, which is what `run_detector` itself does
+    on the whole-clip path.
+    """
+    if not analyzed:
+        return [index for index, frame in enumerate(core) if getattr(frame, "valid", False)]
+    positions: list[int] = []
+    for rep in analyzed:
+        for index in range(rep.start, min(rep.end + 1, len(core))):
+            if getattr(core[index], "valid", False):
+                positions.append(index)
+    return sorted(set(positions))
+
+
+def _series(points_by_frame, quantity, positions: Sequence[int]) -> list[float]:
+    """`quantity` over the whole clip, smoothed, then restricted to `positions`.
+
+    Smoothing FIRST and restricting SECOND is deliberate: a centered median needs the neighbours
+    of a frame, including neighbours that sit just outside the rep window.
+    """
+    raw = [quantity(points) for points in points_by_frame]
+    smoothed = centered_median(raw, window=5)
+    return [float(smoothed[index]) for index in positions if index < len(smoothed)]
 
 
 def evaluate_view(frames: list[dict], fps: float, view_type: str) -> dict:
@@ -316,14 +435,27 @@ def evaluate_view(frames: list[dict], fps: float, view_type: str) -> dict:
         ]
         peaks.append(max(candidates) if candidates else math.nan)
 
+    # THE WITHDRAWN RULES' QUANTITIES, MEASURED WHERE THE RULES WOULD HAVE RUN.
+    #
+    # Not over every frame in the file. Arm VW measured fire rates on annotation windows and on
+    # `run_detector`'s SEGMENTED windows to be 3.7x apart, and this harness would have repeated
+    # that: an action file carries idle lead-in and lead-out frames that the detector assigns to
+    # `rest` and never scores, plus frames the 6-landmark gate rejects. Including them inflates a
+    # fire rate TOWARD withdrawal, which is the direction this module's own `cadence_hz` docstring
+    # says the bias must not run.
+    #
+    # Smoothed with the same centered median window 5 the framework applies to every metric, for
+    # the same reason: the surviving rule's quantity is read off `core`, which is smoothed, so an
+    # unsmoothed comparison would hold the withdrawn quantities to a noisier standard.
     points_by_frame = [
         landmarks_to_array(frame.get("landmarks")) if isinstance(frame, dict) else None
         for frame in frames
     ]
-    lean = [signed_trunk_lean_deg(points) for points in points_by_frame]
-    axis_error = [trunk_to_support_limb_deg(points) for points in points_by_frame]
-    obliquity = [pelvic_obliquity_deg(points) for points in points_by_frame]
-    gate = [frame.m("anterior_axis_length") for frame in core if frame.valid]
+    scored = _scored_positions(core, result.analyzed)
+    lean = _series(points_by_frame, signed_trunk_lean_deg, scored)
+    axis_error = _series(points_by_frame, trunk_to_support_limb_deg, scored)
+    obliquity = _series(points_by_frame, pelvic_obliquity_deg, scored)
+    gate = [core[index].m("anterior_axis_length") for index in scored]
 
     span = (
         result.analyzed[-1].end - result.analyzed[0].start + 1 if result.analyzed else 0
