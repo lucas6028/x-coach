@@ -125,7 +125,7 @@ yT4RK3_action_13   1.10     zOfbr6_action_8   1.54
 Four of eleven actions clear 1.3 comfortably and seven do not — subject-level variation, not one
 outlier dragging a median.
 
-**Outcome: the rule is registered PERMANENTLY SILENT, and the 1.3 is left where it is.** A cut
+**Outcome: the rule is PERMANENTLY SILENT, and the 1.3 is left where it is.** A cut
 fitted to this distribution could be manufactured at will, and manufacturing one is what this
 programme forbids. `abd_insufficient_rom` was silenced rather than moved for the same reason.
 
@@ -153,9 +153,22 @@ ratio:
 | observed knees | 0.769 | **79.4%** |
 | **perfectly aligned knees** | **0.810** | **68.5%** |
 
-**Of the 79.4 points of firing, 68.5 are stance geometry.** About 11 points are attributable to any
-inward deviation at all — on a population every action of which a human judged correct. The rule
-reads the movement, not the fault.
+**Two marginal rates are not a decomposition**, so the joint counts were taken rather than their
+difference — the aligned firings are *not* a clean subset of the observed ones:
+
+| of 2 353 open-phase frames | |
+|---|---|
+| fires with a **perfectly straight limb** too — stance alone explains it | **63.2%** |
+| fires only with the **real** knees — needed genuine inward deviation | **16.2%** |
+| the straight limb would condemn and the real knees do not (knees bowed *out*) | 5.2% |
+
+**Four firings in five — 63.2 of the 79.4 points — need no inward deviation whatsoever**, on a
+population every action of which a human judged correct. The rule reads the movement, not the
+fault.
+
+The 16.2% is not nothing and is not claimed to be: on about one open-phase frame in six there is
+measurable inward deviation relative to the straight limb. That is a reason to want a metric that
+**isolates** it, not a reason to keep one that cannot.
 
 The same mechanism is pinned on synthetic geometry by
 `tests/test_jumping_jacks.py::StanceGeometryConfoundTest`: a perfectly aligned knee trips the 0.82

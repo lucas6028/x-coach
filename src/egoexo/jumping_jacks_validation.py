@@ -353,6 +353,26 @@ def evaluate_view(frames: list[dict], fps: float, view_type: str) -> dict:
         "open_frames": len(open_observed),
         "open_observed_below_cut": sum(1 for value in open_observed if value < WITHDRAWN_VALGUS_CUT),
         "open_aligned_below_cut": sum(1 for value in open_aligned if value < WITHDRAWN_VALGUS_CUT),
+        # THE JOINT COUNTS, because two marginal rates are not a decomposition. "68.5 of the 79.4
+        # points are stance geometry" is only true if the aligned-firing frames are a SUBSET of
+        # the observed-firing ones, which has to be counted rather than inferred from the two
+        # medians. `both` is a firing the stance alone explains; `observed_only` is a firing that
+        # needed genuine inward deviation.
+        "open_both_below_cut": sum(
+            1
+            for observed, aligned in zip(open_observed, open_aligned)
+            if observed < WITHDRAWN_VALGUS_CUT and aligned < WITHDRAWN_VALGUS_CUT
+        ),
+        "open_observed_only_below_cut": sum(
+            1
+            for observed, aligned in zip(open_observed, open_aligned)
+            if observed < WITHDRAWN_VALGUS_CUT and aligned >= WITHDRAWN_VALGUS_CUT
+        ),
+        "open_aligned_only_below_cut": sum(
+            1
+            for observed, aligned in zip(open_observed, open_aligned)
+            if observed >= WITHDRAWN_VALGUS_CUT and aligned < WITHDRAWN_VALGUS_CUT
+        ),
         "open_observed_median": _median(open_observed),
         "open_aligned_median": _median(open_aligned),
     }
@@ -452,6 +472,18 @@ def summarize(payload: dict) -> dict:
         ),
         "valgus_aligned_frame_rate": _rate(
             sum(r["open_aligned_below_cut"] for r in per_view_records),
+            sum(r["open_frames"] for r in per_view_records),
+        ),
+        "valgus_both_frame_rate": _rate(
+            sum(r.get("open_both_below_cut", 0) for r in per_view_records),
+            sum(r["open_frames"] for r in per_view_records),
+        ),
+        "valgus_observed_only_frame_rate": _rate(
+            sum(r.get("open_observed_only_below_cut", 0) for r in per_view_records),
+            sum(r["open_frames"] for r in per_view_records),
+        ),
+        "valgus_aligned_only_frame_rate": _rate(
+            sum(r.get("open_aligned_only_below_cut", 0) for r in per_view_records),
             sum(r["open_frames"] for r in per_view_records),
         ),
         "median_open_observed": _median(

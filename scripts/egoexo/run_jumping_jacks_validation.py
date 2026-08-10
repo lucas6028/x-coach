@@ -70,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
           f"   median {summary['median_open_observed']:.3f}")
     print(f"  PERFECTLY ALIGNED knees below  {summary['valgus_aligned_frame_rate']:.3f}"
           f"   median {summary['median_open_aligned']:.3f}   <- the confound")
+    print(f"  DECOMPOSITION: stance alone {summary['valgus_both_frame_rate']:.3f}"
+          f"  +  needed real deviation {summary['valgus_observed_only_frame_rate']:.3f}"
+          f"  (aligned-only {summary['valgus_aligned_only_frame_rate']:.3f})")
     print(f"cross-camera agreement, ROM      {summary['agreement_leg_rom']}")
     print(f"cross-camera agreement, valgus   {summary['agreement_valgus']}")
     print(f"median cross-camera stance spread {summary['median_stance_spread']:.3f}")

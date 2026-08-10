@@ -15,7 +15,7 @@ it, and it decided against the two rules this document was originally written to
 |---|---|---|
 | `jj_incomplete_leg_rom` | **PERMANENTLY SILENT** | it clears every bar this programme sets — a primary sentence, a KG node grounded in *this* exercise, human corroboration that the fault is real — and the spec's 1.3 cut **fires on 79.1% of the repetitions humans judged correct** |
 | `jj_incomplete_arm_rom` | **PERMANENTLY SILENT** | needs **no threshold at all** and the metric is clean; silent because its only source attributes an injury association, in the same document, to the range of motion the rule would coach users toward |
-| `jj_knee_valgus_landing` | **WITHDRAWN, absent** | a zero-parameter control: replacing both knees with **perfectly straight-limb positions** still trips the 0.82 cut on **68.5%** of open-phase frames against 79.4% for the real knees. The rule reads stance geometry, not knee alignment |
+| `jj_knee_valgus_landing` | **WITHDRAWN, absent** | a zero-parameter control: of the 79.4% of open-phase frames the 0.82 cut fires on, **63.2 points fire with both knees replaced by perfectly straight-limb positions** — four firings in five need no valgus at all. The rule reads stance geometry, not knee alignment |
 | `jj_stiff_landing` | **WITHDRAWN, absent** | DeVita & Skelly's *stiff* landing is 77° of knee flexion; the rule fires below **20°**, so the paper's own stiff condition sits nowhere near the cut — and the cue carries a measured **+41.2° projection bias in the firing direction** |
 | `jj_landing_asymmetry` | **WITHDRAWN, absent** | no KG node; a three-quantity disjunction that would put an arm, a foot or a knee behind one `fault_id`; and cross-rep state this architecture has never had |
 
@@ -43,12 +43,13 @@ is new and it is sharper: **the labels judge different faults from the ones the 
 rules for.** §2 establishes that with both taxonomies side by side, because it is the fact that
 decides `validated` and it should not be paraphrased.
 
-The second thing that is different is the shape of the reasoning that follows. Two of this
-section's five rules were decided by a measurement this repository already held
-(`notes/fit3d_view_dependence_summary.md`, which read every squat cue twice — once from mocap 3-D
-truth, once from the 2-D projection in each of four calibrated cameras); the other three were
-decided by arithmetic in a cited abstract, by the graph's negative filter, and — the one this
-document changed its own mind on — by a **zero-parameter control run on the corpus itself**.
+The second thing that is different is the shape of the reasoning that follows. Each of the five
+rules was decided by something checkable rather than by judgement: `jj_incomplete_leg_rom` by a
+**replay against human judgement** (§5.1), `jj_knee_valgus_landing` by a **zero-parameter control
+run on the corpus itself** (§7.0), `jj_stiff_landing` by **arithmetic inside its own cited
+abstract** with a measurement this repository already held as the second reason (§3.1, §7.1),
+`jj_landing_asymmetry` by the graph's negative filter and a structural argument about `fault_id`
+(§7.2), and `jj_incomplete_arm_rom` by **a passage in its own supporting document** (§3.3).
 
 That last one is worth flagging at the top, because it is the lesson. The Fit3D table ranks
 `knee_width_ratio` the **most view-robust cue this project has ever measured** and `knee_angle`
@@ -375,7 +376,7 @@ that `frames_open` is missing its `.ac` part, leaving 11 reachable and all 11 ne
 positive class. That is a download, not a research programme.
 
 
-## 6. `jj_incomplete_arm_rom` is REGISTERED PERMANENTLY SILENT, for a new reason
+## 6. `jj_incomplete_arm_rom` is PERMANENTLY SILENT, for a new reason
 
 Every previous silent rule in this registry is silent because a **number** or a **sensor** is
 missing — `abd_insufficient_rom` and `tt_insufficient_rotation_rom` (no source states a range),
@@ -435,10 +436,26 @@ over 2 353 open-phase frames of the 11 judged actions
   PERFECTLY ALIGNED knees   median 0.810    below the 0.82 cut on 68.5% of frames
 ```
 
-**Of the 79.4 points of firing, 68.5 are stance geometry.** About 11 points are attributable to any
-inward deviation at all -- on a population every action of which a human judged correct. The rule
-reads the movement, not the fault. This is the discipline that refuted the keypoint blind-spot
-claims elsewhere in this project: **run the zero-parameter control before believing the cue.**
+**Two marginal rates are not a decomposition**, so the joint counts were taken rather than the
+difference — the aligned firings are *not* a clean subset of the observed ones:
+
+```
+  fires with a PERFECTLY STRAIGHT LIMB too   63.2% of frames   <- stance alone explains it
+  fires only with the REAL knees             16.2%             <- needed real inward deviation
+  would fire straight-limb but does NOT       5.2%             <- knees bowed OUT of the line
+```
+
+**Four firings in five — 63.2 of the 79.4 points — need no inward deviation whatsoever**, on a
+population every action of which a human judged correct. The rule reads the movement, not the
+fault. This is the discipline that refuted the keypoint blind-spot claims elsewhere in this
+project: **run the zero-parameter control before believing the cue.**
+
+*(The 16.2% is not nothing and is not claimed to be: on about one open-phase frame in six there is
+measurable inward deviation relative to the straight limb. That is a reason to want a metric that
+isolates it — the last paragraph of this section — not a reason to keep one that cannot. And the
+first draft of this document wrote "68.5 of the 79.4 points are stance geometry", which is the
+subtraction of two marginal rates and was wrong; the conditional was measured because the whole
+withdrawal turns on it.)*
 
 The mechanism is pinned independently of the corpus by
 `tests/test_jumping_jacks.py::StanceGeometryConfoundTest` -- a perfectly aligned knee trips the
@@ -670,7 +687,7 @@ constants were removed rather than left as dead code.
 
 ## 9. Testing
 
-`tests/test_jumping_jacks.py` (32 cases) and `tests/test_jumping_jacks_validation.py` (18). The
+`tests/test_jumping_jacks.py` (32 cases) and `tests/test_jumping_jacks_validation.py` (19). The
 ones that carry an argument rather than coverage:
 
 | test | what it pins |
@@ -689,6 +706,7 @@ ones that carry an argument rather than coverage:
 | `CadenceTest::test_the_floor_probe_measures_what_the_direct_reading_cannot` | 8.2 — why the floor measurement is a difference of two segmentations rather than a min over one |
 | `SummarizeTest::test_the_fire_rate_is_over_action_camera_pairs_not_actions` | that three simultaneous cameras are three chances to fire, so a per-action rate would hide the disagreement the rig exists to expose |
 | `AgreementTest::test_a_single_camera_is_not_agreement` | 8.3 — the one-camera action is not counted as unanimous |
+| `SummarizeTest::test_the_confound_is_a_decomposition_not_a_subtraction` | 7.0 — that the withdrawal's headline number is a conditional count and not the difference of two marginal rates, on a fixture built so the two disagree |
 
 ## 10. Honesty constraints
 

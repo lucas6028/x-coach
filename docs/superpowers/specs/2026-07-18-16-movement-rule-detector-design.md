@@ -2303,8 +2303,11 @@ Rep phases: **closed (feet together, arms at sides) → open (feet spread wide, 
 >   sits partway along the hip→ankle line and its separation is *necessarily* smaller than the
 >   ankles' — with no valgus at all. Replacing both knees with **perfectly straight-limb
 >   positions** and recomputing over 2 353 open-phase frames: the aligned knees fall below 0.82 on
->   **68.5%** of frames against **79.4%** for the real ones (medians 0.810 vs 0.769). **Of the
->   79.4 points of firing, 68.5 are stance geometry.** The rule reads the movement, not the fault.
+>   **68.5%** of frames against **79.4%** for the real ones (medians 0.810 vs 0.769) — and the
+>   JOINT counts, because two marginal rates are not a decomposition, are **63.2% fires with a
+>   straight limb too, 16.2% needed real deviation, 5.2% the straight limb would condemn and the
+>   real knees do not**. **Four firings in five need no inward deviation whatsoever.** The rule
+>   reads the movement, not the fault.
 >   Pinned independently of the corpus by `StanceGeometryConfoundTest`, so it does not rest on
 >   EgoExo's 456×256 frames. What would work — knee deviation from its own hip→ankle line — is
 >   recorded and **not built**, because no source states a threshold for it.

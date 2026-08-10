@@ -23,10 +23,10 @@
 #                                 range of motion the rule would coach users toward
 #   jj_knee_valgus_landing        WITHDRAWN, absent -- THE METRIC IS CONFOUNDED BY THE VERY
 #                                 STANCE THIS MOVEMENT IS DEFINED BY, measured with a
-#                                 zero-parameter control: replacing both knees with PERFECTLY
-#                                 STRAIGHT-LIMB positions still puts the ratio below the 0.82 cut
-#                                 on 68.5% of open-phase frames, against 79.4% for the real
-#                                 knees. The rule reads stance geometry, not knee alignment.
+#                                 zero-parameter control: of the 79.4% of open-phase frames the
+#                                 0.82 cut fires on, 63.2 points ALSO fire with both knees
+#                                 replaced by PERFECTLY STRAIGHT-LIMB positions -- four firings in
+#                                 five need no valgus at all. It reads stance, not alignment.
 #   jj_stiff_landing              WITHDRAWN, absent -- the cited paper's OWN STIFF CONDITION
 #                                 WOULD NOT FIRE THIS RULE (77 deg of flexion, against a cut
 #                                 below 20 deg), and the cue carries a measured projection bias
@@ -490,9 +490,19 @@ def rule_incomplete_arm_rom(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
 #          observed knee/ankle    median 0.769,  below the 0.82 cut on 79.4% of frames
 #          ALIGNED  knee/ankle    median 0.810,  below the 0.82 cut on 68.5% of frames
 #
-#      So of the 79.4 points of firing, 68.5 are STANCE GEOMETRY and about 11 are any inward
-#      deviation at all -- on a population every one of whose actions a human judged correct.
-#      THE RULE READS THE MOVEMENT, NOT THE FAULT. Harness:
+#      AND THE JOINT COUNTS, BECAUSE TWO MARGINAL RATES ARE NOT A DECOMPOSITION -- the aligned
+#      firings are NOT a clean subset of the observed ones, which had to be counted rather than
+#      inferred from the two medians:
+#
+#          fires with a PERFECTLY STRAIGHT LIMB too   63.2% of frames   <- stance alone
+#          fires only with the REAL knees             16.2%             <- needed real deviation
+#          would fire straight-limb but does NOT       5.2%             <- knees BOWED OUT
+#
+#      So FOUR FIRINGS IN FIVE (63.2 of 79.4) need no inward deviation whatsoever, on a population
+#      every one of whose actions a human judged correct. THE RULE READS THE MOVEMENT, NOT THE
+#      FAULT. (The 16.2% is not nothing and is not claimed to be: on about one open-phase frame in
+#      six there IS measurable inward deviation. That is a reason to want a metric that isolates
+#      it -- see below -- not a reason to keep one that cannot.) Harness:
 #      `src/egoexo/jumping_jacks_validation.py::aligned_knee_ratio`; this is the same shape as the
 #      zero-parameter controls that refuted the keypoint blind-spot claims elsewhere in this
 #      project -- run the control before believing the cue.

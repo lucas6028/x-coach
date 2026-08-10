@@ -138,6 +138,9 @@ class SummarizeTest(unittest.TestCase):
                 "open_frames": 10,
                 "open_observed_below_cut": 8,
                 "open_aligned_below_cut": 7,
+                "open_both_below_cut": 6,
+                "open_observed_only_below_cut": 2,
+                "open_aligned_only_below_cut": 1,
                 "open_observed_median": 0.77,
                 "open_aligned_median": 0.81,
             }
@@ -174,6 +177,21 @@ class SummarizeTest(unittest.TestCase):
         self.assertEqual(summary["open_frames"], 20)
         self.assertAlmostEqual(summary["valgus_observed_frame_rate"], 0.8, places=6)
         self.assertAlmostEqual(summary["valgus_aligned_frame_rate"], 0.7, places=6)
+
+    def test_the_confound_is_a_decomposition_not_a_subtraction(self) -> None:
+        """TWO MARGINAL RATES ARE NOT A DECOMPOSITION, and the first draft of the design document
+        made exactly that mistake -- it wrote "of the 79.4 points of firing, 68.5 are stance
+        geometry", which is 79.4 minus a separately-measured 68.5 and assumes the aligned firings
+        nest inside the observed ones. They do not: on the real corpus the joint counts are 63.2 /
+        16.2 / 5.2, so 5.2% of frames the straight limb would condemn are ones the REAL knees do
+        not. The summary therefore carries the conditional rates, and this fixture is built so the
+        subtraction (8 - 7 = 1) and the truth (2) disagree."""
+        summary = summarize(self._payload())
+        self.assertAlmostEqual(summary["valgus_both_frame_rate"], 0.6, places=6)
+        self.assertAlmostEqual(summary["valgus_observed_only_frame_rate"], 0.2, places=6)
+        self.assertAlmostEqual(summary["valgus_aligned_only_frame_rate"], 0.1, places=6)
+        subtraction = summary["valgus_observed_frame_rate"] - summary["valgus_aligned_frame_rate"]
+        self.assertNotAlmostEqual(subtraction, summary["valgus_observed_only_frame_rate"], places=6)
 
     def test_the_fire_rate_is_over_action_camera_pairs_not_actions(self) -> None:
         """Three simultaneous cameras of one action are three chances to fire, and reporting one
