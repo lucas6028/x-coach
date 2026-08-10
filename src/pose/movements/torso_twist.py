@@ -356,10 +356,14 @@ BRACE_SEVERE_DEG = 40.0
 
 
 def rule_trunk_not_braced(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
-    """Flag a repetition in which the held trunk position is lost -- the brace is dropped.
+    """Flag a repetition in which the trunk SAGS BACK away from its opening posture.
+
+    DIRECTIONAL, and the parent spec's wording is not: it says "deviates from baseline by
+    > ~15 deg". See the signed-deviation comment in the body for why an unsigned reading fires on
+    the opposite of the fault, and for the measurement that showed it doing so.
 
     THRESHOLD PROVENANCE -- TWO CATEGORIES, DO NOT CONFLATE THEM:
-      FIRE THRESHOLD 15 deg of deviation from the repetition's opening posture: FROM THE SPEC
+      FIRE THRESHOLD 15 deg of SAG from the repetition's opening posture: FROM THE SPEC
         (whose own source gives a 45 deg TARGET against the ground and no tolerance at all).
       SEVERITY RAMP 15 -> 40 deg: A RULE-LEVEL CHOICE.
 
@@ -409,15 +413,17 @@ def rule_trunk_not_braced(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
     WHAT CAMERA PLACEMENT ALONE DOES TO THIS NUMBER, MEASURED. Fit3D films four cameras
     simultaneously, so any disagreement between them on the same repetition is pure projection
     error, and the joints are mocap ground truth projected through the real calibration -- a
-    PERFECT detector. On 45 repetitions of `standing_ab_twists`: the ABSOLUTE trunk-thigh angle
-    is robust, cross-camera spread of the per-rep median 4.5 deg (p90 10.6, max 15.7). The PEAK
-    DEVIATION this rule scores is NOT, spread 13.5 deg (p90 25.0, max 30.5) -- taking a maximum
-    over a window picks up the worst projection excursion, so the derived quantity is 3x less
-    camera-robust than the angle it is built from. That spread is the size of the 15 deg cut, so
-    a near-threshold repetition is decided by where the phone was put. THE VARIANT DOES NOT
-    MATCH (module header) and `standing_ab_twists` moves the trunk far more than a seated twist
-    does -- median peak deviation 44.5 deg there -- so the transferable figure is the RATIO,
-    about 0.30 of the measured deviation, not the 13.5 itself. Design spec section 8.2.
+    PERFECT detector. Harness: `scripts/fit3d/run_rotation_proxy_fidelity.py`. On 45 repetitions
+    of `standing_ab_twists`: the ABSOLUTE trunk-thigh angle is robust, cross-camera spread of the
+    per-rep median 4.5 deg (p90 10.6). The SIGNED SAG this rule scores has a median value of only
+    6.3 deg there and a cross-camera spread of 5.1 deg (p90 15.7) -- taking a maximum over a
+    window picks up the worst projection excursion, so the derived quantity is LESS camera-robust
+    than the angle it is built from, and its p90 disagreement is the size of the 15 deg cut.
+    TWO CAVEATS, AND THE SECOND BINDS HARDER. (i) The variant does not match (module header).
+    (ii) `standing_ab_twists` moves the trunk mostly in FORWARD FLEXION, which is the direction
+    this rule does NOT score, which is why the sag there is small. So these figures bound the sag
+    direction only weakly and must not be read as "the rule barely moves on real footage". Design
+    spec section 8.2.
     """
     segment = [
         frame for frame in core if frame.valid and np.isfinite(frame.m("trunk_thigh_angle_deg"))
@@ -432,7 +438,22 @@ def rule_trunk_not_braced(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
     if not np.isfinite(baseline):
         return []
 
-    deviations = [abs(frame.m("trunk_thigh_angle_deg") - baseline) for frame in segment]
+    # SIGNED, NOT `abs`, AND THAT IS PUSH-UP'S FINDING ARRIVING BY A THIRD ROUTE. The parent
+    # spec says "deviates from baseline by > ~15 deg", and an unsigned deviation is not merely
+    # non-directional but ACTIVELY INVERTED here: `trunk_thigh_angle_deg` is monotone in sag --
+    # larger means the torso has laid further back toward the floor, smaller means the subject is
+    # sitting UP -- so an `abs` fires on the OPPOSITE of the fault. Measured before the fix, on
+    # the shipped path: a twister who sets up loose at 95 deg and then TIGHTENS to 50 deg for the
+    # swing was reported "Braced Torso Lost" at severity 1.0, quoting a 45 deg deviation.
+    #
+    # AND THE BASELINE MAKES THAT THE COMMON CASE RATHER THAN AN EDGE ONE, because `setup` is the
+    # window's first 15% -- the frames BEFORE the subject braces. Set up loose, brace, swing is an
+    # ordinary way to perform the movement and produces exactly a large positive tightening.
+    #
+    # No new number: the same 15 deg cut on a strictly smaller set of firings. `pushup_head_drop`
+    # had to add a signed metric to the metric layer for this; here the sign is already in the
+    # comparison, so nothing about roll- or mirror-invariance changes.
+    deviations = [frame.m("trunk_thigh_angle_deg") - baseline for frame in segment]
     peak = float(np.nanmax(deviations))
     if not peak > BRACE_MILD_DEG:
         return []
@@ -452,10 +473,10 @@ def rule_trunk_not_braced(core: list[CoreFrame], ctx: RuleContext) -> list[PoseR
             # to a `side` view; see the module header for why no view term is applied.
             observability="medium",
             evidence={
-                "max_trunk_deviation_deg": round(peak, 2),
+                "max_trunk_sag_deg": round(peak, 2),
                 "setup_trunk_thigh_angle_deg": round(baseline, 2),
                 "threshold_deg": BRACE_MILD_DEG,
-                "primary_label": "trunk drift from the braced opening posture",
+                "primary_label": "trunk sag from the braced opening posture",
                 "primary_value": round(peak, 2),
                 "primary_threshold": BRACE_MILD_DEG,
             },
@@ -557,15 +578,15 @@ def rule_insufficient_rotation_rom(core: list[CoreFrame], ctx: RuleContext) -> l
 #        (a) ITS DERIVATIVE IS ZERO AT THE BRACED CENTRE, so it has least resolution exactly
 #            where the rule must separate "square" from "slightly turned". Measured against a
 #            real noise floor: on the Fit3D projections one degree of true rotation moves the
-#            shoulder width by 0.00016 of the image width in the 0-15 deg band and 0.00102 in
-#            the 45-75 deg band, while the frame-to-frame jitter of MediaPipe's own shoulder
-#            width over 30 REHAB24-6 videos is 0.000242 of the image width. One frame of jitter
-#            is therefore worth about 1.5 deg of rotation near the centre and 0.24 deg near the
-#            peak.
+#            shoulder width by 0.00016 of the image width in the 0-15 deg band and 0.00109 in
+#            the 45-75 deg band, while the frame-to-frame movement of MediaPipe's own shoulder
+#            width over all 130 REHAB24-6 cached-landmark videos is 0.000323 of the image width.
+#            One frame of that is therefore worth about 2.0 deg of rotation near the centre and
+#            0.30 deg near the peak.
 #        (b) IT IS EVEN IN theta, so it cannot tell a twist to one side from a twist to the
 #            other. The spec's remedy is the "left-right x-ordering flip", which only occurs past
 #            90 deg of rotation; the true relative trunk twist measured on Fit3D peaks at a
-#            median of 44.9 deg per repetition (p90 55.0, max 58.8), so the flip never happens.
+#            median of 44.9 deg per repetition (p90 54.1, max 58.8), so the flip never happens.
 #        (c) MEASURED END TO END, WITH A PERFECT DETECTOR. Fit3D ships mocap ground truth and
 #            real camera calibration, so the 2-D side can be built by projecting the truth --
 #            zero landmark error, every error below is projection alone. Over 8 subjects x 4
@@ -577,10 +598,12 @@ def rule_insufficient_rotation_rom(core: list[CoreFrame], ctx: RuleContext) -> l
 #            true hip/shoulder ratio fires at the spec's 0.6 cut on 64/180 records and the proxy
 #            fires on 86/180, DISAGREEING ON 30/180 = 16.7%, of which 26 are the proxy firing
 #            where the truth does not. (Honest qualifier: the rank correlation between the true
-#            and proxy ratios is 0.877 -- the proxy is not noise, it is biased. And the corpus is
+#            and proxy ratios is 0.876 -- the proxy is not noise, it is biased. And the corpus is
 #            `standing_ab_twists`, a DIFFERENT VARIANT with a free pelvis, so the TRUTH
 #            distribution of the ratio does not transfer to a seated twist with the hips pinned;
-#            what transfers is the projection geometry.)
+#            what transfers is the projection geometry.) Harness, so these numbers are
+#            re-runnable rather than a scratch probe someone has to trust:
+#            `scripts/fit3d/run_rotation_proxy_fidelity.py --jitter`.
 #
 #   NOT SAID BY THIS WITHDRAWAL: that rotating through the lumbar spine is fine. It is the
 #   torsional-injury pathway McGill's stabilization finding implies. What is missing is a source

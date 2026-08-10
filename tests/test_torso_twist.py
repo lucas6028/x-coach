@@ -445,11 +445,41 @@ class BraceRuleTest(unittest.TestCase):
         window = self._window(BRACE_SEVERE_DEG, setup_frames=1, total=2)
         self.assertEqual(rule_trunk_not_braced(window, _ctx(min_frames=3)), [])
 
-    def test_the_evidence_reports_the_baseline_and_the_deviation(self) -> None:
+    def test_the_evidence_reports_the_baseline_and_the_sag(self) -> None:
         fired = rule_trunk_not_braced(self._window(22.0), _ctx())[0]
         self.assertAlmostEqual(fired.evidence["setup_trunk_thigh_angle_deg"], 95.0, places=2)
-        self.assertAlmostEqual(fired.evidence["max_trunk_deviation_deg"], 22.0, places=2)
+        self.assertAlmostEqual(fired.evidence["max_trunk_sag_deg"], 22.0, places=2)
         self.assertEqual(fired.evidence["threshold_deg"], BRACE_MILD_DEG)
+
+    def test_a_twister_who_TIGHTENS_is_not_told_they_lost_the_brace(self) -> None:
+        """THE FALSE-POSITIVE DIRECTION OF THE BASELINE, WHICH THE FIRST IMPLEMENTATION HAD AND
+        NO GREEN TEST CAUGHT.
+
+        `trunk_thigh_angle_deg` is monotone in sag -- larger means the torso has laid further
+        back toward the floor -- so an UNSIGNED deviation from the baseline fires on the opposite
+        of the fault. Measured on the shipped path before the fix: a twister setting up loose at
+        95 deg and then tightening to 50 deg for the swing was reported "Braced Torso Lost" at
+        severity 1.0, quoting a 45 deg deviation.
+
+        And the baseline makes that the ORDINARY case rather than an edge one: `setup` is the
+        window's first 15%, i.e. the frames BEFORE the subject braces. Set up loose, brace, swing.
+
+        `pushup_head_drop` recorded this exact inversion ("a baseline on the unsigned angle is not
+        merely non-directional but actively inverted") and had to add a signed metric for it; here
+        the sign lives in the comparison, so the fix costs nothing. This test is the mirror of
+        `test_a_brace_lost_before_the_rep_opens_is_invisible` -- that one pins what the baseline
+        cannot see, this one pins what it must not invent.
+        """
+        frames = [twist_frame(trunk_thigh_deg=95.0, frame_index=i) for i in range(6)]
+        frames += [twist_frame(trunk_thigh_deg=50.0, frame_index=6 + i) for i in range(18)]
+        self.assertEqual(rule_trunk_not_braced(_core_with_setup(frames, 6), _ctx()), [])
+
+    def test_it_still_fires_on_the_sag_direction_so_the_test_above_is_not_vacuous(self) -> None:
+        frames = [twist_frame(trunk_thigh_deg=95.0, frame_index=i) for i in range(6)]
+        frames += [twist_frame(trunk_thigh_deg=140.0, frame_index=6 + i) for i in range(18)]
+        fired = rule_trunk_not_braced(_core_with_setup(frames, 6), _ctx())
+        self.assertEqual(len(fired), 1)
+        self.assertAlmostEqual(fired[0].evidence["max_trunk_sag_deg"], 45.0, places=2)
 
     def test_the_citation_records_that_mcgill_never_mentions_this_exercise(self) -> None:
         """The parent spec marks this rule VERIFIED. Reading McGill in place shows he measured a
