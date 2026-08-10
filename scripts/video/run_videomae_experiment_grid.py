@@ -147,7 +147,10 @@ def write_summary_csv(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run VideoMAE classifier experiments over label modes and seeds.")
-    parser.add_argument("--classifier-script", type=Path, default=REPO_ROOT / "src" / "video" / "videomae_video_classifier.py")
+    # The thin entry point, not the module file: `src/video/videomae_video_classifier.py`
+    # imports `src.video.classification_metrics`, which needs the repo root on sys.path.
+    # Running the module file directly puts `src/video/` there instead and fails to import.
+    parser.add_argument("--classifier-script", type=Path, default=REPO_ROOT / "scripts" / "video" / "train_videomae_classifier.py")
     parser.add_argument("--feature-dir", type=Path, required=True)
     parser.add_argument("--train-keys", type=Path, required=True)
     parser.add_argument("--val-keys", type=Path, required=True)
