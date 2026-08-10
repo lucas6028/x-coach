@@ -40,7 +40,7 @@ from src.video.videomae_pooling import LEGACY_FIRST_TOKEN, MEAN_POOL_FC_NORM, bu
 import transformers  # noqa: E402 - after videomae_backbone so its import guard reports first
 from transformers import VideoMAEImageProcessor  # noqa: E402
 
-VARIANTS = ("full_frame", "person_crop", "background_only")
+VARIANTS = ("full_frame", "person_crop", "background_only", "reencoded")
 
 
 @dataclass(frozen=True)
@@ -282,9 +282,10 @@ def main() -> None:
         variant=args.variant,
     )
 
+    work = list(iter_requests(requests, args.limit))
     written = 0
     skipped = 0
-    for index, request in enumerate(iter_requests(requests, args.limit), start=1):
+    for index, request in enumerate(work, start=1):
         output_path = args.output_dir / request.split / f"{request.video_id}.npz"
         if output_path.exists() and not args.overwrite:
             skipped += 1
@@ -304,8 +305,8 @@ def main() -> None:
         )
         save_feature_bundle(output_path, request, bundle, provenance)
         written += 1
-        if written % 25 == 0 or index == len(requests):
-            print(f"[{index}/{len(requests)}] wrote {written} bundles (skipped {skipped})")
+        if written % 25 == 0 or index == len(work):
+            print(f"[{index}/{len(work)}] wrote {written} bundles (skipped {skipped})")
 
     print(f"Wrote {written} VideoMAE feature bundles ({skipped} already present) under {args.output_dir}")
 

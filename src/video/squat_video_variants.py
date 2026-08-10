@@ -5,20 +5,42 @@ representation carries movement quality or merely scene and viewpoint. The contr
 to re-extract features from videos where one of the two is removed:
 
 ``person_crop``
-    Crop to a square box around the athlete. Background is mostly gone; if accuracy
-    survives, the signal is on the body. Square rather than tight because the
-    VideoMAE processor resizes the shortest edge to 224 and then centre-crops 224 --
-    a tall, narrow crop would have its own feet cut off, which is exactly the
-    preprocessing asymmetry Stage A had to log as a caveat on REHAB24-6 cam18.
+    Crop tight to the athlete, then letterbox to square on a neutral grey. Background
+    is mostly gone; if accuracy survives, the signal is on the body.
+
+    The letterbox is not cosmetic. The VideoMAE processor resizes the shortest edge
+    to 224 and centre-crops 224, so a tall narrow crop would have its feet cut off --
+    the preprocessing asymmetry Stage A had to log as a caveat on REHAB24-6 cam18.
+    Padding to square makes that centre crop a no-op. *Expanding* the crop to square
+    instead was tried first and defeats the control: a standing athlete's box is tall
+    and narrow, so squaring it kept a median 77% of the original frame area (p90
+    100%, measured over 300 train videos) -- it would have removed almost no
+    background. The landmark box itself is a median 25% of the frame.
 
 ``background_only``
-    Paint the person's box over with a per-pixel temporal median of the video, i.e.
-    an estimate of the scene without the athlete. If accuracy survives *this*, the
-    classifier was reading the gym, not the squat. Median inpainting rather than a
-    grey rectangle because a filled rectangle still draws the athlete's position and
-    size in the frame -- a leak that would let the control pass for the wrong reason.
+    Paint the person's box over by interpolating horizontally between the columns
+    just outside it, so the scene keeps its colours and lighting and the athlete
+    keeps nothing. If accuracy survives *this*, the classifier was reading the gym,
+    not the squat.
 
-Both variants use ONE box per video (the union over frames) rather than a per-frame
+    A per-pixel temporal median was tried first and is wrong here: the athlete
+    occupies the middle of that box in essentially every frame of a squat, so the
+    median *is* the athlete and the "background" video shows a recognisable smeared
+    person (verified on 33048_1). The true background behind a stationary lifter is
+    never observed by a fixed camera, so no fill can recover it -- the honest choice
+    is a fill that provably carries no body structure. What survives is the box's
+    position and size, a rectangle-shaped leak that is stated in the results rather
+    than engineered away.
+
+``reencoded``
+    The identity variant: the same frames, through the same decode/encode path, with
+    no box applied. Both controls pay one extra lossy generation that the untouched
+    ``full_frame`` arm does not, so a control that *drops* is confounded with codec
+    degradation -- and that is the direction that would decide the retention
+    question. This arm prices that generation. It is only worth extracting if a
+    control actually drops.
+
+Both box variants use ONE box per video (the union over frames) rather than a per-frame
 box: a per-frame box makes the crop pan with the athlete, which injects motion that
 is not in the original and would differ between the two variants.
 
@@ -35,11 +57,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-VARIANTS = ("person_crop", "background_only")
+VARIANTS = ("person_crop", "background_only", "reencoded")
 DEFAULT_VISIBILITY = 0.5
 DEFAULT_MARGIN = 0.15
-#: Frames sampled to estimate the background. Odd so the median never interpolates.
-BACKGROUND_SAMPLES = 31
+#: Neutral grey for the person-crop letterbox -- the usual detection-pipeline value,
+#: mid-range so the padding is neither a bright nor a black frame around the athlete.
+LETTERBOX_FILL = 114
 
 
 @dataclass(frozen=True)
@@ -89,23 +112,33 @@ def person_box_from_pose(
     return Box(x0, y0, x1, y1)
 
 
-def square_crop_box(box: Box, width: int, height: int, margin: float = DEFAULT_MARGIN) -> Box:
-    """Smallest square containing ``box`` plus ``margin``, clamped inside the frame.
+def expand_box(box: Box, width: int, height: int, margin: float = DEFAULT_MARGIN) -> Box:
+    """Grow ``box`` by ``margin`` on each side, clamped inside the frame.
 
-    MediaPipe's landmarks stop at the wrists/ankles, so the margin also buys back the
-    hands and feet that a landmark-tight box would clip.
+    MediaPipe's landmarks stop at the wrists and ankles, so the margin buys back the
+    hands and feet that a landmark-tight box would clip. Aspect ratio is left alone
+    -- squaring happens later as padding, not as more background.
     """
-    side = max(box.x1 - box.x0, box.y1 - box.y0) * (1.0 + margin)
-    side = int(min(side, width, height))
-    side = max(side, 1)
+    pad_x = (box.x1 - box.x0) * margin / 2.0
+    pad_y = (box.y1 - box.y0) * margin / 2.0
+    x0 = max(int(round(box.x0 - pad_x)), 0)
+    y0 = max(int(round(box.y0 - pad_y)), 0)
+    x1 = min(int(round(box.x1 + pad_x)), width)
+    y1 = min(int(round(box.y1 + pad_y)), height)
+    return Box(x0, y0, max(x1, x0 + 1), max(y1, y0 + 1))
 
-    centre_x = (box.x0 + box.x1) / 2.0
-    centre_y = (box.y0 + box.y1) / 2.0
-    x0 = int(round(centre_x - side / 2.0))
-    y0 = int(round(centre_y - side / 2.0))
-    x0 = min(max(x0, 0), width - side)
-    y0 = min(max(y0, 0), height - side)
-    return Box(x0, y0, x0 + side, y0 + side)
+
+def letterbox_to_square(frame: np.ndarray, fill: int = LETTERBOX_FILL) -> np.ndarray:
+    """Centre ``frame`` on a square grey canvas without changing its aspect ratio."""
+    height, width = frame.shape[:2]
+    side = max(height, width)
+    if side == height == width:
+        return frame
+    canvas = np.full((side, side, frame.shape[2]), fill, dtype=frame.dtype)
+    top = (side - height) // 2
+    left = (side - width) // 2
+    canvas[top : top + height, left : left + width] = frame
+    return canvas
 
 
 def read_all_frames(video_path: Path, target_frames: int | None = None) -> list[np.ndarray]:
@@ -140,36 +173,70 @@ def read_all_frames(video_path: Path, target_frames: int | None = None) -> list[
     return frames
 
 
-def estimate_background(frames: list[np.ndarray], samples: int = BACKGROUND_SAMPLES) -> np.ndarray:
-    """Per-pixel temporal median over evenly spaced frames.
+def fill_box_from_surroundings(frame: np.ndarray, box: Box) -> np.ndarray:
+    """Replace the box with a horizontal blend of the columns flanking it.
 
-    On a static camera this is the empty scene. On a handheld one it is a smear --
-    still person-free, which is what the control needs, but it is why the
-    background-only arm is read as "scene cues survive?" and not as a clean image.
+    Per row, the fill ramps from the pixel immediately left of the box to the one
+    immediately right, so a wall, a rack upright or a floor line continues across at
+    roughly the right colour while nothing body-shaped can survive: the output inside
+    the box is a rank-1 function of two columns of the *surrounding* scene.
+
+    Falls back to whichever side exists when the box touches a frame edge, and to a
+    vertical blend when it spans the full width. A box covering the entire frame
+    leaves nothing to sample and is filled with the frame's mean.
     """
-    indices = np.unique(np.linspace(0, len(frames) - 1, num=min(samples, len(frames)), dtype=int))
-    stack = np.stack([frames[index] for index in indices], axis=0)
-    return np.median(stack, axis=0).astype(np.uint8)
+    height, width = frame.shape[:2]
+    filled = frame.copy()
+    box_width = box.x1 - box.x0
+    box_height = box.y1 - box.y0
+    if box_width <= 0 or box_height <= 0:
+        return filled
+
+    left = frame[box.y0 : box.y1, box.x0 - 1] if box.x0 > 0 else None
+    right = frame[box.y0 : box.y1, box.x1] if box.x1 < width else None
+
+    if left is not None or right is not None:
+        if left is None:
+            left = right
+        if right is None:
+            right = left
+        weights = np.linspace(0.0, 1.0, num=box_width, dtype=np.float32).reshape(1, box_width, 1)
+        blended = left[:, None, :].astype(np.float32) * (1.0 - weights) + right[:, None, :].astype(np.float32) * weights
+        filled[box.y0 : box.y1, box.x0 : box.x1] = blended.round().astype(np.uint8)
+        return filled
+
+    top = frame[box.y0 - 1, box.x0 : box.x1] if box.y0 > 0 else None
+    bottom = frame[box.y1, box.x0 : box.x1] if box.y1 < height else None
+    if top is not None or bottom is not None:
+        if top is None:
+            top = bottom
+        if bottom is None:
+            bottom = top
+        weights = np.linspace(0.0, 1.0, num=box_height, dtype=np.float32).reshape(box_height, 1, 1)
+        blended = top[None, :, :].astype(np.float32) * (1.0 - weights) + bottom[None, :, :].astype(np.float32) * weights
+        filled[box.y0 : box.y1, box.x0 : box.x1] = blended.round().astype(np.uint8)
+        return filled
+
+    filled[box.y0 : box.y1, box.x0 : box.x1] = frame.mean(axis=(0, 1)).round().astype(np.uint8)
+    return filled
 
 
 def apply_variant(frames: list[np.ndarray], variant: str, box: Box | None) -> list[np.ndarray]:
     if variant not in VARIANTS:
         raise ValueError(f"Unknown variant {variant!r}; expected one of {VARIANTS}.")
+    if variant == "reencoded":
+        return frames
     if box is None:
-        # No person was ever visible. Both variants degrade to the untouched video;
-        # the manifest records these so they can be reported, not silently counted.
+        # No person was ever visible. Both box variants degrade to the untouched
+        # video; the manifest records these so they are reported, not silently counted.
         return frames
 
     if variant == "person_crop":
-        return [frame[box.y0 : box.y1, box.x0 : box.x1].copy() for frame in frames]
+        return [letterbox_to_square(frame[box.y0 : box.y1, box.x0 : box.x1]) for frame in frames]
 
-    background = estimate_background(frames)
-    masked: list[np.ndarray] = []
-    for frame in frames:
-        painted = frame.copy()
-        painted[box.y0 : box.y1, box.x0 : box.x1] = background[box.y0 : box.y1, box.x0 : box.x1]
-        masked.append(painted)
-    return masked
+    # Filled per frame rather than from one static plate, so lighting changes and
+    # camera drift stay consistent with the untouched part of the scene.
+    return [fill_box_from_surroundings(frame, box) for frame in frames]
 
 
 def write_video(frames: list[np.ndarray], output_path: Path, fps: float) -> None:
@@ -206,7 +273,7 @@ def build_variant_video(
     landmark_box = person_box_from_pose(pose, visibility_threshold)
     box = landmark_box
     if landmark_box is not None and variant == "person_crop":
-        box = square_crop_box(landmark_box, width, height, margin)
+        box = expand_box(landmark_box, width, height, margin)
 
     frames = read_all_frames(video_path, target_frames=total_frames)
     written_frames = apply_variant(frames, variant, box)

@@ -12,10 +12,11 @@ from src.video.squat_video_variants import (
     Box,
     apply_variant,
     build_variant_video,
-    estimate_background,
+    fill_box_from_surroundings,
     person_box_from_pose,
     read_all_frames,
-    square_crop_box,
+    expand_box,
+    letterbox_to_square,
     write_video,
 )
 
@@ -64,22 +65,36 @@ class PersonBoxTests(unittest.TestCase):
             person_box_from_pose({"metadata": {}, "frames": []})
 
 
-class SquareCropBoxTests(unittest.TestCase):
-    def test_crop_is_square_and_padded_by_the_margin(self) -> None:
-        box = square_crop_box(Box(20, 10, 30, 30), WIDTH, HEIGHT, margin=0.2)
-        self.assertEqual(box.x1 - box.x0, box.y1 - box.y0)
-        self.assertEqual(box.x1 - box.x0, 24)  # 20px tall * 1.2
+class CropBoxTests(unittest.TestCase):
+    def test_margin_grows_the_box_without_changing_its_aspect(self) -> None:
+        box = expand_box(Box(20, 10, 30, 30), WIDTH, HEIGHT, margin=0.2)
+        self.assertEqual(box.as_tuple(), (19, 8, 31, 32))
 
-    def test_crop_stays_inside_the_frame_when_the_person_hugs_an_edge(self) -> None:
-        box = square_crop_box(Box(0, 0, 40, 40), WIDTH, HEIGHT, margin=0.5)
-        self.assertGreaterEqual(box.x0, 0)
-        self.assertGreaterEqual(box.y0, 0)
-        self.assertLessEqual(box.x1, WIDTH)
-        self.assertLessEqual(box.y1, HEIGHT)
+    def test_expansion_never_leaves_the_frame(self) -> None:
+        box = expand_box(Box(0, 0, WIDTH, HEIGHT), WIDTH, HEIGHT, margin=0.5)
+        self.assertEqual(box.as_tuple(), (0, 0, WIDTH, HEIGHT))
 
-    def test_side_is_capped_by_the_shorter_frame_dimension(self) -> None:
-        box = square_crop_box(Box(0, 0, WIDTH, HEIGHT), WIDTH, HEIGHT, margin=1.0)
-        self.assertEqual(box.y1 - box.y0, HEIGHT)
+    def test_a_tall_person_keeps_far_less_background_than_a_square_expansion(self) -> None:
+        """The measured reason the crop letterboxes instead of expanding: on 300 train
+        videos a square expansion kept a median 77% of the frame, the landmark box 25%."""
+        tall = Box(24, 2, 40, 46)  # 16 x 44, a standing athlete
+        cropped = expand_box(tall, WIDTH, HEIGHT, margin=0.0)
+        kept = (cropped.x1 - cropped.x0) * (cropped.y1 - cropped.y0) / (WIDTH * HEIGHT)
+        squared = max(tall.x1 - tall.x0, tall.y1 - tall.y0) ** 2 / (WIDTH * HEIGHT)
+        self.assertLess(kept, 0.3)
+        self.assertGreater(squared, 0.6)
+
+    def test_letterbox_squares_the_frame_without_distorting_it(self) -> None:
+        frame = np.zeros((40, 10, 3), dtype=np.uint8)
+        frame[:] = 200
+        padded = letterbox_to_square(frame)
+        self.assertEqual(padded.shape[:2], (40, 40))
+        self.assertTrue((padded[:, 15:25] == 200).all())
+        self.assertTrue((padded[:, 0:14] == 114).all())
+
+    def test_letterbox_leaves_an_already_square_frame_alone(self) -> None:
+        frame = np.zeros((8, 8, 3), dtype=np.uint8)
+        self.assertIs(letterbox_to_square(frame), frame)
 
 
 class ApplyVariantTests(unittest.TestCase):
@@ -91,21 +106,51 @@ class ApplyVariantTests(unittest.TestCase):
             frames.append(frame)
         return frames
 
-    def test_person_crop_keeps_only_the_box(self) -> None:
-        cropped = apply_variant(self.make_frames(), "person_crop", Box(20, 10, 40, 30))
-        self.assertEqual(cropped[0].shape[:2], (20, 20))
-        self.assertTrue((cropped[0] >= 200).all())
+    def test_person_crop_keeps_only_the_box_and_pads_it_square(self) -> None:
+        cropped = apply_variant(self.make_frames(), "person_crop", Box(24, 10, 36, 30))
+        self.assertEqual(cropped[0].shape[:2], (20, 20))  # 12x20 letterboxed to 20x20
+        self.assertTrue((cropped[0][:, 4:16] >= 200).all())
+        self.assertTrue((cropped[0][:, 0:3] == 114).all())
 
-    def test_background_only_paints_the_box_with_the_scene_median(self) -> None:
+    def test_background_only_replaces_the_person_with_the_surrounding_scene(self) -> None:
+        """The fill must land on the *background* value, not the person's.
+
+        A per-pixel temporal median passes a "nothing varies inside the box" check
+        while painting a smeared athlete, because a squatter covers those pixels in
+        every frame. Asserting the filled value matches the scene is what
+        distinguishes the two.
+        """
         frames = self.make_frames()
         masked = apply_variant(frames, "background_only", Box(20, 10, 40, 30))
+
         self.assertEqual(masked[0].shape, frames[0].shape)
-        # The person's pixels are replaced by the temporal median (202 here), so no
-        # frame-to-frame variation from the athlete survives inside the box.
-        inside = np.stack([frame[10:30, 20:40] for frame in masked], axis=0)
-        self.assertEqual(len(np.unique(inside)), 1)
+        inside = masked[0][10:30, 20:40]
+        self.assertTrue((inside == 10).all(), f"filled with {np.unique(inside)}, expected the scene value 10")
         # Outside the box the scene is untouched.
         self.assertTrue((masked[0][0:10, 0:20] == 10).all())
+
+    def test_background_fill_ramps_between_the_two_flanking_columns(self) -> None:
+        frame = np.zeros((4, 6, 3), dtype=np.uint8)
+        frame[:, 0] = 0
+        frame[:, 1:5] = 255  # the "person"
+        frame[:, 5] = 100
+        filled = fill_box_from_surroundings(frame, Box(1, 0, 5, 4))
+        self.assertEqual([int(v) for v in filled[0, 1:5, 0]], [0, 33, 67, 100])
+
+    def test_background_fill_uses_one_side_when_the_box_touches_an_edge(self) -> None:
+        frame = np.full((4, 6, 3), 20, dtype=np.uint8)
+        frame[:, 0:4] = 200
+        filled = fill_box_from_surroundings(frame, Box(0, 0, 4, 4))
+        self.assertTrue((filled[:, 0:4] == 20).all())
+
+    def test_background_fill_falls_back_to_a_vertical_blend_across_the_full_width(self) -> None:
+        frame = np.zeros((5, 4, 3), dtype=np.uint8)
+        frame[0] = 10
+        frame[1:4] = 250
+        frame[4] = 30
+        filled = fill_box_from_surroundings(frame, Box(0, 1, 4, 4))
+        self.assertTrue((filled[1:4] < 250).all())
+        self.assertEqual(int(filled[1, 0, 0]), 10)
 
     def test_missing_box_leaves_the_video_untouched(self) -> None:
         frames = self.make_frames()
@@ -117,10 +162,19 @@ class ApplyVariantTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             apply_variant(self.make_frames(), "grayscale", Box(0, 0, 4, 4))
 
-    def test_background_median_ignores_a_transient_object(self) -> None:
-        frames = [np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8) for _ in range(9)]
-        frames[4][:] = 255
-        self.assertTrue((estimate_background(frames) == 0).all())
+    def test_fill_carries_no_body_structure_even_when_the_person_never_moves(self) -> None:
+        """The failure the temporal median had: a static athlete IS the median.
+
+        The fill is a blend of two columns *outside* the box, so whatever shape the
+        person has inside it cannot appear in the output -- every filled row is
+        constant-to-linear regardless of what the athlete was doing.
+        """
+        frame = np.full((HEIGHT, WIDTH, 3), 30, dtype=np.uint8)
+        frame[12:28, 22:38] = 240  # a body-shaped blob, identical in every frame
+        frame[16:20, 24:28] = 90  # ... with internal structure
+        filled = fill_box_from_surroundings(frame, Box(20, 10, 40, 30))
+        self.assertEqual(len(np.unique(filled[10:30, 20:40])), 1)
+        self.assertEqual(int(np.unique(filled[10:30, 20:40])[0]), 30)
 
 
 class VideoRoundTripTests(unittest.TestCase):
@@ -194,3 +248,18 @@ class VideoRoundTripTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReencodedVariantTests(unittest.TestCase):
+    """The identity arm exists to price the extra lossy generation the two box
+    variants pay and the untouched full_frame arm does not."""
+
+    def test_reencoded_returns_the_frames_untouched(self) -> None:
+        frames = [np.full((HEIGHT, WIDTH, 3), value, dtype=np.uint8) for value in (10, 20, 30)]
+        result = apply_variant(frames, "reencoded", Box(10, 10, 20, 20))
+        for original, produced in zip(frames, result):
+            self.assertTrue(np.array_equal(original, produced))
+
+    def test_reencoded_ignores_a_missing_box(self) -> None:
+        frames = [np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8)]
+        self.assertTrue(np.array_equal(apply_variant(frames, "reencoded", None)[0], frames[0]))
