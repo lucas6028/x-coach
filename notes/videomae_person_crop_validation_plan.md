@@ -1,5 +1,12 @@
 # VideoMAE person-crop 驗證計畫(Stage B 後續)
 
+> **狀態(2026-08-12):本計畫的前提已被自己的重抽推翻。**
+> 在 5×5 重抽下 `person_crop` 比 `full_frame` 低 0.015,原本的 +0.026 只存在於固定
+> split 的那 244 支測試影片上。F1 因此已回答且為否定,`person_crop_centercrop` 不再
+>需要抽取;只有 `full_frame_letterbox` 以獨立的預處理問題保留。
+> 結果見 [`videomae_b1_repeated_splits_results.md`](videomae_b1_repeated_splits_results.md)。
+> 以下內容保留為決策紀錄,**不再是待執行的計畫**。
+
 ## 目的
 
 本計畫要回答的不是「VideoMAE 有沒有用」——Stage B 已經以事前登錄的方式回答過:
