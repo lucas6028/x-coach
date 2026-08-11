@@ -571,3 +571,52 @@ VideoMAE-only 自身在 full frame 上的表現,有 91% 在受試者被移除後
   取景幾何的新對照(例如把每支影片的 crop 重新縮放到固定尺寸),那是下一次的事。
 - **這個 shortcut 發現本身值得寫進論文**:它同時解釋了為什麼歷史的 VideoMAE 數字
   「看起來還行但沒用」,也給了 in-the-wild 健身資料集一個具體的方法學警告。
+
+
+---
+
+## 4. 事後探索(**不屬於 Stage B 的判定**)
+
+### 4.1 pose + person-crop 的 late fusion 超過了兩個 branch
+
+§3 的判定已經定案,以下不更動它。但「person-crop 值不值得繼續」是一個會影響下一步
+投入的問題,而它可以直接量——late fusion 完全離線,兩個 branch 的 prediction CSV
+都已存在。**先前所有 fusion 臂用的都是 full-frame VideoMAE;pose + person-crop
+從未被測過。**
+
+| 臂 | balanced accuracy |
+| --- | --- |
+| pose-only | 0.650 ± 0.012 |
+| person-crop VideoMAE-only | 0.666 ± 0.012 |
+| **late fusion(pose + person-crop)** | **0.682 ± 0.016** |
+
+| 條件 | 值 | 判定 |
+| --- | --- | --- |
+| 1. Δ ≥ +0.02 | **+0.032** | 通過 |
+| 2. CI 下限 > 0 | [−0.018, +0.085] | **不通過** |
+| 3. 護欄 | recall +0.050、specificity +0.014,**兩者皆升** | 通過 |
+| 4. 多數 seed 同向 | 4/5 | 通過 |
+
+**它超過了兩個 branch 各自的值**(pose 0.650、person-crop 0.666)。這是 Stage A 與
+Stage B 全部 fusion 實驗中**第一次**出現的現象:先前每一個 fusion 都只收斂到較強的
+branch。這就是互補性的操作型定義。
+
+### 4.2 為什麼這個數字**不能**拿來翻案
+
+1. **它是事後選的。** 事前登錄的 primary 是 full-frame VideoMAE。看到它失敗之後再換
+   一個變體重跑,正是 §0 開頭要防的 best-of-N。把 0.682 寫成 Stage B 的結果,等於
+   把整份事前登錄作廢。**§3 的判定維持不變。**
+2. **條件 2 仍然不通過。** 244 支 test 影片撐不出下限大於 0 的區間。
+3. **取景幾何的混淆沒有解決。** person-crop 的 letterbox 比例仍編碼人框長寬比,
+   而 `box_geometry` 單獨值 +0.078。
+4. 一個合理但**未經檢驗**的機制假說:full-frame 的 VideoMAE 訊號主要是場景與粗略
+   幾何,那些東西與 pose 不相關但也沒用;person-crop 逼模型只看身體,於是它帶進的是
+   **關鍵點丟掉的身體外觀**(軀幹形變、槓位、實際肢體樣貌),那才是 pose 真正沒有的資訊。
+
+### 4.3 若要把它變成結論,需要什麼
+
+- 以 **person-crop 為 primary** 重寫一份事前登錄,連同 seeds、fusion 規則、門檻。
+- 一個**消掉取景幾何**的新對照:把每支影片的 crop 重新縮放到固定尺寸,讓框的大小與
+  長寬比不再進入畫面;再跑一次 `box_geometry` 式的 zero-parameter 對照確認它掉到隨機。
+- 條件 2 需要更高的檢定力:目前 244 支 test 影片是硬限制,可考慮改用 repeated
+  splits 或把 Fitness-AQA 其他動作(OHP、BarbellRow)一起納入。
