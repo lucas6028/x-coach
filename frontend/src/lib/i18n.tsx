@@ -395,16 +395,15 @@ const en: Dict = {
 
   // Auth — login + session
   "auth.checking": "Checking your session…",
-  "auth.back": "Back to app",
   "auth.signInTitle": "Sign in",
-  "auth.signInSub": "Welcome back. Pick up your saved analyses.",
+  "auth.signInSub": "Welcome back — pick up your saved analyses.",
   "auth.signUpTitle": "Create your account",
   "auth.signUpSub": "Save every analysis to your history.",
   "auth.email": "Email",
   "auth.password": "Password",
   "auth.signInBtn": "Sign in",
   "auth.signUpBtn": "Create account",
-  "auth.or": "or",
+  "auth.orContinue": "or continue with",
   "auth.google": "Continue with Google",
   "auth.lineBtn": "Continue with LINE",
 
@@ -438,12 +437,28 @@ const en: Dict = {
   "auth.errorTitle": "Couldn't sign you in",
   "auth.confirmEmail": "Check your inbox to confirm your email, then sign in.",
   "auth.notConfigured": "Sign-in isn't set up on this server yet. You can still use the demo.",
-  "auth.brandHeadline": "Coaching you can revisit.",
-  "auth.brandSub":
-    "Sign in to keep every squat analysis, with its skeleton, faults, and grounded feedback.",
-  "auth.point1": "Every analysis saved to your history",
-  "auth.point2": "Reopen any past rep, exactly as analyzed",
-  "auth.point3": "Private to you, enforced at the database",
+  // Login's brand stage. The headline is split across three keys rather than one string with
+  // markup in it: the second line highlights its last phrase in violet, and which words carry
+  // that emphasis is a per-language decision (English accents the noun "results", Chinese the
+  // noun 成果) that a single interpolated key could not express.
+  "auth.brandHome": "X-Coach home",
+  "auth.heroLine1": "Smarter training.",
+  "auth.heroLine2Lead": "Stronger",
+  "auth.heroLine2Accent": "results.",
+  "auth.heroSub":
+    "AI-powered motion analysis and coaching feedback to help you move better and perform your best.",
+  "auth.card1Title": "AI Motion Analysis",
+  "auth.card1Body": "Detects faults and finds opportunities to improve.",
+  "auth.card2Title": "Train Smarter",
+  "auth.card2Body": "Personalized feedback for every rep.",
+  "auth.card3Title": "Track Progress",
+  "auth.card3Body": "See your improvements and stay consistent.",
+  "auth.scoreTitle": "Form score",
+  "auth.scoreVerdict": "Excellent",
+  "auth.scoreNote": "No faults detected",
+  "auth.showPassword": "Show password",
+  "auth.hidePassword": "Hide password",
+  "auth.footer": "© {year} X-Coach. All rights reserved.",
 
   // Account / nav
   "nav.history": "My records",
@@ -1203,7 +1218,6 @@ const zhHant: Dict = {
 
   // Auth — login + session
   "auth.checking": "確認登入狀態中…",
-  "auth.back": "返回應用程式",
   "auth.signInTitle": "登入",
   "auth.signInSub": "歡迎回來，繼續查看你儲存的分析。",
   "auth.signUpTitle": "建立帳號",
@@ -1212,7 +1226,7 @@ const zhHant: Dict = {
   "auth.password": "密碼",
   "auth.signInBtn": "登入",
   "auth.signUpBtn": "建立帳號",
-  "auth.or": "或",
+  "auth.orContinue": "或使用以下方式",
   "auth.google": "使用 Google 繼續",
   "auth.lineBtn": "使用 LINE 繼續",
 
@@ -1244,11 +1258,23 @@ const zhHant: Dict = {
   "auth.errorTitle": "無法登入",
   "auth.confirmEmail": "請至信箱點擊確認連結，再回來登入。",
   "auth.notConfigured": "此伺服器尚未設定登入功能，你仍可使用示範。",
-  "auth.brandHeadline": "可以回顧的教練回饋。",
-  "auth.brandSub": "登入後，每一段深蹲分析（骨架、錯誤與有據回饋）都會為你保留。",
-  "auth.point1": "每次分析都存進你的紀錄",
-  "auth.point2": "隨時重開任何一次動作，完整重現",
-  "auth.point3": "僅你可見，由資料庫層級保護",
+  "auth.brandHome": "X-Coach 首頁",
+  "auth.heroLine1": "更聰明地練",
+  "auth.heroLine2Lead": "換來更強的",
+  "auth.heroLine2Accent": "成果。",
+  "auth.heroSub": "用 AI 動作分析與教練回饋，幫你動得更漂亮，也表現得更好。",
+  "auth.card1Title": "AI 動作分析",
+  "auth.card1Body": "找出動作上的錯誤，也找出還能再進步的地方。",
+  "auth.card2Title": "練得更聰明",
+  "auth.card2Body": "每一下都給你專屬的回饋。",
+  "auth.card3Title": "追蹤進步",
+  "auth.card3Body": "看見自己的改變，才練得下去。",
+  "auth.scoreTitle": "動作評分",
+  "auth.scoreVerdict": "很好",
+  "auth.scoreNote": "沒有偵測到錯誤",
+  "auth.showPassword": "顯示密碼",
+  "auth.hidePassword": "隱藏密碼",
+  "auth.footer": "© {year} X-Coach. 保留一切權利。",
 
   // Account / nav
   "nav.history": "我的紀錄",
