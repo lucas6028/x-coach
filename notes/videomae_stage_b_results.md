@@ -643,6 +643,10 @@ centre crop 224,在 480×600 上會切掉上下各約 1/6。**full-frame 那一�
 
 ### 4.4 若要把它變成結論,需要什麼
 
+> 完整的後續設計已獨立成計畫:
+> [`videomae_person_crop_validation_plan.md`](videomae_person_crop_validation_plan.md)。
+> 其 Stage B1 就是 §4.3 的 F1×F2 分離,且**必須先於任何以 person-crop 為主的設計**。
+
 - 以 **person-crop 為 primary** 重寫一份事前登錄,連同 seeds、fusion 規則、門檻。
 - **先跑 §4.3 的 `full_frame_letterbox`**——在知道 +0.026 到底是背景還是取景之前,
   任何以 person-crop 為主的設計都建立在一個未分離的混淆上。這是下一步的第一件事。
