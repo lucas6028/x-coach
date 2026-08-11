@@ -69,6 +69,19 @@ describe("Login", () => {
     expect(auth.signInWithPassword).toHaveBeenCalledWith("ada@x.com", "secret1");
   });
 
+  it("toggles password visibility", async () => {
+    mockUseAuth.mockReturnValue(makeAuth());
+    renderLogin();
+    const password = screen.getByLabelText("Password");
+    expect(password).toHaveAttribute("type", "password");
+    await userEvent.click(screen.getByRole("button", { name: "Show password" }));
+    expect(password).toHaveAttribute("type", "text");
+    // The control renames itself, so the only way back is the new name — a stale "Show password"
+    // query here would silently pass against a button that never flipped.
+    await userEvent.click(screen.getByRole("button", { name: "Hide password" }));
+    expect(password).toHaveAttribute("type", "password");
+  });
+
   it("shows an error when sign-in fails", async () => {
     const auth = makeAuth({
       signInWithPassword: vi.fn().mockRejectedValue(new Error("Invalid login credentials")),
