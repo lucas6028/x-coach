@@ -154,9 +154,28 @@ def load_variant_boxes(manifest_path: Path) -> dict[str, Box | None]:
         manifest = json.load(f)
 
     boxes: dict[str, Box | None] = {}
+    unrecorded: list[str] = []
     for row in manifest["rows"]:
-        box = row.get("box")
-        boxes[str(row["video_id"])] = Box(*box) if box else None
+        video_id = str(row["video_id"])
+        if "box" not in row:
+            # A row that never recorded a box is NOT the same as a row whose box is
+            # null. Null means "no person was visible", a real and rare state that
+            # legitimately leaves the video untouched. A missing key means the
+            # builder skipped this video (its output already existed) and wrote a
+            # stub -- and mapping that to None silently extracted an UNTRANSFORMED
+            # video into a control arm. That happened: 51% of one control and 26% of
+            # the other were full-frame before this check existed.
+            unrecorded.append(video_id)
+            continue
+        box = row["box"]
+        boxes[video_id] = Box(*box) if box else None
+
+    if unrecorded:
+        raise SystemExit(
+            f"{len(unrecorded)} rows in {manifest_path} record no box "
+            f"({unrecorded[:5]}). Rebuild the manifest with --boxes-only; a control arm "
+            "that silently mixes in untransformed videos measures nothing."
+        )
     return boxes
 
 

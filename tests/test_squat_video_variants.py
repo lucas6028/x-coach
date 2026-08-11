@@ -13,6 +13,7 @@ from src.video.squat_video_variants import (
     Box,
     apply_variant,
     build_variant_video,
+    describe_variant,
     fill_box_from_surroundings,
     person_box_from_pose,
     read_all_frames,
@@ -248,9 +249,6 @@ class VideoRoundTripTests(unittest.TestCase):
             self.assertIsNone(row["box"])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ReencodedVariantTests(unittest.TestCase):
     """The identity arm exists to price the extra lossy generation the two box
@@ -309,3 +307,51 @@ class VerifyVariantTests(unittest.TestCase):
     def test_a_missing_output_counts_as_zero_frames(self) -> None:
         with TemporaryDirectory() as tmp:
             self.assertEqual(verify_variant_video(Path(tmp) / "nope.mp4", 5), 0)
+
+
+class DescribeVariantTests(unittest.TestCase):
+    """Every video must carry a box, whether or not its video file was encoded.
+
+    A row without a box used to be indistinguishable from a row whose box is null
+    ("no person visible"), and the extractor treats null as "leave untouched" -- so
+    the resume path silently fed untransformed videos into the control arms: 51% of
+    person_crop and 26% of background_only.
+    """
+
+    def make_pose(self, tmp: Path, visible: bool = True) -> Path:
+        marks = [landmark(0.25, 0.2), landmark(0.5, 0.8)] if visible else [landmark(0.5, 0.5, visibility=0.0)]
+        path = tmp / "v.json"
+        path.write_text(json.dumps(pose_document([marks, marks], total_frames=2)), encoding="utf-8")
+        return path
+
+    def test_box_is_produced_without_encoding_a_video(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            row = describe_variant(root / "v.mp4", self.make_pose(root), "person_crop")
+
+            self.assertIn("box", row)
+            self.assertTrue(row["pose_detected"])
+            self.assertEqual(row["video_id"], "v")
+            self.assertEqual(list(Path(tmp).glob("*.mp4")), [])
+
+    def test_person_crop_box_is_the_expanded_one_and_background_the_raw_one(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pose = self.make_pose(root)
+            crop = describe_variant(root / "v.mp4", pose, "person_crop")["box"]
+            background = describe_variant(root / "v.mp4", pose, "background_only")["box"]
+            self.assertNotEqual(crop, background)
+            self.assertLessEqual(crop[0], background[0])
+
+    def test_a_person_less_video_records_an_explicit_null_box(self) -> None:
+        """Null is a real state and must stay distinguishable from 'not recorded'."""
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            row = describe_variant(root / "v.mp4", self.make_pose(root, visible=False), "background_only")
+            self.assertIn("box", row)
+            self.assertIsNone(row["box"])
+            self.assertFalse(row["pose_detected"])
+
+
+if __name__ == "__main__":
+    unittest.main()

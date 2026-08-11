@@ -165,5 +165,27 @@ class VariantBoxLoadingTests(unittest.TestCase):
             self.assertNotIn("zz", load_variant_boxes(manifest))
 
 
+
+class MissingBoxIsRefusedTests(unittest.TestCase):
+    def test_a_row_without_a_box_key_is_refused(self) -> None:
+        """The defect this exists to stop: a stub row read as 'no person visible',
+        which leaves the video untransformed inside a control arm."""
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(
+                json.dumps({"rows": [{"video_id": "a", "box": [1, 2, 3, 4]}, {"video_id": "b", "skipped": True}]}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SystemExit) as ctx:
+                load_variant_boxes(manifest)
+            self.assertIn("record no box", str(ctx.exception))
+
+    def test_an_explicit_null_box_is_still_accepted(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(json.dumps({"rows": [{"video_id": "a", "box": None}]}), encoding="utf-8")
+            self.assertEqual(load_variant_boxes(manifest), {"a": None})
+
+
 if __name__ == "__main__":
     unittest.main()

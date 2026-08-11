@@ -18,7 +18,24 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.video.squat_dataset import SPLIT_NAMES, SQUAT_LABELED_ROOT, load_json_list
-from src.video.squat_video_variants import VARIANTS, build_variant_video, verify_variant_video
+from src.video.squat_video_variants import VARIANTS, build_variant_video, describe_variant, verify_variant_video
+
+
+def write_manifest(manifest_output: Path, variant: str, rows: list[dict]) -> list[str]:
+    """Write the manifest and return the ids where no person was ever visible."""
+    unrecorded = [row["video_id"] for row in rows if "box" not in row]
+    if unrecorded:
+        raise SystemExit(
+            f"{len(unrecorded)} rows carry no box ({unrecorded[:5]}). Refusing to write a "
+            "manifest the extractor would read as 'no person visible' and silently leave "
+            "those videos untransformed."
+        )
+
+    fallbacks = [row["video_id"] for row in rows if row.get("pose_detected") is False]
+    manifest_output.parent.mkdir(parents=True, exist_ok=True)
+    with manifest_output.open("w", encoding="utf-8") as f:
+        json.dump({"variant": variant, "n_videos": len(rows), "fallbacks": fallbacks, "rows": rows}, f, indent=2)
+    return fallbacks
 
 
 def find_video_path(video_root: Path, video_id: str) -> Path | None:
@@ -41,6 +58,12 @@ def main() -> None:
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument(
+        "--boxes-only",
+        action="store_true",
+        help="Write the manifest without encoding any video. The extractor applies the "
+        "box in memory, so the boxes are the only output anything consumes.",
+    )
     args = parser.parse_args()
 
     output_root = args.output_root or SQUAT_LABELED_ROOT / f"videos_{args.variant}"
@@ -71,8 +94,15 @@ def main() -> None:
 
     def build(item: tuple[str, str, Path, Path, Path]) -> dict:
         video_id, split_name, video_path, pose_path, output_path = item
-        if output_path.exists() and not args.overwrite:
-            return {"video_id": video_id, "split": split_name, "variant": args.variant, "skipped": True}
+        # The box is recorded for EVERY video, including ones whose file already
+        # exists. A stub row without a box used to be indistinguishable from "no
+        # person visible", and the extractor then fed the control arm an
+        # untransformed video -- silently, for half of one arm.
+        if args.boxes_only or (output_path.exists() and not args.overwrite):
+            row = describe_variant(video_path=video_path, pose_path=pose_path, variant=args.variant)
+            row["split"] = split_name
+            row["encoded"] = False
+            return row
         row = build_variant_video(
             video_path=video_path,
             pose_path=pose_path,
@@ -80,6 +110,7 @@ def main() -> None:
             variant=args.variant,
         )
         row["split"] = split_name
+        row["encoded"] = True
         return row
 
     print(f"Building {len(work)} {args.variant} videos under {output_root} with {args.jobs} job(s).")
@@ -89,6 +120,11 @@ def main() -> None:
             rows.append(row)
             if index % 100 == 0:
                 print(f"  {index}/{len(work)} done")
+
+    if args.boxes_only:
+        write_manifest(manifest_output, args.variant, rows)
+        print(f"Wrote boxes for {len(rows)} videos to {manifest_output} (no video encoded)")
+        return
 
     print("Verifying every output against its source frame count...")
     corrupt: list[tuple[str, int]] = []
@@ -100,10 +136,7 @@ def main() -> None:
             corrupt.append((video_id, found))
             output_path.unlink(missing_ok=True)
 
-    fallbacks = [row["video_id"] for row in rows if row.get("pose_detected") is False]
-    manifest_output.parent.mkdir(parents=True, exist_ok=True)
-    with manifest_output.open("w", encoding="utf-8") as f:
-        json.dump({"variant": args.variant, "n_videos": len(rows), "fallbacks": fallbacks, "rows": rows}, f, indent=2)
+    fallbacks = write_manifest(manifest_output, args.variant, rows)
 
     print(f"Wrote {len(rows)} videos and {manifest_output}")
     if corrupt:

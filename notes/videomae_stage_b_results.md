@@ -403,7 +403,7 @@ label mode `combined`,seeds 1–5,threshold 與 checkpoint 皆由 val 決定。
 | Corrected VideoMAE-only | 0.640 ± 0.021 | 0.630 ± 0.027 | 0.650 ± 0.018 | 0.611 |
 | Regularized early fusion(secondary)| 0.641 ± 0.019 | 0.565 ± 0.050 | 0.717 ± 0.021 | 0.595 |
 | Legacy VideoMAE-only | 0.572 ± 0.019 | 0.602 ± 0.038 | 0.542 ± 0.071 | 0.552 |
-| Person-crop 控制 | 0.667 ± 0.013 | 0.578 ± 0.032 | 0.756 ± 0.041 | 0.617 |
+| ~~Person-crop 控制~~ | ~~0.667~~ | | | **作廢,見 §2.5** |
 
 **Primary 判定(對照 §0.4 的五個條件):**
 
@@ -413,7 +413,7 @@ label mode `combined`,seeds 1–5,threshold 與 checkpoint 皆由 val 決定。
 | 2 | Paired 95% CI 下限 > 0 | **[−0.059, +0.056]** | **不通過** |
 | 3 | recall/specificity 惡化 ≤ 0.03 | −0.006 | 通過 |
 | 4 | 多數 seed 方向一致 | 3/5 | 通過 |
-| 5 | 控制組後仍保留效果 | *(見 §2.5)* | — |
+| 5 | 控制組後仍保留效果 | *(重跑中,見 §2.5)* | — |
 
 **條件 1 與 2 不通過,因此依計畫:VideoMAE 不作為 production 預設 input。**
 
@@ -435,3 +435,35 @@ Early fusion 另外踩到護欄:recall 掉 0.066(0.631 → 0.565),換來 specifi
 corrected VideoMAE-only 是 0.640,遠高於 legacy 的 0.572、也遠高於隨機的 0.500,
 所以「有獨立訊號」成立;但它與 pose 融合後拿不到任何增量,所以「pose 已捕捉同一資訊」
 也成立。**這一列就是 Stage B 的結論。**
+
+
+### 2.5 兩個控制組的第一次結果**作廢**:一半的樣本根本沒被變換
+
+第一次跑出來的控制組數字是 person-crop `0.667`、background-only `0.616`。**兩個都不能用。**
+
+原因在 manifest,不在模型。`build_video_variants.py` 的續跑路徑遇到「輸出影片已存在」
+時,回傳的是一列 `{"skipped": true}` 的殘缺紀錄——**沒有 box**。而抽取器的
+`load_variant_boxes` 把「沒有 box 欄位」對應成 `None`,`apply_variant` 又把 `None`
+定義為「這支影片偵測不到人,原樣輸出」。兩個不同的意思被摺成同一個值,於是:
+
+| 控制組 | 沒有 box 的列 | 實際被抽取的內容 |
+| --- | --- | --- |
+| person_crop | **831 / 1623(51%)** | 一半是**未經變換的原始畫面** |
+| background_only | **426 / 1623(26%)** | 四分之一是**未經變換的原始畫面** |
+
+兩個控制組都被原始畫面污染,而且污染方向正好把它們**拉向 full-frame 臂**——也就是
+會讓「控制組存活」看起來更像真的。這正是控制組最不能出錯的方向。
+
+**修正:**
+
+1. `describe_variant()` 把「算出 box」與「編碼影片」拆開,所以**每一支影片都會記錄
+   box**,不論它的影片檔是否已經存在;新增 `--boxes-only` 模式,重建 manifest 只需要
+   幾秒(抽取器本來就只吃 box)。
+2. `write_manifest()` 在任何一列缺 box 時**拒絕寫出**。
+3. `load_variant_boxes()` 在任何一列缺 box 時**拒絕載入**,並明確區分
+   「沒有記錄」(缺陷)與 `null`(真的偵測不到人,本資料集為 0 支)。
+
+三個防線都有測試。兩個控制組已用完整的 box 重新抽取中。
+
+**這個缺陷沒有影響主結果。** full_frame 臂根本不讀 manifest(`--variant full_frame`
+不需要 box),legacy 臂與 pose 臂也一樣。§2.1–§2.4 的所有數字不受影響。

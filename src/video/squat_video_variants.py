@@ -281,6 +281,43 @@ def verify_variant_video(output_path: Path, expected_frames: int) -> int | None:
     return None if frames == expected_frames else frames
 
 
+def describe_variant(
+    video_path: Path,
+    pose_path: Path,
+    variant: str,
+    visibility_threshold: float = DEFAULT_VISIBILITY,
+    margin: float = DEFAULT_MARGIN,
+) -> dict:
+    """The manifest row for one video WITHOUT encoding anything.
+
+    The extractor applies the box in memory, so the box is the only output anything
+    downstream consumes; encoding a video is now purely for eyeballing. Splitting
+    this out is also what lets every row carry a box even when the video file is
+    already on disk -- the omission that fed untransformed videos into a control arm.
+    """
+    with pose_path.open("r", encoding="utf-8") as f:
+        pose = json.load(f)
+
+    metadata = pose.get("metadata", {})
+    width = int(metadata.get("width", 0))
+    height = int(metadata.get("height", 0))
+    landmark_box = person_box_from_pose(pose, visibility_threshold)
+
+    box = landmark_box
+    if landmark_box is not None and variant == "person_crop":
+        box = expand_box(landmark_box, width, height, margin)
+
+    return {
+        "video_id": video_path.stem,
+        "variant": variant,
+        "pose_detected": landmark_box is not None,
+        "box": box.as_tuple() if box is not None else None,
+        "source_frames": int(metadata.get("total_frames", 0)),
+        "fps": float(metadata.get("fps", 30.0)) or 30.0,
+        "frame_size": [width, height],
+    }
+
+
 def build_variant_video(
     video_path: Path,
     pose_path: Path,
