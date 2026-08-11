@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 
 from src.rehab24.videomae_audit import audit_feature_dir
+from src.video.videomae_audit import audit_feature_dir as core_audit_feature_dir
+from src.video.videomae_audit import load_labeled_ids, load_split_map
 
 MANIFEST_HEADER = "sample_id,split,video_id,exercise_id,person_id,camera,correctness\n"
 
@@ -127,6 +129,45 @@ class AuditTest(unittest.TestCase):
         report = audit_feature_dir(self.feature_dir, self.manifest, self.labels)
         self.assertFalse(report["checks"]["all_readable"])
         self.assertTrue(any("s2" in entry for entry in report["unreadable"]))
+
+
+class SquatSplitSourceTests(unittest.TestCase):
+    """The Fitness-AQA side feeds the same checks from split-key and label JSONs."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def test_split_map_covers_every_split_key_file(self):
+        for split_name, ids in (("train", ["a", "b"]), ("val", ["c"]), ("test", ["d"])):
+            (self.tmp / f"{split_name}_keys.json").write_text(json.dumps(ids), encoding="utf-8")
+
+        self.assertEqual(
+            load_split_map(self.tmp),
+            {"a": "train", "b": "train", "c": "val", "d": "test"},
+        )
+
+    def test_labeled_ids_are_the_union_of_both_error_files(self):
+        """``build_labels`` reads both files with ``.get``, so an id in neither is
+        silently relabeled as a negative rather than reported as missing."""
+        (self.tmp / "error_knees_forward.json").write_text(json.dumps({"a": [], "b": [[1, 2]]}), encoding="utf-8")
+        (self.tmp / "error_knees_inward.json").write_text(json.dumps({"c": []}), encoding="utf-8")
+
+        self.assertEqual(load_labeled_ids(self.tmp), {"a", "b", "c"})
+
+    def test_missing_label_files_yield_an_empty_set_rather_than_raising(self):
+        self.assertEqual(load_labeled_ids(self.tmp), set())
+
+    def test_feature_dir_is_audited_against_the_split_map(self):
+        feature_dir = self.tmp / "features"
+        write_feature(feature_dir / "train" / "a.npz", np.asarray([1.0, 2.0], dtype=np.float32))
+        write_feature(feature_dir / "train" / "b.npz", np.asarray([2.0, 1.0], dtype=np.float32))
+
+        report = core_audit_feature_dir(feature_dir, {"a": "train", "b": "val"}, {"a", "b"})
+
+        self.assertTrue(report["checks"]["coverage_complete"])
+        self.assertFalse(report["checks"]["splits_match_manifest"])
+        self.assertTrue(any("b" in entry for entry in report["split_mismatch"]))
 
 
 if __name__ == "__main__":

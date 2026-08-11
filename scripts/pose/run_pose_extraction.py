@@ -4,12 +4,16 @@ import argparse
 import json
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPLIT_NAMES = ("train", "val", "test")
+SQUAT_LABELED_ROOT = REPO_ROOT / "data" / "Fitness-AQA" / "Squat" / "Labeled_Dataset"
+SQUAT_UNLABELED_ROOT = REPO_ROOT / "data" / "Fitness-AQA" / "Squat" / "Unlabeled_Dataset"
 
 
 @dataclass(frozen=True)
@@ -110,7 +114,7 @@ def iter_requests(requests: list[PoseRequest], limit: int | None):
         yield request
 
 
-def run_request(script_path: Path, request: PoseRequest) -> None:
+def run_request(script_path: Path, request: PoseRequest, capture_output: bool = False) -> None:
     request.json_path.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
@@ -123,7 +127,56 @@ def run_request(script_path: Path, request: PoseRequest) -> None:
     if request.annotated_video_path is not None:
         request.annotated_video_path.parent.mkdir(parents=True, exist_ok=True)
         command.extend(["--output_video", str(request.annotated_video_path)])
-    subprocess.run(command, check=True)
+    subprocess.run(command, check=True, capture_output=capture_output)
+
+
+def process_requests(
+    script_path: Path,
+    requests: Sequence[PoseRequest],
+    overwrite: bool,
+    jobs: int,
+) -> tuple[int, int, int]:
+    """Extract pose for every request, at most ``jobs`` videos in flight.
+
+    MediaPipe Pose with ``model_complexity=2`` runs at ~2.4 fps per process on this
+    machine's CPU, so a full 1.6k-video dataset is a many-hour serial job. Each
+    request is already its own subprocess, so a thread pool is enough to keep N of
+    them busy -- the GIL is released while ``subprocess.run`` waits. Child stdout is
+    captured when ``jobs > 1`` because N concurrent tqdm bars are unreadable.
+    """
+    if jobs < 1:
+        raise ValueError(f"--jobs must be at least 1, got {jobs}.")
+
+    pending: list[tuple[int, PoseRequest]] = []
+    skipped = 0
+    for index, request in enumerate(requests, start=1):
+        if request.json_path.exists() and not overwrite:
+            print(f"[{index}] Skipping {request.video_id}, already processed.")
+            skipped += 1
+            continue
+        pending.append((index, request))
+
+    processed = 0
+    failed = 0
+
+    def run_one(item: tuple[int, PoseRequest]) -> tuple[int, PoseRequest, Exception | None]:
+        index, request = item
+        try:
+            run_request(script_path=script_path, request=request, capture_output=jobs > 1)
+        except subprocess.CalledProcessError as exc:
+            return index, request, exc
+        return index, request, None
+
+    with ThreadPoolExecutor(max_workers=jobs) as pool:
+        for index, request, error in pool.map(run_one, pending):
+            if error is None:
+                processed += 1
+                print(f"[{index}] Processed {request.video_id} from {request.video_path.name}.")
+            else:
+                failed += 1
+                print(f"Error processing {request.video_id}: {error}")
+
+    return processed, skipped, failed
 
 
 def main() -> None:
@@ -143,7 +196,7 @@ def main() -> None:
     parser.add_argument(
         "--split-dir",
         type=Path,
-        default=REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "Splits",
+        default=SQUAT_LABELED_ROOT / "Splits",
         help="Directory containing train_keys.json, val_keys.json, and test_keys.json.",
     )
     parser.add_argument("--splits", type=parse_split_names, default=list(SPLIT_NAMES))
@@ -156,11 +209,18 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=None, help="Limit number of videos to process.")
     parser.add_argument("--no-video", action="store_true", help="Do not generate annotated videos.")
     parser.add_argument("--overwrite", action="store_true", help="Recompute existing pose JSON files.")
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="How many videos to process concurrently. Each is a separate MediaPipe "
+        "subprocess; child output is captured when this is above 1.",
+    )
     args = parser.parse_args()
 
     if args.dataset == "labeled":
-        video_dir = args.video_dir or REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "videos"
-        output_dir = args.output_dir or REPO_ROOT / "data" / "Squat" / "Labeled_Dataset" / "pose_json"
+        video_dir = args.video_dir or SQUAT_LABELED_ROOT / "videos"
+        output_dir = args.output_dir or SQUAT_LABELED_ROOT / "pose_json"
         requests = build_labeled_requests(
             video_dir=video_dir,
             split_dir=args.split_dir,
@@ -169,8 +229,8 @@ def main() -> None:
             write_video=not args.no_video,
         )
     else:
-        video_dir = args.video_dir or REPO_ROOT / "data" / "Squat" / "Unlabeled_Dataset" / "videos"
-        output_dir = args.output_dir or REPO_ROOT / "data" / "Squat" / "Unlabeled_Dataset" / "processed_poses"
+        video_dir = args.video_dir or SQUAT_UNLABELED_ROOT / "videos"
+        output_dir = args.output_dir or SQUAT_UNLABELED_ROOT / "processed_poses"
         requests = build_unlabeled_requests(video_dir=video_dir, output_dir=output_dir, write_video=not args.no_video)
 
     if not requests:
@@ -180,22 +240,12 @@ def main() -> None:
     print(f"Found {len(requests)} videos to process from {video_dir}.")
     print(f"Writing pose outputs under {output_dir}.")
 
-    processed = 0
-    skipped = 0
-    failed = 0
-    for index, request in enumerate(iter_requests(requests, args.limit), start=1):
-        if request.json_path.exists() and not args.overwrite:
-            print(f"[{index}] Skipping {request.video_id}, already processed.")
-            skipped += 1
-            continue
-
-        print(f"[{index}] Processing {request.video_id} from {request.video_path.name}...")
-        try:
-            run_request(script_path=script_path, request=request)
-            processed += 1
-        except subprocess.CalledProcessError as exc:
-            failed += 1
-            print(f"Error processing {request.video_id}: {exc}")
+    processed, skipped, failed = process_requests(
+        script_path=script_path,
+        requests=list(iter_requests(requests, args.limit)),
+        overwrite=args.overwrite,
+        jobs=args.jobs,
+    )
 
     print(f"Done. processed={processed} skipped={skipped} failed={failed}")
 
