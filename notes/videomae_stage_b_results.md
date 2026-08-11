@@ -367,3 +367,71 @@ combined 的 per-seed:0.639 / 0.650 / 0.644 / 0.649 / 0.670。
 > 副產品:這一節同時證明了本階段的 pose 分支確實是歷史那條 pipeline 的重建,而不是
 > 一個名字相同的新東西——三個 label mode 的排序、未正規化臂的重現、以及 normalization
 > 帶來的 +0.065 提升(0.585 → 0.650,歷史為 +0.054)都對得上。
+
+### 2.2 Legacy 臂重現,所以 pooling 修正的 delta 站得住
+
+| 臂 | 本次(5 seeds) | 歷史公布值 | 判定 |
+| --- | --- | --- | --- |
+| `legacy_first_token_max` VideoMAE-only | **0.5720 ± 0.0192** | 0.555(範圍 0.532–0.584)| **落在公布範圍內,重現成立** |
+
+per-seed:0.558 / 0.551 / 0.578 / 0.600 / 0.573。
+
+這一條是整個 pooling 修正的分母。它重現了,所以下一節的 +0.068 不是「基線換掉了」。
+
+### 2.3 Pooling 修正在**第二個資料集、第二個任務**上獨立複製
+
+| 臂 | balanced accuracy |
+| --- | --- |
+| `legacy_first_token_max`(舊抽取方式) | 0.5720 ± 0.0192 |
+| `mean_pool_fc_norm_mean`(修正後,pre-registered primary)| **0.6401 ± 0.0211** |
+| **delta** | **+0.068** |
+
+Stage A 在 REHAB24-6 上量到的是 +0.08~0.12。這裡是不同資料集(in-the-wild YouTube
+vs 實驗室)、不同任務(squat fault detection vs binary correctness)、不同評估協定
+(固定 split vs subject-wise LOSO),方向一致、量級相同。**Stage A 的核心主張因此有了
+一次獨立複製,而不只是同一批資料的再分析。**
+
+### 2.4 主結果:fusion **未達**保留門檻
+
+來源:`data/Fitness-AQA/Squat/experiments/stage_b_report_preliminary.json`,
+label mode `combined`,seeds 1–5,threshold 與 checkpoint 皆由 val 決定。
+
+| 臂 | balanced acc | recall | specificity | macro F1 |
+| --- | --- | --- | --- | --- |
+| **Normalized pose-only(分母)** | **0.650 ± 0.012** | 0.631 ± 0.059 | 0.669 ± 0.065 | 0.618 |
+| **Calibrated late fusion(primary)** | **0.648 ± 0.008** | 0.631 ± 0.057 | 0.664 ± 0.052 | 0.617 |
+| Corrected VideoMAE-only | 0.640 ± 0.021 | 0.630 ± 0.027 | 0.650 ± 0.018 | 0.611 |
+| Regularized early fusion(secondary)| 0.641 ± 0.019 | 0.565 ± 0.050 | 0.717 ± 0.021 | 0.595 |
+| Legacy VideoMAE-only | 0.572 ± 0.019 | 0.602 ± 0.038 | 0.542 ± 0.071 | 0.552 |
+| Person-crop 控制 | 0.667 ± 0.013 | 0.578 ± 0.032 | 0.756 ± 0.041 | 0.617 |
+
+**Primary 判定(對照 §0.4 的五個條件):**
+
+| # | 條件 | 值 | 判定 |
+| --- | --- | --- | --- |
+| 1 | Δ balanced accuracy ≥ +0.02 | **−0.0028** | **不通過** |
+| 2 | Paired 95% CI 下限 > 0 | **[−0.059, +0.056]** | **不通過** |
+| 3 | recall/specificity 惡化 ≤ 0.03 | −0.006 | 通過 |
+| 4 | 多數 seed 方向一致 | 3/5 | 通過 |
+| 5 | 控制組後仍保留效果 | *(見 §2.5)* | — |
+
+**條件 1 與 2 不通過,因此依計畫:VideoMAE 不作為 production 預設 input。**
+
+值得注意的是 late fusion 的行為:0.648 對 pose-only 的 0.650、VideoMAE-only 的 0.640——
+**它收斂到兩個 branch 中較強的那一個,沒有超越它**。這正是 Stage A 在 REHAB24-6 上對
+early concat 量到的同一個現象,現在在不同資料集、不同 fusion 方法上重演。計畫把
+calibrated late fusion 排進 Stage B 的理由是「降低弱 branch 稀釋強 branch 的風險」——
+它確實做到了(late fusion 0.648 遠優於 early fusion 在 recall 上的崩壞),
+**但「不稀釋」不等於「有互補性」。**
+
+Early fusion 另外踩到護欄:recall 掉 0.066(0.631 → 0.565),換來 specificity +0.048。
+它把決策往「預測正常」推,而不是變得更準。
+
+**與計畫結果解讀表的對應:**
+
+> 「REHAB24-6 與 Fitness-AQA 都成功,但 fusion 無增益 → VideoMAE 有獨立訊號,
+> 但 pose 已捕捉同一資訊 → 保留選配或診斷 branch,不作預設輸入」
+
+corrected VideoMAE-only 是 0.640,遠高於 legacy 的 0.572、也遠高於隨機的 0.500,
+所以「有獨立訊號」成立;但它與 pose 融合後拿不到任何增量,所以「pose 已捕捉同一資訊」
+也成立。**這一列就是 Stage B 的結論。**
