@@ -1,11 +1,16 @@
 # Serves the built SPA and stands in for Vite's dev proxy: /api -> the backend service,
 # so the app keeps using same-origin relative URLs (see frontend/src/api.ts).
-
-upstream xcoach_backend {
-    # `backend` is the docker-compose service name. Override with BACKEND_HOST at build
-    # time only if you rename the service.
-    server backend:8000;
-}
+#
+# This is a TEMPLATE, not a finished config: nginx's entrypoint runs envsubst over
+# /etc/nginx/templates/*.template at container start and writes the result to
+# /etc/nginx/conf.d/. Only ${BACKEND_ORIGIN} is substituted -- NGINX_ENVSUBST_FILTER in the
+# Dockerfile pins the substitution to that one name, so nginx's own runtime variables
+# ($host, $uri, $proxy_add_x_forwarded_for, ...) below survive verbatim. Without the filter
+# envsubst would blank every one of them and the proxy headers would silently go empty.
+#
+# BACKEND_ORIGIN defaults to the docker-compose service (http://backend:8000) and is
+# overridden in Azure with the backend's internal Container Apps FQDN. See
+# docs/azure-deployment.md.
 
 server {
     listen 80;
@@ -23,9 +28,17 @@ server {
     gzip_min_length 1024;
 
     location /api/ {
-        proxy_pass http://xcoach_backend;
+        # No URI part after the origin, so the request path is passed through unchanged.
+        # Resolved once at config load: the Container Apps environment's internal endpoint
+        # is a stable address, so there is nothing to re-resolve between backend revisions.
+        proxy_pass ${BACKEND_ORIGIN};
         proxy_http_version 1.1;
-        proxy_set_header Host              $host;
+        # $proxy_host, not $host: the Container Apps internal ingress routes by Host header,
+        # so forwarding the browser's hostname makes the environment fail to find the app.
+        # Compose does not care either way (uvicorn ignores it), so one setting serves both.
+        # The original hostname is preserved on X-Forwarded-Host for anything that wants it.
+        proxy_set_header Host              $proxy_host;
+        proxy_set_header X-Forwarded-Host  $host;
         proxy_set_header X-Real-IP         $remote_addr;
         proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;

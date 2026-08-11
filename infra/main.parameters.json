@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": { "value": "eastasia" },
+    "namePrefix": { "value": "xcoach" },
+    "deployApps": { "value": true },
+
+    "backendImage": { "value": "REPLACE.azurecr.io/x-coach-backend:latest" },
+    "frontendImage": { "value": "REPLACE.azurecr.io/x-coach-frontend:latest" },
+
+    "customDomain": { "value": "" },
+
+    "backendCpu": { "value": 2 },
+    "maxConcurrentAnalyses": { "value": 2 },
+    "backendMinReplicas": { "value": 1 },
+    "backendMaxReplicas": { "value": 3 },
+
+    "supabaseUrl": { "value": "" },
+    "lineChannelId": { "value": "" },
+    "lineLiffId": { "value": "" },
+    "llmModels": { "value": "" },
+    "llmBaseUrl": { "value": "" },
+
+    "r2AccountId": { "value": "" },
+    "r2AccessKeyId": { "value": "" },
+    "r2Bucket": { "value": "" }
+  }
+}
