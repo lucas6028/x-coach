@@ -178,6 +178,37 @@ def select_rows(rows: list[dict], subset: str = "all") -> list[dict]:
     raise ValueError(f"Unknown subset {subset!r}; expected one of {SUBSETS}.")
 
 
+def truncation_cause(frame_w: int, frame_h: int, box: Box) -> str:
+    """Why ``full_frame`` loses part of this athlete: ``scale``, ``framing`` or ``none``.
+
+    The processor's shortest-edge resize plus square centre crop is exactly "keep the
+    centred ``min(W, H)``-square of the original frame". So a box can be lost two ways,
+    and they have different fixes: it is TALLER than that window (scale -- only zooming
+    out helps, which costs F3), or it fits but sits away from the frame's centre
+    (framing -- re-centring the window on the athlete costs no zoom at all). Half of
+    the 613 truncated Fitness-AQA squats are the second kind, which is why the F2
+    manipulation does not have to cost the 30% body area ``full_frame_letterbox`` pays.
+    """
+    window = min(frame_w, frame_h)
+    if not frame_variant("full_frame", frame_w, frame_h, box).truncated:
+        return "none"
+    return "scale" if (box.y1 - box.y0) > window else "framing"
+
+
+def split_counts(rows: list[dict], split_map: dict[str, str], subset: str = "all") -> dict[str, int]:
+    """How many videos of ``subset`` land in each split.
+
+    A contrast is only as powerful as its TEST videos, and the subsets B1 needs are a
+    minority of a 244-video test split. Reporting the corpus count alone reads as more
+    evidence than the comparison can carry.
+    """
+    counts: dict[str, int] = {}
+    for row in select_rows(rows, subset):
+        split_name = split_map.get(str(row["video_id"]), "unassigned")
+        counts[split_name] = counts.get(split_name, 0) + 1
+    return counts
+
+
 def _percentiles(values: list[float]) -> dict[str, float]:
     if not values:
         return {"p10": 0.0, "median": 0.0, "p90": 0.0}

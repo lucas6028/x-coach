@@ -8,7 +8,9 @@ from src.video.variant_framing import (
     frame_variant,
     processor_view,
     select_rows,
+    split_counts,
     summarize_manifest,
+    truncation_cause,
     variant_input,
 )
 
@@ -161,6 +163,39 @@ class SummarizeManifestTests(unittest.TestCase):
 
     def test_processor_size_matches_the_checkpoint_config(self) -> None:
         self.assertEqual(PROCESSOR_SIZE, 224)
+
+
+class TruncationCauseTests(unittest.TestCase):
+    """The two causes have different prices, so they must not be pooled."""
+
+    def test_a_box_taller_than_the_crop_window_is_a_scale_problem(self) -> None:
+        self.assertEqual(truncation_cause(480, 900, Box(100, 20, 340, 880)), "scale")
+
+    def test_a_box_that_fits_but_sits_low_is_a_framing_problem(self) -> None:
+        """Half of the 613 truncated squats. Re-centring the crop window on the
+        athlete restores them at no zoom cost, so F2 need not cost 30% body area."""
+        self.assertEqual(truncation_cause(480, 900, Box(100, 500, 340, 900)), "framing")
+
+    def test_an_untruncated_video_has_no_cause(self) -> None:
+        self.assertEqual(truncation_cause(480, 480, Box(100, 100, 300, 300)), "none")
+
+
+class SplitCountTests(unittest.TestCase):
+    def rows(self) -> list[dict]:
+        return [
+            {"video_id": "a", "frame_size": [480, 480], "box": [10, 10, 20, 20]},
+            {"video_id": "b", "frame_size": [480, 852], "box": [10, 10, 20, 20]},
+            {"video_id": "c", "frame_size": [480, 852], "box": [10, 10, 20, 20]},
+        ]
+
+    def test_counts_are_reported_per_split_for_the_chosen_subset(self) -> None:
+        split_map = {"a": "train", "b": "test", "c": "test"}
+        self.assertEqual(split_counts(self.rows(), split_map, "non_square"), {"test": 2})
+
+    def test_a_video_missing_from_the_split_map_is_surfaced_not_dropped(self) -> None:
+        """Silently dropping it would overstate how much test data a contrast has."""
+        counts = split_counts(self.rows(), {"a": "train"}, "all")
+        self.assertEqual(counts["unassigned"], 2)
 
 
 if __name__ == "__main__":

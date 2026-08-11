@@ -16,8 +16,22 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.video.squat_dataset import SQUAT_LABELED_ROOT
-from src.video.variant_framing import FRAMING_VARIANTS, SUBSETS, summarize_manifest
+from src.video.squat_dataset import SPLIT_NAMES, SQUAT_LABELED_ROOT, load_json_list
+from src.video.variant_framing import (
+    FRAMING_VARIANTS,
+    SUBSETS,
+    Box,
+    select_rows,
+    split_counts,
+    summarize_manifest,
+    truncation_cause,
+)
+
+#: Stage B's paired bootstrap gave a half-width of about 0.052 on 244 test videos.
+#: A bootstrap CI narrows as 1/sqrt(n), so this extrapolates the width any smaller
+#: subset can deliver. It is an extrapolation, labelled as one -- not a measurement.
+STAGE_B_HALF_WIDTH = 0.052
+STAGE_B_TEST_N = 244
 
 
 def format_report(summary: dict) -> str:
@@ -47,6 +61,39 @@ def format_report(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def format_power(rows: list[dict], split_map: dict[str, str]) -> str:
+    lines = [
+        "power: a contrast is only as strong as its TEST videos",
+        "",
+        f"{'subset':<30}{'corpus':>8}{'test':>7}{'extrapolated CI half-width':>29}",
+    ]
+    for subset in SUBSETS:
+        counts = split_counts(rows, split_map, subset)
+        test_n = counts.get("test", 0)
+        width = STAGE_B_HALF_WIDTH * (STAGE_B_TEST_N / test_n) ** 0.5 if test_n else float("inf")
+        lines.append(f"{subset:<30}{sum(counts.values()):>8}{test_n:>7}{width:>28.3f}")
+
+    causes: dict[str, int] = {}
+    for row in select_rows(rows, "all"):
+        frame_w, frame_h = (int(value) for value in row["frame_size"])
+        cause = truncation_cause(frame_w, frame_h, Box(*row["box"]))
+        causes[cause] = causes.get(cause, 0) + 1
+    truncated = causes.get("scale", 0) + causes.get("framing", 0)
+    lines.append("")
+    lines.append(
+        f"why full_frame truncates ({truncated} videos): "
+        f"scale {causes.get('scale', 0)} ({causes.get('scale', 0) / truncated:.1%}), "
+        f"framing {causes.get('framing', 0)} ({causes.get('framing', 0) / truncated:.1%})"
+    )
+    lines.append(
+        "  scale  = box taller than the centre-crop window; only zooming out helps, which costs F3"
+    )
+    lines.append(
+        "  framing = box fits but sits off the frame's centre; re-centring costs no zoom at all"
+    )
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Per-arm framing report for the B1 matrix.")
     parser.add_argument(
@@ -56,6 +103,7 @@ def main() -> None:
         help="A person_crop manifest: both crop arms take its expanded box, and tracking "
         "one box through every arm is what makes the arms comparable.",
     )
+    parser.add_argument("--split-dir", type=Path, default=SQUAT_LABELED_ROOT / "Splits")
     parser.add_argument("--json-output", type=Path, default=None)
     args = parser.parse_args()
 
@@ -71,6 +119,14 @@ def main() -> None:
     for subset in SUBSETS:
         print(format_report(summaries[subset]))
         print()
+
+    split_map = {
+        video_id: split_name
+        for split_name in SPLIT_NAMES
+        for video_id in load_json_list(args.split_dir / f"{split_name}_keys.json")
+    }
+    print(format_power(manifest["rows"], split_map))
+    print()
 
     if args.json_output:
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
