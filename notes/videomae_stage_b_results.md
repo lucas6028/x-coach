@@ -403,7 +403,8 @@ label mode `combined`,seeds 1–5,threshold 與 checkpoint 皆由 val 決定。
 | Corrected VideoMAE-only | 0.640 ± 0.021 | 0.630 ± 0.027 | 0.650 ± 0.018 | 0.611 |
 | Regularized early fusion(secondary)| 0.641 ± 0.019 | 0.565 ± 0.050 | 0.717 ± 0.021 | 0.595 |
 | Legacy VideoMAE-only | 0.572 ± 0.019 | 0.602 ± 0.038 | 0.542 ± 0.071 | 0.552 |
-| ~~Person-crop 控制~~ | ~~0.667~~ | | | **作廢,見 §2.5** |
+| Person-crop 控制 | 0.666 ± 0.012 | 0.655 | 0.678 | 0.636 |
+| Background-only 控制 | 0.627 ± 0.019 | 0.671 | 0.583 | 0.602 |
 
 **Primary 判定(對照 §0.4 的五個條件):**
 
@@ -413,7 +414,7 @@ label mode `combined`,seeds 1–5,threshold 與 checkpoint 皆由 val 決定。
 | 2 | Paired 95% CI 下限 > 0 | **[−0.059, +0.056]** | **不通過** |
 | 3 | recall/specificity 惡化 ≤ 0.03 | −0.006 | 通過 |
 | 4 | 多數 seed 方向一致 | 3/5 | 通過 |
-| 5 | 控制組後仍保留效果 | *(重跑中,見 §2.5)* | — |
+| 5 | 控制組後仍保留效果 | 見 §2.6 | **不通過(見下)** |
 
 **條件 1 與 2 不通過,因此依計畫:VideoMAE 不作為 production 預設 input。**
 
@@ -467,3 +468,93 @@ corrected VideoMAE-only 是 0.640,遠高於 legacy 的 0.572、也遠高於隨�
 
 **這個缺陷沒有影響主結果。** full_frame 臂根本不讀 manifest(`--variant full_frame`
 不需要 box),legacy 臂與 pose 臂也一樣。§2.1–§2.4 的所有數字不受影響。
+
+
+### 2.6 捷徑控制:full-frame 的訊號有 **91%** 在把人塗掉之後仍然存在
+
+用完整 box 重抽之後的四個數字(全部 5 seeds、同一組 split 與超參數):
+
+| 臂 | 看得到什麼 | balanced accuracy | 高於隨機 |
+| --- | --- | --- | --- |
+| `videomae_corrected`(full frame)| 人 + 場景 + 取景 | 0.6401 ± 0.0211 | +0.140 |
+| `videomae_person_crop` | **只有人**(背景移除,灰邊補正方)| **0.6662 ± 0.0117** | +0.166 |
+| `videomae_background_only` | **只有場景**(人被塗掉)| 0.6271 ± 0.0191 | +0.127 |
+| `box_geometry`(zero-parameter)| **完全沒有像素**,只有 12 個數字 | 0.5777 ± 0.0230 | +0.078 |
+
+把 full-frame 高於隨機的 +0.140 拆開:
+
+| 只給模型 | 高於隨機 | 佔 full-frame 的 |
+| --- | --- | --- |
+| 12 個描述人框位置/大小/畫面比例/長度的數字 | +0.078 | **56%** |
+| ＋場景像素(人被塗掉)| +0.127 | **91%** |
+| ＋人本身 | +0.140 | 100% |
+
+**把受試者整個塗掉之後,還剩下 91% 的訊號。** 換句話說,corrected VideoMAE 在
+full frame 上的 0.640 **不能**被解讀成「動作品質」——它主要在讀拍攝脈絡。而且
+**56% 只需要 12 個數字**:人在畫面裡的位置與大小、畫面長寬、影片長度。這個
+zero-parameter 對照(`box_geometry`)甚至贏過 legacy VideoMAE 全幀臂的 0.572。
+
+為什麼會這樣:Fitness-AQA 是 in-the-wild YouTube 影片,同一個健身房/上傳者/機位
+會重複出現,而錯誤標註在這些脈絡之間分布不均。標籤因此部分可由「這是誰在哪裡拍的」
+預測,與深蹲做得好不好無關。
+
+**但身體確實帶有訊號,而且是最強的一臂。** `person_crop`(只有人)0.666 是所有臂裡最高的,
+比 background_only 高 +0.039、比 full frame 高 +0.026、也比 pose-only 的 0.650 高。
+**給模型看整個畫面比只給它看身體更差** —— 場景不只是捷徑,它同時是干擾。
+
+**條件 5 判定:不通過。** 計畫要求「效果在 person-crop / 背景控制後仍保留」。
+這裡沒有可保留的 fusion 增益(條件 1、2 已不通過),而 VideoMAE-only 自身的訊號
+在背景控制下被證明主要來自場景與取景。依計畫結果解讀表:
+
+> 「效果只存在於背景／視角 → 模型學到 dataset shortcut,而非動作品質 → 判定為 no-go」
+
+嚴格說,本次不是「**只**存在於背景」——身體那一臂是最強的——所以正確的措辭是:
+**full-frame 的表現主要由 dataset shortcut 撐起,身體訊號真實但被場景稀釋。**
+
+三個必須連同這節一起讀的限制:
+
+1. **`background_only` 不是純場景。** 補洞後仍留下一個矩形,它的位置與大小洩漏受試者的
+   取景。這正是 `box_geometry` 對照存在的理由:矩形幾何單獨值 +0.078,場景像素再加
+   +0.049。
+2. **`person_crop` 也不是純身體。** 灰邊 letterbox 的比例仍然編碼了人框的長寬比,
+   所以它的 0.666 裡也含有部分取景資訊。
+3. **兩個控制與主臂共用同一次解碼**(§1.3d),所以三者之間沒有編碼世代差。
+
+---
+
+## 3. Stage B 結論
+
+### 3.1 對照計畫的五個保留條件
+
+| # | 條件 | 結果 | 判定 |
+| --- | --- | --- | --- |
+| 1 | Δ balanced accuracy ≥ +0.02 | −0.003 | **不通過** |
+| 2 | Paired 95% CI 下限 > 0 | [−0.059, +0.056] | **不通過** |
+| 3 | recall/specificity 惡化 ≤ 0.03 | −0.006 | 通過 |
+| 4 | 多數 seed 方向一致 | 3/5 | 通過 |
+| 5 | 控制組後仍保留效果 | 91% 的訊號在人被塗掉後仍在 | **不通過** |
+
+**結論:VideoMAE 不作為 x-coach 的 production 預設 input。**
+
+### 3.2 這一階段確立了什麼
+
+1. **Pooling 修正在第二個資料集上獨立複製:+0.068**(legacy 0.572 → corrected 0.640),
+   而 legacy 臂本身重現了歷史公布值。Stage A 的核心主張不再只有一組資料支持。
+2. **Fusion 沒有互補性。** late fusion 收斂到較強的 branch(0.648 對 pose 的 0.650),
+   early fusion 更差且以 recall 換 specificity。兩種 fusion、兩個資料集,同一個結論。
+3. **這個資料集上的 VideoMAE 表現主要是 dataset shortcut。** 91% 的高於隨機訊號在
+   受試者被塗掉後仍然存在,56% 甚至不需要任何像素。任何引用 Fitness-AQA VideoMAE
+   數字(包括歷史的 0.555 與本次的 0.640)的說法都必須連帶這一句。
+4. **身體訊號是真的,而且被場景稀釋。** person-crop 0.666 是全部臂中最高,
+   超過 full frame(+0.026)與 pose-only(+0.016)。
+
+### 3.3 據此建議
+
+- **不進 Stage C。** 計畫規定 Stage A 與 Stage B 都通過才投入 EgoExo-Fitness。Stage B
+  未通過,依計畫應停在這裡。
+- **VideoMAE 保留為研究/診斷 branch**,不接進 production 推論路徑。
+- **若未來要再碰這條線,person-crop 是唯一有證據的方向**:它是本次最強的單一臂,
+  而且它是唯一一個把 dataset shortcut 主動移除掉的設定。它相對 pose-only 的
+  +0.016(95% CI 含 0)還不足以支撐部署,但它是這批實驗裡唯一往上的訊號。
+- **這個 shortcut 發現本身值得寫進論文**:它同時解釋了為什麼歷史的 VideoMAE 數字
+  「看起來還行但沒用」,也給了 in-the-wild 健身資料集一個具體的方法學警告。
