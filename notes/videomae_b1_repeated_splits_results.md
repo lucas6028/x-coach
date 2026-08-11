@@ -109,6 +109,28 @@
 這個問題不依賴 person-crop 的任何主張,而且現在的半寬 0.024 足以回答它。它一直是
 兩條線裡價值較高的那條——若有效,那是**對所有 VideoMAE 數字都適用的修正**。
 
+## `full_frame_letterbox` kernel:抽取前的驗證
+
+本機 2 支影片的煙霧測試,兩臂都在**同一台機器**上抽:
+
+| 影片 | 畫面 | 與 `full_frame` 相同? | 預期 |
+| --- | --- | --- | --- |
+| 46777_1 | 480×600 非正方 | 否(max\|diff\| 0.375)| 否 ✓ |
+| 49897_1 | 480×480 正方 | **位元完全相同** | 是 ✓ |
+
+變換確實生效,而且在正方形影片上是乾淨的 no-op,與事前登錄的 768 支一致。
+
+**但這個比對不能跨機器做。** 同一支正方形影片,本機重抽的特徵與 Kaggle 上既有的
+`videomae_raw_full_frame` 並不位元相同(cos = 1.0000,但 `allclose` 為否)——像素
+一模一樣,差異來自硬體與函式庫版本。所以抽取完成後的「identical 數必須是 768」檢查
+必須用**容差**(例如 max\|diff\| < 1e-3 或 cos > 0.99999),不能用位元相等,否則會把
+一個正確的臂判成壞的。這是 51% 事件那條檢查的正確版本。
+
+kernel 設定:`.kaggle_tmp/fitaqa_videomae_extract_ffl/`,不掛 variant manifest
+(`resolve_boxes` 會拒絕),src.zip 的過期守衛新增 `full_frame_letterbox` 與
+`resolve_boxes` 兩個 token——少了它們就代表上傳的 src 早於這一臂,`--variant` 會在
+跑了幾小時之後才被拒絕。
+
 ## 尚未做的事
 
 - Fusion 沒有在重抽上重跑,所以 Stage B §3 的保留判定原封不動。
