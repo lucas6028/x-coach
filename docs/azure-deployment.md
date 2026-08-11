@@ -1,34 +1,32 @@
-# Deploying x-coach to Azure
+# 部署 x-coach 到 Azure
 
-Two Container Apps in one environment, mirroring `docker-compose.yml`: `backend` (FastAPI
-plus the pose/rules/retrieval pipeline) behind an **internal** ingress, and `frontend`
-(nginx serving the built SPA) with an **external** ingress that proxies `/api` to it.
-Postgres/auth stays on Supabase and user uploads stay on Cloudflare R2, so neither has an
-Azure resource. Infrastructure lives in `infra/main.bicep`.
+同一個環境裡兩個 Container Apps，與 `docker-compose.yml` 一一對應：`backend`（FastAPI 加上
+pose/rules/retrieval pipeline）放在**內部** ingress 後面，`frontend`（nginx 服務打包好的 SPA）用
+**對外** ingress 並把 `/api` 代理過去。Postgres/auth 留在 Supabase，使用者上傳留在 Cloudflare R2，
+所以這兩者在 Azure 上都沒有對應資源。基礎設施定義在 `infra/main.bicep`。
 
-Read `docs/docker.md` first — everything about the two images (what is in them, why `data/`
-is mounted rather than baked, why the `VITE_*` vars are build args) carries over unchanged.
+先讀 `docs/docker.md` — 關於這兩個 image 的一切（裡面裝了什麼、為什麼 `data/` 是掛載而不是烘進
+image、為什麼 `VITE_*` 是 build args）在這裡完全適用，不需要重講。
 
-## Where each part goes
+## 各部分放在哪裡
 
-| Part of the project | Azure service | Notes |
+| 專案部分 | Azure 服務 | 說明 |
 | --- | --- | --- |
-| `frontend/` (nginx + built SPA) | Container Apps | Keeps the `/api` same-origin proxy, so SSE and 256 MB uploads need no rework |
-| `backend/` (FastAPI + MediaPipe + ffmpeg) | Container Apps, Consumption profile | CPU/RAM-heavy, single worker, needs a raised request timeout |
-| Both images | Azure Container Registry (Basic) | Pulled with a user-assigned managed identity; the admin account stays off |
-| Postgres, auth, RLS | **Supabase, unchanged** | No Azure resource. Moving it means rewriting auth, RLS and `supabase-py` |
-| Uploads (video, pose JSON, thumbnail) | **Cloudflare R2, unchanged** | `services/storage.py` speaks the S3 API; Azure Blob has no S3-compatible endpoint, so switching needs a new store implementation |
-| `data/` — KG graphml, RAG vector DB, demo library | Azure Files share, mounted read-only at `/app/data` | Same shape as compose's `./data:/app/data:ro` |
-| Secrets | Container Apps secrets (or Key Vault references) | Never in the parameters file — see [Secrets](#secrets) |
-| Logs and traces | Log Analytics (wired by the template) + Application Insights | |
-| Custom domain and TLS | Container Apps custom domain + free managed certificate | Frontend only; the backend is internal |
-| Research pipelines (`src/rehab24`, `src/video`, torch/VideoMAE, Gemini KG extraction) | **Not deployed** | If they ever need to run in the cloud, Container Apps *Jobs* or Azure ML — not this app. `requirements-docker.txt` deliberately excludes their dependencies |
+| `frontend/`（nginx + 打包好的 SPA） | Container Apps | 保留 `/api` 同源代理，SSE 與 256 MB 上傳都不用改寫 |
+| `backend/`（FastAPI + MediaPipe + ffmpeg） | Container Apps，Consumption profile | CPU/RAM 密集、單一 worker、需要調高 request timeout |
+| 兩個 image | Azure Container Registry（Basic） | 用 user-assigned managed identity 拉取；admin 帳戶保持關閉 |
+| Postgres、auth、RLS | **維持 Supabase 不動** | 沒有 Azure 資源。搬走等於重寫 auth、RLS 與 `supabase-py` |
+| 上傳內容（影片、pose JSON、縮圖） | **維持 Cloudflare R2 不動** | `services/storage.py` 走 S3 API；Azure Blob 沒有 S3 相容端點，要換就得寫一份新的 store 實作 |
+| `data/` — KG graphml、RAG 向量庫、demo 影片庫 | Azure Files 檔案共用，唯讀掛載於 `/app/data` | 與 compose 的 `./data:/app/data:ro` 同形 |
+| 機密設定 | Container Apps secrets（或 Key Vault 參照） | 絕不放進參數檔 — 見[機密設定](#機密設定) |
+| Log 與追蹤 | Log Analytics（範本已接好）+ Application Insights | |
+| 自訂網域與 TLS | Container Apps 自訂網域 + 免費受管憑證 | 只有 frontend 需要；backend 是內部的 |
+| 研究 pipeline（`src/rehab24`、`src/video`、torch/VideoMAE、Gemini KG 抽取） | **不部署** | 真的需要上雲就用 Container Apps *Jobs* 或 Azure ML，不是這個 app。`requirements-docker.txt` 刻意排除了它們的相依套件 |
 
-**Region.** East Asia is closest to Taiwan; Japan East has the wider service catalogue.
-Either works — pick whichever is nearer the Supabase project, because every request pays
-that round trip.
+**區域。** East Asia 離台灣最近；Japan East 的服務目錄比較齊全。兩者都可以 — 挑離 Supabase 專案較
+近的那個，因為每一次請求都要付那趟來回。
 
-## Topology
+## 拓撲
 
 ```
                        ┌─ Front Door (optional: WAF, global cache)
@@ -44,102 +42,91 @@ that round trip.
        (external)          (external)         KG + RAG + demo library
 ```
 
-The backend's ingress is internal for two reasons: nothing outside the environment needs
-the API, and when the `R2_*` variables are unset the backend exposes an **unauthenticated**
-`GET /api/local-object/{key}` that must never face the internet.
+backend 的 ingress 設為內部有兩個理由：環境外面沒有東西需要這個 API；而且當 `R2_*` 變數未設定時，
+backend 會暴露一個**未經驗證的** `GET /api/local-object/{key}`，那絕不能面向網際網路。
 
-The one thing that does arrive from outside is the LINE Messaging webhook. It hits the
-frontend's public hostname and nginx forwards it like any other `/api` route — no separate
-public endpoint, and no reason to make the backend external.
+唯一真的從外面進來的是 LINE Messaging webhook。它打的是 frontend 的公開主機名稱，由 nginx 像其他
+`/api` 路由一樣轉發 — 不需要另外開一個公開端點，也沒有理由把 backend 變成對外。
 
-## Why Container Apps for the frontend, and not Static Web Apps or Vercel
+## 為什麼 frontend 放 Container Apps，而不是 Static Web Apps 或 Vercel
 
-The frontend image is not a static site: `nginx.conf.template` is also the reverse proxy,
-and it does three things a CDN-first platform will not.
+frontend 這個 image 不是靜態網站：`nginx.conf.template` 同時也是反向代理，而它做的三件事是
+CDN 優先的平台辦不到的。
 
-- **Long requests.** A cold analysis runs for minutes; the config allows 900 s.
-  Azure Static Web Apps and Vercel both cap proxied requests well below that (Vercel's
-  external-rewrite ceiling is 120 s and is not configurable).
-- **Large uploads.** `client_max_body_size 256m`. Static Web Apps caps a request at 30 MB.
-- **SSE.** `/api/chat` needs `proxy_buffering off` to stream tokens; behaviour through a
-  third-party proxy layer is at best undocumented.
+- **長時間請求。** 冷啟動的分析會跑上幾分鐘；設定裡允許 900 秒。Azure Static Web Apps 與 Vercel
+  對代理請求的上限都遠低於此（Vercel 的外部 rewrite 上限是 120 秒，而且不可設定）。
+- **大型上傳。** `client_max_body_size 256m`。Static Web Apps 的單次請求上限是 30 MB。
+- **SSE。** `/api/chat` 需要 `proxy_buffering off` 才能逐 token 串流；透過第三方代理層的行為
+  至少可以說是沒有文件保證的。
 
-Avoiding all three means dropping the `/api` proxy and calling the backend cross-origin —
-but every call in `frontend/src/api.ts` is a hard-coded relative path (`fetch("/api/...")`,
-and `videoFileUrl` returns `/api/video-file/{id}` straight into a `<video src>`). That is a
-`VITE_API_BASE_URL` refactor across ~30 call sites, plus CORS, plus a public backend, in
-exchange for CDN delivery of one small SPA. Not worth it at this size.
+要避開這三點，就得放棄 `/api` 代理、改成跨來源呼叫 backend — 但 `frontend/src/api.ts` 裡每一個呼叫
+都是寫死的相對路徑（`fetch("/api/...")`，而 `videoFileUrl` 直接回傳 `/api/video-file/{id}` 塞進
+`<video src>`）。那是一次橫跨約 30 個呼叫點的 `VITE_API_BASE_URL` 重構，外加 CORS，外加一個公開的
+backend，換來的只是用 CDN 遞送一個小型 SPA。以這個規模來說不值得。
 
-## Three things to get right
+## 三件必須弄對的事
 
-### 1. The ingress request timeout is 240 s by default
+### 1. ingress 的請求逾時預設是 240 秒
 
-Container Apps fronts every app with Envoy, which cancels a request at 240 s. A cold
-analysis (MediaPipe + rules + RAG) can exceed that, and `nginx.conf.template` asking for
-900 s does not change it — the platform cuts first.
+Container Apps 在每個 app 前面都擺了 Envoy，它會在 240 秒切斷請求。冷啟動的分析
+（MediaPipe + rules + RAG）有可能超過，而 `nginx.conf.template` 裡寫 900 秒並不能改變這件事 —
+平台會先動手。
 
-Three ways out, in increasing order of doing it properly:
+三條出路，依「做得徹底」的程度排列：
 
-1. **Premium ingress**, which makes the timeout configurable up to an hour. Not in the
-   Bicep template because it changes the environment's billing; enable it out of band:
+1. **Premium ingress**，可把逾時設定到最長一小時。沒有寫進 Bicep 範本，因為它會改變環境的計費
+   方式；請另外啟用：
 
    ```bash
    az containerapp env update -n xcoach-env -g <rg> \
        --enable-premium-ingress --request-idle-timeout 15
    ```
 
-2. **Prefer the client-side pose path.** The browser runs MediaPipe and posts pose JSON
-   (`analyze.py` already supports this); the server then only runs rules and retrieval, and
-   finishes in seconds. 240 s is ample.
-3. **Make analysis asynchronous.** Upload → Storage Queue or Service Bus → a
-   KEDA-triggered **Container Apps Job** → the client polls. `analyze.py:22` already calls
-   the in-process semaphore a stop-gap "until the Celery/Redis worker queue lands"; Jobs
-   are that queue on Azure without running a broker.
+2. **優先走客戶端 pose 路徑。** 瀏覽器跑 MediaPipe 並送出 pose JSON（`analyze.py` 已經支援）；
+   伺服器端只跑 rules 與 retrieval，秒級就完成。240 秒綽綽有餘。
+3. **把分析改成非同步。** 上傳 → Storage Queue 或 Service Bus → 由 KEDA 觸發的
+   **Container Apps Job** → 客戶端輪詢。`analyze.py:22` 本來就把行程內的 semaphore 稱為
+   「until the Celery/Redis worker queue lands」的權宜之計；Jobs 就是 Azure 上的那個 queue，
+   而且不必自己養 broker。
 
-Start with (1) or (2). (3) is the right answer once analysis volume is real, and doing it
-first is over-engineering.
+先做 (1) 或 (2)。等分析量真的起來，(3) 才是正解；一開始就做是過度工程。
 
-### 2. R2 is required, not optional
+### 2. R2 是必要的，不是選配
 
-`/app/data` is mounted read-only, so `LocalObjectStore` has nowhere to write — and replicas
-are ephemeral, so anything it did write would vanish on the next revision anyway. All four
-`R2_*` variables must be set. A single missing or misspelled one falls the app back to the
-local store **silently**.
+`/app/data` 是唯讀掛載，所以 `LocalObjectStore` 沒有地方可寫 — 而且 replica 是短暫的，就算寫成功
+了，下一個修訂版也會讓它消失。四個 `R2_*` 變數必須全部設定。少一個或拼錯一個，app 就會**靜默地**
+退回本機儲存。
 
-Verify after every deploy:
+每次部署後都要驗證：
 
 ```bash
-curl -s https://<frontend-fqdn>/api/health | grep storage_configured   # must be true
+curl -s https://<frontend-fqdn>/api/health | grep storage_configured   # 必須是 true
 ```
 
-and check the startup log for `Object storage: Cloudflare R2 (bucket=...)` at INFO. The
-fallback logs a WARNING instead.
+並檢查啟動 log 裡有 INFO 等級的 `Object storage: Cloudflare R2 (bucket=...)`。退回本機時記的是
+WARNING。
 
-If you would rather keep the local store, add a second Azure Files share mounted
-read-write at `/app/data/runtime` — but R2 is cheaper, has no egress fee, and already has
-the lifecycle rule for `uploads/anon/` described in `.env.example`.
+如果你比較想保留本機儲存，可以再加一個 Azure Files 檔案共用、以讀寫模式掛在 `/app/data/runtime` —
+但 R2 比較便宜、沒有 egress 費用，而且已經有 `.env.example` 裡描述的 `uploads/anon/` 生命週期規則。
 
-### 3. Scale with replicas, not workers
+### 3. 用 replica 擴展，不是用 worker
 
-`XCOACH_MAX_CONCURRENT_ANALYSES` is a **per-process** semaphore (`backend/app/config.py`).
-The template therefore keeps one uvicorn worker per replica and sets the HTTP scale rule's
-`concurrentRequests` to the same number, so a replica scales out at the point its semaphore
-saturates rather than at Envoy's default of 10 — past which requests queue invisibly while
-the replica still looks healthy.
+`XCOACH_MAX_CONCURRENT_ANALYSES` 是一個**每行程**的 semaphore（`backend/app/config.py`）。因此
+範本讓每個 replica 只跑一個 uvicorn worker，並把 HTTP scale rule 的 `concurrentRequests` 設成同一個
+數字，讓 replica 在它的 semaphore 飽和的那一刻才擴展出去，而不是等到 Envoy 預設的 10 — 超過之後
+請求會無聲地排隊，而 replica 看起來依然健康。
 
-`minReplicas` is 1 on purpose. A cold start loads MediaPipe, the knowledge graph and the
-RAG vector DB off the file share; scale-to-zero puts all of that on a real user's first
-request.
+`minReplicas` 設為 1 是刻意的。冷啟動要從檔案共用載入 MediaPipe、知識圖譜與 RAG 向量庫；
+scale-to-zero 等於把這一切都算到真實使用者的第一個請求上。
 
-Consumption tops out at 4 vCPU / 8 GiB per replica, with memory fixed at 2 GiB per vCPU.
-Beyond that you need a dedicated workload profile.
+Consumption 的上限是每個 replica 4 vCPU / 8 GiB，記憶體固定為每 vCPU 2 GiB。超過就需要
+dedicated workload profile。
 
-## Deploying
+## 部署
 
-### First pass: registry and environment
+### 第一趟：registry 與環境
 
-The container apps reference images that do not exist until the registry does, so the first
-deployment skips them.
+container apps 引用的 image 在 registry 存在之前並不存在，所以第一次部署要跳過它們。
 
 ```bash
 RG=xcoach-rg
@@ -149,10 +136,10 @@ az deployment group create -g $RG -f infra/main.bicep -p deployApps=false
 ACR=$(az deployment group show -g $RG -n main --query properties.outputs.acrName.value -o tsv)
 ```
 
-### Seed the data share
+### 灌入資料共用
 
-The KG and RAG stores are produced by the pipelines and are gitignored, so they are
-uploaded rather than built in the cloud. From the repo root, after the pipelines have run:
+KG 與 RAG 儲存是由 pipeline 產生且被 gitignore 的，所以是上傳而不是在雲端建置。在 pipeline 跑完
+之後，從 repo 根目錄執行：
 
 ```bash
 STORAGE=$(az deployment group show -g $RG -n main \
@@ -165,22 +152,20 @@ az storage file upload-batch --account-name $STORAGE --account-key $KEY \
     -d data/rag/vector_db -s data/rag/vector_db
 ```
 
-The demo library (`data/Fitness-AQA/Squat/Labeled_Dataset/`) is optional and large; upload
-it the same way only if you want the instant-demo videos. Without it the API still serves —
-`/api/health` reports those stores missing, exactly as a bare `docker run` does.
+demo 影片庫（`data/Fitness-AQA/Squat/Labeled_Dataset/`）是選配而且很大；只有在你要那些即時 demo
+影片時才用同樣方式上傳。沒有它 API 一樣能服務 — `/api/health` 會回報那些 store 不存在，就跟一個
+什麼都沒掛載的 `docker run` 一樣。
 
-> Cold-start alternative: if reading the vector DB over SMB ever shows up in startup
-> latency, bake `data/kg/` and `data/rag/vector_db/` into the backend image instead. That
-> needs a `.dockerignore` change — Docker cannot re-include a path whose parent directory
-> is excluded, so the `data` line has to become `data/*` before `!data/kg` will take
-> effect. Do this only if measurement justifies it; the KG and vector DB are small, and the
-> embedder is hash-based (`src/knowledge/rag_vector_db.py`), so nothing downloads a model.
+> 冷啟動的替代方案：如果讀取 SMB 上的向量庫真的在啟動延遲上顯現出來，改成把 `data/kg/` 與
+> `data/rag/vector_db/` 烘進 backend image。那需要改 `.dockerignore` — Docker 無法重新納入
+> 一個父目錄已被排除的路徑，所以 `data` 那行得先改成 `data/*`，`!data/kg` 才會生效。只有在量測
+> 證明有必要時才做；KG 與向量庫都很小，而且 embedder 是 hash-based 的
+> （`src/knowledge/rag_vector_db.py`），不會去下載任何模型。
 
-### Build and push
+### 建置與推送
 
-Both images build in ACR, so no local Docker daemon is needed. The backend's build context
-is the **repo root** (it imports `backend.*` and `src.*` by absolute package path); the
-frontend's is `frontend/`.
+兩個 image 都在 ACR 裡建置，所以不需要本機的 Docker daemon。backend 的 build context 是
+**repo 根目錄**（它以絕對套件路徑 import `backend.*` 與 `src.*`）；frontend 的是 `frontend/`。
 
 ```bash
 TAG=$(git rev-parse --short HEAD)
@@ -193,11 +178,10 @@ az acr build -r $ACR -t x-coach-frontend:$TAG -f frontend/Dockerfile frontend \
     --build-arg VITE_LIFF_ID=1234567890-Abcdefgh
 ```
 
-Vite inlines `VITE_*` at build time, so those are **build args, not runtime env** — a
-change to any of them requires a rebuild, not a restart. The anon key is safe to ship; row
-access is governed by Postgres RLS.
+Vite 會在建置時把 `VITE_*` 內嵌進 bundle，所以它們是 **build args，不是 runtime env** — 改動任何
+一個都需要重新建置，不是重啟。anon key 可以安心隨 bundle 出貨；資料列的存取由 Postgres RLS 控管。
 
-### Second pass: the apps
+### 第二趟：兩個 app
 
 ```bash
 az deployment group create -g $RG -f infra/main.bicep \
@@ -212,33 +196,30 @@ az deployment group create -g $RG -f infra/main.bicep \
     -p lineMessagingAccessToken=$LINE_MESSAGING_ACCESS_TOKEN
 ```
 
-The frontend gets `BACKEND_ORIGIN` pointed at the backend's internal FQDN. nginx substitutes
-it into the config at container start (`frontend/nginx.conf.template`), so re-pointing the
-proxy is an env change, not a rebuild.
+frontend 會拿到指向 backend 內部 FQDN 的 `BACKEND_ORIGIN`。nginx 在容器啟動時把它代入設定檔
+（`frontend/nginx.conf.template`），所以要重新指向代理目標是改 env，不是重新建置。
 
-Note the `Host` header in that config is set to `$proxy_host`, not `$host`. The internal
-ingress routes by Host, so forwarding the browser's hostname makes the environment fail to
-find the backend app — a 404 from the platform that looks like a routing bug in the API.
-The browser's hostname is preserved on `X-Forwarded-Host`.
+注意那份設定裡的 `Host` header 設的是 `$proxy_host`，不是 `$host`。內部 ingress 是按 Host 路由的，
+把瀏覽器的主機名稱轉過去會讓環境找不到 backend app — 那是平台回的 404，但看起來像 API 的路由 bug。
+瀏覽器原本的主機名稱保留在 `X-Forwarded-Host`。
 
-### Subsequent deploys
+### 後續部署
 
-Only the image tag changes:
+只有 image tag 會變：
 
 ```bash
 az containerapp update -n xcoach-backend  -g $RG --image $ACR.azurecr.io/x-coach-backend:$TAG
 az containerapp update -n xcoach-frontend -g $RG --image $ACR.azurecr.io/x-coach-frontend:$TAG
 ```
 
-In GitHub Actions, authenticate with an OIDC federated credential (`azure/login@v2` with
-`client-id`/`tenant-id`/`subscription-id`, no stored secret) and run the same two commands
-after the existing `ci.yml` test and coverage gates pass.
+在 GitHub Actions 裡，用 OIDC federated credential 驗證（`azure/login@v2` 搭配
+`client-id`/`tenant-id`/`subscription-id`，不存任何 secret），並在現有 `ci.yml` 的測試與覆蓋率
+關卡通過之後執行同樣這兩行。
 
-## Secrets
+## 機密設定
 
-The `@secure()` parameters are deliberately absent from `infra/main.parameters.json` so
-that file stays committable. Pass them on the command line as above, or — better for
-anything long-lived — put them in Key Vault and reference them:
+`@secure()` 參數刻意不放在 `infra/main.parameters.json`，這樣那個檔案才能安心進版控。請如上面那樣
+用命令列傳入，或者 — 對任何長期存在的機密而言更好 — 放進 Key Vault 再參照：
 
 ```json
 "llmApiKey": {
@@ -249,23 +230,21 @@ anything long-lived — put them in Key Vault and reference them:
 }
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` is the one to be most careful with: it exists only so the LINE
-LIFF bridge can mint a sign-in link, never for data access. It must not reach the frontend
-image or any build arg.
+`SUPABASE_SERVICE_ROLE_KEY` 是最需要小心的一個：它的存在只是為了讓 LINE LIFF 橋接能鑄出一個登入
+連結，絕不用於資料存取。它不能進到 frontend image，也不能出現在任何 build arg。
 
-## Custom domain and TLS
+## 自訂網域與 TLS
 
-The generated `*.azurecontainerapps.io` FQDN already serves HTTPS, so TLS needs no work
-until you want your own hostname. Container Apps then issues a **free managed certificate**
-(DigiCert) and renews it automatically — there is no certbot to run.
+系統產生的 `*.azurecontainerapps.io` FQDN 本來就提供 HTTPS，所以在你想用自己的主機名稱之前，TLS
+不需要做任何事。之後 Container Apps 會簽發一張**免費的受管憑證**（DigiCert）並自動續期 — 沒有
+certbot 要跑。
 
-Only the frontend needs one; the backend is internal.
+只有 frontend 需要；backend 是內部的。
 
-1. Add the DNS records. A subdomain needs a `CNAME` to the frontend FQDN plus a
-   `TXT` at `asuid.<sub>` holding the verification code. An apex domain needs an `A` record
-   to the environment's static IP (`environmentStaticIp` in the template's outputs) plus a
-   `TXT` at `asuid`.
-2. Bind the domain and let Azure issue the certificate:
+1. 加上 DNS 記錄。子網域需要一筆指向 frontend FQDN 的 `CNAME`，再加一筆位於 `asuid.<sub>`、
+   內容為驗證碼的 `TXT`。根網域（apex）需要一筆指向環境靜態 IP 的 `A` 記錄（範本輸出裡的
+   `environmentStaticIp`），再加一筆位於 `asuid` 的 `TXT`。
+2. 繫結網域並讓 Azure 簽發憑證：
 
    ```bash
    az containerapp hostname add -n xcoach-frontend -g $RG --hostname app.example.com
@@ -273,39 +252,34 @@ Only the frontend needs one; the backend is internal.
        --environment xcoach-env --validation-method CNAME
    ```
 
-Two things that break issuance:
+兩件會讓簽發失敗的事：
 
-- **CAA records.** If the root domain has any `CAA` record, add `0 issue digicert.com` or
-  both issuance and renewal fail.
-- **Ordering.** The app must already be publicly reachable when the certificate is
-  requested, because DigiCert validates over HTTP. Deploy first, then DNS, then bind.
+- **CAA 記錄。** 如果根網域上存在任何 `CAA` 記錄，必須加上 `0 issue digicert.com`，否則簽發與
+  續期都會失敗。
+- **順序。** 請求憑證時 app 必須已經是公開可達的，因為 DigiCert 是透過 HTTP 驗證的。先部署，
+  再設 DNS，最後才繫結。
 
-Set `customDomain` in the parameters file once the hostname is live: the template feeds it
-to `XCOACH_CORS_ORIGINS`, which matters only for direct cross-origin calls to the API (the
-SPA itself is same-origin through nginx) but costs nothing to have right.
+主機名稱上線後，在參數檔裡設定 `customDomain`：範本會把它餵給 `XCOACH_CORS_ORIGINS`。這只有在
+直接跨來源呼叫 API 時才有意義（SPA 本身透過 nginx 是同源的），但設對了也不花什麼成本。
 
-Front Door in front of the frontend is optional. Add it for WAF or global caching; it is
-not needed for TLS or for a custom domain.
+在 frontend 前面加 Front Door 是選配。要 WAF 或全球快取時才加；TLS 與自訂網域都不需要它。
 
-## Observability
+## 可觀測性
 
-Container logs stream to the Log Analytics workspace created by the template:
+容器 log 會串流到範本建立的 Log Analytics workspace：
 
 ```bash
 az containerapp logs show -n xcoach-backend -g $RG --follow
 ```
 
-For request-level tracing, add Application Insights and instrument FastAPI with
-OpenTelemetry. The health endpoint is the fastest first check either way — `/api/health`
-reports `auth_configured`, `chat_configured`, `line_login_configured`,
-`storage_configured` and a `stores` map for the labeled-video, detection, KG and RAG
-directories, which between them explain most "why is this feature dead in production"
-questions.
+要做請求層級的追蹤，就加上 Application Insights 並用 OpenTelemetry 為 FastAPI 埋點。不論如何，
+健康端點都是最快的第一道檢查 — `/api/health` 回報 `auth_configured`、`chat_configured`、
+`line_login_configured`、`storage_configured`，以及一個涵蓋 labeled-video、detection、KG 與 RAG
+目錄的 `stores` 對照表，這些加起來能解釋大部分「為什麼這個功能在正式環境是死的」這類問題。
 
-## What this does not cover
+## 這份文件不涵蓋的部分
 
-The research pipelines are not part of this deployment and should not be added to these
-images. `requirements-docker.txt` is the web subset of `requirements.txt` — adding `torch`
-and `transformers` back would grow the backend image by several GB for code the API never
-calls. If those pipelines need cloud compute, run them as Container Apps Jobs or on Azure
-Machine Learning, against their own image built from the full `requirements.txt`.
+研究 pipeline 不屬於這次部署，也不該被加進這兩個 image。`requirements-docker.txt` 是
+`requirements.txt` 的 web 子集 — 把 `torch` 與 `transformers` 加回去，會為了 API 從不呼叫的程式碼
+讓 backend image 膨脹好幾 GB。如果那些 pipeline 需要雲端運算資源，請用 Container Apps Jobs 或
+Azure Machine Learning 執行，並使用它們自己、以完整 `requirements.txt` 建置的 image。
