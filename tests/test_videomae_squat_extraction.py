@@ -11,11 +11,14 @@ from src.video.videomae_feature_extraction import (
     ClipRequest,
     build_requests,
     iter_requests,
+    VARIANTS,
     load_variant_boxes,
+    resolve_boxes,
     sample_clip_starts,
     save_feature_bundle,
     select_chunk,
 )
+from src.video.squat_video_variants import BOX_VARIANTS
 from src.video.videomae_pooling import LEGACY_FIRST_TOKEN, MEAN_POOL_FC_NORM, build_provenance
 
 
@@ -185,6 +188,53 @@ class MissingBoxIsRefusedTests(unittest.TestCase):
             manifest = Path(tmp) / "manifest.json"
             manifest.write_text(json.dumps({"rows": [{"video_id": "a", "box": None}]}), encoding="utf-8")
             self.assertEqual(load_variant_boxes(manifest), {"a": None})
+
+
+class ResolveBoxesTests(unittest.TestCase):
+    """The per-variant manifest contract for B1's four-arm 2x2."""
+
+    def write_manifest(self, tmp: Path, video_ids: list[str]) -> Path:
+        manifest = tmp / "manifest.json"
+        manifest.write_text(
+            json.dumps({"rows": [{"video_id": vid, "box": [0, 0, 2, 4]} for vid in video_ids]}),
+            encoding="utf-8",
+        )
+        return manifest
+
+    def test_a_box_variant_without_a_manifest_is_refused(self) -> None:
+        for variant in BOX_VARIANTS:
+            with self.assertRaises(SystemExit):
+                resolve_boxes(variant, None, ["a"])
+
+    def test_a_box_free_variant_needs_no_manifest(self) -> None:
+        for variant in ("full_frame", "full_frame_letterbox", "reencoded"):
+            self.assertEqual(resolve_boxes(variant, None, ["a", "b"]), {})
+
+    def test_a_box_free_variant_handed_a_manifest_is_refused(self) -> None:
+        """full_frame_letterbox crops nothing and takes no box. Accepting a manifest
+        would let it be run as a quietly different arm than its name claims."""
+        with TemporaryDirectory() as tmp:
+            manifest = self.write_manifest(Path(tmp), ["a"])
+            with self.assertRaises(SystemExit) as ctx:
+                resolve_boxes("full_frame_letterbox", manifest, ["a"])
+            self.assertIn("takes no box", str(ctx.exception))
+
+    def test_a_manifest_missing_videos_is_refused(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = self.write_manifest(Path(tmp), ["a"])
+            with self.assertRaises(SystemExit) as ctx:
+                resolve_boxes("person_crop_centercrop", manifest, ["a", "b"])
+            self.assertIn("not a paired comparison", str(ctx.exception))
+
+    def test_a_covering_manifest_returns_every_box(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = self.write_manifest(Path(tmp), ["a", "b"])
+            boxes = resolve_boxes("person_crop_centercrop", manifest, ["a", "b"])
+            self.assertEqual(sorted(boxes), ["a", "b"])
+
+    def test_every_box_variant_is_an_offered_choice(self) -> None:
+        for variant in BOX_VARIANTS:
+            self.assertIn(variant, VARIANTS)
 
 
 if __name__ == "__main__":

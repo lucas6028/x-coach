@@ -16,9 +16,11 @@ version by construction, and (b) clip aggregation stays an offline axis that can
 never move together with token pooling inside one measured delta.
 
 ``--variant`` records which pixels the features came from -- ``full_frame`` for the
-main arms, ``person_crop`` / ``background_only`` for the plan's shortcut controls --
-and is stamped into provenance so two variants can never be silently mixed in one
-feature dir.
+main arms, ``person_crop`` / ``background_only`` for the plan's shortcut controls,
+``full_frame_letterbox`` / ``person_crop_centercrop`` for the two cells that complete
+the background x body-completeness 2x2 of
+``notes/videomae_person_crop_validation_plan.md`` -- and is stamped into provenance so
+two variants can never be silently mixed in one feature dir.
 
 Run ``src.video.videomae_materialize`` afterwards to derive the classifier-ready dirs.
 """
@@ -35,14 +37,21 @@ import cv2
 import numpy as np
 
 from src.video.squat_dataset import SPLIT_NAMES, SQUAT_LABELED_ROOT, load_json_list
-from src.video.squat_video_variants import Box, apply_variant
+from src.video.squat_video_variants import BOX_VARIANTS, Box, apply_variant
 from src.video.videomae_backbone import encode_clip, load_backbone, resolve_device
 from src.video.videomae_pooling import LEGACY_FIRST_TOKEN, MEAN_POOL_FC_NORM, build_provenance
 
 import transformers  # noqa: E402 - after videomae_backbone so its import guard reports first
 from transformers import VideoMAEImageProcessor  # noqa: E402
 
-VARIANTS = ("full_frame", "person_crop", "background_only", "reencoded")
+VARIANTS = (
+    "full_frame",
+    "full_frame_letterbox",
+    "person_crop",
+    "person_crop_centercrop",
+    "background_only",
+    "reencoded",
+)
 
 
 @dataclass(frozen=True)
@@ -179,6 +188,41 @@ def load_variant_boxes(manifest_path: Path) -> dict[str, Box | None]:
     return boxes
 
 
+def resolve_boxes(
+    variant: str,
+    manifest_path: Path | None,
+    video_ids: Sequence[str],
+) -> dict[str, Box | None]:
+    """The per-variant manifest contract, in one testable place.
+
+    Three ways this can silently produce an arm that measures nothing, all refused
+    here: a box variant with no manifest (every box would be None, i.e. untransformed),
+    a box-free variant handed one (an arm whose name promises no box quietly gaining
+    one), and a manifest covering fewer videos than the extraction (not a paired
+    comparison).
+    """
+    if variant not in BOX_VARIANTS:
+        if manifest_path is not None:
+            raise SystemExit(
+                f"--variant {variant} takes no box, so --variant-manifest must not be given. "
+                f"Only {', '.join(BOX_VARIANTS)} read a manifest."
+            )
+        return {}
+
+    if manifest_path is None:
+        raise SystemExit(f"--variant {variant} needs --variant-manifest to supply its boxes.")
+
+    boxes = load_variant_boxes(manifest_path)
+    uncovered = [video_id for video_id in video_ids if video_id not in boxes]
+    if uncovered:
+        raise SystemExit(
+            f"{len(uncovered)} videos are missing from {manifest_path} "
+            f"({uncovered[:5]}). A control arm covering fewer videos than the main arm "
+            "is not a paired comparison."
+        )
+    return boxes
+
+
 def extract_video_features(
     backbone,
     processor: VideoMAEImageProcessor,
@@ -301,8 +345,9 @@ def main() -> None:
         type=Path,
         default=None,
         help="build_video_variants manifest supplying one box per video. Required for "
-        "every variant except full_frame; the transform is applied in memory so the "
-        "controls decode the same source file as the main arm.",
+        f"{', '.join(BOX_VARIANTS)}; the transform is applied in memory so the controls "
+        "decode the same source file as the main arm. The box-free variants "
+        "(full_frame_letterbox, reencoded) must NOT be given one.",
     )
     parser.add_argument("--model-name", type=str, default="MCG-NJU/videomae-base-finetuned-kinetics")
     parser.add_argument("--clip-length", type=int, default=16)
@@ -319,18 +364,11 @@ def main() -> None:
     if not requests:
         raise SystemExit("No videos were found to process.")
 
-    boxes: dict[str, Box | None] = {}
-    if args.variant != "full_frame":
-        if args.variant_manifest is None:
-            raise SystemExit(f"--variant {args.variant} needs --variant-manifest to supply its boxes.")
-        boxes = load_variant_boxes(args.variant_manifest)
-        uncovered = [request.video_id for request in requests if request.video_id not in boxes]
-        if uncovered:
-            raise SystemExit(
-                f"{len(uncovered)} videos are missing from {args.variant_manifest} "
-                f"({uncovered[:5]}). A control arm covering fewer videos than the main arm "
-                "is not a paired comparison."
-            )
+    boxes = resolve_boxes(
+        args.variant,
+        args.variant_manifest,
+        [request.video_id for request in requests],
+    )
     requests = select_chunk(requests, args.num_chunks, args.chunk_index)
     if args.num_chunks > 1:
         print(f"Chunk {args.chunk_index + 1}/{args.num_chunks}: {len(requests)} videos")

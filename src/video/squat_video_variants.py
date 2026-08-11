@@ -32,6 +32,25 @@ to re-extract features from videos where one of the two is removed:
     position and size, a rectangle-shaped leak that is stated in the results rather
     than engineered away.
 
+``person_crop_centercrop``
+    The same crop as ``person_crop``, from the same expanded box, but WITHOUT the
+    letterbox -- the processor is left to resize the shortest edge to 224 and centre
+    crop, which on a tall narrow crop keeps only the middle band of the athlete.
+    Background removed, body truncated: the cell that
+    ``notes/videomae_person_crop_validation_plan.md`` needs to separate "removing the
+    scene" (F1) from "finally seeing the whole person" (F2). It must differ from
+    ``person_crop`` in the letterbox and nothing else, which is why it takes the
+    expanded box rather than the raw landmark box.
+
+``full_frame_letterbox``
+    The whole frame padded to square on the same neutral grey, nothing cropped. Scene
+    kept, body complete -- the other new cell of the 2x2. It needs no box at all, and
+    it is a deliberate no-op on the 768 of 1623 Fitness-AQA squat videos that are
+    already square (47.3%, measured from the person_crop manifest): those videos'
+    ``full_frame`` features were never centre-cropped, so there is nothing for this
+    arm to restore. The expected identical count against ``full_frame`` is therefore
+    768, not zero, and the F2 contrast is carried by the 855 non-square videos.
+
 ``reencoded``
     The identity variant: the same frames, through the same decode/encode path, with
     no box applied. Both controls pay one extra lossy generation that the untouched
@@ -51,29 +70,40 @@ clip starts in every variant and the arms stay paired frame-for-frame.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 
-VARIANTS = ("person_crop", "background_only", "reencoded")
-DEFAULT_VISIBILITY = 0.5
-DEFAULT_MARGIN = 0.15
-#: Neutral grey for the person-crop letterbox -- the usual detection-pipeline value,
-#: mid-range so the padding is neither a bright nor a black frame around the athlete.
-LETTERBOX_FILL = 114
+from src.video.variant_geometry import (  # re-exported: this stays the pixel-side entry point
+    BOX_VARIANTS,
+    CROP_VARIANTS,
+    DEFAULT_MARGIN,
+    DEFAULT_VISIBILITY,
+    LETTERBOX_FILL,
+    VARIANTS,
+    Box,
+)
 
-
-@dataclass(frozen=True)
-class Box:
-    x0: int
-    y0: int
-    x1: int
-    y1: int
-
-    def as_tuple(self) -> tuple[int, int, int, int]:
-        return (self.x0, self.y0, self.x1, self.y1)
+__all__ = [
+    "BOX_VARIANTS",
+    "CROP_VARIANTS",
+    "DEFAULT_MARGIN",
+    "DEFAULT_VISIBILITY",
+    "LETTERBOX_FILL",
+    "VARIANTS",
+    "Box",
+    "apply_variant",
+    "build_variant_video",
+    "describe_variant",
+    "expand_box",
+    "fill_box_from_surroundings",
+    "letterbox_to_square",
+    "person_box_from_pose",
+    "read_all_frames",
+    "verify_variant_video",
+    "write_video",
+]
 
 
 def person_box_from_pose(
@@ -226,13 +256,26 @@ def apply_variant(frames: list[np.ndarray], variant: str, box: Box | None) -> li
         raise ValueError(f"Unknown variant {variant!r}; expected one of {VARIANTS}.")
     if variant == "reencoded":
         return frames
+    if variant == "full_frame_letterbox":
+        # Answered BEFORE the box check, not after. This arm is never given a box, so
+        # a `box is None -> return frames` fallthrough would hand back the untouched
+        # video for EVERY video and produce an arm byte-identical to full_frame --
+        # silently, which is the failure mode that already cost this study 51% of one
+        # control arm.
+        return [letterbox_to_square(frame) for frame in frames]
     if box is None:
-        # No person was ever visible. Both box variants degrade to the untouched
+        # No person was ever visible. The box variants degrade to the untouched
         # video; the manifest records these so they are reported, not silently counted.
         return frames
 
-    if variant == "person_crop":
-        return [letterbox_to_square(frame[box.y0 : box.y1, box.x0 : box.x1]) for frame in frames]
+    if variant in CROP_VARIANTS:
+        cropped = [frame[box.y0 : box.y1, box.x0 : box.x1] for frame in frames]
+        if variant == "person_crop_centercrop":
+            # No letterbox: the processor's shortest-edge resize plus centre crop then
+            # keeps only the middle band of a tall athlete. That truncation IS this
+            # arm's manipulation.
+            return cropped
+        return [letterbox_to_square(frame) for frame in cropped]
 
     # Filled per frame rather than from one static plate, so lighting changes and
     # camera drift stay consistent with the untouched part of the scene.
@@ -304,7 +347,7 @@ def describe_variant(
     landmark_box = person_box_from_pose(pose, visibility_threshold)
 
     box = landmark_box
-    if landmark_box is not None and variant == "person_crop":
+    if landmark_box is not None and variant in CROP_VARIANTS:
         box = expand_box(landmark_box, width, height, margin)
 
     return {
@@ -338,7 +381,7 @@ def build_variant_video(
 
     landmark_box = person_box_from_pose(pose, visibility_threshold)
     box = landmark_box
-    if landmark_box is not None and variant == "person_crop":
+    if landmark_box is not None and variant in CROP_VARIANTS:
         box = expand_box(landmark_box, width, height, margin)
 
     frames = read_all_frames(video_path, target_frames=total_frames)
