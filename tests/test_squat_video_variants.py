@@ -10,6 +10,7 @@ import cv2
 import numpy as np
 
 from src.video.squat_video_variants import (
+    BOX_VARIANTS,
     Box,
     apply_variant,
     build_variant_video,
@@ -157,7 +158,7 @@ class ApplyVariantTests(unittest.TestCase):
 
     def test_missing_box_leaves_the_video_untouched(self) -> None:
         frames = self.make_frames()
-        for variant in ("person_crop", "background_only"):
+        for variant in ("person_crop", "person_crop_centercrop", "background_only"):
             result = apply_variant(frames, variant, None)
             self.assertTrue(np.array_equal(result[0], frames[0]))
 
@@ -178,6 +179,92 @@ class ApplyVariantTests(unittest.TestCase):
         filled = fill_box_from_surroundings(frame, Box(20, 10, 40, 30))
         self.assertEqual(len(np.unique(filled[10:30, 20:40])), 1)
         self.assertEqual(int(np.unique(filled[10:30, 20:40])[0]), 30)
+
+
+class TwoByTwoArmTests(unittest.TestCase):
+    """The two cells that complete B1's background x body-completeness 2x2.
+
+    ``full_frame_letterbox`` keeps the scene and makes the processor's centre crop a
+    no-op; ``person_crop_centercrop`` removes the scene and lets the centre crop
+    truncate the athlete. Between them and the two existing arms, F1 and F2 separate.
+    """
+
+    def tall_frames(self, count: int = 3) -> list[np.ndarray]:
+        frames = []
+        for index in range(count):
+            frame = np.full((40, 20, 3), 7, dtype=np.uint8)
+            frame[8:32, 6:14] = 150 + index  # a tall "person"
+            frames.append(frame)
+        return frames
+
+    def test_letterbox_arm_pads_the_whole_frame_and_crops_nothing(self) -> None:
+        frames = self.tall_frames()
+        result = apply_variant(frames, "full_frame_letterbox", None)
+
+        self.assertEqual(result[0].shape[:2], (40, 40))
+        # Every source pixel survives, in one block, at its original scale.
+        np.testing.assert_array_equal(result[0][:, 10:30], frames[0])
+        self.assertTrue((result[0][:, 0:9] == 114).all())
+
+    def test_letterbox_arm_transforms_even_though_it_is_never_given_a_box(self) -> None:
+        """The trap: this arm has no manifest, so its box is always None.
+
+        Were it answered after the ``box is None`` early return, it would hand back the
+        untouched video for every video and produce an arm byte-identical to
+        ``full_frame`` -- with nothing failing. That is the shape of the defect that
+        already fed 51% of one control arm untransformed video.
+        """
+        frames = self.tall_frames()
+        result = apply_variant(frames, "full_frame_letterbox", None)
+        self.assertNotEqual(result[0].shape, frames[0].shape)
+
+    def test_letterbox_arm_is_a_legitimate_no_op_on_an_already_square_frame(self) -> None:
+        """768 of the 1623 Fitness-AQA squat videos are already square (47.3%).
+
+        Their full_frame features were never centre-cropped, so this arm has nothing to
+        restore. The pre-registered identical count against full_frame is 768, not 0 --
+        a build check demanding zero would be "fixed" by corrupting the arm.
+        """
+        square = [np.full((16, 16, 3), 42, dtype=np.uint8)]
+        result = apply_variant(square, "full_frame_letterbox", None)
+        np.testing.assert_array_equal(result[0], square[0])
+
+    def test_centercrop_arm_keeps_the_box_aspect_instead_of_padding_it(self) -> None:
+        frames = self.tall_frames()
+        result = apply_variant(frames, "person_crop_centercrop", Box(6, 8, 14, 32))
+
+        self.assertEqual(result[0].shape[:2], (24, 8))  # the box, unpadded
+        self.assertTrue((result[0] >= 150).all())
+
+    def test_the_two_crop_arms_differ_in_the_letterbox_and_nothing_else(self) -> None:
+        """F2's contrast is only readable if the letterbox is the single difference."""
+        frames = self.tall_frames()
+        box = Box(6, 8, 14, 32)
+        padded = apply_variant(frames, "person_crop", box)[0]
+        unpadded = apply_variant(frames, "person_crop_centercrop", box)[0]
+
+        side = padded.shape[0]
+        left = (side - unpadded.shape[1]) // 2
+        np.testing.assert_array_equal(padded[:, left : left + unpadded.shape[1]], unpadded)
+
+    def test_both_crop_arms_are_described_with_the_same_expanded_box(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pose_path = root / "v.json"
+            marks = [landmark(0.25, 0.2), landmark(0.5, 0.8)]
+            pose_path.write_text(json.dumps(pose_document([marks, marks], total_frames=2)), encoding="utf-8")
+
+            crop = describe_variant(root / "v.mp4", pose_path, "person_crop")
+            centercrop = describe_variant(root / "v.mp4", pose_path, "person_crop_centercrop")
+
+            self.assertEqual(crop["box"], centercrop["box"])
+
+    def test_the_box_free_arms_are_excluded_from_box_variants(self) -> None:
+        """The extractor demands a manifest for exactly this tuple; a box-free arm in
+        it would be handed a null box, which every box arm reads as 'leave untouched'."""
+        self.assertNotIn("full_frame_letterbox", BOX_VARIANTS)
+        self.assertNotIn("reencoded", BOX_VARIANTS)
+        self.assertIn("person_crop_centercrop", BOX_VARIANTS)
 
 
 class VideoRoundTripTests(unittest.TestCase):
