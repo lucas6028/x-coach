@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { ClipboardText } from "@phosphor-icons/react";
+import { Link, useSearchParams } from "react-router-dom";
 import { api, UploadLimitError, type Analysis } from "./api";
 import AppLayout from "./components/AppLayout";
 import VideoPanel from "./components/VideoPanel";
@@ -39,6 +40,40 @@ export default function App() {
   }, []);
 
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Entered from a training plan: /app?movement=X&plan=<planId>&plan_item=<itemId>. Both ids are
+  // needed — the item PATCH is scoped by plan, so an item id alone cannot be written back.
+  const planId = searchParams.get("plan");
+  const planItemId = searchParams.get("plan_item");
+  // The plan's name and this item's day, for the banner. Fetched rather than passed in the URL:
+  // a name in a query string is a second copy that goes stale the moment the plan is renamed.
+  const [planCtx, setPlanCtx] = useState<{ name: string; day: number } | null>(null);
+  // Whether this analysis has been ticked off in the plan, so the banner can say so.
+  const [planLinked, setPlanLinked] = useState(false);
+  useEffect(() => {
+    if (!planId || !planItemId) {
+      setPlanCtx(null);
+      return;
+    }
+    let cancelled = false;
+    api
+      .getPlan(planId)
+      .then((p) => {
+        if (cancelled) return;
+        const item = p.items.find((it) => it.id === planItemId);
+        setPlanCtx({ name: p.name, day: item?.day_index ?? 1 });
+        // Arriving on an item that is already ticked (a re-record, or a back-button return) must
+        // show the linked state rather than claiming it is still outstanding.
+        setPlanLinked(!!item?.completed_at);
+      })
+      // Silent: the plan banner is context, and a signed-out or failed fetch must not stop the
+      // studio from analysing the clip the user came here to analyse.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [planId, planItemId]);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   // The analysis id we just reflected into the URL after an upload — so the replay effect below can
   // skip re-fetching an analysis we already hold in state.
@@ -142,7 +177,29 @@ export default function App() {
       // effect from re-fetching the analysis we already hold.
       if (data.analysis_id) {
         skipReloadId.current = data.analysis_id;
-        setSearchParams({ analysis: data.analysis_id }, { replace: true });
+        // The plan ids ride along, so the banner and its "back to plan" link survive the rewrite.
+        setSearchParams(
+          planId && planItemId
+            ? { analysis: data.analysis_id, plan: planId, plan_item: planItemId }
+            : { analysis: data.analysis_id },
+          { replace: true }
+        );
+        // Tick the plan item off and link this analysis to it. Guarded on `analysis_id`, which
+        // ONLY a signed-in upload has — an anonymous visitor who lands here with a ?plan_item= in
+        // the URL analyses their clip normally and this is simply skipped, rather than erroring on
+        // a write they could not have been allowed to make.
+        if (planId && planItemId) {
+          try {
+            await api.updatePlanItem(planId, planItemId, {
+              completed: true,
+              analysis_id: data.analysis_id,
+            });
+            setPlanLinked(true);
+          } catch {
+            // The analysis is saved either way. A failed tick is worth neither an error banner
+            // over a successful analysis nor losing the result the user just waited for.
+          }
+        }
       }
     } catch (e) {
       setError(errorMessage(e));
@@ -150,7 +207,7 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t, setSearchParams, canonicalMovement, errorMessage]);
+  }, [t, setSearchParams, canonicalMovement, errorMessage, planId, planItemId]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -235,6 +292,25 @@ export default function App() {
         />
       }
     >
+      {/* Where this session came from, when the studio was entered from a plan item. It stays up
+          through the whole session — before the upload it says which exercise is being recorded,
+          after it confirms the item was ticked off. */}
+      {planCtx && (
+        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/25 bg-primary/[0.04] px-3 py-2 text-xs">
+          <ClipboardText size={14} weight="duotone" className="shrink-0 text-primary" />
+          <span className="font-medium text-content">
+            {t("plans.studioBanner", { plan: planCtx.name, day: planCtx.day })}
+          </span>
+          {planLinked && <span className="text-secondary">{t("plans.studioLinked")}</span>}
+          <Link
+            to={`/plans/${planId}`}
+            className="ml-auto font-semibold text-primary underline-offset-2 hover:underline"
+          >
+            {t("plans.studioBackToPlan")}
+          </Link>
+        </div>
+      )}
+
       {hasResult && phone ? (
         // The phone layout (motion_analysis_mobile.png). Chosen here rather than by CSS: both
         // trees mount a <video> and a skeleton canvas, so rendering the two and hiding one would

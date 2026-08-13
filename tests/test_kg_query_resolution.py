@@ -111,8 +111,14 @@ def _kg_queries(module_path: Path) -> list[str]:
 class TestKgQueryCorpus(unittest.TestCase):
     def test_every_module_is_covered(self) -> None:
         """Guard against a new detector module being added and silently skipped by this gate."""
+        # The subtracted names are the package's INFRASTRUCTURE modules -- the ones that hold no
+        # detector rules and therefore no `kg_query` for this gate to check. `catalog.py` joins
+        # them for that reason: it is the sixteen-name movement catalog the plan API validates
+        # against (all sixteen, not the fourteen registered here), and it contains no
+        # `build_detection` call at all. Anything else appearing in this directory is a detector
+        # and must be listed in MODULE_MOVEMENTS.
         present = {p.name for p in MOVEMENTS_DIR.glob("*.py")} - {
-            "__init__.py", "base.py", "registry.py"
+            "__init__.py", "base.py", "registry.py", "catalog.py"
         }
         self.assertEqual(present, set(MODULE_MOVEMENTS))
 

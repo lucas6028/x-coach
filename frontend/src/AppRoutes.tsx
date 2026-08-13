@@ -5,6 +5,8 @@ import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
 import Movements from "./pages/Movements";
+import PlanDetail from "./pages/PlanDetail";
+import Plans from "./pages/Plans";
 import Settings from "./pages/Settings";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminLogin from "./pages/admin/AdminLogin";
@@ -72,6 +74,25 @@ export default function AppRoutes() {
           bouncing to /login — for a menu whose live cards hand off to /app, which is itself
           public. Pinned by src/test/AppRoutes.test.tsx. */}
       <Route path="/movements" element={<Movements />} />
+      {/* GATED, unlike /movements above. A plan is one user's own data — its name, its exercises
+          and its progress — so both the list and the detail sit behind RequireAuth alongside
+          /history, and the API answers 401 without a session regardless. */}
+      <Route
+        path="/plans"
+        element={
+          <RequireAuth>
+            <Plans />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/plans/:planId"
+        element={
+          <RequireAuth>
+            <PlanDetail />
+          </RequireAuth>
+        }
+      />
       <Route
         path="/history"
         element={
