@@ -84,3 +84,21 @@ Project knowledge graph at `graphify-out/` (graph.json + GRAPH_REPORT.md; no wik
   concept; `GRAPH_REPORT.md` only for broad architecture review.
 - After modifying code, run `graphify update .` (AST-only, no API cost). Note the graph
   is scoped to the project proper (memory `graphify-graph-scoped`).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `lucas6028/x-coach`, driven via the `gh` CLI.
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name (`needs-triage`,
+`needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`).
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root, created lazily by
+`/domain-modeling` — neither exists yet. See `docs/agents/domain.md`.
