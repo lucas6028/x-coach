@@ -40,7 +40,10 @@ export default function PlanItemRow({
 
   return (
     <li
-      className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
+      // `min-w-0` so the row can actually shrink to its grid cell. Without it a flex/grid item
+      // floors at its intrinsic content width and pushes out of the card instead of letting the
+      // label truncate — which is exactly how this row used to overflow its day.
+      className={`flex min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
         done ? "border-secondary/30 bg-secondary/[0.06]" : "border-border-dark bg-surface"
       }`}
     >
@@ -75,21 +78,30 @@ export default function PlanItemRow({
 
       {/* Only ever ONE of these three: the report (this item produced an analysis), the studio link
           (it can produce one), or the tick-only note (it never can). */}
+      {/* The VISIBLE label is the short one; the full phrase is the accessible name.
+          "Record & analyse" / 錄影並分析 renders ~128px wide, and the row's fixed parts already
+          come to ~100px — together they left nothing for the movement name, which is how the name
+          vanished entirely. Screen readers and tooltips still get the full wording, so nothing is
+          actually lost by shortening what is drawn. */}
       {item.analysis_id ? (
         <Link
           to={`/app?analysis=${encodeURIComponent(item.analysis_id)}`}
+          aria-label={t("plans.viewReport")}
+          title={t("plans.viewReport")}
           className="inline-flex shrink-0 items-center gap-1 rounded-full bg-content/[0.04] px-2.5 py-1 text-[11px] font-semibold text-content transition-colors hover:bg-primary hover:text-primary-content"
         >
           <ChartBar size={12} weight="duotone" />
-          {t("plans.viewReport")}
+          {t("plans.viewReportShort")}
         </Link>
       ) : analyzable ? (
         <Link
           to={studioHref}
+          aria-label={t("plans.analyze")}
+          title={t("plans.analyze")}
           className="inline-flex shrink-0 items-center gap-1 rounded-full bg-content/[0.04] px-2.5 py-1 text-[11px] font-semibold text-content transition-colors hover:bg-primary hover:text-primary-content"
         >
           <VideoCamera size={12} weight="fill" />
-          {t("plans.analyze")}
+          {t("plans.analyzeShort")}
         </Link>
       ) : (
         // Not a disabled button: there is no action behind it. It is a labelled note explaining

@@ -556,6 +556,10 @@ const en: Dict = {
   "plans.markUndone": "Mark {movement} as not done",
   "plans.analyze": "Record & analyse",
   "plans.viewReport": "View report",
+  // Drawn on the row; the keys above are their accessible names. A row is as narrow as a phone's
+  // width, and a full-phrase chip there leaves no room for the movement it belongs to.
+  "plans.analyzeShort": "Analyse",
+  "plans.viewReportShort": "Report",
   "plans.analysedNote": "Analysed",
   "plans.tickOnly": "Tick off manually — video analysis for this movement isn't available yet.",
   // The visible chip on such a row. Distinct from `movements.soon`: that one means the MOVEMENT is
@@ -1472,6 +1476,8 @@ const zhHant: Dict = {
   "plans.markUndone": "把{movement}標記為未完成",
   "plans.analyze": "錄影並分析",
   "plans.viewReport": "看報告",
+  "plans.analyzeShort": "分析",
+  "plans.viewReportShort": "報告",
   "plans.analysedNote": "已分析",
   "plans.tickOnly": "此動作目前還不能做影片分析，請自行打勾。",
   "plans.tickOnlyLabel": "無分析",

@@ -79,6 +79,18 @@ describe("PlanDetail — the analysis seam", () => {
     expect(link).toHaveAttribute("href", "/app?movement=Squat&plan=p1&plan_item=i1");
   });
 
+  it("draws a short action label but keeps the full phrase as its accessible name", async () => {
+    // jsdom has no layout engine, so the overflow this guards against cannot be asserted here
+    // directly — it was measured in a real browser (the row needed 241px inside a 147px column and
+    // the movement name was squeezed to zero). What IS testable is the contract that fixed it: the
+    // drawn label is short so the name has room, while the full wording survives for assistive
+    // tech. Restoring the long visible label would fail this.
+    renderWithProviders(<PlanDetail />);
+    const link = await screen.findByRole("link", { name: /record & analyse/i });
+    expect(link).toHaveTextContent("Analyse");
+    expect(link).not.toHaveTextContent(/record/i);
+  });
+
   it("offers no studio link for a movement with no detector", async () => {
     vi.mocked(api.getPlan).mockResolvedValue(
       plan({ items: [item({ id: "i1", day_index: 1, movement: "Jumping Jacks" })] })

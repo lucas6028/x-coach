@@ -12,7 +12,7 @@ import { PLAN_DAYS, currentDay, isAnalyzable, itemsByDay, progressRatio } from "
 
 type Status = "loading" | "ready" | "error";
 
-// One plan, as seven day columns. Editing is immediate — every tick, add and remove is its own
+// One plan, as one full-width band per day. Editing is immediate — every tick, add and remove is its own
 // request and the local copy is patched from the response, rather than a save button over a draft:
 // a plan is edited while standing in a gym, and a draft that needs saving is a draft that gets lost.
 export default function PlanDetail() {
@@ -256,36 +256,57 @@ export default function PlanDetail() {
             </p>
           )}
 
-          {/* Seven columns on a wide screen, stacked on a phone. Every day is shown, including the
-              empty ones: a rest day is part of a plan, and hiding it would make "Day 3" mean
-              different things on different plans. */}
-          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7">
+          {/* ONE FULL-WIDTH BAND PER DAY, not seven columns across.
+              Seven columns was the first attempt and it broke: at >=1280px each day got ~147px
+              while a single exercise row needs ~241px, so the row overflowed its card by 120px
+              (spilling over the next day) and the flex-1 label was crushed to ZERO width -- the
+              movement name simply disappeared. A day column cannot hold a horizontal row carrying a
+              checkbox, an icon, a name, an action and a delete button, and no amount of truncation
+              fixes that; the row's fixed parts alone exceed the column.
+              Bands also spend the vertical space where it is earned: a rest day is one thin line
+              here instead of a full-height empty column, and the days that hold work get the whole
+              page width for their exercises. Every day is still shown, rest days included, so
+              "Day 3" means the same thing in every plan. */}
+          <div className="mt-6 flex flex-col gap-3">
             {PLAN_DAYS.map((day) => {
               const items = days[day - 1];
               const isToday = today === day;
               return (
                 <section
                   key={day}
-                  className={`flex min-w-0 flex-col rounded-2xl border p-3 ${
+                  className={`rounded-2xl border p-4 ${
                     isToday ? "border-primary/40 bg-primary/[0.03]" : "border-border-dark bg-surface"
                   }`}
                 >
-                  <h2
-                    className={`text-xs font-semibold uppercase tracking-wider ${
-                      isToday ? "text-primary" : "text-faint"
-                    }`}
-                  >
-                    {t("plans.day", { n: day })}
-                  </h2>
-
-                  {items.length === 0 && addingTo !== day && (
-                    <p className="mt-3 rounded-xl bg-content/[0.03] py-4 text-center text-[11px] text-faint">
-                      {t("plans.rest")}
-                    </p>
-                  )}
+                  <div className="flex items-center gap-3">
+                    <h2
+                      className={`shrink-0 text-xs font-semibold uppercase tracking-wider ${
+                        isToday ? "text-primary" : "text-faint"
+                      }`}
+                    >
+                      {t("plans.day", { n: day })}
+                    </h2>
+                    {items.length === 0 && addingTo !== day && (
+                      <span className="shrink-0 text-[11px] text-faint">{t("plans.rest")}</span>
+                    )}
+                    <span className="h-px flex-1 bg-border-dark" />
+                    {addingTo !== day && (
+                      <button
+                        type="button"
+                        onClick={() => setAddingTo(day)}
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border-dark px-3 py-1 text-[11px] font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary"
+                      >
+                        <Plus size={12} weight="bold" />
+                        {t("plans.addExercise")}
+                      </button>
+                    )}
+                  </div>
 
                   {items.length > 0 && (
-                    <ul className="mt-3 flex flex-col gap-2">
+                    // Up to three exercises across on a wide screen. The narrowest cell this
+                    // produces is the phone's full width; the widest day still never squeezes a row
+                    // below what its own controls need.
+                    <ul className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
                       {items.map((item) => (
                         <PlanItemRow
                           key={item.id}
@@ -302,8 +323,8 @@ export default function PlanDetail() {
                     </ul>
                   )}
 
-                  {addingTo === day ? (
-                    <div className="mt-2">
+                  {addingTo === day && (
+                    <div className="mt-3 max-w-xs">
                       <AddExerciseForm
                         day={day}
                         busy={planBusy}
@@ -311,15 +332,6 @@ export default function PlanDetail() {
                         onCancel={() => setAddingTo(null)}
                       />
                     </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setAddingTo(day)}
-                      className="mt-2 inline-flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border-dark py-2 text-[11px] font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary"
-                    >
-                      <Plus size={12} weight="bold" />
-                      {t("plans.addExercise")}
-                    </button>
                   )}
                 </section>
               );
