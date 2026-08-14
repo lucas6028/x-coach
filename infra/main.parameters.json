@@ -6,8 +6,8 @@
     "namePrefix": { "value": "xcoach" },
     "deployApps": { "value": true },
 
-    "backendImage": { "value": "REPLACE.azurecr.io/x-coach-backend:latest" },
-    "frontendImage": { "value": "REPLACE.azurecr.io/x-coach-frontend:latest" },
+    "backendImage": { "value": "ghcr.io/lucas6028/x-coach-backend:latest" },
+    "frontendImage": { "value": "ghcr.io/lucas6028/x-coach-frontend:latest" },
 
     "customDomain": { "value": "" },
 

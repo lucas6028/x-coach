@@ -5,14 +5,11 @@
 // built SPA) with an EXTERNAL ingress that proxies /api to it. Postgres/auth stays on
 // Supabase and user uploads stay on Cloudflare R2, so neither has a resource here.
 //
-// Deploy in two passes, because the container apps reference images that do not exist in
-// the registry until the registry itself does:
+// Deploy in two passes, because the first one has to create the environment and the data
+// share that the container apps mount:
 //
 //   az deployment group create -g <rg> -f infra/main.bicep -p deployApps=false
-//   az acr build -r <acr> -t x-coach-backend:<tag>  -f backend/Dockerfile .
-//   az acr build -r <acr> -t x-coach-frontend:<tag> -f frontend/Dockerfile frontend \
-//        --build-arg VITE_SUPABASE_URL=... --build-arg VITE_SUPABASE_ANON_KEY=... \
-//        --build-arg VITE_LIFF_ID=...
+//   (images are built by .github/workflows/build-images.yml and pushed to GHCR)
 //   az deployment group create -g <rg> -f infra/main.bicep -p @infra/main.parameters.json
 //
 // See docs/azure-deployment.md for the full walkthrough, including the 240s ingress
@@ -35,10 +32,10 @@ param namePrefix string = 'xcoach'
 @description('Set false on the first pass to create the registry and environment only; the images do not exist yet.')
 param deployApps bool = true
 
-@description('Backend image reference, e.g. myacr.azurecr.io/x-coach-backend:2026-08-11. Required when deployApps is true.')
+@description('Backend image reference, e.g. ghcr.io/lucas6028/x-coach-backend:<sha>. Required when deployApps is true.')
 param backendImage string = ''
 
-@description('Frontend image reference, e.g. myacr.azurecr.io/x-coach-frontend:2026-08-11. Required when deployApps is true.')
+@description('Frontend image reference, e.g. ghcr.io/lucas6028/x-coach-frontend:<sha>. Required when deployApps is true.')
 param frontendImage string = ''
 
 @description('Public hostname the SPA is served on, e.g. app.example.com. Left blank the app is reachable on its generated *.azurecontainerapps.io FQDN only. The certificate is bound separately -- see docs/azure-deployment.md.')
@@ -129,13 +126,11 @@ param r2Bucket string = ''
 // ---------------------------------------------------------------------------------------
 
 var suffix = uniqueString(resourceGroup().id)
-var acrName = '${namePrefix}acr${suffix}'
 // Storage account names are capped at 24 characters and must be lowercase alphanumeric,
 // which an 11-character prefix plus the 13-character hash would overrun.
 var storageName = toLower(take('${namePrefix}st${suffix}', 24))
 var envName = '${namePrefix}-env'
 var lawName = '${namePrefix}-logs'
-var identityName = '${namePrefix}-id'
 var backendAppName = '${namePrefix}-backend'
 var frontendAppName = '${namePrefix}-frontend'
 var dataShareName = 'data'
@@ -150,38 +145,15 @@ var backendOrigin = 'http://${backendAppName}.internal.${containerAppsEnv.proper
 var corsOrigins = empty(customDomain) ? '' : 'https://${customDomain}'
 
 // ---------------------------------------------------------------------------------------
-// Registry, identity, observability
+// Observability
 // ---------------------------------------------------------------------------------------
-
-resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
-  name: acrName
-  location: location
-  sku: {
-    name: 'Basic'
-  }
-  properties: {
-    // Pulls go through the user-assigned identity below, so the admin account stays off
-    // and there is no registry password to store or rotate.
-    adminUserEnabled: false
-  }
-}
-
-resource uami 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: identityName
-  location: location
-}
-
-var acrPullRoleId = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-
-resource acrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, uami.id, acrPullRoleId)
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPullRoleId)
-    principalId: uami.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
+//
+// There is no registry resource. The images live in GHCR as public packages, built by
+// .github/workflows/build-images.yml, and a public registry needs no `registries` block and
+// no pull identity at all. An Azure Container Registry was the original design, but ACR
+// Tasks -- the only way to build an image without a local Docker daemon -- is disabled on
+// subscriptions spending student or trial credit, which left the registry as $5/month of
+// storage for images that had to be built on GitHub anyway.
 
 resource law 'Microsoft.OperationalInsights/workspaces@2022-10-01' = {
   name: lawName
@@ -283,12 +255,6 @@ resource envDataStorage 'Microsoft.App/managedEnvironments/storages@2024-03-01' 
 resource backend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
   name: backendAppName
   location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${uami.id}': {}
-    }
-  }
   properties: {
     managedEnvironmentId: containerAppsEnv.id
     workloadProfileName: 'Consumption'
@@ -302,12 +268,7 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
         transport: 'http'
         allowInsecure: false
       }
-      registries: [
-        {
-          server: acr.properties.loginServer
-          identity: uami.id
-        }
-      ]
+      // No `registries`: the GHCR packages are public, so the platform pulls anonymously.
       secrets: [
         { name: 'supabase-anon-key', value: supabaseAnonKey }
         { name: 'supabase-service-role-key', value: supabaseServiceRoleKey }
@@ -421,12 +382,6 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
 resource frontend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
   name: frontendAppName
   location: location
-  identity: {
-    type: 'UserAssigned'
-    userAssignedIdentities: {
-      '${uami.id}': {}
-    }
-  }
   properties: {
     managedEnvironmentId: containerAppsEnv.id
     workloadProfileName: 'Consumption'
@@ -439,12 +394,7 @@ resource frontend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
         // plain-HTTP port so the LINE webhook and LIFF never see a downgrade.
         allowInsecure: false
       }
-      registries: [
-        {
-          server: acr.properties.loginServer
-          identity: uami.id
-        }
-      ]
+      // No `registries`: see the backend app above.
     }
     template: {
       containers: [
@@ -489,8 +439,6 @@ resource frontend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
 // Outputs
 // ---------------------------------------------------------------------------------------
 
-output acrLoginServer string = acr.properties.loginServer
-output acrName string = acr.name
 output environmentName string = containerAppsEnv.name
 output storageAccountName string = storage.name
 output dataShareName string = dataShare.name

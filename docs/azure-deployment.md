@@ -14,7 +14,7 @@ image、為什麼 `VITE_*` 是 build args）在這裡完全適用，不需要重
 | --- | --- | --- |
 | `frontend/`（nginx + 打包好的 SPA） | Container Apps | 保留 `/api` 同源代理，SSE 與 256 MB 上傳都不用改寫 |
 | `backend/`（FastAPI + MediaPipe + ffmpeg） | Container Apps，Consumption profile | CPU/RAM 密集、單一 worker、需要調高 request timeout |
-| 兩個 image | Azure Container Registry（Basic） | 用 user-assigned managed identity 拉取；admin 帳戶保持關閉 |
+| 兩個 image | **GHCR（公開 package）** | Azure 建不了 image — ACR Tasks 對學生額度停用，見[建置與推送](#建置與推送在-github-actions不在-azure) |
 | Postgres、auth、RLS | **維持 Supabase 不動** | 沒有 Azure 資源。搬走等於重寫 auth、RLS 與 `supabase-py` |
 | 上傳內容（影片、pose JSON、縮圖） | **維持 Cloudflare R2 不動** | `services/storage.py` 走 S3 API；Azure Blob 沒有 S3 相容端點，要換就得寫一份新的 store 實作 |
 | `data/` — KG graphml、RAG 向量庫、demo 影片庫 | Azure Files 檔案共用，唯讀掛載於 `/app/data` | 與 compose 的 `./data:/app/data:ro` 同形 |
@@ -139,9 +139,9 @@ Container Apps 按 vCPU-秒與 GiB-秒計費。每個訂閱每月頭 180,000 vCP
 
 | 設定 | 每月約略 | $100 學生額度可撐 |
 | --- | --- | --- |
-| backend 2 vCPU、`minReplicas: 1` | $50 + frontend $6 + ACR $5 ≈ **$61** | 約 7 週 |
-| backend 1 vCPU、`minReplicas: 1` | $24 + $6 + $5 ≈ **$36** | 約 3 個月 |
-| backend `minReplicas: 0`（**範本預設**） | 用多少算多少 + $6 + $5 ≈ **$12** | 約 8 個月 |
+| backend 2 vCPU、`minReplicas: 1` | $50 + frontend $6 ≈ **$56** | 約 8 週 |
+| backend 1 vCPU、`minReplicas: 1` | $24 + $6 ≈ **$30** | 約 3 個月 |
+| backend `minReplicas: 0`（**範本預設**） | 用多少算多少 + frontend $6 ≈ **$7** | 約 14 個月 |
 
 所以 `infra/main.parameters.json` 預設 `backendMinReplicas: 0`。代價是冷啟動：第一個請求要等
 容器起來、載入 MediaPipe、再從 SMB 共用讀知識圖譜與向量庫。兩個後果要知道：
@@ -160,7 +160,7 @@ frontend 維持 `minReplicas: 1`：它只是 nginx，0.25 vCPU 一個月約 $6�
   resource group 設 50% 與 80% 的 alert，在跑第二趟部署之前就設好。
 - **配額**。免費／學生訂閱不能申請提高配額，Container Apps environment 的數量上限很低
   （常見錯誤訊息是 `Environment limit reached`）。這份範本只建一個環境。
-- **區域限制**。學生訂閱在部分區域不能開資源。`location` 是參數，而 ACR、儲存體與環境共用它，
+- **區域限制**。學生訂閱在部分區域不能開資源。`location` 是參數，而儲存體與環境共用它，
   所以換區域只是改一個參數，不是逐一搬資源。實測 `eastasia` 就是被擋的那個，見上面的區域說明。
 
 ## 部署
@@ -170,10 +170,10 @@ frontend 維持 `minReplicas: 1`：它只是 nginx，0.25 vCPU 一個月約 $6�
 
 ```powershell
 az login                              # 互動式，只有你能跑
-./infra/deploy.ps1 -Stage providers   # 註冊四個 resource provider
-./infra/deploy.ps1 -Stage infra       # 第一趟：registry、環境、儲存體
+./infra/deploy.ps1 -Stage providers   # 註冊三個 resource provider
+./infra/deploy.ps1 -Stage infra       # 第一趟：環境、儲存體、Log Analytics
 ./infra/deploy.ps1 -Stage data        # 灌 KG 與向量庫
-./infra/deploy.ps1 -Stage build       # 在 ACR 裡建兩個 image
+./infra/deploy.ps1 -Stage build       # 等 GitHub Actions 把兩個 image 建好
 ./infra/deploy.ps1 -Stage apps        # 第二趟：兩個 container app
 ```
 
@@ -186,14 +186,14 @@ Git Bash 裡跑 `az`**：MSYS 會把任何以 `/` 開頭的參數當成路徑改
 全新的訂閱一個都沒註冊，而第一趟部署只會回 `MissingSubscriptionRegistration`，不會告訴你少哪個。
 
 ```bash
-for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.ContainerRegistry Microsoft.Storage; do
+for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.Storage; do
     az provider register --namespace $ns --wait
 done
 ```
 
-### 第一趟：registry 與環境
+### 第一趟：環境與儲存體
 
-container apps 引用的 image 在 registry 存在之前並不存在，所以第一次部署要跳過它們。
+container apps 要掛第一趟才建出來的資料共用，所以第一次部署先跳過它們。
 
 ```bash
 RG=xcoach-rg
@@ -201,7 +201,6 @@ az group create -n $RG -l japaneast
 
 az deployment group create -g $RG -n main -f infra/main.bicep \
     -p @infra/main.parameters.json -p deployApps=false
-ACR=$(az deployment group show -g $RG -n main --query properties.outputs.acrName.value -o tsv)
 ```
 
 ### 灌入資料共用
@@ -235,34 +234,43 @@ demo 影片庫（`data/Fitness-AQA/Squat/Labeled_Dataset/`）是選配而且很�
 > 證明有必要時才做；KG 與向量庫都很小，而且 embedder 是 hash-based 的
 > （`src/knowledge/rag_vector_db.py`），不會去下載任何模型。
 
-### 建置與推送
+### 建置與推送：在 GitHub Actions，不在 Azure
 
-兩個 image 都在 ACR 裡建置，所以不需要本機的 Docker daemon。backend 的 build context 是
-**repo 根目錄**（它以絕對套件路徑 import `backend.*` 與 `src.*`）；frontend 的是 `frontend/`。
+**Azure 建不了這兩個 image。** `az acr build` 跑在 ACR Tasks 上，而使用學生／試用額度的訂閱一律
+被停用該功能：
 
-```bash
-TAG=$(git rev-parse --short HEAD)
-
-az acr build -r $ACR -t x-coach-backend:$TAG -f backend/Dockerfile .
-
-# -f 是相對於 context 根目錄，不是相對於工作目錄 — 所以 backend 那行寫得出路徑，
-# frontend 這行就只能是裸的 Dockerfile。
-az acr build -r $ACR -t x-coach-frontend:$TAG -f Dockerfile frontend \
-    --build-arg VITE_SUPABASE_URL=https://xxxx.supabase.co \
-    --build-arg VITE_SUPABASE_ANON_KEY=eyJ... \
-    --build-arg VITE_LIFF_ID=1234567890-Abcdefgh
+```
+(TasksOperationsNotAllowed) ACR Tasks requests for the registry ... are not permitted
 ```
 
-Vite 會在建置時把 `VITE_*` 內嵌進 bundle，所以它們是 **build args，不是 runtime env** — 改動任何
-一個都需要重新建置，不是重啟。anon key 可以安心隨 bundle 出貨；資料列的存取由 Postgres RLS 控管。
+官方唯一解法是升級成 Pay-As-You-Go，那就沒有 $100 額度了。所以 image 由
+`.github/workflows/build-images.yml` 在 GitHub Actions 裡建，推到 **GHCR**：
+
+```
+ghcr.io/lucas6028/x-coach-backend:<commit sha>
+ghcr.io/lucas6028/x-coach-frontend:<commit sha>
+```
+
+推送只用 Actions 內建的 `GITHUB_TOKEN`，不需要任何 Azure 憑證。**兩個 package 必須是 public**，
+Container Apps 才拉得到 —— 這也是範本裡沒有 `registries` 區塊、沒有 pull identity、也沒有 ACR
+資源的原因。第一次推完之後要到 GitHub 的 package 設定把可見度改成 public（package 預設是 private，
+即使 repo 是 public）。
+
+需要三個 repository secret，因為 Vite 在**建置時**就把 `VITE_*` 內嵌進 bundle（改動任何一個都要
+重新建置，不是重啟）：`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY`、`VITE_LIFF_ID`。anon key 可以
+安心隨 bundle 出貨，資料列存取由 Postgres RLS 控管；`SUPABASE_SERVICE_ROLE_KEY` **絕不可以**
+出現在 build arg 裡。
+
+backend 的 build context 是 **repo 根目錄**（它以絕對套件路徑 import `backend.*` 與 `src.*`）；
+frontend 的是 `frontend/`。
 
 ### 第二趟：兩個 app
 
 ```bash
 az deployment group create -g $RG -f infra/main.bicep \
     -p @infra/main.parameters.json \
-    -p backendImage=$ACR.azurecr.io/x-coach-backend:$TAG \
-    -p frontendImage=$ACR.azurecr.io/x-coach-frontend:$TAG \
+    -p backendImage=ghcr.io/lucas6028/x-coach-backend:$TAG \
+    -p frontendImage=ghcr.io/lucas6028/x-coach-frontend:$TAG \
     -p supabaseAnonKey=$SUPABASE_ANON_KEY \
     -p supabaseServiceRoleKey=$SUPABASE_SERVICE_ROLE_KEY \
     -p llmApiKey=$LLM_API_KEY \
@@ -294,8 +302,8 @@ frontend 會拿到指向 backend 內部 FQDN 的 `BACKEND_ORIGIN`。nginx 在容
 ```
 
 ```bash
-az containerapp update -n xcoach-backend  -g $RG --image $ACR.azurecr.io/x-coach-backend:$TAG
-az containerapp update -n xcoach-frontend -g $RG --image $ACR.azurecr.io/x-coach-frontend:$TAG
+az containerapp update -n xcoach-backend  -g $RG --image ghcr.io/lucas6028/x-coach-backend:$TAG
+az containerapp update -n xcoach-frontend -g $RG --image ghcr.io/lucas6028/x-coach-frontend:$TAG
 ```
 
 在 GitHub Actions 裡，用 OIDC federated credential 驗證（`azure/login@v2` 搭配

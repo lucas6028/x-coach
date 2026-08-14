@@ -11,10 +11,10 @@
 
     Stages are separate so a failure costs you one step, not the whole run:
 
-        providers   register the four resource providers (once per subscription)
-        infra       resource group + ACR + Log Analytics + storage + environment (no apps)
+        providers   register the three resource providers (once per subscription)
+        infra       resource group + Log Analytics + storage + environment (no apps)
         data        upload the KG and the RAG vector DB to the Azure Files share
-        build       build both images in ACR (no local Docker needed)
+        build       wait for the GitHub Actions run that builds and pushes both images
         apps        deploy the two container apps
         update      re-point the existing apps at a freshly built tag
         status      print the FQDN and run the post-deploy health checks
@@ -44,7 +44,11 @@ param(
     [string]$Location = 'japaneast',
     [string]$EnvFile = '.env',
 
-    # Defaults to the short commit SHA, so a deployed revision is traceable to a commit.
+    # Where .github/workflows/build-images.yml pushes. Must be lowercase (GHCR requires it).
+    [string]$ImageRepo = 'ghcr.io/lucas6028',
+
+    # Defaults to the full commit SHA, because that is what the workflow tags with
+    # (github.sha). The commit must be pushed, or no image carries this tag.
     [string]$Tag = ''
 )
 
@@ -95,9 +99,14 @@ function Get-DeploymentOutput {
 
 function Resolve-Tag {
     if ($Tag) { return $Tag }
-    $sha = (git rev-parse --short HEAD).Trim()
+    $sha = (git rev-parse HEAD).Trim()
     Assert-LastExit 'git rev-parse'
     return $sha
+}
+
+function Get-ImageRef {
+    param([string]$Component, [string]$TagValue)
+    return "$ImageRepo/x-coach-$Component`:$TagValue"
 }
 
 function Assert-LoggedIn {
@@ -118,13 +127,12 @@ function Invoke-Providers {
     Assert-LoggedIn
     # A fresh subscription has none of these registered, and the first deployment fails with
     # MissingSubscriptionRegistration rather than saying which one is missing.
-    foreach ($ns in @('Microsoft.App', 'Microsoft.OperationalInsights',
-                      'Microsoft.ContainerRegistry', 'Microsoft.Storage')) {
+    foreach ($ns in @('Microsoft.App', 'Microsoft.OperationalInsights', 'Microsoft.Storage')) {
         Write-Host "Registering $ns ..." -ForegroundColor Cyan
         az provider register --namespace $ns --wait
         Assert-LastExit "Registering $ns"
     }
-    Write-Host 'All four providers registered.' -ForegroundColor Green
+    Write-Host 'All three providers registered.' -ForegroundColor Green
 }
 
 function Invoke-Infra {
@@ -132,7 +140,7 @@ function Invoke-Infra {
     az group create -n $ResourceGroup -l $Location -o none
     Assert-LastExit 'az group create'
 
-    # Pass 1 skips the apps: they reference images that do not exist until the registry does.
+    # Pass 1 skips the apps: they mount the data share this pass creates.
     az deployment group create -g $ResourceGroup -n main -f infra/main.bicep `
         -p '@infra/main.parameters.json' `
         -p location=$Location `
@@ -140,7 +148,6 @@ function Invoke-Infra {
         -o none
     Assert-LastExit 'Pass 1 (deployApps=false)'
 
-    Write-Host "ACR:     $(Get-DeploymentOutput 'acrName')" -ForegroundColor Green
     Write-Host "Storage: $(Get-DeploymentOutput 'storageAccountName')" -ForegroundColor Green
     Write-Host ''
     Write-Host 'Set a budget alert before going further -- on a student subscription, ' -NoNewline
@@ -193,36 +200,30 @@ function Invoke-Data {
 }
 
 function Invoke-Build {
-    Assert-LoggedIn
-    $env_ = Read-DotEnv $EnvFile
-    $acr = Get-DeploymentOutput 'acrName'
+    # Images are NOT built here. `az acr build` runs on ACR Tasks, which is disabled for any
+    # subscription spending student or trial credit (TasksOperationsNotAllowed), and this
+    # machine has no Docker daemon. .github/workflows/build-images.yml builds both images and
+    # pushes them to GHCR; this stage only waits for that run.
     $t = Resolve-Tag
-    Write-Host "Building tag $t in $acr ..." -ForegroundColor Cyan
+    $branch = (git rev-parse --abbrev-ref HEAD).Trim()
+    Write-Host "Waiting for the build-images run on $branch ..." -ForegroundColor Cyan
 
-    # Backend context is the REPO ROOT: the app imports backend.* and src.* by absolute path.
-    az acr build -r $acr -t "x-coach-backend:$t" -f backend/Dockerfile .
-    Assert-LastExit 'Backend image build'
+    $runId = gh run list --workflow build-images.yml --branch $branch --limit 1 --json databaseId --jq '.[0].databaseId'
+    Assert-LastExit 'Listing workflow runs'
+    if ([string]::IsNullOrWhiteSpace($runId)) {
+        throw "No build-images run on '$branch'. Push the branch first -- the workflow triggers on push."
+    }
+    gh run watch $runId.Trim() --exit-status
+    Assert-LastExit 'The build-images workflow'
 
-    # VITE_* are inlined by Vite at BUILD time, so they are build args, not runtime env —
-    # changing one needs a rebuild, not a restart. The anon key ships in the bundle by
-    # design; row access is governed by Postgres RLS. The service-role key must never
-    # appear here.
-    # -f is relative to the CONTEXT root, not to the working directory, so it is a bare
-    # 'Dockerfile' here even though the backend above needs the path from the repo root.
-    az acr build -r $acr -t "x-coach-frontend:$t" -f Dockerfile frontend `
-        --build-arg "VITE_SUPABASE_URL=$($env_['SUPABASE_URL'])" `
-        --build-arg "VITE_SUPABASE_ANON_KEY=$($env_['SUPABASE_ANON_KEY'])" `
-        --build-arg "VITE_LIFF_ID=$($env_['LINE_LIFF_ID'])"
-    Assert-LastExit 'Frontend image build'
-
-    Write-Host "Built x-coach-backend:$t and x-coach-frontend:$t" -ForegroundColor Green
+    Write-Host "Built $(Get-ImageRef 'backend' $t)" -ForegroundColor Green
+    Write-Host "Built $(Get-ImageRef 'frontend' $t)" -ForegroundColor Green
+    Write-Host 'Both GHCR packages must be PUBLIC, or Container Apps cannot pull them.' -ForegroundColor Yellow
 }
 
 function Invoke-Apps {
     Assert-LoggedIn
     $env_ = Read-DotEnv $EnvFile
-    $acr = Get-DeploymentOutput 'acrName'
-    $login = Get-DeploymentOutput 'acrLoginServer'
     $t = Resolve-Tag
 
     foreach ($required in @('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET')) {
@@ -237,8 +238,8 @@ function Invoke-Apps {
         -p '@infra/main.parameters.json' `
         -p location=$Location `
         -p deployApps=true `
-        -p backendImage="$login/x-coach-backend:$t" `
-        -p frontendImage="$login/x-coach-frontend:$t" `
+        -p backendImage=(Get-ImageRef 'backend' $t) `
+        -p frontendImage=(Get-ImageRef 'frontend' $t) `
         -p supabaseUrl="$($env_['SUPABASE_URL'])" `
         -p supabaseAnonKey="$($env_['SUPABASE_ANON_KEY'])" `
         -p supabaseServiceRoleKey="$($env_['SUPABASE_SERVICE_ROLE_KEY'])" `
@@ -261,11 +262,10 @@ function Invoke-Apps {
 
 function Invoke-Update {
     Assert-LoggedIn
-    $login = Get-DeploymentOutput 'acrLoginServer'
     $t = Resolve-Tag
-    az containerapp update -n xcoach-backend -g $ResourceGroup --image "$login/x-coach-backend:$t" -o none
+    az containerapp update -n xcoach-backend -g $ResourceGroup --image (Get-ImageRef 'backend' $t) -o none
     Assert-LastExit 'Updating the backend image'
-    az containerapp update -n xcoach-frontend -g $ResourceGroup --image "$login/x-coach-frontend:$t" -o none
+    az containerapp update -n xcoach-frontend -g $ResourceGroup --image (Get-ImageRef 'frontend' $t) -o none
     Assert-LastExit 'Updating the frontend image'
     Write-Host "Both apps now run tag $t." -ForegroundColor Green
 }
