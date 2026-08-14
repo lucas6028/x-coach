@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import {
@@ -149,7 +149,12 @@ beforeEach(() => {
     result: { success: true, status_code: 200, reason: "OK", detail: "200" }, error: null,
   });
 });
-afterEach(() => vi.restoreAllMocks());
+// unstubAllGlobals is not optional here: the clipboard tests replace `navigator` wholesale, and a
+// leaked stub would follow every later test in the file.
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("AdminLayout gate", () => {
   it("renders the admin nav for an admin", async () => {
@@ -381,6 +386,87 @@ describe("AdminLine", () => {
     expect(await screen.findByText(/Couldn't read yesterday's delivery counts/i)).toBeInTheDocument();
   });
 
+  // Login and messaging are two SEPARATE LINE channels. A green "Enabled" on a server where only
+  // one of them is wired up would be the status page misreporting the exact thing it exists to
+  // report, so half-configured has to read as its own state.
+  it.each([
+    [true, true, "Enabled"],
+    [true, false, "Partly configured"],
+    [false, true, "Partly configured"],
+    // Distinct from the cards' own "Not configured" so this assertion can't pass by matching one
+    // of them instead of the header summary.
+    [false, false, "Not set up"],
+  ])(
+    "reports login=%s messaging=%s as '%s' in the header",
+    async (login_configured, messaging_configured, expected) => {
+      vi.spyOn(api, "getLineStatus").mockResolvedValue({
+        ...SAMPLE_LINE_STATUS,
+        login_configured,
+        messaging_configured,
+      });
+      renderAdmin("/admin/line");
+      expect(await screen.findByText(expected)).toBeInTheDocument();
+    }
+  );
+
+  it("copies the webhook endpoint to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Copy webhook URL" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("https://x-coach.app/api/line/webhook"));
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+  });
+
+  // A copy button that silently no-ops (insecure origin, embedded webview) leaves the admin
+  // pasting whatever was in the buffer before. Say it failed and tell them to select it by hand.
+  it("says so when the clipboard write is rejected instead of claiming success", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Copy webhook URL" }));
+    expect(await screen.findByText(/select the URL and copy it manually/i)).toBeInTheDocument();
+    expect(screen.queryByText("Copied")).not.toBeInTheDocument();
+  });
+
+  // The verdict is a modal now, not a line of text under the button — so it has to be dismissible,
+  // and it must not be on screen before the probe is ever run.
+  it("shows the webhook-test verdict in a dialog and closes it again", async () => {
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Reachable \(200\)/i)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("closes the webhook-test dialog on Escape", async () => {
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    await screen.findByRole("dialog");
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("shows no verdict dialog until the test is actually run", async () => {
+    renderAdmin("/admin/line");
+    await screen.findByRole("button", { name: "Test webhook" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows no copy button when the webhook endpoint couldn't be read", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      webhook: null,
+      webhook_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    await screen.findByText(/Couldn't read the webhook setting/i);
+    expect(screen.queryByRole("button", { name: "Copy webhook URL" })).not.toBeInTheDocument();
+  });
+
   it.each([
     ["unauthorized" as const, /rejected the channel access token/i],
     ["rate_limited" as const, /rate-limited/i],
@@ -398,11 +484,15 @@ describe("AdminLine", () => {
 });
 
 describe("AdminUsers", () => {
+  // Scoped to the table on purpose: the signed-in admin ("ada@x.com", row u1) is now also named by
+  // the account cluster in the nav rail, which the shell renders twice (desktop rail + off-canvas
+  // drawer). An unscoped getByText would match three nodes and fail on a page that is correct.
   it("renders the users table rows with the self tag", async () => {
     renderAdmin("/admin/users");
     expect(await screen.findByText("bob@x.com")).toBeInTheDocument();
-    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
-    expect(screen.getByText("You")).toBeInTheDocument();
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("ada@x.com")).toBeInTheDocument();
+    expect(table.getByText("You")).toBeInTheDocument();
   });
 
   it("toggles a non-self user's role and refreshes the list", async () => {
@@ -715,9 +805,11 @@ describe("AdminUsers error / empty / toggle-failure", () => {
     // Inline per-row error is shown; the list was NOT re-fetched (only the initial load ran).
     expect(await screen.findByText("Couldn't update this user's role.")).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(1);
-    // Both rows survive — the failed toggle didn't corrupt the table.
-    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
-    expect(screen.getByText("bob@x.com")).toBeInTheDocument();
+    // Both rows survive — the failed toggle didn't corrupt the table. Scoped to the table because
+    // the signed-in admin's own email also appears in the rail's account cluster (see above).
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("ada@x.com")).toBeInTheDocument();
+    expect(table.getByText("bob@x.com")).toBeInTheDocument();
   });
 
   it("falls back to the id for a null email and shows 'Never' for an unparseable date", async () => {
@@ -748,25 +840,28 @@ describe("AdminLayout loading + mobile nav", () => {
     expect(await screen.findByText("Checking your access…")).toBeInTheDocument();
   });
 
+  // The backdrop is selected by its tint class because it carries no other stable hook. That tint
+  // is `bg-black/40` to match the app shell's own drawer (components/AppLayout.tsx) — if the shells
+  // are restyled again, these selectors move with it.
   it("opens the mobile drawer (backdrop) and closes it via the drawer's close button", async () => {
     const { container } = renderAdmin("/admin");
     await screen.findByLabelText("Show navigation");
     // Drawer starts closed: the off-canvas backdrop is not mounted yet.
-    expect(container.querySelector(".bg-black\\/50")).toBeNull();
+    expect(container.querySelector(".bg-black\\/40")).toBeNull();
     // Open: the header's menu button mounts the backdrop.
     fireEvent.click(screen.getByLabelText("Show navigation"));
-    expect(container.querySelector(".bg-black\\/50")).not.toBeNull();
+    expect(container.querySelector(".bg-black\\/40")).not.toBeNull();
     // Close: the drawer's onNavigate close button collapses it again.
     fireEvent.click(screen.getByLabelText("Hide navigation"));
-    await waitFor(() => expect(container.querySelector(".bg-black\\/50")).toBeNull());
+    await waitFor(() => expect(container.querySelector(".bg-black\\/40")).toBeNull());
   });
 
   it("closes the mobile drawer when the backdrop is clicked", async () => {
     const { container } = renderAdmin("/admin");
     fireEvent.click(await screen.findByLabelText("Show navigation"));
-    const backdrop = container.querySelector(".bg-black\\/50");
+    const backdrop = container.querySelector(".bg-black\\/40");
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop as Element);
-    await waitFor(() => expect(container.querySelector(".bg-black\\/50")).toBeNull());
+    await waitFor(() => expect(container.querySelector(".bg-black\\/40")).toBeNull());
   });
 });
