@@ -109,6 +109,29 @@ function Get-ImageRef {
     return "$ImageRepo/x-coach-$Component`:$TagValue"
 }
 
+function Assert-ImagePullable {
+    # Two ways to reach `apps` with an unpullable image, and both look like a broken template
+    # rather than a broken image: the tag defaults to HEAD, but the workflow only builds when
+    # something image-relevant changed (a docs-only commit produces no tag); and a GHCR package
+    # is PRIVATE until someone flips it in the UI, which no API can do. Anonymous pull is
+    # exactly what Container Apps attempts, so ask the registry the same question it will.
+    param([string]$Component, [string]$TagValue)
+    $path = ($ImageRepo -replace '^ghcr\.io/', '') + "/x-coach-$Component"
+    try {
+        $token = (Invoke-RestMethod "https://ghcr.io/token?scope=repository:${path}:pull&service=ghcr.io" -TimeoutSec 30).token
+        $accept = 'application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.manifest.v1+json'
+        Invoke-WebRequest "https://ghcr.io/v2/$path/manifests/$TagValue" `
+            -Headers @{ Authorization = "Bearer $token"; Accept = $accept } `
+            -Method Head -TimeoutSec 30 -ErrorAction Stop | Out-Null
+    } catch {
+        $code = $_.Exception.Response.StatusCode.value__
+        if ($code -eq 401 -or $code -eq 403) {
+            throw "ghcr.io/$path is not anonymously pullable (HTTP $code). Make the package PUBLIC: https://github.com/users/$(($path -split '/')[0])/packages/container/x-coach-$Component/settings -> Danger Zone -> Change visibility."
+        }
+        throw "No image ghcr.io/${path}:$TagValue (HTTP $code). The workflow only builds on image-relevant paths, so a docs-only commit produces no tag -- pass -Tag <sha of a built commit>."
+    }
+}
+
 function Assert-LoggedIn {
     az account show -o none 2>$null
     if ($LASTEXITCODE -ne 0) {
@@ -225,6 +248,8 @@ function Invoke-Apps {
     Assert-LoggedIn
     $env_ = Read-DotEnv $EnvFile
     $t = Resolve-Tag
+    Assert-ImagePullable 'backend' $t
+    Assert-ImagePullable 'frontend' $t
 
     foreach ($required in @('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET')) {
         if ([string]::IsNullOrWhiteSpace($env_[$required])) {
@@ -263,6 +288,8 @@ function Invoke-Apps {
 function Invoke-Update {
     Assert-LoggedIn
     $t = Resolve-Tag
+    Assert-ImagePullable 'backend' $t
+    Assert-ImagePullable 'frontend' $t
     az containerapp update -n xcoach-backend -g $ResourceGroup --image (Get-ImageRef 'backend' $t) -o none
     Assert-LastExit 'Updating the backend image'
     az containerapp update -n xcoach-frontend -g $ResourceGroup --image (Get-ImageRef 'frontend' $t) -o none
