@@ -13,8 +13,9 @@
 
     "backendCpu": { "value": 2 },
     "maxConcurrentAnalyses": { "value": 2 },
-    "backendMinReplicas": { "value": 1 },
+    "backendMinReplicas": { "value": 0 },
     "backendMaxReplicas": { "value": 3 },
+    "frontendMinReplicas": { "value": 1 },
 
     "supabaseUrl": { "value": "" },
     "lineChannelId": { "value": "" },

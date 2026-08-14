@@ -116,13 +116,72 @@ WARNING。
 數字，讓 replica 在它的 semaphore 飽和的那一刻才擴展出去，而不是等到 Envoy 預設的 10 — 超過之後
 請求會無聲地排隊，而 replica 看起來依然健康。
 
-`minReplicas` 設為 1 是刻意的。冷啟動要從檔案共用載入 MediaPipe、知識圖譜與 RAG 向量庫；
-scale-to-zero 等於把這一切都算到真實使用者的第一個請求上。
+`backendMinReplicas` 是這份範本裡唯一真正花錢的旋鈕，見下一節。
 
 Consumption 的上限是每個 replica 4 vCPU / 8 GiB，記憶體固定為每 vCPU 2 GiB。超過就需要
 dedicated workload profile。
 
+## 成本，以及 Azure 學生方案
+
+Container Apps 按 vCPU-秒與 GiB-秒計費。每個訂閱每月頭 180,000 vCPU-秒、360,000 GiB-秒、
+200 萬次請求免費；超出後**執行中**是 $0.000024/vCPU-秒，而 `minReplicas > 0` 但沒有請求在處理的
+**閒置** replica 是 $0.000008/vCPU-秒（記憶體 $0.000001/GiB-秒）。scale 到 0 則完全不計。
+
+閒置費率才是重點：一個 `minReplicas: 1` 的 replica 就算整個月沒人用，也是整個月都在計費。
+
+| 設定 | 每月約略 | $100 學生額度可撐 |
+| --- | --- | --- |
+| backend 2 vCPU、`minReplicas: 1` | $50 + frontend $6 + ACR $5 ≈ **$61** | 約 7 週 |
+| backend 1 vCPU、`minReplicas: 1` | $24 + $6 + $5 ≈ **$36** | 約 3 個月 |
+| backend `minReplicas: 0`（**範本預設**） | 用多少算多少 + $6 + $5 ≈ **$12** | 約 8 個月 |
+
+所以 `infra/main.parameters.json` 預設 `backendMinReplicas: 0`。代價是冷啟動：第一個請求要等
+容器起來、載入 MediaPipe、再從 SMB 共用讀知識圖譜與向量庫。兩個後果要知道：
+
+- **LINE Messaging webhook 可能逾時重試。** LINE 對 webhook 的等待很短，冷的 backend 接不下。
+  如果 bot 是要給真人用的，把 `backendMinReplicas` 調回 1，接受上面那張表的第二列。
+- **demo 前先把它叫醒。** 口試或展示前打一次 `https://<fqdn>/api/health`，之後只要有流量
+  replica 就會維持喚醒。
+
+frontend 維持 `minReplicas: 1`：它只是 nginx，0.25 vCPU 一個月約 $6，換來的是網站本身永遠是熱的。
+真的要再省，把 `frontendMinReplicas` 也設成 0，第一位訪客多等兩三秒。
+
+學生訂閱另外三件事：
+
+- **先設預算警示。** 額度歸零時資源會被停用，不是寄帳單給你。在 Cost Management 裡對
+  resource group 設 50% 與 80% 的 alert，在跑第二趟部署之前就設好。
+- **配額**。免費／學生訂閱不能申請提高配額，Container Apps environment 的數量上限很低
+  （常見錯誤訊息是 `Environment limit reached`）。這份範本只建一個環境。
+- **區域限制**。學生訂閱在部分區域不能開資源。`location` 是參數，而 ACR、儲存體與環境共用它，
+  所以換區域只是改一個參數，不是逐一搬資源。`eastasia` 不行就試 `japaneast` 或 `southeastasia`。
+
 ## 部署
+
+在 Windows 上請跑 `infra/deploy.ps1`，它把下面每一段包成一個 stage，並且從 `.env` 讀出那十幾個
+設定值，不用把八個機密貼到命令列上：
+
+```powershell
+az login                              # 互動式，只有你能跑
+./infra/deploy.ps1 -Stage providers   # 註冊四個 resource provider
+./infra/deploy.ps1 -Stage infra       # 第一趟：registry、環境、儲存體
+./infra/deploy.ps1 -Stage data        # 灌 KG 與向量庫
+./infra/deploy.ps1 -Stage build       # 在 ACR 裡建兩個 image
+./infra/deploy.ps1 -Stage apps        # 第二趟：兩個 container app
+```
+
+下面的 bash 版本是同一件事，給非 Windows 環境、也給你知道每個 stage 實際做了什麼。**不要在
+Git Bash 裡跑 `az`**：MSYS 會把任何以 `/` 開頭的參數當成路徑改寫，resource ID 與 `--scope`
+會被無聲地改壞。
+
+### 第零步：註冊 resource provider
+
+全新的訂閱一個都沒註冊，而第一趟部署只會回 `MissingSubscriptionRegistration`，不會告訴你少哪個。
+
+```bash
+for ns in Microsoft.App Microsoft.OperationalInsights Microsoft.ContainerRegistry Microsoft.Storage; do
+    az provider register --namespace $ns --wait
+done
+```
 
 ### 第一趟：registry 與環境
 
@@ -132,7 +191,8 @@ container apps 引用的 image 在 registry 存在之前並不存在，所以第
 RG=xcoach-rg
 az group create -n $RG -l eastasia
 
-az deployment group create -g $RG -f infra/main.bicep -p deployApps=false
+az deployment group create -g $RG -n main -f infra/main.bicep \
+    -p @infra/main.parameters.json -p deployApps=false
 ACR=$(az deployment group show -g $RG -n main --query properties.outputs.acrName.value -o tsv)
 ```
 
@@ -144,12 +204,17 @@ KG 與 RAG 儲存是由 pipeline 產生且被 gitignore 的，所以是上傳而
 ```bash
 STORAGE=$(az deployment group show -g $RG -n main \
     --query properties.outputs.storageAccountName.value -o tsv)
+SHARE=$(az deployment group show -g $RG -n main \
+    --query properties.outputs.dataShareName.value -o tsv)
 KEY=$(az storage account keys list -g $RG -n $STORAGE --query '[0].value' -o tsv)
 
+# 只送 backend 真的會開的那個圖：data/kg/ 另外那八個 .bak / .pre-* / .post-*-raw 是
+# pipeline 的歷史快照，不是執行時的輸入。路徑對應 backend/app/config.py 的 KG_GRAPH_FILE。
+az storage file upload --account-name $STORAGE --account-key $KEY \
+    --share-name $SHARE --path kg/sports_kg_v3.graphml --source data/kg/sports_kg_v3.graphml
+
 az storage file upload-batch --account-name $STORAGE --account-key $KEY \
-    -d data/kg -s data/kg
-az storage file upload-batch --account-name $STORAGE --account-key $KEY \
-    -d data/rag/vector_db -s data/rag/vector_db
+    --destination $SHARE --destination-path rag/vector_db --source data/rag/vector_db
 ```
 
 demo 影片庫（`data/Fitness-AQA/Squat/Labeled_Dataset/`）是選配而且很大；只有在你要那些即時 demo
@@ -172,7 +237,9 @@ TAG=$(git rev-parse --short HEAD)
 
 az acr build -r $ACR -t x-coach-backend:$TAG -f backend/Dockerfile .
 
-az acr build -r $ACR -t x-coach-frontend:$TAG -f frontend/Dockerfile frontend \
+# -f 是相對於 context 根目錄，不是相對於工作目錄 — 所以 backend 那行寫得出路徑，
+# frontend 這行就只能是裸的 Dockerfile。
+az acr build -r $ACR -t x-coach-frontend:$TAG -f Dockerfile frontend \
     --build-arg VITE_SUPABASE_URL=https://xxxx.supabase.co \
     --build-arg VITE_SUPABASE_ANON_KEY=eyJ... \
     --build-arg VITE_LIFF_ID=1234567890-Abcdefgh
@@ -203,9 +270,20 @@ frontend 會拿到指向 backend 內部 FQDN 的 `BACKEND_ORIGIN`。nginx 在容
 把瀏覽器的主機名稱轉過去會讓環境找不到 backend app — 那是平台回的 404，但看起來像 API 的路由 bug。
 瀏覽器原本的主機名稱保留在 `X-Forwarded-Host`。
 
+### Supabase migrations 不在 Azure 這邊
+
+`db/migrations/` 底下的 SQL 是手動套到 Supabase 的，跟這次部署完全沒有交集。上線前確認最新那幾支
+（`20260813000000_training_plans.sql`、`20260725000000_analysis_movement.sql`）已經跑過 —
+少了資料表的話，前端會壞在看起來像 Azure 問題的地方。
+
 ### 後續部署
 
 只有 image tag 會變：
+
+```powershell
+./infra/deploy.ps1 -Stage build
+./infra/deploy.ps1 -Stage update
+```
 
 ```bash
 az containerapp update -n xcoach-backend  -g $RG --image $ACR.azurecr.io/x-coach-backend:$TAG

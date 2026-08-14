@@ -33,6 +33,12 @@ coverage.xml
 # by the pipelines rather than shipped. See docs/docker.md.
 data
 notebooks
+tmp
+.kaggle_tmp
+
+# Vendored research code (VideoPose3D). The image copies only backend/ and src/, but the
+# whole context is uploaded to ACR on `az acr build`, so excluding it saves ~230 MB a build.
+third_party
 
 # Frontend — has its own image and its own .dockerignore
 frontend

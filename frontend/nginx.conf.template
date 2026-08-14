@@ -52,6 +52,11 @@ server {
         # read timeout would 504 mid-run.
         proxy_read_timeout 900s;
         proxy_send_timeout 900s;
+        # Raised from the 60s default for the same reason, one step earlier: when the backend
+        # runs at minReplicas 0 (see infra/main.parameters.json), this connection is what
+        # waits for a replica to be activated and to load the KG and the vector DB. On
+        # compose the backend is already up and this never fires.
+        proxy_connect_timeout 120s;
     }
 
     # Vite emits content-hashed filenames under /assets, so they are safe to pin forever.

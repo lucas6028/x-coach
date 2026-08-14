@@ -56,12 +56,16 @@ param backendCpu int = 2
 @description('Concurrent in-process analyses per backend replica (XCOACH_MAX_CONCURRENT_ANALYSES).')
 param maxConcurrentAnalyses int = 2
 
-@description('Backend replica floor. Keep at 1: a cold start loads MediaPipe, the KG and the vector DB, so scale-to-zero puts that latency on a real user.')
-@minValue(1)
+@description('Backend replica floor. 1 keeps a warm replica and bills it at the idle rate around the clock; 0 costs nothing while nobody is using the app but puts a cold start -- MediaPipe, the KG and the vector DB off the SMB share -- on the first request, which the LINE webhook may time out on. See the cost ladder in docs/azure-deployment.md.')
+@minValue(0)
 param backendMinReplicas int = 1
 
 @description('Backend replica ceiling.')
 param backendMaxReplicas int = 3
+
+@description('Frontend replica floor. nginx starts in a second or two, so 0 is cheap and barely noticeable -- but it is the public entry point, so the first visitor after an idle period waits for it.')
+@minValue(0)
+param frontendMinReplicas int = 1
 
 // --- Application configuration ---------------------------------------------------------
 // Every one of these is optional: the backend boots without them and reports each
@@ -474,7 +478,7 @@ resource frontend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
       ]
       scale: {
         // Static assets only; one replica saturates long before the backend does.
-        minReplicas: 1
+        minReplicas: frontendMinReplicas
         maxReplicas: 3
       }
     }
