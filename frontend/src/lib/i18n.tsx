@@ -395,16 +395,15 @@ const en: Dict = {
 
   // Auth — login + session
   "auth.checking": "Checking your session…",
-  "auth.back": "Back to app",
   "auth.signInTitle": "Sign in",
-  "auth.signInSub": "Welcome back. Pick up your saved analyses.",
+  "auth.signInSub": "Welcome back — pick up your saved analyses.",
   "auth.signUpTitle": "Create your account",
   "auth.signUpSub": "Save every analysis to your history.",
   "auth.email": "Email",
   "auth.password": "Password",
   "auth.signInBtn": "Sign in",
   "auth.signUpBtn": "Create account",
-  "auth.or": "or",
+  "auth.orContinue": "or continue with",
   "auth.google": "Continue with Google",
   "auth.lineBtn": "Continue with LINE",
 
@@ -438,12 +437,28 @@ const en: Dict = {
   "auth.errorTitle": "Couldn't sign you in",
   "auth.confirmEmail": "Check your inbox to confirm your email, then sign in.",
   "auth.notConfigured": "Sign-in isn't set up on this server yet. You can still use the demo.",
-  "auth.brandHeadline": "Coaching you can revisit.",
-  "auth.brandSub":
-    "Sign in to keep every squat analysis, with its skeleton, faults, and grounded feedback.",
-  "auth.point1": "Every analysis saved to your history",
-  "auth.point2": "Reopen any past rep, exactly as analyzed",
-  "auth.point3": "Private to you, enforced at the database",
+  // Login's brand stage. The headline is split across three keys rather than one string with
+  // markup in it: the second line highlights its last phrase in violet, and which words carry
+  // that emphasis is a per-language decision (English accents the noun "results", Chinese the
+  // noun 成果) that a single interpolated key could not express.
+  "auth.brandHome": "X-Coach home",
+  "auth.heroLine1": "Smarter training.",
+  "auth.heroLine2Lead": "Stronger",
+  "auth.heroLine2Accent": "results.",
+  "auth.heroSub":
+    "AI-powered motion analysis and coaching feedback to help you move better and perform your best.",
+  "auth.card1Title": "AI Motion Analysis",
+  "auth.card1Body": "Detects faults and finds opportunities to improve.",
+  "auth.card2Title": "Train Smarter",
+  "auth.card2Body": "Personalized feedback for every rep.",
+  "auth.card3Title": "Track Progress",
+  "auth.card3Body": "See your improvements and stay consistent.",
+  "auth.scoreTitle": "Form score",
+  "auth.scoreVerdict": "Excellent",
+  "auth.scoreNote": "No faults detected",
+  "auth.showPassword": "Show password",
+  "auth.hidePassword": "Hide password",
+  "auth.footer": "© {year} X-Coach. All rights reserved.",
 
   // Account / nav
   "nav.history": "My records",
@@ -477,6 +492,100 @@ const en: Dict = {
   // fall back to their canonical spelling.
   "movement.Push-up": "Push-up",
   "movement.Sit-up": "Sit-up",
+
+  // Training plans ("訓練菜單")
+  "nav.plans": "Plans",
+  "plans.title": "Training plans",
+  "plans.subtitle":
+    "Build a day or a week from the movement library, then train it with the coach watching.",
+  "plans.new": "New plan",
+  "plans.empty": "No plans yet. Start from a template below, or build your own.",
+  "plans.loadFailed": "Could not load your plans.",
+  "plans.retry": "Try again",
+  "plans.progress": "{done} of {total} done",
+  "plans.daysCount": "{n} days",
+  "plans.dayCountOne": "1 day",
+  "plans.notStarted": "Not started",
+  "plans.startedOn": "Started {date}",
+  "plans.finished": "Complete",
+  "plans.onDay": "On day {n}",
+  "plans.open": "Open",
+  "plans.templatesTitle": "Start from a template",
+  "plans.templatesSubtitle": "A copy is made — edit it however you like afterwards.",
+  "plans.useTemplate": "Use this",
+  "plans.templateItems": "{n} exercises over {days} days",
+
+  // Create dialog
+  "plans.createTitle": "New training plan",
+  "plans.nameLabel": "Plan name",
+  "plans.namePlaceholder": "e.g. Upper-body week",
+  "plans.notesLabel": "Notes (optional)",
+  "plans.notesPlaceholder": "Anything you want to remember about this plan",
+  "plans.blank": "Start blank",
+  "plans.create": "Create",
+  "plans.cancel": "Cancel",
+  "plans.creating": "Creating…",
+
+  // Plan detail
+  "plans.back": "All plans",
+  "plans.notFound": "This plan no longer exists.",
+  "plans.start": "Start this plan",
+  "plans.restart": "Start again",
+  "plans.starting": "Starting…",
+  "plans.restartTitle": "Start this plan again?",
+  "plans.restartBody":
+    "Every exercise is unticked and its link to the recorded analysis is cleared. The analyses themselves stay in My records.",
+  "plans.deletePlan": "Delete plan",
+  "plans.deletePlanTitle": "Delete this plan?",
+  "plans.deletePlanBody": "The plan and all of its exercises are removed. This cannot be undone.",
+  "plans.delete": "Delete",
+  "plans.rename": "Rename",
+  "plans.save": "Save",
+  "plans.day": "Day {n}",
+  "plans.rest": "Rest day",
+  "plans.addExercise": "Add exercise",
+  "plans.setsReps": "{sets} × {reps}",
+  "plans.setsLabel": "Sets",
+  "plans.repsLabel": "Reps",
+  "plans.movementLabel": "Movement",
+  "plans.dayLabel": "Day",
+  "plans.add": "Add",
+  "plans.adding": "Adding…",
+  "plans.removeItem": "Remove {movement}",
+  "plans.markDone": "Mark {movement} as done",
+  "plans.markUndone": "Mark {movement} as not done",
+  "plans.analyze": "Record & analyse",
+  "plans.viewReport": "View report",
+  // Drawn on the row; the keys above are their accessible names. A row is as narrow as a phone's
+  // width, and a full-phrase chip there leaves no room for the movement it belongs to.
+  "plans.analyzeShort": "Analyse",
+  "plans.viewReportShort": "Report",
+  "plans.analysedNote": "Analysed",
+  "plans.tickOnly": "Tick off manually — video analysis for this movement isn't available yet.",
+  // The visible chip on such a row. Distinct from `movements.soon`: that one means the MOVEMENT is
+  // unavailable, this one means only its analysis is.
+  "plans.tickOnlyLabel": "No analysis",
+  "plans.itemFailed": "That change didn't save.",
+
+  // Built-in template names/descriptions. Keyed by the `key` the backend sends; a template added
+  // to backend/app/routers/plans.py without an entry here falls back to the English string the API
+  // itself carries (see lib/plans.ts `templateText`), so it renders rather than showing a raw key.
+  "plans.template.full_body_starter.name": "Full-body starter",
+  "plans.template.full_body_starter.desc":
+    "Three sessions a week covering the whole body. A good first plan.",
+  "plans.template.upper_body.name": "Upper-body focus",
+  "plans.template.upper_body.desc": "Two pushing and pulling sessions for chest, back and shoulders.",
+  "plans.template.lower_body.name": "Lower-body focus",
+  "plans.template.lower_body.desc": "Two leg sessions built around the squat and the hinge.",
+  "plans.template.mobility.name": "Mobility & rehab",
+  "plans.template.mobility.desc": "Low-load shoulder and hip work, three short sessions a week.",
+  "plans.template.quick_core.name": "Quick core session",
+  "plans.template.quick_core.desc": "One 15-minute session you can drop into any week.",
+
+  // Studio banner when the studio was entered from a plan item
+  "plans.studioBanner": "From {plan} · Day {day}",
+  "plans.studioLinked": "Ticked off in your plan.",
+  "plans.studioBackToPlan": "Back to plan",
 
   // Settings popup
   "settings.title": "Settings",
@@ -681,6 +790,31 @@ const en: Dict = {
   "admin.line.pushYesterday": "Pushes yesterday",
   "admin.line.deliveryUnready": "Not ready yet",
   "admin.line.deliveryDate": "Counts for {date}",
+  // Header state pill. "Partly configured" is its own state on purpose: login and messaging are two
+  // separate LINE channels, and a green "Enabled" on a server where only one of them is wired up
+  // would be the panel telling a comfortable lie about the exact thing it exists to report.
+  // Distinct wording from the per-card `admin.overview.notConfigured` on purpose: this pill
+  // summarises BOTH channels, and reusing the card's exact words would make an unconfigured server
+  // read as three copies of one verdict rather than a summary over two.
+  "admin.line.stateEnabled": "Enabled",
+  "admin.line.statePartial": "Partly configured",
+  "admin.line.stateDisabled": "Not set up",
+  "admin.line.loginBridgeDesc": "Lets people sign in to the app with their LINE account.",
+  "admin.line.botDesc": "Receives messages from users and sends push notifications.",
+  "admin.line.quotaFree": "Free allowance: {limit} messages / month",
+  "admin.line.quotaNoCap": "No monthly limit set",
+  "admin.line.webhookUrl": "Webhook URL",
+  "admin.line.webhookUrlNote": "Where LINE delivers events (messages, follows, unfollows).",
+  "admin.line.webhookStatus": "Status",
+  // Must NOT say "the URL above": the test button outlives a failed endpoint read, and in that
+  // state there is no URL above to point at.
+  "admin.line.webhookTestNote": "Ask LINE to send a test event to this channel's webhook URL.",
+  "admin.line.webhookTestResult": "Webhook test",
+  "admin.line.copy": "Copy webhook URL",
+  "admin.line.copied": "Copied",
+  "admin.line.copyFailed": "Couldn't copy — select the URL and copy it manually.",
+  "admin.line.oaManager": "Open LINE Official Account Manager",
+  "admin.line.deliveryTitle": "Message delivery",
 
   // Admin panel P3 — user oversight
   "admin.users.title": "Users",
@@ -1203,7 +1337,6 @@ const zhHant: Dict = {
 
   // Auth — login + session
   "auth.checking": "確認登入狀態中…",
-  "auth.back": "返回應用程式",
   "auth.signInTitle": "登入",
   "auth.signInSub": "歡迎回來，繼續查看你儲存的分析。",
   "auth.signUpTitle": "建立帳號",
@@ -1212,7 +1345,7 @@ const zhHant: Dict = {
   "auth.password": "密碼",
   "auth.signInBtn": "登入",
   "auth.signUpBtn": "建立帳號",
-  "auth.or": "或",
+  "auth.orContinue": "或使用以下方式",
   "auth.google": "使用 Google 繼續",
   "auth.lineBtn": "使用 LINE 繼續",
 
@@ -1244,11 +1377,23 @@ const zhHant: Dict = {
   "auth.errorTitle": "無法登入",
   "auth.confirmEmail": "請至信箱點擊確認連結，再回來登入。",
   "auth.notConfigured": "此伺服器尚未設定登入功能，你仍可使用示範。",
-  "auth.brandHeadline": "可以回顧的教練回饋。",
-  "auth.brandSub": "登入後，每一段深蹲分析（骨架、錯誤與有據回饋）都會為你保留。",
-  "auth.point1": "每次分析都存進你的紀錄",
-  "auth.point2": "隨時重開任何一次動作，完整重現",
-  "auth.point3": "僅你可見，由資料庫層級保護",
+  "auth.brandHome": "X-Coach 首頁",
+  "auth.heroLine1": "更聰明地練",
+  "auth.heroLine2Lead": "換來更強的",
+  "auth.heroLine2Accent": "成果。",
+  "auth.heroSub": "用 AI 動作分析與教練回饋，幫你動得更漂亮，也表現得更好。",
+  "auth.card1Title": "AI 動作分析",
+  "auth.card1Body": "找出動作上的錯誤，也找出還能再進步的地方。",
+  "auth.card2Title": "練得更聰明",
+  "auth.card2Body": "每一下都給你專屬的回饋。",
+  "auth.card3Title": "追蹤進步",
+  "auth.card3Body": "看見自己的改變，才練得下去。",
+  "auth.scoreTitle": "動作評分",
+  "auth.scoreVerdict": "很好",
+  "auth.scoreNote": "沒有偵測到錯誤",
+  "auth.showPassword": "顯示密碼",
+  "auth.hidePassword": "隱藏密碼",
+  "auth.footer": "© {year} X-Coach. 保留一切權利。",
 
   // Account / nav
   "nav.history": "我的紀錄",
@@ -1293,6 +1438,92 @@ const zhHant: Dict = {
   "movement.Torso Twist": "軀幹旋轉",
   "movement.Jumping Jacks": "開合跳",
   "movement.High Knee": "高抬腿",
+
+  // 訓練菜單
+  "nav.plans": "訓練菜單",
+  "plans.title": "訓練菜單",
+  "plans.subtitle": "從動作庫排出一天或一週的課表，訓練時交給教練幫你看動作。",
+  "plans.new": "新增菜單",
+  "plans.empty": "還沒有任何菜單。可以先從下面的範本開始，或自己排一份。",
+  "plans.loadFailed": "無法載入你的菜單。",
+  "plans.retry": "重試",
+  "plans.progress": "已完成 {done} / {total}",
+  "plans.daysCount": "{n} 天",
+  "plans.dayCountOne": "1 天",
+  "plans.notStarted": "尚未開始",
+  "plans.startedOn": "{date} 開始",
+  "plans.finished": "已完成",
+  "plans.onDay": "進行到第 {n} 天",
+  "plans.open": "開啟",
+  "plans.templatesTitle": "從範本開始",
+  "plans.templatesSubtitle": "範本會複製一份給你，之後想怎麼改都可以。",
+  "plans.useTemplate": "使用",
+  "plans.templateItems": "{days} 天、共 {n} 個動作",
+
+  // 建立菜單
+  "plans.createTitle": "新增訓練菜單",
+  "plans.nameLabel": "菜單名稱",
+  "plans.namePlaceholder": "例如：上肢訓練週",
+  "plans.notesLabel": "備註（選填）",
+  "plans.notesPlaceholder": "想記下來的事情，例如這份菜單的目標",
+  "plans.blank": "從空白開始",
+  "plans.create": "建立",
+  "plans.cancel": "取消",
+  "plans.creating": "建立中…",
+
+  // 菜單內容
+  "plans.back": "所有菜單",
+  "plans.notFound": "這份菜單已經不存在了。",
+  "plans.start": "開始這份菜單",
+  "plans.restart": "重新開始",
+  "plans.starting": "開始中…",
+  "plans.restartTitle": "要重新開始這份菜單嗎？",
+  "plans.restartBody":
+    "所有動作會恢復成未完成，並解除與已錄影分析的連結。分析紀錄本身仍然保留在「我的紀錄」裡。",
+  "plans.deletePlan": "刪除菜單",
+  "plans.deletePlanTitle": "要刪除這份菜單嗎？",
+  "plans.deletePlanBody": "菜單與其中所有動作都會被移除，且無法復原。",
+  "plans.delete": "刪除",
+  "plans.rename": "重新命名",
+  "plans.save": "儲存",
+  "plans.day": "第 {n} 天",
+  "plans.rest": "休息日",
+  "plans.addExercise": "加入動作",
+  "plans.setsReps": "{sets} 組 × {reps} 下",
+  "plans.setsLabel": "組數",
+  "plans.repsLabel": "次數",
+  "plans.movementLabel": "動作",
+  "plans.dayLabel": "第幾天",
+  "plans.add": "加入",
+  "plans.adding": "加入中…",
+  "plans.removeItem": "移除{movement}",
+  "plans.markDone": "把{movement}標記為完成",
+  "plans.markUndone": "把{movement}標記為未完成",
+  "plans.analyze": "錄影並分析",
+  "plans.viewReport": "看報告",
+  "plans.analyzeShort": "分析",
+  "plans.viewReportShort": "報告",
+  "plans.analysedNote": "已分析",
+  "plans.tickOnly": "此動作目前還不能做影片分析，請自行打勾。",
+  "plans.tickOnlyLabel": "無分析",
+  "plans.itemFailed": "這項變更沒有儲存成功。",
+
+  // 內建範本
+  "plans.template.full_body_starter.name": "全身入門",
+  "plans.template.full_body_starter.desc": "一週三次、練到全身的課表，適合當作第一份菜單。",
+  "plans.template.upper_body.name": "上肢強化",
+  "plans.template.upper_body.desc": "一推一拉兩次訓練，練胸、背與肩膀。",
+  "plans.template.lower_body.name": "下肢強化",
+  "plans.template.lower_body.desc": "以深蹲與髖屈伸為主的兩次腿部訓練。",
+  "plans.template.mobility.name": "活動度與復健",
+  "plans.template.mobility.desc": "低負荷的肩、髖訓練，一週三次、每次都不長。",
+  "plans.template.quick_core.name": "快速核心",
+  "plans.template.quick_core.desc": "一次 15 分鐘的核心訓練，可以插進任何一週。",
+
+  // 從菜單進入分析工作區時的提示列
+  "plans.studioBanner": "來自「{plan}」· 第 {day} 天",
+  "plans.studioLinked": "已在菜單中打勾。",
+  "plans.studioBackToPlan": "回到菜單",
 
   // Settings popup
   "settings.title": "設定",
@@ -1485,6 +1716,23 @@ const zhHant: Dict = {
   "admin.line.pushYesterday": "昨日推播",
   "admin.line.deliveryUnready": "資料尚未就緒",
   "admin.line.deliveryDate": "統計日期 {date}",
+  "admin.line.stateEnabled": "已啟用",
+  "admin.line.statePartial": "部分設定",
+  "admin.line.stateDisabled": "尚未接上",
+  "admin.line.loginBridgeDesc": "讓使用者可以用 LINE 帳號登入網站。",
+  "admin.line.botDesc": "接收使用者訊息、發送推播通知。",
+  "admin.line.quotaFree": "免費額度：每月 {limit} 則",
+  "admin.line.quotaNoCap": "未設定每月上限",
+  "admin.line.webhookUrl": "Webhook 網址",
+  "admin.line.webhookUrlNote": "LINE 事件（訊息、加入好友、封鎖）送達的位址。",
+  "admin.line.webhookStatus": "狀態",
+  "admin.line.webhookTestNote": "請 LINE 送一個測試事件到這個 channel 的 webhook 網址。",
+  "admin.line.webhookTestResult": "Webhook 測試結果",
+  "admin.line.copy": "複製 webhook 網址",
+  "admin.line.copied": "已複製",
+  "admin.line.copyFailed": "無法複製，請手動選取網址複製。",
+  "admin.line.oaManager": "前往 LINE 官方帳號管理後台",
+  "admin.line.deliveryTitle": "訊息發送量",
 
   // 後台管理 P3 — 使用者監看
   "admin.users.title": "使用者",

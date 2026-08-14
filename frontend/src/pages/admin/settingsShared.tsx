@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import { CheckCircle, FloppyDisk, WarningCircle } from "@phosphor-icons/react";
 import type { TFunc } from "../../lib/i18n";
+import AdminLoading from "./AdminLoading";
 
 // Shared form primitives for the three admin settings pages (LLM / RAG-KG / Analyze). Each page keeps
 // its OWN narrow FormState + toPayload (sending only its group's keys); these bits are the common shell.
@@ -126,9 +127,10 @@ export function SaveBar({ t, save, onSave }: { t: TFunc; save: SaveState; onSave
   );
 }
 
-// Loading + load-error states shared by the settings pages.
-export function SettingsLoading({ t }: { t: TFunc }) {
-  return <p className="text-sm text-muted">{t("admin.settings.loading")}</p>;
+// Loading + load-error states shared by the settings pages. The loading state is the console-wide
+// animated one (it reads its own label key), so it takes no `t` — the three call sites pass none.
+export function SettingsLoading() {
+  return <AdminLoading labelKey="admin.settings.loading" />;
 }
 
 export function SettingsLoadError({ t }: { t: TFunc }) {

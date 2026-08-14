@@ -10,6 +10,7 @@ import {
 } from "@phosphor-icons/react";
 import { api, type AdminOverview as AdminOverviewData } from "../../api";
 import { useI18n } from "../../lib/i18n";
+import AdminLoading from "./AdminLoading";
 
 type Status = "loading" | "ready" | "error";
 
@@ -34,7 +35,7 @@ export default function AdminOverview() {
     };
   }, []);
 
-  if (status === "loading") return <p className="text-sm text-muted">{t("admin.loading")}</p>;
+  if (status === "loading") return <AdminLoading />;
   if (status === "error" || !data)
     return (
       <div className="flex items-start gap-2.5 rounded-2xl border border-danger/30 bg-danger/[0.06] p-4 text-sm text-danger">
@@ -87,8 +88,10 @@ export default function AdminOverview() {
   );
 }
 
-// Shared with AdminLine (../../pages/admin/AdminLine.tsx) — the small stat-card tile both pages use.
-export function OverviewCard({
+// The small stat-card tile this page's grid is built from. It used to be exported and shared with
+// AdminLine; that page now builds its own taller cards (donut, copy field, per-card actions), so
+// this is private to the overview again.
+function OverviewCard({
   icon,
   label,
   value,

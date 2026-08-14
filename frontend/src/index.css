@@ -359,3 +359,103 @@ body {
   .lm-scan::after { opacity: 0; }
   .lm-el { display: none; }
 }
+
+/* ── Login stage (`/login`) ─────────────────────────────────────────────────
+   Everything the login page CAN express as a Tailwind utility, it does — this block holds only
+   what utilities have no vocabulary for: the layered radial blooms behind the athlete, the
+   organic (non-circular) floor sweep, the dot fields, the conic score ring, and the entrance /
+   idle keyframes.
+
+   Class selectors, never element selectors. The reference prototype this is ported from styled
+   `form label`, `footer` and `a` globally; in this app those would reach into history, settings,
+   movements, games and admin. Nothing below matches an element it was not handed, and every
+   class is prefixed `lgn-`. */
+
+/* The violet-into-white bloom the athlete stands in. Two ellipses (a cool halo up top, a warmer
+   one bottom-left) sit under everything; the ::after is the "floor" — a wide, slightly rotated
+   dome whose gradient runs white at the horizon into violet at the edges. */
+.lgn-stage::before {
+  position: absolute;
+  z-index: -4;
+  content: "";
+  inset: 11% 0 0 1%;
+  border-radius: 50% 42% 0 0;
+  background:
+    radial-gradient(ellipse at 60% 46%, rgba(217, 217, 255, 0.72) 0%, rgba(244, 244, 255, 0.42) 31%, transparent 59%),
+    radial-gradient(ellipse at 27% 88%, rgba(152, 125, 255, 0.33) 0%, rgba(213, 203, 255, 0.26) 42%, transparent 67%);
+}
+.lgn-stage::after {
+  position: absolute;
+  z-index: -3;
+  content: "";
+  left: -8%;
+  bottom: -31%;
+  width: 104%;
+  height: 63%;
+  transform: rotate(2deg);
+  border-radius: 49% 54% 0 0;
+  background: radial-gradient(
+    ellipse at 52% 15%,
+    rgba(255, 255, 255, 0.97) 0 24%,
+    rgba(220, 211, 255, 0.8) 55%,
+    rgba(113, 72, 246, 0.75) 100%
+  );
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* Concentric "measurement" rings on the floor under the athlete's feet — a visual echo of the
+   app's own skeleton overlay. */
+.lgn-rings i {
+  position: absolute;
+  inset: 16%;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+}
+.lgn-rings i:nth-child(2) { inset: 32%; }
+.lgn-rings i:nth-child(3) { inset: 46%; }
+
+.lgn-dots {
+  background-image: radial-gradient(circle, #c4b4ff 2px, transparent 2.2px);
+  background-size: 22px 22px;
+}
+
+/* Score ring: a conic sweep with a white plug punched out of the middle. The arc stops at 330deg
+   so the ring reads as a gauge rather than a solid disc. */
+.lgn-ring {
+  background: conic-gradient(#11c267 0deg 330deg, #dff6e9 330deg 360deg);
+}
+.lgn-ring::before {
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  content: "";
+  border-radius: 50%;
+  background: #fff;
+}
+
+.lgn-copy { animation: lgn-rise 0.8s cubic-bezier(0.2, 0.75, 0.25, 1) both; }
+.lgn-art { animation: lgn-lift 1s 0.12s cubic-bezier(0.16, 0.8, 0.28, 1) both; }
+.lgn-panel { animation: lgn-slide 0.9s cubic-bezier(0.18, 0.8, 0.28, 1) both; }
+/* Entrance then idle drift. The four cards are staggered by explicit delay classes rather than
+   :nth-child so the markup order is free to change without reshuffling the choreography. */
+.lgn-card {
+  animation:
+    lgn-pop 0.8s 0.38s cubic-bezier(0.17, 0.77, 0.34, 1) both,
+    lgn-float 5.5s 1.3s ease-in-out infinite;
+}
+.lgn-card-b { animation-delay: 0.46s, 2.4s; }
+.lgn-card-c { animation-delay: 0.5s, 2s; }
+.lgn-card-d { animation-delay: 0.58s, 1.65s; }
+.lgn-orb { animation: lgn-orb 3.2s ease-in-out infinite; }
+.lgn-orb-b { animation-delay: 1s; }
+
+@keyframes lgn-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes lgn-lift { from { opacity: 0; transform: translateY(24px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes lgn-slide { from { opacity: 0; transform: translateX(22px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes lgn-pop { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes lgn-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -5px; } }
+@keyframes lgn-orb { 0%, 100% { transform: scale(0.8); opacity: 0.35; } 50% { transform: scale(1.2); opacity: 0.8; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .lgn-copy, .lgn-art, .lgn-panel, .lgn-card, .lgn-orb { animation: none !important; }
+}

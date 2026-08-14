@@ -68,6 +68,83 @@ export interface RetrievalContext {
   query?: string;
 }
 
+// ---------------------------------------------------------------------------
+// Training plans ("訓練菜單")
+// ---------------------------------------------------------------------------
+
+/** One exercise slot inside a plan's day. `day_index` is RELATIVE (Day 1..7), never a date — a
+ *  plan is a reusable template the user restarts, not a calendar. */
+export interface PlanItem {
+  id: string;
+  plan_id: string;
+  day_index: number;
+  position: number;
+  /** Canonical catalog spelling. All 16 are plannable; only the ones in `getMovements()` can be
+   *  analysed, so the rest are tick-only. */
+  movement: string;
+  sets: number;
+  reps: number;
+  notes: string | null;
+  /** Set for the CURRENT run only. Starting the plan again clears it (and `analysis_id`). */
+  completed_at: string | null;
+  /** The analysis the user recorded for this item, when they trained it through the studio. */
+  analysis_id: string | null;
+  created_at: string;
+}
+
+export interface Plan {
+  id: string;
+  name: string;
+  notes: string | null;
+  /** Which built-in template this was copied from, or null when built from scratch. Provenance
+   *  only — the copy is independent. */
+  template_key: string | null;
+  started_at: string | null;
+  created_at: string;
+  updated_at: string;
+  items: PlanItem[];
+}
+
+/** A plan as the list page shows it: no items, but the counts a card needs. */
+export interface PlanSummary extends Omit<Plan, "items"> {
+  item_count: number;
+  completed_count: number;
+  /** Distinct days used, derived server-side — NOT the highest day index. */
+  day_count: number;
+  /** Distinct movements in plan order, so a card can say what a plan trains without fetching it. */
+  movements: string[];
+}
+
+export interface PlanTemplate {
+  key: string;
+  /** English fallback. The UI renders `plans.template.<key>.name` and sends the localized name
+   *  back on create, so a plan created in Chinese is stored in Chinese. */
+  name: string;
+  description: string;
+  items: Array<{ day_index: number; movement: string; sets: number; reps: number }>;
+}
+
+export interface NewPlanItem {
+  day_index: number;
+  movement: string;
+  sets?: number;
+  reps?: number;
+  notes?: string | null;
+  position?: number;
+}
+
+export interface PlanItemPatch {
+  day_index?: number;
+  movement?: string;
+  sets?: number;
+  reps?: number;
+  notes?: string | null;
+  position?: number;
+  /** true stamps completion; false clears it AND the analysis link. */
+  completed?: boolean;
+  analysis_id?: string;
+}
+
 // One fault a movement defines, with its 1-hop graph connectivity (0 = no linked
 // causes/corrections/risks to render yet).
 export interface MovementFault {
@@ -477,6 +554,31 @@ async function getJSON<T>(url: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+/**
+ * A JSON write (POST/PATCH/DELETE) that returns JSON. The read path has `getJSON`; every plan
+ * mutation used to be six near-identical lines of fetch + status check, so they share this.
+ *
+ * The server's `detail` is preferred over the bare status line: the plan endpoints answer 400 with
+ * a real explanation ("Unknown movement 'Burpee'."), and swallowing it would leave the UI showing
+ * "400 Bad Request" for a problem the user can actually fix.
+ */
+async function sendJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(await authHeader()),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => ({}))) as { detail?: unknown };
+    if (typeof detail.detail === "string") throw new Error(detail.detail);
+    throw new Error(`${res.status} ${res.statusText} for ${url}`);
+  }
+  return (await res.json()) as T;
+}
+
 export type UploadLimitCode = "upload_too_large" | "storage_quota_exceeded";
 
 /**
@@ -660,6 +762,53 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
     return (await res.json()) as { deleted: number };
   },
+
+  // --- Training plans ------------------------------------------------------
+  // Everything but `planTemplates` requires a session: a plan is one user's own data.
+
+  /** The built-in starting points. Public, like `getMovements` — a static catalog. */
+  planTemplates: () =>
+    getJSON<{ templates: PlanTemplate[] }>("/api/plans/templates").then((r) => r.templates),
+
+  listPlans: () => getJSON<{ plans: PlanSummary[] }>("/api/plans").then((r) => r.plans),
+
+  getPlan: (id: string) => getJSON<Plan>(`/api/plans/${encodeURIComponent(id)}`),
+
+  /** Create a plan: empty, from explicit `items`, or copied from `template_key`. Passing both a
+   *  template and items is not merged — the server takes the template and ignores the items. */
+  createPlan: (body: {
+    name: string;
+    notes?: string | null;
+    template_key?: string;
+    items?: NewPlanItem[];
+  }) => sendJSON<Plan>("/api/plans", "POST", body),
+
+  updatePlan: (id: string, patch: { name?: string; notes?: string | null }) =>
+    sendJSON<Omit<Plan, "items">>(`/api/plans/${encodeURIComponent(id)}`, "PATCH", patch),
+
+  deletePlan: (id: string) =>
+    sendJSON<{ deleted: number }>(`/api/plans/${encodeURIComponent(id)}`, "DELETE"),
+
+  /** Begin a run: stamps `started_at` and CLEARS every item's tick and analysis link. Destructive
+   *  by design — the plan tracks the current run, while the analyses stay in 我的紀錄. */
+  startPlan: (id: string) =>
+    sendJSON<Plan>(`/api/plans/${encodeURIComponent(id)}/start`, "POST"),
+
+  addPlanItem: (planId: string, item: NewPlanItem) =>
+    sendJSON<PlanItem>(`/api/plans/${encodeURIComponent(planId)}/items`, "POST", item),
+
+  updatePlanItem: (planId: string, itemId: string, patch: PlanItemPatch) =>
+    sendJSON<PlanItem>(
+      `/api/plans/${encodeURIComponent(planId)}/items/${encodeURIComponent(itemId)}`,
+      "PATCH",
+      patch
+    ),
+
+  deletePlanItem: (planId: string, itemId: string) =>
+    sendJSON<{ deleted: number }>(
+      `/api/plans/${encodeURIComponent(planId)}/items/${encodeURIComponent(itemId)}`,
+      "DELETE"
+    ),
 
   // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
   // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user

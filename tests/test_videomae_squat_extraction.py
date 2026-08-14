@@ -1,0 +1,241 @@
+from __future__ import annotations
+
+import json
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import numpy as np
+
+from src.video.videomae_feature_extraction import (
+    ClipRequest,
+    build_requests,
+    iter_requests,
+    VARIANTS,
+    load_variant_boxes,
+    resolve_boxes,
+    sample_clip_starts,
+    save_feature_bundle,
+    select_chunk,
+)
+from src.video.squat_video_variants import BOX_VARIANTS
+from src.video.videomae_pooling import LEGACY_FIRST_TOKEN, MEAN_POOL_FC_NORM, build_provenance
+
+
+def write_split(split_dir: Path, split_name: str, video_ids: list[str]) -> None:
+    split_dir.mkdir(parents=True, exist_ok=True)
+    (split_dir / f"{split_name}_keys.json").write_text(json.dumps(video_ids), encoding="utf-8")
+
+
+class SampleClipStartsTests(unittest.TestCase):
+    def test_four_clips_span_the_whole_video(self) -> None:
+        # 16 frames at stride 2 covers 31 frames, so the last start is 120 - 31 = 89.
+        self.assertEqual(sample_clip_starts(120, 16, 2, 4), [0, 29, 59, 89])
+
+    def test_single_clip_is_centred(self) -> None:
+        self.assertEqual(sample_clip_starts(120, 16, 2, 1), [44])
+
+    def test_video_shorter_than_one_clip_collapses_to_zero(self) -> None:
+        """The frame reader pads by repeating, so a short video is legal, not an error."""
+        self.assertEqual(sample_clip_starts(20, 16, 2, 4), [0, 0, 0, 0])
+
+    def test_unreadable_frame_count_still_yields_a_start(self) -> None:
+        self.assertEqual(sample_clip_starts(0, 16, 2, 4), [0])
+
+
+class BuildRequestsTests(unittest.TestCase):
+    def test_requests_carry_their_split_and_find_nested_videos(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video_root = root / "videos"
+            (video_root / "nested").mkdir(parents=True)
+            (video_root / "a.mp4").write_bytes(b"")
+            (video_root / "nested" / "b.mp4").write_bytes(b"")
+            write_split(root / "Splits", "train", ["a"])
+            write_split(root / "Splits", "val", ["b"])
+
+            requests = build_requests(video_root, root / "Splits", ["train", "val"])
+
+            self.assertEqual([(r.video_id, r.split) for r in requests], [("a", "train"), ("b", "val")])
+            self.assertEqual(requests[1].video_path.name, "b.mp4")
+
+    def test_missing_videos_are_reported_and_skipped(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            video_root = root / "videos"
+            video_root.mkdir(parents=True)
+            (video_root / "a.mp4").write_bytes(b"")
+            write_split(root / "Splits", "test", ["a", "gone"])
+
+            requests = build_requests(video_root, root / "Splits", ["test"])
+
+            self.assertEqual([r.video_id for r in requests], ["a"])
+
+
+class SelectChunkTests(unittest.TestCase):
+    def make_requests(self, count: int) -> list[ClipRequest]:
+        return [ClipRequest(video_id=str(i), split="train", video_path=Path(f"{i}.mp4")) for i in range(count)]
+
+    def test_chunks_partition_the_work_exactly_once(self) -> None:
+        requests = self.make_requests(10)
+        chunks = [select_chunk(requests, 3, index) for index in range(3)]
+
+        covered = [request.video_id for chunk in chunks for request in chunk]
+        self.assertEqual(sorted(covered, key=int), [r.video_id for r in requests])
+        self.assertEqual(len(covered), len(set(covered)))
+
+    def test_single_chunk_is_the_whole_list(self) -> None:
+        requests = self.make_requests(4)
+        self.assertEqual(select_chunk(requests, 1, 0), requests)
+
+    def test_out_of_range_chunk_index_is_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            select_chunk(self.make_requests(4), 2, 2)
+
+
+class SaveFeatureBundleTests(unittest.TestCase):
+    def test_bundle_stores_both_pooling_stacks_and_the_variant_provenance(self) -> None:
+        with TemporaryDirectory() as tmp:
+            output_path = Path(tmp) / "train" / "a.npz"
+            request = ClipRequest(video_id="a", split="train", video_path=Path("videos/a.mp4"))
+            bundle = {
+                f"clip_features_{LEGACY_FIRST_TOKEN}": np.zeros((4, 8), dtype=np.float32),
+                f"clip_features_{MEAN_POOL_FC_NORM}": np.ones((4, 8), dtype=np.float32),
+                "clip_starts": np.asarray([0, 1, 2, 3], dtype=np.int32),
+                "total_frames": np.asarray(120, dtype=np.int32),
+            }
+            provenance = build_provenance(
+                model_name="m",
+                clip_length=16,
+                frame_stride=2,
+                num_clips=4,
+                transformers_version="5.5.0",
+                variant="person_crop",
+            )
+
+            save_feature_bundle(output_path, request, bundle, provenance)
+
+            with np.load(output_path, allow_pickle=False) as data:
+                self.assertEqual(str(data["video_id"]), "a")
+                self.assertEqual(str(data["split"]), "train")
+                self.assertEqual(data[f"clip_features_{MEAN_POOL_FC_NORM}"].shape, (4, 8))
+                self.assertEqual(str(data["provenance_variant"]), "person_crop")
+                self.assertEqual(str(data["provenance_num_clips"]), "4")
+
+    def test_limit_truncates_the_work_list(self) -> None:
+        requests = [ClipRequest(video_id=str(i), split="train", video_path=Path("x.mp4")) for i in range(5)]
+        self.assertEqual(len(list(iter_requests(requests, 2))), 2)
+        self.assertEqual(len(list(iter_requests(requests, None))), 5)
+
+
+
+class VariantBoxLoadingTests(unittest.TestCase):
+    """Controls travel as boxes, not as re-encoded videos.
+
+    Shipping variant videos would put one extra lossy generation between the control
+    arms and the untouched full_frame arm -- measured at cos 0.997 between the two
+    routes on real clips, i.e. small but real, and in the direction that would let a
+    dropped control be blamed on the codec instead of on the missing person.
+    """
+
+    def test_boxes_are_read_per_video_id(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "variant": "person_crop",
+                        "rows": [
+                            {"video_id": "a", "box": [1, 2, 3, 4]},
+                            {"video_id": "b", "box": None},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            boxes = load_variant_boxes(manifest)
+
+            self.assertEqual(boxes["a"].as_tuple(), (1, 2, 3, 4))
+            self.assertIsNone(boxes["b"])
+
+    def test_a_video_absent_from_the_manifest_is_absent_from_the_mapping(self) -> None:
+        """main() turns this into a refusal: a control covering fewer videos than the
+        main arm is not a paired comparison."""
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(json.dumps({"rows": [{"video_id": "a", "box": [0, 0, 2, 2]}]}), encoding="utf-8")
+            self.assertNotIn("zz", load_variant_boxes(manifest))
+
+
+
+class MissingBoxIsRefusedTests(unittest.TestCase):
+    def test_a_row_without_a_box_key_is_refused(self) -> None:
+        """The defect this exists to stop: a stub row read as 'no person visible',
+        which leaves the video untransformed inside a control arm."""
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(
+                json.dumps({"rows": [{"video_id": "a", "box": [1, 2, 3, 4]}, {"video_id": "b", "skipped": True}]}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SystemExit) as ctx:
+                load_variant_boxes(manifest)
+            self.assertIn("record no box", str(ctx.exception))
+
+    def test_an_explicit_null_box_is_still_accepted(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text(json.dumps({"rows": [{"video_id": "a", "box": None}]}), encoding="utf-8")
+            self.assertEqual(load_variant_boxes(manifest), {"a": None})
+
+
+class ResolveBoxesTests(unittest.TestCase):
+    """The per-variant manifest contract for B1's four-arm 2x2."""
+
+    def write_manifest(self, tmp: Path, video_ids: list[str]) -> Path:
+        manifest = tmp / "manifest.json"
+        manifest.write_text(
+            json.dumps({"rows": [{"video_id": vid, "box": [0, 0, 2, 4]} for vid in video_ids]}),
+            encoding="utf-8",
+        )
+        return manifest
+
+    def test_a_box_variant_without_a_manifest_is_refused(self) -> None:
+        for variant in BOX_VARIANTS:
+            with self.assertRaises(SystemExit):
+                resolve_boxes(variant, None, ["a"])
+
+    def test_a_box_free_variant_needs_no_manifest(self) -> None:
+        for variant in ("full_frame", "full_frame_letterbox", "reencoded"):
+            self.assertEqual(resolve_boxes(variant, None, ["a", "b"]), {})
+
+    def test_a_box_free_variant_handed_a_manifest_is_refused(self) -> None:
+        """full_frame_letterbox crops nothing and takes no box. Accepting a manifest
+        would let it be run as a quietly different arm than its name claims."""
+        with TemporaryDirectory() as tmp:
+            manifest = self.write_manifest(Path(tmp), ["a"])
+            with self.assertRaises(SystemExit) as ctx:
+                resolve_boxes("full_frame_letterbox", manifest, ["a"])
+            self.assertIn("takes no box", str(ctx.exception))
+
+    def test_a_manifest_missing_videos_is_refused(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = self.write_manifest(Path(tmp), ["a"])
+            with self.assertRaises(SystemExit) as ctx:
+                resolve_boxes("person_crop_centercrop", manifest, ["a", "b"])
+            self.assertIn("not a paired comparison", str(ctx.exception))
+
+    def test_a_covering_manifest_returns_every_box(self) -> None:
+        with TemporaryDirectory() as tmp:
+            manifest = self.write_manifest(Path(tmp), ["a", "b"])
+            boxes = resolve_boxes("person_crop_centercrop", manifest, ["a", "b"])
+            self.assertEqual(sorted(boxes), ["a", "b"])
+
+    def test_every_box_variant_is_an_offered_choice(self) -> None:
+        for variant in BOX_VARIANTS:
+            self.assertIn(variant, VARIANTS)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,62 +1,30 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowCounterClockwise,
-  ArrowLeft,
+  Barbell,
   CircleNotch,
-  ClockCounterClockwise,
   EnvelopeSimple,
+  Eye,
+  EyeSlash,
   Info,
   Lock,
+  SignIn,
+  Sparkle,
+  TrendUp,
   WarningCircle,
   type Icon,
 } from "@phosphor-icons/react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
-import { motion, useReducedMotion } from "motion/react";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import { useLiffContext } from "../lib/liffContext";
+import LineLogo from "../components/LineLogo";
 
 type Mode = "signin" | "signup";
-
-// Brand-side value points (why make an account): persistence is the whole reason to sign in.
-const POINTS: { Icon: Icon; key: string }[] = [
-  { Icon: ClockCounterClockwise, key: "auth.point1" },
-  { Icon: ArrowCounterClockwise, key: "auth.point2" },
-  { Icon: Lock, key: "auth.point3" },
-];
-
-// The official LINE logo: brand-green rounded square with the white speech bubble and the
-// green "LINE" wordmark cut into it. Traced verbatim from LINE's own SVG so it matches the
-// brand exactly; inlined (not hotlinked) because the app's CSP blocks external images.
-function LineLogo({ size = 20 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 320 320" aria-hidden="true">
-      <rect width="320" height="320" rx="72.14" fill="#06C755" />
-      <path
-        fill="#fff"
-        d="M266.66,144.92c0-47.74-47.86-86.58-106.69-86.58S53.28,97.18,53.28,144.92c0,42.8,38,78.65,89.22,85.42,3.48.75,8.21,2.29,9.4,5.26,1.08,2.7.71,6.93.35,9.65,0,0-1.25,7.53-1.52,9.13-.47,2.7-2.15,10.55,9.24,5.76s61.44-36.18,83.82-61.95h0C259.25,181.24,266.66,164,266.66,144.92Z"
-      />
-      <path
-        fill="#06C755"
-        d="M231.16,172.49h-30a2,2,0,0,1-2-2v0h0V123.94h0v0a2,2,0,0,1,2-2h30a2,2,0,0,1,2,2v7.57a2,2,0,0,1-2,2H210.79v7.85h20.37a2,2,0,0,1,2,2V151a2,2,0,0,1-2,2H210.79v7.86h20.37a2,2,0,0,1,2,2v7.56A2,2,0,0,1,231.16,172.49Z"
-      />
-      <path
-        fill="#06C755"
-        d="M120.29,172.49a2,2,0,0,0,2-2v-7.56a2,2,0,0,0-2-2H99.92v-37a2,2,0,0,0-2-2H90.32a2,2,0,0,0-2,2v46.53h0v0a2,2,0,0,0,2,2h30Z"
-      />
-      <rect fill="#06C755" x="128.73" y="121.85" width="11.64" height="50.64" rx="2.04" />
-      <path
-        fill="#06C755"
-        d="M189.84,121.85h-7.56a2,2,0,0,0-2,2v27.66l-21.3-28.77a1.2,1.2,0,0,0-.17-.21v0l-.12-.12,0,0-.11-.09-.06,0-.11-.08-.06,0-.11-.06-.07,0-.11,0-.07,0-.12,0-.08,0-.12,0h-.08l-.11,0h-7.71a2,2,0,0,0-2,2v46.56a2,2,0,0,0,2,2h7.57a2,2,0,0,0,2-2V142.81l21.33,28.8a2,2,0,0,0,.52.52h0l.12.08.06,0,.1.05.1,0,.07,0,.14,0h0a2.42,2.42,0,0,0,.54.07h7.52a2,2,0,0,0,2-2V123.89A2,2,0,0,0,189.84,121.85Z"
-      />
-    </svg>
-  );
-}
 
 // The Google "G" is a brand mark (the OAuth convention), not a hand-rolled generic icon.
 function GoogleG() {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+    <svg width="20" height="20" viewBox="0 0 18 18" aria-hidden="true">
       <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />
       <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z" />
       <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z" />
@@ -65,11 +33,46 @@ function GoogleG() {
   );
 }
 
-// Auth gateway into the studio. Lives in the app's theme-aware token system (dual-mode), with
-// an asymmetric split: brand + reason-to-sign-up on the left, the form on the right.
+// One of the three floating capability cards on the brand stage. `extra` is the card's little
+// data ornament (sparkline / progress bar / bar chart) — the thing that makes it read as a
+// screenshot of the product rather than as a feature bullet.
+function StageCard({
+  className,
+  Glyph,
+  title,
+  body,
+  extra,
+}: {
+  className: string;
+  Glyph: Icon;
+  title: string;
+  body: string;
+  extra?: ReactNode;
+}) {
+  return (
+    <div
+      className={`lgn-card absolute z-[7] w-[214px] rounded-2xl border border-white/95 bg-white/[0.88] p-4 pb-3.5 shadow-card backdrop-blur-[10px] ${className}`}
+    >
+      <div className="flex gap-2.5">
+        <span className="grid h-[34px] w-[34px] shrink-0 place-items-center rounded-[10px] bg-[#eee9ff] text-primary">
+          <Glyph size={21} weight="duotone" />
+        </span>
+        <div className="min-w-0">
+          <strong className="block text-xs font-bold leading-snug text-content">{title}</strong>
+          <span className="mt-1 block text-[10.5px] leading-[1.5] text-muted">{body}</span>
+        </div>
+      </div>
+      {extra}
+    </div>
+  );
+}
+
+// Auth gateway into the studio. Ported from the login-page design study: a single rounded shell
+// holding an illustrated brand stage on the left and the form on the right. The stage is desktop
+// only — its callouts are absolutely positioned in the stage's own coordinate space, which has no
+// sensible phone equivalent, and the LIFF path lands here on small screens.
 export default function Login() {
   const { t } = useI18n();
-  const reduce = useReducedMotion();
   const navigate = useNavigate();
   const location = useLocation();
   const { user, configured, signInWithPassword, signUpWithPassword, signInWithGoogle, signInWithLine } =
@@ -81,6 +84,7 @@ export default function Login() {
   const [mode, setMode] = useState<Mode>("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -95,7 +99,7 @@ export default function Login() {
   // analysis pipeline is running here), so the app's waits read as one system.
   if (!ready && isInClient) {
     return (
-      <div className="grid min-h-[100dvh] place-items-center bg-background-dark text-muted" role="status">
+      <div className="grid min-h-[100dvh] place-items-center bg-background text-muted" role="status">
         <CircleNotch size={24} className="animate-spin" />
         <span className="sr-only">{t("loader.neutral")}</span>
       </div>
@@ -155,173 +159,265 @@ export default function Login() {
     }
   }
 
+  const fieldWrap =
+    "flex h-[52px] items-center rounded-[14px] border border-border bg-white/70 transition-colors focus-within:border-primary focus-within:ring-[3px] focus-within:ring-primary/10";
+  const fieldInput =
+    "h-full w-full min-w-0 bg-transparent px-3.5 text-[15px] text-content outline-none placeholder:text-faint";
+  const socialButton =
+    "flex h-[52px] w-full items-center justify-center gap-3 rounded-[13px] border border-border bg-white text-[15px] font-semibold text-content shadow-[0_5px_11px_rgba(35,46,97,0.035)] transition-colors hover:border-primary/40 hover:bg-primary/[0.03] active:scale-[0.995] disabled:opacity-60";
+
   return (
-    <div className="grid min-h-[100dvh] bg-background-dark text-content lg:grid-cols-2">
-      {/* Brand / value panel — desktop only */}
-      <aside className="relative hidden flex-col justify-between overflow-hidden border-r border-border-dark bg-surface-dark p-12 lg:flex">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-primary/10 blur-3xl"
-        />
-        <Link to="/" className="flex items-center gap-2.5">
-          <img src="/icon.svg" alt="" className="h-9 w-9 rounded" />
-          <span className="font-display text-lg font-bold tracking-tight">X-Coach</span>
-        </Link>
-        <div className="relative">
-          <h2 className="max-w-sm font-display text-3xl font-bold leading-tight tracking-tight">
-            {t("auth.brandHeadline")}
-          </h2>
-          <p className="mt-3 max-w-sm leading-relaxed text-muted">{t("auth.brandSub")}</p>
-          <ul className="mt-8 flex flex-col gap-4">
-            {POINTS.map((p) => (
-              <li key={p.key} className="flex items-center gap-3">
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <p.Icon size={20} weight="duotone" />
-                </span>
-                <span className="text-sm text-content">{t(p.key)}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </aside>
-
-      {/* Form panel */}
-      <main className="flex items-center justify-center px-5 py-10 sm:px-8">
-        <motion.div
-          initial={reduce ? false : { opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-sm"
+    <div className="min-h-[100dvh] bg-background xl:p-4">
+      {/* Below `lg` the brand stage is gone, so the shell keeps the lavender canvas and the form
+          reads as a card on it; from `lg` up the shell itself is the white surface the stage
+          paints on. */}
+      <div className="relative grid min-h-[100dvh] grid-rows-[1fr_auto] overflow-hidden bg-background lg:bg-white xl:min-h-[calc(100dvh-2rem)] xl:rounded-[2rem] xl:border xl:border-white xl:shadow-card">
+        <Link
+          to="/"
+          aria-label={t("auth.brandHome")}
+          className="absolute left-6 top-6 z-20 inline-flex items-center gap-3.5 lg:left-11 lg:top-9"
         >
-          <Link
-            to="/app"
-            className="mb-8 inline-flex items-center gap-1.5 text-sm text-muted transition-colors hover:text-content"
+          <img src="/icon.svg" alt="" width={52} height={52} className="h-[52px] w-[52px] rounded-[12px] shadow-accent" />
+          <span className="font-display text-2xl font-extrabold tracking-tight text-content">X-Coach</span>
+        </Link>
+
+        {/* 61/39 split, matching the design study the percentage offsets below were measured in. */}
+        <div className="grid pt-28 lg:grid-cols-[minmax(0,1.564fr)_minmax(430px,1fr)] lg:pt-[4.8rem]">
+          {/* ── Brand stage ─────────────────────────────────────────────── */}
+          <section
+            aria-labelledby="lgn-hero-title"
+            className="lgn-stage relative isolate hidden min-h-[716px] overflow-hidden lg:block"
           >
-            <ArrowLeft size={18} />
-            {t("auth.back")}
-          </Link>
+            {/* -z-[1], not lower: the stage's floor gradient sits at -3/-4, and the mock shows the
+                dot fields ON the violet corner rather than buried under it. */}
+            <div className="lgn-dots absolute -z-[1] h-[126px] w-[126px] opacity-50 right-[10%] top-11" aria-hidden="true" />
+            <div className="lgn-dots absolute -z-[1] h-[126px] w-[126px] opacity-50 bottom-[18px] left-[4%]" aria-hidden="true" />
+            <span className="lgn-orb absolute right-[19%] top-[48%] h-2 w-2 rounded-full border-2 border-[#ad92ff] opacity-70" aria-hidden="true" />
+            <span className="lgn-orb lgn-orb-b absolute right-[4.5%] top-[56%] h-[9px] w-[9px] rounded-full border-2 border-[#ad92ff] opacity-70" aria-hidden="true" />
 
-          <h1 className="font-display text-2xl font-bold tracking-tight">
-            {t(isSignup ? "auth.signUpTitle" : "auth.signInTitle")}
-          </h1>
-          <p className="mt-1.5 text-sm text-muted">
-            {t(isSignup ? "auth.signUpSub" : "auth.signInSub")}
-          </p>
-
-          {!configured && (
-            <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-border-dark bg-content/[0.03] p-3.5 text-sm text-muted">
-              <Info size={18} className="shrink-0 text-faint" />
-              <span>{t("auth.notConfigured")}</span>
-            </div>
-          )}
-
-          <form onSubmit={submit} className="mt-6 flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="email" className="text-sm font-medium text-content">
-                {t("auth.email")}
-              </label>
-              <input
-                id="email"
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="rounded-xl border border-border-dark bg-content/[0.02] px-3.5 py-2.5 text-sm text-content outline-none transition-colors placeholder:text-faint focus:border-primary focus:bg-content/[0.04]"
-              />
+            <div className="lgn-copy absolute left-[13%] top-[72px] z-[6]">
+              {/* h2, not h1: the stage is desktop-only, so making it the document's h1 would leave
+                  phones with no h1 at all. The page's subject is the form, and its title keeps the
+                  h1 it has always had. */}
+              <h2
+                id="lgn-hero-title"
+                className="font-display text-[clamp(38px,3vw,49px)] font-extrabold leading-[1.13] tracking-[-0.03em] text-content"
+              >
+                {t("auth.heroLine1")}
+                <br />
+                {t("auth.heroLine2Lead")} <span className="text-primary">{t("auth.heroLine2Accent")}</span>
+              </h2>
+              {/* Capped so the copy wraps before it reaches the Form-score card, which floats into
+                  this line's track. The cap widens with the stage. */}
+              <p className="mt-4 max-w-[24rem] text-base leading-relaxed text-muted 2xl:max-w-[29rem]">
+                {t("auth.heroSub")}
+              </p>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="password" className="text-sm font-medium text-content">
-                {t("auth.password")}
-              </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete={isSignup ? "new-password" : "current-password"}
-                required
-                minLength={6}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="rounded-xl border border-border-dark bg-content/[0.02] px-3.5 py-2.5 text-sm text-content outline-none transition-colors placeholder:text-faint focus:border-primary focus:bg-content/[0.04]"
-              />
+            <img
+              src="/assets/squat-hero.webp"
+              width={920}
+              height={814}
+              alt=""
+              className="lgn-art absolute bottom-[2.7%] left-[29.5%] z-[2] h-[61%] w-[56%] object-contain mix-blend-multiply"
+            />
+            <div
+              aria-hidden="true"
+              className="lgn-rings absolute bottom-[2.8%] left-[26%] z-[1] h-[13%] w-[54%] rounded-[50%] border border-white/90 shadow-[0_0_40px_rgba(121,80,255,0.2)]"
+            >
+              <i />
+              <i />
+              <i />
             </div>
 
-            {error && (
-              <div className="flex items-start gap-2.5 rounded-xl border border-danger/30 bg-danger/[0.06] p-3.5 text-sm text-danger">
-                <WarningCircle size={18} className="shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-medium">{t("auth.errorTitle")}</p>
-                  <p className="mt-0.5 break-words text-danger/80">{error}</p>
+            <StageCard
+              className="left-[10%] top-[287px]"
+              Glyph={Sparkle}
+              title={t("auth.card1Title")}
+              body={t("auth.card1Body")}
+              extra={
+                <svg className="mt-1 w-[122px] translate-x-[44px]" viewBox="0 0 122 32" fill="none" aria-hidden="true">
+                  <path d="M1 27.5 17 20l13 3.5 15-7 12 3 14-6 14 4 13-8 11 6L121 4" stroke="#9b80ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M1 31h120" stroke="#e5e1ff" strokeWidth="1" />
+                  <circle cx="121" cy="4" r="2.2" fill="#7a52ff" />
+                </svg>
+              }
+            />
+
+            {/* Form score — the one card that shows a verdict rather than a capability. */}
+            <div className="lgn-card lgn-card-b absolute right-[7%] top-[190px] z-[7] w-[184px] rounded-2xl border border-white/95 bg-white/[0.88] p-4 shadow-card backdrop-blur-[10px]">
+              <strong className="block text-xs font-bold leading-snug text-content">{t("auth.scoreTitle")}</strong>
+              <div className="mt-3 flex items-center gap-3.5">
+                <div className="lgn-ring relative grid h-[64px] w-[64px] shrink-0 place-items-center rounded-full">
+                  <span className="z-[1] text-[17px] font-extrabold text-content">100%</span>
+                </div>
+                <div>
+                  <b className="block text-sm font-bold text-[#0fbe50]">{t("auth.scoreVerdict")}</b>
+                  <small className="mt-1 block text-[10px] leading-tight text-muted">{t("auth.scoreNote")}</small>
                 </div>
               </div>
-            )}
+            </div>
 
-            {notice && (
-              <div className="flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/[0.06] p-3.5 text-sm text-primary">
-                <EnvelopeSimple size={18} className="shrink-0" />
-                <span>{notice}</span>
+            <StageCard
+              className="lgn-card-c bottom-[148px] left-[14%]"
+              Glyph={Barbell}
+              title={t("auth.card2Title")}
+              body={t("auth.card2Body")}
+              extra={
+                <div className="mt-3 h-[5px] w-full overflow-hidden rounded-full bg-[#eeeefe]" aria-hidden="true">
+                  <span className="block h-full w-[34%] rounded-full bg-gradient-to-r from-[#6f42f7] to-[#9d7bff]" />
+                </div>
+              }
+            />
+
+            <StageCard
+              className="lgn-card-d bottom-[150px] right-[6%]"
+              Glyph={TrendUp}
+              title={t("auth.card3Title")}
+              body={t("auth.card3Body")}
+              extra={
+                <div className="mt-2 flex h-[33px] items-end justify-end gap-[18px] pr-1" aria-hidden="true">
+                  <i className="h-[7px] w-[7px] rounded-t-sm bg-gradient-to-b from-[#bda9ff] to-[#8967fa]" />
+                  <i className="h-[20px] w-[7px] rounded-t-sm bg-gradient-to-b from-[#bda9ff] to-[#8967fa]" />
+                  <i className="h-[31px] w-[7px] rounded-t-sm bg-gradient-to-b from-[#bda9ff] to-[#8967fa]" />
+                  <i className="h-[15px] w-[7px] rounded-t-sm bg-gradient-to-b from-[#bda9ff] to-[#8967fa]" />
+                  <i className="h-[36px] w-[7px] rounded-t-sm bg-gradient-to-b from-[#bda9ff] to-[#8967fa]" />
+                </div>
+              }
+            />
+          </section>
+
+          {/* ── Form panel ──────────────────────────────────────────────── */}
+          <section className="flex items-center justify-center px-5 pb-10 sm:px-8 lg:px-6">
+            <div className="lgn-panel w-full max-w-[554px] rounded-[28px] border border-border bg-white px-6 py-9 shadow-card sm:px-10">
+              <h1 className="font-display text-[30px] font-extrabold tracking-[-0.03em] text-content">
+                {t(isSignup ? "auth.signUpTitle" : "auth.signInTitle")}
+              </h1>
+              <p className="mt-2 text-base text-muted">
+                {t(isSignup ? "auth.signUpSub" : "auth.signInSub")}
+              </p>
+
+              {!configured && (
+                <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-border bg-background p-3.5 text-sm text-muted">
+                  <Info size={18} className="shrink-0 text-faint" />
+                  <span>{t("auth.notConfigured")}</span>
+                </div>
+              )}
+
+              <form onSubmit={submit} className="mt-7">
+                <label htmlFor="email" className="mb-2 block text-sm font-bold text-content">
+                  {t("auth.email")}
+                </label>
+                <div className={fieldWrap}>
+                  <EnvelopeSimple size={21} className="ml-4 shrink-0 text-faint" />
+                  <input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    required
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className={fieldInput}
+                  />
+                </div>
+
+                <label htmlFor="password" className="mb-2 mt-5 block text-sm font-bold text-content">
+                  {t("auth.password")}
+                </label>
+                <div className={fieldWrap}>
+                  <Lock size={21} className="ml-4 shrink-0 text-faint" />
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete={isSignup ? "new-password" : "current-password"}
+                    required
+                    minLength={6}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={fieldInput}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    aria-label={t(showPassword ? "auth.hidePassword" : "auth.showPassword")}
+                    className="grid h-full w-12 shrink-0 place-items-center rounded-r-[14px] text-faint transition-colors hover:text-muted"
+                  >
+                    {showPassword ? <EyeSlash size={21} /> : <Eye size={21} />}
+                  </button>
+                </div>
+
+                {error && (
+                  <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-danger/30 bg-danger/[0.06] p-3.5 text-sm text-danger">
+                    <WarningCircle size={18} className="shrink-0" />
+                    <div className="min-w-0">
+                      <p className="font-medium">{t("auth.errorTitle")}</p>
+                      <p className="mt-0.5 break-words text-danger/80">{error}</p>
+                    </div>
+                  </div>
+                )}
+
+                {notice && (
+                  <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-primary/30 bg-primary/[0.06] p-3.5 text-sm text-primary">
+                    <EnvelopeSimple size={18} className="shrink-0" />
+                    <span>{notice}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={busy || !configured}
+                  className="mt-7 flex h-[54px] w-full items-center justify-center gap-3 rounded-[13px] bg-gradient-to-r from-[#7447ff] to-[#6d3cf5] text-base font-bold text-primary-content shadow-accent transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
+                >
+                  {busy ? <CircleNotch size={20} className="animate-spin" /> : <SignIn size={20} />}
+                  {t(isSignup ? "auth.signUpBtn" : "auth.signInBtn")}
+                </button>
+              </form>
+
+              <div className="my-6 flex items-center gap-4 text-[13px] text-muted">
+                <span className="h-px flex-1 bg-border" />
+                {t("auth.orContinue")}
+                <span className="h-px flex-1 bg-border" />
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={busy || !configured}
-              className="mt-1 flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-primary-content transition-colors hover:bg-primary/90 active:scale-[0.99] disabled:opacity-60"
-            >
-              {busy && <CircleNotch size={18} className="animate-spin" />}
-              {t(isSignup ? "auth.signUpBtn" : "auth.signInBtn")}
-            </button>
-          </form>
+              <button type="button" onClick={google} disabled={busy || !configured} className={socialButton}>
+                <GoogleG />
+                {t("auth.google")}
+              </button>
 
-          <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-wider text-faint">
-            <span className="h-px flex-1 bg-border-dark" />
-            {t("auth.or")}
-            <span className="h-px flex-1 bg-border-dark" />
-          </div>
+              <button type="button" onClick={line} disabled={busy || !configured} className={`mt-3 ${socialButton}`}>
+                <LineLogo />
+                {t("auth.lineBtn")}
+              </button>
 
-          <button
-            type="button"
-            onClick={google}
-            disabled={busy || !configured}
-            className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-border-dark bg-surface-dark px-5 py-2.5 text-sm font-medium text-content transition-colors hover:bg-content/[0.05] active:scale-[0.99] disabled:opacity-60"
-          >
-            <GoogleG />
-            {t("auth.google")}
-          </button>
+              <p className="mt-7 text-center text-[15px] text-muted">
+                {t(isSignup ? "auth.haveAccount" : "auth.noAccount")}{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode(isSignup ? "signin" : "signup");
+                    setError("");
+                    setNotice("");
+                  }}
+                  className="font-semibold text-primary hover:underline"
+                >
+                  {t(isSignup ? "auth.toSignin" : "auth.toSignup")}
+                </button>
+              </p>
 
-          <button
-            type="button"
-            onClick={line}
-            disabled={busy || !configured}
-            className="mt-3 flex w-full items-center justify-center gap-2.5 rounded-xl border border-border-dark bg-surface-dark px-5 py-2.5 text-sm font-medium text-content transition-colors hover:bg-content/[0.05] active:scale-[0.99] disabled:opacity-60"
-          >
-            <LineLogo size={20} />
-            {t("auth.lineBtn")}
-          </button>
+              <p className="mt-3 text-center">
+                <Link to="/app" className="text-sm text-faint transition-colors hover:text-muted">
+                  {t("auth.demoLink")}
+                </Link>
+              </p>
+            </div>
+          </section>
+        </div>
 
-          <p className="mt-6 text-center text-sm text-muted">
-            {t(isSignup ? "auth.haveAccount" : "auth.noAccount")}{" "}
-            <button
-              type="button"
-              onClick={() => {
-                setMode(isSignup ? "signin" : "signup");
-                setError("");
-                setNotice("");
-              }}
-              className="font-medium text-primary hover:underline"
-            >
-              {t(isSignup ? "auth.toSignin" : "auth.toSignup")}
-            </button>
-          </p>
-
-          <p className="mt-4 text-center">
-            <Link to="/app" className="text-sm text-faint transition-colors hover:text-muted">
-              {t("auth.demoLink")}
-            </Link>
-          </p>
-        </motion.div>
-      </main>
+        <footer className="z-[15] flex items-center justify-center px-6 py-5 text-xs text-muted">
+          {t("auth.footer", { year: String(new Date().getFullYear()) })}
+        </footer>
+      </div>
     </div>
   );
 }

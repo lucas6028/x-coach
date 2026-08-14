@@ -55,7 +55,7 @@ export default function AdminSettingsRag() {
     };
   }, []);
 
-  if (status === "loading") return <SettingsLoading t={t} />;
+  if (status === "loading") return <SettingsLoading />;
   if (status === "error" || !form || !data) return <SettingsLoadError t={t} />;
 
   const set = (key: keyof RagForm) => (value: string) => setForm((f) => (f ? { ...f, [key]: value } : f));
@@ -85,8 +85,10 @@ export default function AdminSettingsRag() {
 
   const d = data.defaults;
 
+  // Long forms keep their own reading measure: the admin column is now wide enough for the LINE
+  // page's four-across card row, which would otherwise stretch these label+input rows across it.
   return (
-    <div className="space-y-6">
+    <div className="max-w-3xl space-y-6">
       <SettingsCard
         icon={<Graph size={18} weight="duotone" className="text-primary" />}
         title={t("admin.settings.ragkg")}

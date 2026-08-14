@@ -2,6 +2,7 @@ import {
   Barbell,
   CaretDoubleLeft,
   CaretDoubleRight,
+  ClipboardText,
   ClockCounterClockwise,
   GameController,
   GearSix,
@@ -16,19 +17,21 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
 import AccountMenu from "./AccountMenu";
+import {
+  RAIL_CELL_ACTIVE,
+  RAIL_CELL_IDLE,
+  RAIL_CTA,
+  RAIL_FRAME,
+  RAIL_LABEL,
+  RailMark,
+  railCell,
+} from "./railStyles";
 
-// The app's own brand mark. The reference design's chevron placeholder is gone: with the top row
-// carrying no lockup any more, the rail shows the real X-Coach icon. The artwork carries its own
-// rounded violet plate, so the ring and the shadow have real edges to trace.
-function Mark({ className = "" }: { className?: string }) {
-  return (
-    <img
-      src="/icon.svg"
-      alt=""
-      className={`h-10 w-10 rounded-xl shadow-accent ring-1 ring-black/5 ${className}`}
-    />
-  );
-}
+// The brand mark and the row styling now live in components/railStyles.tsx so the admin console's
+// rail (pages/admin/AdminLayout.tsx) renders identically without this component being generalized.
+// The reference design's chevron placeholder is gone: with the top row carrying no lockup any
+// more, the rail shows the real X-Coach icon.
+const Mark = RailMark;
 
 interface Props {
   open: boolean;
@@ -64,6 +67,8 @@ export default function Sidebar({
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
   const onMovements = pathname === "/movements";
+  // The detail route lights the same entry as the list — /plans/<id> is still "Plans".
+  const onPlans = pathname === "/plans" || pathname.startsWith("/plans/");
   const onSettings = pathname === "/settings";
   const onAdmin = pathname === "/admin";
 
@@ -74,18 +79,10 @@ export default function Sidebar({
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
   const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
 
-  // One rail row: icon beside its label, the whole row a rounded target. Collapsed, the label is
-  // gone and the icon centres itself in the 76px strip — the row keeps its height either way, so
-  // toggling only moves things horizontally.
-  const cell = `w-full flex items-center gap-3 min-h-[46px] px-3 rounded-[14px] transition-colors ${
-    open ? "justify-start" : "justify-center"
-  }`;
-  // `primary` is the reference's violet, so primary/10 over white lands on its #f3f0ff pill —
-  // using the token keeps the active state one definition instead of two. The lift under the
-  // selected row is the reference's own, and it is what separates "selected" from a plain hover.
-  const cellActive = "bg-primary/10 text-primary shadow-[0_14px_34px_rgba(112,70,255,0.14)]";
-  const cellIdle = "text-[#59648f] hover:bg-[#f8f8fb] hover:text-[#1e2142]";
-  const label = "text-sm leading-none tracking-tight truncate";
+  const cell = railCell(open);
+  const cellActive = RAIL_CELL_ACTIVE;
+  const cellIdle = RAIL_CELL_IDLE;
+  const label = RAIL_LABEL;
 
   const Cell = ({ icon: Ico, text, active }: { icon: Icon; text: string; active: boolean }) => (
     <>
@@ -102,9 +99,7 @@ export default function Sidebar({
       // `glass-rail` — the second of the page's three blurred surfaces (shell, rail, popovers).
       // The scroll lives on the inner block, NOT here: an overflow container clips absolutely
       // positioned descendants, and the account menu at the foot opens upward out of the rail.
-      className={`glass-rail h-full shrink-0 flex flex-col rounded-[28px] ${
-        animate ? "transition-[width] duration-200 ease-in-out" : ""
-      }`}
+      className={`${RAIL_FRAME} ${animate ? "transition-[width] duration-200 ease-in-out" : ""}`}
     >
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none rounded-t-[28px]">
         {/* Mobile drawer only: brand + close. */}
@@ -157,7 +152,7 @@ export default function Sidebar({
           <button
             onClick={onNewAnalysis}
             title={t("nav.newAnalysis")}
-            className={`${cell} bg-gradient-to-br from-[#a48bff] to-[#7b5cff] text-white shadow-[0_8px_20px_rgba(123,92,255,0.3)] hover:from-[#9a80ff] hover:to-[#6e4bff] active:scale-[0.98] mb-1`}
+            className={`${cell} ${RAIL_CTA}`}
           >
             <Plus size={21} weight="bold" className="shrink-0" />
             {open && <span className={`${label} font-semibold`}>{t("nav.newAnalysis")}</span>}
@@ -175,6 +170,15 @@ export default function Sidebar({
             className={`${cell} ${onMovements ? cellActive : cellIdle}`}
           >
             <Cell icon={Barbell} text={t("nav.movements")} active={onMovements} />
+          </Link>
+          {/* Plans sits between the movement library and the history: the library is where you
+              pick what to train, a plan is when you train it, and the history is what came out. */}
+          <Link
+            to="/plans"
+            title={t("nav.plans")}
+            className={`${cell} ${onPlans ? cellActive : cellIdle}`}
+          >
+            <Cell icon={ClipboardText} text={t("nav.plans")} active={onPlans} />
           </Link>
           <Link
             to="/history"

@@ -87,14 +87,19 @@ export default function AppLayout({
     // `ms-shell` re-declares the light design tokens for everything inside the frame — see
     // index.css. The reference design is light-only, and a dark token set under these white
     // cards puts dark text and dark scrollbars inside them.
-    <div className="ms-shell relative h-[100dvh] w-full overflow-hidden bg-[#eef0fb] p-2 font-body text-[#211f39] sm:p-3 lg:p-[14px]">
+    <div className="ms-shell relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#eef0fb] p-2 font-body text-[#211f39] sm:p-3 lg:p-[14px]">
       {/* Background wash: the reference's two soft colour blooms behind the cards. */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
         <div className="absolute -right-20 -top-20 h-[600px] w-[600px] rounded-full bg-[#e9e3ff] opacity-40 blur-[120px]" />
         <div className="absolute -left-40 top-40 h-[500px] w-[500px] rounded-full bg-[#e0e7ff] opacity-30 blur-[100px]" />
       </div>
 
-      <div className="relative mx-auto flex h-full max-w-[1500px] gap-3 lg:gap-4">
+      {/* The frame is capped in BOTH axes and centred in whatever is left. Width was already
+          held at 1500px; height was not, so on a 1440px-tall monitor the content card stretched
+          to the full viewport and the studio's upload panel floated in ~300px of dead space top
+          and bottom. 940px is a maximised browser on a 1080p screen — the shell now looks the
+          same on a big display as on a normal one, instead of scaling up to fill it. */}
+      <div className="relative mx-auto my-auto flex h-full max-h-[940px] w-full max-w-[1500px] gap-3 lg:gap-4">
         {/* Desktop: the floating nav rail. */}
         <div className="hidden lg:flex">
           <Sidebar
