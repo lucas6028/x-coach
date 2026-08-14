@@ -141,7 +141,10 @@ Container Apps 按 vCPU-秒與 GiB-秒計費。每個訂閱每月頭 180,000 vCP
 | --- | --- | --- |
 | backend 2 vCPU、`minReplicas: 1` | $50 + frontend $6 ≈ **$56** | 約 8 週 |
 | backend 1 vCPU、`minReplicas: 1` | $24 + $6 ≈ **$30** | 約 3 個月 |
-| backend `minReplicas: 0`（**範本預設**） | 用多少算多少 + frontend $6 ≈ **$7** | 約 14 個月 |
+| backend `minReplicas: 0`（**範本預設**） | 用多少算多少 + frontend $6 ≈ **$7** | 用不完（見下） |
+
+第三列的額度不是被燒完的，是**過期**的：學生額度給 12 個月，到期就歸零，跟還剩多少無關。所以
+scale-to-zero 的真正意義不是「撐更久」，而是「這 12 個月不必再想這件事」。
 
 所以 `infra/main.parameters.json` 預設 `backendMinReplicas: 0`。代價是冷啟動：第一個請求要等
 容器起來、載入 MediaPipe、再從 SMB 共用讀知識圖譜與向量庫。兩個後果要知道：
@@ -286,11 +289,22 @@ frontend 會拿到指向 backend 內部 FQDN 的 `BACKEND_ORIGIN`。nginx 在容
 把瀏覽器的主機名稱轉過去會讓環境找不到 backend app — 那是平台回的 404，但看起來像 API 的路由 bug。
 瀏覽器原本的主機名稱保留在 `X-Forwarded-Host`。
 
-### Supabase migrations 不在 Azure 這邊
+### 部署完之後，三件不在 Azure 裡的事
 
-`db/migrations/` 底下的 SQL 是手動套到 Supabase 的，跟這次部署完全沒有交集。上線前確認最新那幾支
-（`20260813000000_training_plans.sql`、`20260725000000_analysis_movement.sql`）已經跑過 —
-少了資料表的話，前端會壞在看起來像 Azure 問題的地方。
+這三件全都會表現成「這個功能在正式環境是死的」，但沒有一件是 Azure 的問題，log 裡也看不到。
+
+1. **Supabase Auth 的 redirect URL。** 新的 `https://<fqdn>` 這個來源不在 Supabase 的
+   Site URL / Redirect URLs 清單裡，登入會被彈回去。到 Authentication → URL Configuration 加上去。
+2. **LIFF endpoint。** 要讓 LINE 那條路走得通，LIFF 的 endpoint 要指向新網址的**站台根目錄** —
+   LIFF 深層連結是接在 endpoint 的完整路徑後面的，指到子路徑會整個錯位。LINE Messaging 的
+   webhook URL 同理，指到 `https://<fqdn>/api/line/webhook`。
+3. **Supabase migrations。** `db/migrations/` 底下的 SQL 是手動套的，跟這次部署完全沒有交集。
+   確認最新那幾支（`20260813000000_training_plans.sql`、`20260725000000_analysis_movement.sql`）
+   已經跑過，少了資料表前端就會壞。
+
+另外值得當場看一眼的：前端 bundle 裡的 `VITE_*` 是**建置時**由 GitHub secret 內嵌的，如果哪個
+secret 是空的，build 一樣會成功，只有登入會在執行期壞掉，而且伺服器端不會有任何錯誤。開頁面確認
+SPA 真的連得到 Supabase，比讀 log 快。
 
 ### 後續部署
 
