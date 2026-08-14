@@ -430,3 +430,8 @@ X-Coach Demo App Redesign_files
 X-Coach Demo App Redesign.html
 graphify-out
 tmp
+
+# The paper and the proposal. Untracked from here on; the files stay on disk and
+# docs/paper/TANET_論文-陳皓平.pdf remains the canonical draft locally. Note this does
+# NOT remove them from history -- every past commit still carries them.
+docs/paper/

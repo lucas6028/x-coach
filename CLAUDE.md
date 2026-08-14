@@ -40,6 +40,8 @@ KG schema docs: `docs/kg-schema-generalization.md`, `docs/movement-kg-expansion-
   app :8080, API :8000. Add `-f docker-compose.dev.yml` for hot reload (Vite :5173).
   `requirements-docker.txt` is the web subset of `requirements.txt` (no torch/transformers)
   and must be updated by hand alongside it. Full notes: `docs/docker.md`.
+- **Azure deployment** (same two images, on Container Apps): Bicep in `infra/main.bicep`,
+  walkthrough in `docs/azure-deployment.md`. Supabase and Cloudflare R2 stay external.
 - `GOOGLE_API_KEY` is only needed for Gemini KG extraction (`src/knowledge/extract_kg.py`).
   Everything else, including RAG, runs fully offline.
 - **Kaggle:** drive the Kaggle CLI via `uv` in the shell. Do NOT use the `kaggle` MCP

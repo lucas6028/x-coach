@@ -7,6 +7,9 @@ Postgres/auth is Supabase-hosted, so there is no database container.
 Requires **Docker Compose v2.24+** (the stack uses the `env_file: {path, required}` long
 form and the `!override` merge tag). Check with `docker compose version`.
 
+To run these same two images on Azure Container Apps, see `docs/azure-deployment.md` —
+the topology is the same, with Azure Files standing in for the `./data` bind mount.
+
 ## Quick start
 
 ```bash
