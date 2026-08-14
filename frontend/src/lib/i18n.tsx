@@ -696,6 +696,31 @@ const en: Dict = {
   "admin.line.pushYesterday": "Pushes yesterday",
   "admin.line.deliveryUnready": "Not ready yet",
   "admin.line.deliveryDate": "Counts for {date}",
+  // Header state pill. "Partly configured" is its own state on purpose: login and messaging are two
+  // separate LINE channels, and a green "Enabled" on a server where only one of them is wired up
+  // would be the panel telling a comfortable lie about the exact thing it exists to report.
+  // Distinct wording from the per-card `admin.overview.notConfigured` on purpose: this pill
+  // summarises BOTH channels, and reusing the card's exact words would make an unconfigured server
+  // read as three copies of one verdict rather than a summary over two.
+  "admin.line.stateEnabled": "Enabled",
+  "admin.line.statePartial": "Partly configured",
+  "admin.line.stateDisabled": "Not set up",
+  "admin.line.loginBridgeDesc": "Lets people sign in to the app with their LINE account.",
+  "admin.line.botDesc": "Receives messages from users and sends push notifications.",
+  "admin.line.quotaFree": "Free allowance: {limit} messages / month",
+  "admin.line.quotaNoCap": "No monthly limit set",
+  "admin.line.webhookUrl": "Webhook URL",
+  "admin.line.webhookUrlNote": "Where LINE delivers events (messages, follows, unfollows).",
+  "admin.line.webhookStatus": "Status",
+  // Must NOT say "the URL above": the test button outlives a failed endpoint read, and in that
+  // state there is no URL above to point at.
+  "admin.line.webhookTestNote": "Ask LINE to send a test event to this channel's webhook URL.",
+  "admin.line.webhookTestResult": "Webhook test",
+  "admin.line.copy": "Copy webhook URL",
+  "admin.line.copied": "Copied",
+  "admin.line.copyFailed": "Couldn't copy — select the URL and copy it manually.",
+  "admin.line.oaManager": "Open LINE Official Account Manager",
+  "admin.line.deliveryTitle": "Message delivery",
 
   // Admin panel P3 — user oversight
   "admin.users.title": "Users",
@@ -1511,6 +1536,23 @@ const zhHant: Dict = {
   "admin.line.pushYesterday": "昨日推播",
   "admin.line.deliveryUnready": "資料尚未就緒",
   "admin.line.deliveryDate": "統計日期 {date}",
+  "admin.line.stateEnabled": "已啟用",
+  "admin.line.statePartial": "部分設定",
+  "admin.line.stateDisabled": "尚未接上",
+  "admin.line.loginBridgeDesc": "讓使用者可以用 LINE 帳號登入網站。",
+  "admin.line.botDesc": "接收使用者訊息、發送推播通知。",
+  "admin.line.quotaFree": "免費額度：每月 {limit} 則",
+  "admin.line.quotaNoCap": "未設定每月上限",
+  "admin.line.webhookUrl": "Webhook 網址",
+  "admin.line.webhookUrlNote": "LINE 事件（訊息、加入好友、封鎖）送達的位址。",
+  "admin.line.webhookStatus": "狀態",
+  "admin.line.webhookTestNote": "請 LINE 送一個測試事件到這個 channel 的 webhook 網址。",
+  "admin.line.webhookTestResult": "Webhook 測試結果",
+  "admin.line.copy": "複製 webhook 網址",
+  "admin.line.copied": "已複製",
+  "admin.line.copyFailed": "無法複製，請手動選取網址複製。",
+  "admin.line.oaManager": "前往 LINE 官方帳號管理後台",
+  "admin.line.deliveryTitle": "訊息發送量",
 
   // 後台管理 P3 — 使用者監看
   "admin.users.title": "使用者",
