@@ -13,7 +13,7 @@ a working web app on top of the research pipelines:
 - **ML/perception library** in `src/` (pose, video, knowledge, rehab24, fit3d, egoexo)
   with thin CLI entry points in `scripts/` — the research foundation.
 - **Backend** in `backend/` — FastAPI app (`backend/app/main.py`); routers: analyze,
-  analyses, chat, conversations, knowledge, videos; Supabase for auth/history;
+  analyses, chat, conversations, knowledge, plans, videos; Supabase for auth/history;
   chat via OpenRouter (spec: `specs/llm-chat-spec.md`).
 - **Frontend** in `frontend/` — React 18 + Vite + TypeScript + Tailwind, Supabase client.
 

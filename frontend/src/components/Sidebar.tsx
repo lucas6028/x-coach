@@ -2,6 +2,7 @@ import {
   Barbell,
   CaretDoubleLeft,
   CaretDoubleRight,
+  ClipboardText,
   ClockCounterClockwise,
   GameController,
   GearSix,
@@ -66,6 +67,8 @@ export default function Sidebar({
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
   const onMovements = pathname === "/movements";
+  // The detail route lights the same entry as the list — /plans/<id> is still "Plans".
+  const onPlans = pathname === "/plans" || pathname.startsWith("/plans/");
   const onSettings = pathname === "/settings";
   const onAdmin = pathname === "/admin";
 
@@ -167,6 +170,15 @@ export default function Sidebar({
             className={`${cell} ${onMovements ? cellActive : cellIdle}`}
           >
             <Cell icon={Barbell} text={t("nav.movements")} active={onMovements} />
+          </Link>
+          {/* Plans sits between the movement library and the history: the library is where you
+              pick what to train, a plan is when you train it, and the history is what came out. */}
+          <Link
+            to="/plans"
+            title={t("nav.plans")}
+            className={`${cell} ${onPlans ? cellActive : cellIdle}`}
+          >
+            <Cell icon={ClipboardText} text={t("nav.plans")} active={onPlans} />
           </Link>
           <Link
             to="/history"

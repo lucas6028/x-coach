@@ -18,6 +18,8 @@ vi.mock("../landing/Landing", () => ({ default: () => <div>landing page</div> })
 vi.mock("../pages/Login", () => ({ default: () => <div>login page</div> }));
 vi.mock("../pages/History", () => ({ default: () => <div>history page</div> }));
 vi.mock("../pages/Movements", () => ({ default: () => <div>movements page</div> }));
+vi.mock("../pages/Plans", () => ({ default: () => <div>plans page</div> }));
+vi.mock("../pages/PlanDetail", () => ({ default: () => <div>plan detail page</div> }));
 vi.mock("../pages/Settings", () => ({ default: () => <div>settings page</div> }));
 vi.mock("../pages/Games", () => ({ default: () => <div>games page</div> }));
 vi.mock("../pages/WebSlinger", () => ({ default: () => <div>web slinger page</div> }));
@@ -85,6 +87,11 @@ describe("AppRoutes — gated routes", () => {
   it.each([
     ["/history", "history page"],
     ["/settings", "settings page"],
+    // A plan is one user's own data — its name, its exercises and its progress — so BOTH the list
+    // and the detail route stay gated. /movements next door is public, and this pins that the two
+    // decisions are separate ones.
+    ["/plans", "plans page"],
+    ["/plans/abc-123", "plan detail page"],
   ])("redirects %s to /login when signed out", (path, marker) => {
     renderAnonymousAt(path);
     expect(screen.getByText("login page")).toBeInTheDocument();
