@@ -251,6 +251,11 @@ function Invoke-Apps {
     Assert-ImagePullable 'backend' $t
     Assert-ImagePullable 'frontend' $t
 
+    # Into variables first: `-p name=(Get-ImageRef ...)` makes PowerShell split the token, so
+    # az receives the bare image reference as its own -p and answers "Unable to parse parameter".
+    $backendImage = Get-ImageRef 'backend' $t
+    $frontendImage = Get-ImageRef 'frontend' $t
+
     foreach ($required in @('R2_ACCOUNT_ID', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET')) {
         if ([string]::IsNullOrWhiteSpace($env_[$required])) {
             # /app/data is read-only and replicas are ephemeral, so the local-store fallback
@@ -263,8 +268,8 @@ function Invoke-Apps {
         -p '@infra/main.parameters.json' `
         -p location=$Location `
         -p deployApps=true `
-        -p backendImage=(Get-ImageRef 'backend' $t) `
-        -p frontendImage=(Get-ImageRef 'frontend' $t) `
+        -p backendImage="$backendImage" `
+        -p frontendImage="$frontendImage" `
         -p supabaseUrl="$($env_['SUPABASE_URL'])" `
         -p supabaseAnonKey="$($env_['SUPABASE_ANON_KEY'])" `
         -p supabaseServiceRoleKey="$($env_['SUPABASE_SERVICE_ROLE_KEY'])" `

@@ -266,7 +266,12 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
         external: false
         targetPort: 8000
         transport: 'http'
-        allowInsecure: false
+        // TRUE, unlike the frontend, and not a downgrade: this ingress is reachable only
+        // from inside the environment. With false, the internal ingress answers nginx's
+        // http:// proxy_pass with a 301 to its own https:// name -- which resolves nowhere
+        // outside the environment, so the browser follows it into the platform's
+        // "Container App is stopped or does not exist" 404 and the API looks dead.
+        allowInsecure: true
       }
       // No `registries`: the GHCR packages are public, so the platform pulls anonymously.
       secrets: [
