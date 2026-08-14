@@ -23,8 +23,16 @@ image、為什麼 `VITE_*` 是 build args）在這裡完全適用，不需要重
 | 自訂網域與 TLS | Container Apps 自訂網域 + 免費受管憑證 | 只有 frontend 需要；backend 是內部的 |
 | 研究 pipeline（`src/rehab24`、`src/video`、torch/VideoMAE、Gemini KG 抽取） | **不部署** | 真的需要上雲就用 Container Apps *Jobs* 或 Azure ML，不是這個 app。`requirements-docker.txt` 刻意排除了它們的相依套件 |
 
-**區域。** East Asia 離台灣最近；Japan East 的服務目錄比較齊全。兩者都可以 — 挑離 Supabase 專案較
-近的那個，因為每一次請求都要付那趟來回。
+**區域。** 範本用 `japaneast`。East Asia（香港）離台灣最近，但 **Azure for Students 訂閱不准開在
+那裡** — 訂閱上掛著一個 `sys.regionrestriction` policy，只放行 `malaysiawest`、`southeastasia`、
+`japanwest`、`japaneast`、`koreacentral`，其餘一律 `RequestDisallowedByAzure`。要確認自己這個
+訂閱放行哪些：
+
+```bash
+az policy assignment show -n sys.regionrestriction --query parameters.listOfAllowedLocations.value
+```
+
+在放行清單裡挑離 Supabase 專案較近的，因為每一次請求都要付那趟來回。
 
 ## 拓撲
 
@@ -153,7 +161,7 @@ frontend 維持 `minReplicas: 1`：它只是 nginx，0.25 vCPU 一個月約 $6�
 - **配額**。免費／學生訂閱不能申請提高配額，Container Apps environment 的數量上限很低
   （常見錯誤訊息是 `Environment limit reached`）。這份範本只建一個環境。
 - **區域限制**。學生訂閱在部分區域不能開資源。`location` 是參數，而 ACR、儲存體與環境共用它，
-  所以換區域只是改一個參數，不是逐一搬資源。`eastasia` 不行就試 `japaneast` 或 `southeastasia`。
+  所以換區域只是改一個參數，不是逐一搬資源。實測 `eastasia` 就是被擋的那個，見上面的區域說明。
 
 ## 部署
 
@@ -189,7 +197,7 @@ container apps 引用的 image 在 registry 存在之前並不存在，所以第
 
 ```bash
 RG=xcoach-rg
-az group create -n $RG -l eastasia
+az group create -n $RG -l japaneast
 
 az deployment group create -g $RG -n main -f infra/main.bicep \
     -p @infra/main.parameters.json -p deployApps=false

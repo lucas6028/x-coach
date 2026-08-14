@@ -38,7 +38,10 @@ param(
     [string]$Stage,
 
     [string]$ResourceGroup = 'xcoach-rg',
-    [string]$Location = 'eastasia',
+    # NOT eastasia. The Azure for Students subscription carries a built-in policy assignment
+    # (sys.regionrestriction) that allows only malaysiawest, southeastasia, japanwest,
+    # japaneast and koreacentral; anything else fails with RequestDisallowedByAzure.
+    [string]$Location = 'japaneast',
     [string]$EnvFile = '.env',
 
     # Defaults to the short commit SHA, so a deployed revision is traceable to a commit.
@@ -58,7 +61,7 @@ function Assert-LastExit {
 
 function Read-DotEnv {
     param([string]$Path)
-    if (-not (Test-Path $Path)) { throw "No $Path — copy .env.example and fill it in." }
+    if (-not (Test-Path $Path)) { throw "No $Path -- copy .env.example and fill it in." }
     $map = @{}
     foreach ($line in Get-Content $Path) {
         $trimmed = $line.Trim()
@@ -140,7 +143,7 @@ function Invoke-Infra {
     Write-Host "ACR:     $(Get-DeploymentOutput 'acrName')" -ForegroundColor Green
     Write-Host "Storage: $(Get-DeploymentOutput 'storageAccountName')" -ForegroundColor Green
     Write-Host ''
-    Write-Host 'Set a budget alert before going further — on a student subscription, ' -NoNewline
+    Write-Host 'Set a budget alert before going further -- on a student subscription, ' -NoNewline
     Write-Host 'hitting $0 disables every resource in it.' -ForegroundColor Yellow
 }
 
@@ -153,10 +156,19 @@ function Invoke-Data {
     $key = $key.Trim()
 
     if (-not (Test-Path 'data/kg/sports_kg_v3.graphml')) {
-        throw 'data/kg/sports_kg_v3.graphml is missing. It is gitignored and pipeline-built — generate it before deploying, or the knowledge endpoints will report their stores absent.'
+        throw 'data/kg/sports_kg_v3.graphml is missing. It is gitignored and pipeline-built -- generate it before deploying, or the knowledge endpoints will report their stores absent.'
     }
     if (-not (Test-Path 'data/rag/vector_db')) {
         throw 'data/rag/vector_db is missing. Build the RAG store before deploying.'
+    }
+
+    # `az storage file upload` will not create intermediate directories, and a missing one
+    # surfaces as ParentNotFound rather than as anything mentioning directories. Azure Files
+    # has no implicit hierarchy, so each level is created on its own; both calls are
+    # idempotent-by-hand, hence -o none with the exit code ignored on "already exists".
+    foreach ($dir in @('kg', 'rag', 'rag/vector_db')) {
+        az storage directory create --account-name $storage --account-key $key `
+            --share-name $share --name $dir -o none 2>$null
     }
 
     # Only the graph the backend actually opens (backend/app/config.py:KG_GRAPH_FILE) plus the
@@ -177,7 +189,7 @@ function Invoke-Data {
     Assert-LastExit 'Uploading the vector DB'
 
     Write-Host "Share '$share' populated; it mounts read-only at /app/data." -ForegroundColor Green
-    Write-Host 'The demo video library (data/Fitness-AQA/...) is optional and large — upload it the same way only if you want the pre-processed demos.'
+    Write-Host 'The demo video library (data/Fitness-AQA/...) is optional and large -- upload it the same way only if you want the pre-processed demos.'
 }
 
 function Invoke-Build {
@@ -276,7 +288,7 @@ function Invoke-Status {
     $health | ConvertTo-Json -Depth 5 | Write-Host
 
     if (-not $health.storage_configured) {
-        Write-Host 'storage_configured is FALSE — the backend fell back to local storage and uploads will not survive. Check the four R2_* values.' -ForegroundColor Red
+        Write-Host 'storage_configured is FALSE -- the backend fell back to local storage and uploads will not survive. Check the four R2_* values.' -ForegroundColor Red
     } else {
         Write-Host 'storage_configured: true (R2 is live).' -ForegroundColor Green
     }
