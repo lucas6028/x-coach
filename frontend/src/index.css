@@ -459,3 +459,42 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .lgn-copy, .lgn-art, .lgn-panel, .lgn-card, .lgn-orb { animation: none !important; }
 }
+
+/* SHORT-VIEWPORT TIER. A login page that has to be scrolled to reach its own submit button is
+   broken, and the page has to clear a LAPTOP viewport, not a laptop SCREEN: browser chrome takes
+   100–130px, so a 768px-tall display leaves roughly 640px of page and a 864px one roughly 730px.
+   The markup's own rhythm fits a desktop monitor; this block takes ~95px out of it for both of the
+   laptops above, rather than compressing every screen down to the smallest one. The 780px cut-off
+   is deliberately well clear of the 730px case it has to serve — a page that only fits when the
+   arithmetic is exact stops fitting the moment a font falls back or the reader zooms.
+
+   Only spacing and one type size move — every control stays at or above the 44px touch target.
+   These are plain selectors emitted after `@tailwind utilities`, so they beat the `py-*`/`h-*`
+   utilities they override on equal specificity by source order (same mechanism the RADIUS note
+   at the top of this file warns about, used deliberately here). */
+@media (max-height: 780px) {
+  .lgn-formcol { padding-bottom: 0.5rem; }
+  .lgn-panel { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+  .lgn-title { font-size: 24px; }
+  .lgn-form { margin-top: 1rem; }
+  .lgn-field, .lgn-social, .lgn-submit { height: 2.75rem; }
+  .lgn-submit { margin-top: 1.15rem; }
+  .lgn-divider { margin-top: 0.5rem; margin-bottom: 0.5rem; }
+  .lgn-alt { margin-top: 0.7rem; }
+  .lgn-foot { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+}
+
+/* The two rules above that are NOT safe at every width, so they get the stage's own breakpoint.
+   Below `xl` the brand stage is gone and the brand link sits ABOVE the panel rather than beside it,
+   where a shortened top padding would run the panel under the logo. And `.lgn-card-a` is the one
+   piece of the stage that cannot ride the percentages down: the hero copy above it is text — three
+   lines in English where Chinese takes two — and its height does not shrink with the stage, so on a
+   short stage the card's 34% lands it on that third line. */
+@media (min-width: 1280px) and (max-height: 780px) {
+  .lgn-top { padding-top: 2.25rem; }
+  .lgn-card-a { top: 41%; }
+  /* And the card below it drops the same distance, to keep the pair apart. The clearance has to
+     survive `lgn-float`: the two cards drift ±5px on delays 0.7s apart, so a gap that merely looks
+     safe in a still frame closes while the page idles. */
+  .lgn-card-c { bottom: 15%; }
+}
