@@ -71,6 +71,12 @@ function StageCard({
 // holding an illustrated brand stage on the left and the form on the right. The stage is desktop
 // only — its callouts are absolutely positioned in the stage's own coordinate space, which has no
 // sensible phone equivalent, and the LIFF path lands here on small screens.
+//
+// "Desktop" here means `xl` (1280px), not `lg`. The callout cards are a fixed 214px wide at a fixed
+// type size, and the split gives the form column a 430px floor: below 1280 the stage is squeezed
+// under ~600px and the cards start sitting on the hero copy and on the athlete's head. The form on
+// its own is the better answer at those widths, and it is the same breakpoint at which the shell
+// becomes the inset rounded card — one boundary, not two.
 export default function Login() {
   const { t } = useI18n();
   const navigate = useNavigate();
@@ -159,34 +165,47 @@ export default function Login() {
     }
   }
 
+  // Control heights are sized so the whole page clears a laptop viewport (see the shell comment
+  // below); 48px is still comfortably above the 44px touch-target floor.
   const fieldWrap =
-    "flex h-[52px] items-center rounded-[14px] border border-border bg-white/70 transition-colors focus-within:border-primary focus-within:ring-[3px] focus-within:ring-primary/10";
+    "lgn-field flex h-12 items-center rounded-[14px] border border-border bg-white/70 transition-colors focus-within:border-primary focus-within:ring-[3px] focus-within:ring-primary/10";
   const fieldInput =
     "h-full w-full min-w-0 bg-transparent px-3.5 text-[15px] text-content outline-none placeholder:text-faint";
   const socialButton =
-    "flex h-[52px] w-full items-center justify-center gap-3 rounded-[13px] border border-border bg-white text-[15px] font-semibold text-content shadow-[0_5px_11px_rgba(35,46,97,0.035)] transition-colors hover:border-primary/40 hover:bg-primary/[0.03] active:scale-[0.995] disabled:opacity-60";
+    "lgn-social flex h-12 w-full items-center justify-center gap-3 rounded-[13px] border border-border bg-white text-[15px] font-semibold text-content shadow-[0_5px_11px_rgba(35,46,97,0.035)] transition-colors hover:border-primary/40 hover:bg-primary/[0.03] active:scale-[0.995] disabled:opacity-60";
 
   return (
-    <div className="min-h-[100dvh] bg-background xl:p-4">
-      {/* Below `lg` the brand stage is gone, so the shell keeps the lavender canvas and the form
-          reads as a card on it; from `lg` up the shell itself is the white surface the stage
-          paints on. */}
-      <div className="relative grid min-h-[100dvh] grid-rows-[1fr_auto] overflow-hidden bg-background lg:bg-white xl:min-h-[calc(100dvh-2rem)] xl:rounded-[2rem] xl:border xl:border-white xl:shadow-card">
+    <div className="min-h-[100dvh] bg-background xl:p-3">
+      {/* Below `xl` the brand stage is gone, so the shell keeps the lavender canvas and the form
+          reads as a card on it; from `xl` up the shell itself is the white surface the stage
+          paints on.
+
+          Everything from here down is sized to fit a LAPTOP viewport without scrolling — a sign-in
+          button below the fold is a broken sign-in page. The budget that has to hold is
+          `pt` + max(stage, form panel) + footer; the form panel is the taller of the two columns,
+          so its rhythm (and not the stage) is what the trims below are protecting. */}
+      <div className="relative grid min-h-[100dvh] grid-rows-[1fr_auto] overflow-hidden bg-background xl:bg-white xl:min-h-[calc(100dvh-1.5rem)] xl:rounded-[2rem] xl:border xl:border-white xl:shadow-card">
         <Link
           to="/"
           aria-label={t("auth.brandHome")}
-          className="absolute left-6 top-6 z-20 inline-flex items-center gap-3.5 lg:left-11 lg:top-9"
+          className="absolute left-6 top-5 z-20 inline-flex items-center gap-3 xl:left-10 xl:top-6"
         >
-          <img src="/icon.svg" alt="" width={52} height={52} className="h-[52px] w-[52px] rounded-[12px] shadow-accent" />
-          <span className="font-display text-2xl font-extrabold tracking-tight text-content">X-Coach</span>
+          <img src="/icon.svg" alt="" width={44} height={44} className="h-11 w-11 rounded-[11px] shadow-accent" />
+          <span className="font-display text-[22px] font-extrabold tracking-tight text-content">X-Coach</span>
         </Link>
 
-        {/* 61/39 split, matching the design study the percentage offsets below were measured in. */}
-        <div className="grid pt-28 lg:grid-cols-[minmax(0,1.564fr)_minmax(430px,1fr)] lg:pt-[4.8rem]">
+        {/* 61/39 split, matching the design study the percentage offsets below were measured in.
+            The top padding only has to clear the brand link (top-6 + 44px logo); the form panel
+            centres in whatever height is left. */}
+        <div className="lgn-top grid pt-24 xl:grid-cols-[minmax(0,1.564fr)_minmax(430px,1fr)] xl:pt-[3.75rem]">
           {/* ── Brand stage ─────────────────────────────────────────────── */}
+          {/* The floor was a fixed 716px in the design study, which forced the page past the fold on
+              every laptop. Everything inside it is positioned in %, so the composition scales with
+              the row instead — the floor below is only the point where the fixed-width, fixed-font
+              callout cards start to crowd each other. */}
           <section
             aria-labelledby="lgn-hero-title"
-            className="lgn-stage relative isolate hidden min-h-[716px] overflow-hidden lg:block"
+            className="lgn-stage relative isolate hidden min-h-[520px] overflow-hidden xl:block"
           >
             {/* -z-[1], not lower: the stage's floor gradient sits at -3/-4, and the mock shows the
                 dot fields ON the violet corner rather than buried under it. */}
@@ -195,13 +214,13 @@ export default function Login() {
             <span className="lgn-orb absolute right-[19%] top-[48%] h-2 w-2 rounded-full border-2 border-[#ad92ff] opacity-70" aria-hidden="true" />
             <span className="lgn-orb lgn-orb-b absolute right-[4.5%] top-[56%] h-[9px] w-[9px] rounded-full border-2 border-[#ad92ff] opacity-70" aria-hidden="true" />
 
-            <div className="lgn-copy absolute left-[13%] top-[72px] z-[6]">
+            <div className="lgn-copy absolute left-[13%] top-[7%] z-[6]">
               {/* h2, not h1: the stage is desktop-only, so making it the document's h1 would leave
                   phones with no h1 at all. The page's subject is the form, and its title keeps the
                   h1 it has always had. */}
               <h2
                 id="lgn-hero-title"
-                className="font-display text-[clamp(38px,3vw,49px)] font-extrabold leading-[1.13] tracking-[-0.03em] text-content"
+                className="font-display text-[clamp(34px,2.7vw,45px)] font-extrabold leading-[1.13] tracking-[-0.03em] text-content"
               >
                 {t("auth.heroLine1")}
                 <br />
@@ -214,12 +233,20 @@ export default function Login() {
               </p>
             </div>
 
+            {/* The movement library's own squat figure, so the athlete a visitor meets on the way in
+                is the one they meet again on the /movements card. Derived from
+                `public/movements/squat.png` by `scripts/prep_login_hero.py`: trimmed to the figure
+                and flood-filled to a PURE white plate, which is what lets `mix-blend-multiply` drop
+                it onto the floor gradient with no cut-out halo and no visible plate rectangle.
+                Portrait (0.81), unlike the landscape barbell art this replaced — the box below is
+                height-constrained, so `h-` sets the figure's size and `w-` only has to be wide
+                enough not to clip the outstretched arms. */}
             <img
               src="/assets/squat-hero.webp"
-              width={920}
-              height={814}
+              width={733}
+              height={900}
               alt=""
-              className="lgn-art absolute bottom-[2.7%] left-[29.5%] z-[2] h-[61%] w-[56%] object-contain mix-blend-multiply"
+              className="lgn-art absolute bottom-[6%] left-[30%] z-[2] h-[58%] w-[42%] object-contain mix-blend-multiply"
             />
             <div
               aria-hidden="true"
@@ -230,8 +257,11 @@ export default function Login() {
               <i />
             </div>
 
+            {/* Card offsets are percentages of the stage, not the study's pixels, for the same
+                reason the floor is: at 716px tall they land exactly where they were measured, and
+                below that the four of them close in evenly instead of colliding. */}
             <StageCard
-              className="left-[10%] top-[287px]"
+              className="lgn-card-a left-[10%] top-[34%]"
               Glyph={Sparkle}
               title={t("auth.card1Title")}
               body={t("auth.card1Body")}
@@ -245,7 +275,7 @@ export default function Login() {
             />
 
             {/* Form score — the one card that shows a verdict rather than a capability. */}
-            <div className="lgn-card lgn-card-b absolute right-[7%] top-[190px] z-[7] w-[184px] rounded-2xl border border-white/95 bg-white/[0.88] p-4 shadow-card backdrop-blur-[10px]">
+            <div className="lgn-card lgn-card-b absolute right-[7%] top-[24%] z-[7] w-[184px] rounded-2xl border border-white/95 bg-white/[0.88] p-4 shadow-card backdrop-blur-[10px]">
               <strong className="block text-xs font-bold leading-snug text-content">{t("auth.scoreTitle")}</strong>
               <div className="mt-3 flex items-center gap-3.5">
                 <div className="lgn-ring relative grid h-[64px] w-[64px] shrink-0 place-items-center rounded-full">
@@ -259,7 +289,7 @@ export default function Login() {
             </div>
 
             <StageCard
-              className="lgn-card-c bottom-[148px] left-[14%]"
+              className="lgn-card-c bottom-[18%] left-[14%]"
               Glyph={Barbell}
               title={t("auth.card2Title")}
               body={t("auth.card2Body")}
@@ -271,7 +301,7 @@ export default function Login() {
             />
 
             <StageCard
-              className="lgn-card-d bottom-[150px] right-[6%]"
+              className="lgn-card-d bottom-[18.5%] right-[6%]"
               Glyph={TrendUp}
               title={t("auth.card3Title")}
               body={t("auth.card3Body")}
@@ -288,23 +318,23 @@ export default function Login() {
           </section>
 
           {/* ── Form panel ──────────────────────────────────────────────── */}
-          <section className="flex items-center justify-center px-5 pb-10 sm:px-8 lg:px-6">
-            <div className="lgn-panel w-full max-w-[554px] rounded-[28px] border border-border bg-white px-6 py-9 shadow-card sm:px-10">
-              <h1 className="font-display text-[30px] font-extrabold tracking-[-0.03em] text-content">
+          <section className="lgn-formcol flex items-center justify-center px-5 pb-5 sm:px-8 xl:px-6">
+            <div className="lgn-panel w-full max-w-[554px] rounded-[28px] border border-border bg-white px-6 py-5 shadow-card sm:px-9">
+              <h1 className="lgn-title font-display text-[27px] font-extrabold tracking-[-0.03em] text-content">
                 {t(isSignup ? "auth.signUpTitle" : "auth.signInTitle")}
               </h1>
-              <p className="mt-2 text-base text-muted">
+              <p className="mt-1.5 text-[15px] text-muted">
                 {t(isSignup ? "auth.signUpSub" : "auth.signInSub")}
               </p>
 
               {!configured && (
-                <div className="mt-6 flex items-start gap-2.5 rounded-xl border border-border bg-background p-3.5 text-sm text-muted">
+                <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-border bg-background p-3.5 text-sm text-muted">
                   <Info size={18} className="shrink-0 text-faint" />
                   <span>{t("auth.notConfigured")}</span>
                 </div>
               )}
 
-              <form onSubmit={submit} className="mt-7">
+              <form onSubmit={submit} className="lgn-form mt-5">
                 <label htmlFor="email" className="mb-2 block text-sm font-bold text-content">
                   {t("auth.email")}
                 </label>
@@ -322,7 +352,7 @@ export default function Login() {
                   />
                 </div>
 
-                <label htmlFor="password" className="mb-2 mt-5 block text-sm font-bold text-content">
+                <label htmlFor="password" className="mb-2 mt-4 block text-sm font-bold text-content">
                   {t("auth.password")}
                 </label>
                 <div className={fieldWrap}>
@@ -341,7 +371,7 @@ export default function Login() {
                     type="button"
                     onClick={() => setShowPassword((v) => !v)}
                     aria-label={t(showPassword ? "auth.hidePassword" : "auth.showPassword")}
-                    className="grid h-full w-12 shrink-0 place-items-center rounded-r-[14px] text-faint transition-colors hover:text-muted"
+                    className="grid h-full w-11 shrink-0 place-items-center rounded-r-[14px] text-faint transition-colors hover:text-muted"
                   >
                     {showPassword ? <EyeSlash size={21} /> : <Eye size={21} />}
                   </button>
@@ -367,14 +397,14 @@ export default function Login() {
                 <button
                   type="submit"
                   disabled={busy || !configured}
-                  className="mt-7 flex h-[54px] w-full items-center justify-center gap-3 rounded-[13px] bg-gradient-to-r from-[#7447ff] to-[#6d3cf5] text-base font-bold text-primary-content shadow-accent transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
+                  className="lgn-submit mt-6 flex h-[52px] w-full items-center justify-center gap-3 rounded-[13px] bg-gradient-to-r from-[#7447ff] to-[#6d3cf5] text-base font-bold text-primary-content shadow-accent transition-transform hover:-translate-y-0.5 active:translate-y-0 disabled:translate-y-0 disabled:opacity-60"
                 >
                   {busy ? <CircleNotch size={20} className="animate-spin" /> : <SignIn size={20} />}
                   {t(isSignup ? "auth.signUpBtn" : "auth.signInBtn")}
                 </button>
               </form>
 
-              <div className="my-6 flex items-center gap-4 text-[13px] text-muted">
+              <div className="lgn-divider my-4 flex items-center gap-4 text-[13px] text-muted">
                 <span className="h-px flex-1 bg-border" />
                 {t("auth.orContinue")}
                 <span className="h-px flex-1 bg-border" />
@@ -385,12 +415,12 @@ export default function Login() {
                 {t("auth.google")}
               </button>
 
-              <button type="button" onClick={line} disabled={busy || !configured} className={`mt-3 ${socialButton}`}>
+              <button type="button" onClick={line} disabled={busy || !configured} className={`mt-2.5 ${socialButton}`}>
                 <LineLogo />
                 {t("auth.lineBtn")}
               </button>
 
-              <p className="mt-7 text-center text-[15px] text-muted">
+              <p className="lgn-alt mt-5 text-center text-[15px] text-muted">
                 {t(isSignup ? "auth.haveAccount" : "auth.noAccount")}{" "}
                 <button
                   type="button"
@@ -405,7 +435,7 @@ export default function Login() {
                 </button>
               </p>
 
-              <p className="mt-3 text-center">
+              <p className="mt-2 text-center">
                 <Link to="/app" className="text-sm text-faint transition-colors hover:text-muted">
                   {t("auth.demoLink")}
                 </Link>
@@ -414,7 +444,7 @@ export default function Login() {
           </section>
         </div>
 
-        <footer className="z-[15] flex items-center justify-center px-6 py-5 text-xs text-muted">
+        <footer className="lgn-foot z-[15] flex items-center justify-center px-6 py-2.5 text-xs text-muted">
           {t("auth.footer", { year: String(new Date().getFullYear()) })}
         </footer>
       </div>
