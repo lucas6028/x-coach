@@ -41,9 +41,9 @@ function LocationProbe() {
   return <div data-testid="loc-search">{loc.search}</div>;
 }
 
-function renderAppWithLocation() {
+function renderAppWithLocation(entry = "/app") {
   return render(
-    <MemoryRouter initialEntries={["/app"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <AuthProvider>
         <I18nProvider>
           <App />
@@ -153,6 +153,39 @@ describe("App — analysis loaded", () => {
     expect(
       await screen.findByText(/Your storage is full \(480 MB of 500 MB\)/)
     ).toBeInTheDocument();
+  });
+});
+
+// The movement detail page's "Start recording" card links here with ?capture=record. It is an
+// instruction for the arrival, not a description of the session.
+describe("App — ?capture=record", () => {
+  it("opens the capture panel on the camera and then drops the param", async () => {
+    renderAppWithLocation("/app?movement=Squat&capture=record");
+
+    // Re-queried each poll rather than held: the capture panel is swapped for the loader while
+    // GET /api/movements settles, so a node captured early can be a detached one.
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Record live" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+    );
+
+    // Consumed: left in the URL it would re-apply on every remount of the capture panel and
+    // override whichever tab the user picked since. ?movement= survives — that one describes
+    // the session.
+    await waitFor(() =>
+      expect(screen.getByTestId("loc-search").textContent).toBe("?movement=Squat")
+    );
+    // And the panel stays where the user puts it after the param is gone.
+    await userEvent.click(screen.getByRole("tab", { name: "Upload video" }));
+    expect(screen.getByRole("tab", { name: "Upload video" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens on the dropzone without it", async () => {
+    renderAppWithLocation("/app?movement=Squat");
+    const uploadTab = await screen.findByRole("tab", { name: "Upload video" });
+    expect(uploadTab).toHaveAttribute("aria-selected", "true");
   });
 });
 

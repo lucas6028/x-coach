@@ -435,3 +435,8 @@ tmp
 # docs/paper/TANET_論文-陳皓平.pdf remains the canonical draft locally. Note this does
 # NOT remove them from history -- every past commit still carries them.
 docs/paper/
+# Source art for the movement detail page. These PNGs are ~1 MB each and are the INPUT to
+# scripts/prep_movement_detail_art.py; what ships (and what is committed) are the WebPs it
+# writes beside them. Drop a new PNG in, run the script, commit the .webp.
+frontend/public/movements/steps/*.png
+frontend/public/movements/muscles-worked/*.png
