@@ -110,6 +110,53 @@ control, and camera/exercise stratification) in one pass:
 python scripts/rehab24/videomae_stage_a.py --device cpu
 ```
 
+### Framing arms (letterbox / person crop / background only)
+
+Pre-registration: `notes/rehab24_videomae_framing_validation_plan.md`. Run the steps in
+this order — the gates exist so nobody can look at an accuracy first and then decide
+which arm was "really" showing the whole athlete.
+
+```bash
+# 1. One fixed box per SOURCE VIDEO, from the dataset's own mocap 2D skeletons.
+#    Never one box per repetition: that would encode how far the rep travelled, which
+#    is a function of its correctness.
+python scripts/rehab24/build_videomae_boxes.py
+
+# 2. Geometry gate. Exact arithmetic on frame sizes and boxes; no decoding, no model.
+#    Must pass, and be READ, before any features exist.
+python scripts/rehab24/videomae_framing_geometry.py
+
+# 3. Extract each arm into its OWN raw dir (the extractor refuses to mix them).
+python scripts/rehab24/extract_videomae_features.py --variant full_frame_letterbox \
+  --output-dir data/REHAB24-6/processed/videomae_raw_full_frame_letterbox --device cpu
+
+# 4. Pairing gate: same ids, splits, clip starts and metadata; different pixels.
+python scripts/rehab24/videomae_framing_pairing.py \
+  --baseline-dir data/REHAB24-6/processed/videomae_raw_full_frame_local \
+  --candidate-dir data/REHAB24-6/processed/videomae_raw_full_frame_letterbox
+
+# 5. Materialize the primary representation only, per variant.
+python scripts/rehab24/materialize_videomae_features.py \
+  --raw-dir data/REHAB24-6/processed/videomae_raw_full_frame_letterbox \
+  --output-parent data/REHAB24-6/processed/videomae_framing/full_frame_letterbox \
+  --token-pooling mean_pool_fc_norm --aggregation mean
+
+# 6. Paired LOSO across arms, three seeds, one pre-registered primary test.
+python scripts/rehab24/videomae_framing_report.py \
+  --arm full_frame=data/REHAB24-6/processed/videomae_framing/full_frame/videomae_mean_pool_fc_norm_mean \
+  --arm full_frame_letterbox=data/REHAB24-6/processed/videomae_framing/full_frame_letterbox/videomae_mean_pool_fc_norm_mean \
+  --primary full_frame_letterbox:full_frame --device cpu
+```
+
+The baseline arm is re-extracted **locally** rather than reused from the archived
+`videomae_raw/`: those bundles came from a Kaggle kernel on transformers 5.0.0, and a
+local re-run of the same code differs by ~1e-3 relative L2 (cosine 0.9999996). Small,
+but it would sit inside the measured delta on one arm only. Re-extracting removes the
+environment from the comparison and doubles as a reproduction check against 0.657.
+
+Extraction is resumable: it skips any bundle already on disk, so re-invoking the same
+command continues rather than restarting.
+
 Fuse skeleton and VideoMAE features:
 
 ```bash

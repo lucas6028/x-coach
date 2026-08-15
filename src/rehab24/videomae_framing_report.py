@@ -355,7 +355,11 @@ def print_comparison(name: str, result: dict, indent: str = "  ") -> None:
         f"[{result['delta_range'][0]:+.3f}, {result['delta_range'][1]:+.3f}]  "
         f"({result['n_positive']}/{result['n_subjects']} subjects positive{p_text})"
     )
-    print(f"{indent}  practical (§8): {result['practical_reading']}   significance (§7.2): {result['significance']}")
+    # ASCII "sec." rather than the section sign: this console is cp950 and mangles it.
+    print(
+        f"{indent}  practical (plan sec.8): {result['practical_reading']}"
+        f"   significance (sec.7.2): {result['significance']}"
+    )
 
 
 def print_summary(summary: dict) -> None:
