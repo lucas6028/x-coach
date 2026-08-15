@@ -135,18 +135,36 @@ python scripts/rehab24/videomae_framing_pairing.py \
   --baseline-dir data/REHAB24-6/processed/videomae_raw_full_frame_local \
   --candidate-dir data/REHAB24-6/processed/videomae_raw_full_frame_letterbox
 
-# 5. Materialize the primary representation only, per variant.
-python scripts/rehab24/materialize_videomae_features.py \
-  --raw-dir data/REHAB24-6/processed/videomae_raw_full_frame_letterbox \
-  --output-parent data/REHAB24-6/processed/videomae_framing/full_frame_letterbox \
-  --token-pooling mean_pool_fc_norm --aggregation mean
+# 5. Materialize the primary representation only, once per variant. BOTH arms:
+#    the local full_frame baseline is an arm like any other.
+for variant in full_frame full_frame_letterbox; do
+  python scripts/rehab24/materialize_videomae_features.py \
+    --raw-dir data/REHAB24-6/processed/videomae_raw_${variant/full_frame/full_frame_local} \
+    --output-parent data/REHAB24-6/processed/videomae_framing/$variant \
+    --token-pooling mean_pool_fc_norm --aggregation mean
+done
 
-# 6. Paired LOSO across arms, three seeds, one pre-registered primary test.
+# 6. Audit the MATERIALIZED dirs. Not a duplicate of step 4: the audit needs the
+#    `video_feature` key raw bundles do not have, and it is what independently
+#    checks split placement against the manifest and catches constant features.
+python scripts/rehab24/audit_videomae_features.py \
+  data/REHAB24-6/processed/videomae_framing/full_frame/videomae_mean_pool_fc_norm_mean \
+  data/REHAB24-6/processed/videomae_framing/full_frame_letterbox/videomae_mean_pool_fc_norm_mean
+
+# 7. Paired LOSO across arms, three seeds, one pre-registered primary test.
 python scripts/rehab24/videomae_framing_report.py \
   --arm full_frame=data/REHAB24-6/processed/videomae_framing/full_frame/videomae_mean_pool_fc_norm_mean \
   --arm full_frame_letterbox=data/REHAB24-6/processed/videomae_framing/full_frame_letterbox/videomae_mean_pool_fc_norm_mean \
+  --arm kaggle_full_frame=data/REHAB24-6/processed/videomae_mean_pool_fc_norm_mean \
   --primary full_frame_letterbox:full_frame --device cpu
 ```
+
+`kaggle_full_frame` is declared as an arm but is **not** a `--secondary` comparison. It
+is a quality check, not a framing hypothesis: the runner scores every declared arm, so
+its seed-averaged balanced accuracy lands beside the local `full_frame` in the summary
+and answers whether the local re-extraction reproduces the published 0.657 — the way
+Stage A checked its legacy reproduction against the historical 0.536. Putting it in
+`--secondary` would drag a QC check into the Holm family.
 
 The baseline arm is re-extracted **locally** rather than reused from the archived
 `videomae_raw/`: those bundles came from a Kaggle kernel on transformers 5.0.0, and a
