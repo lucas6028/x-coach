@@ -178,18 +178,35 @@ def extract_repetition_features(
 
 
 def save_feature(path: Path, row: dict[str, str], bundle: dict[str, np.ndarray], provenance: dict[str, str]) -> None:
+    """Write one repetition's bundle, atomically.
+
+    Written to a sibling ``.partial`` and renamed only once the archive is closed. The
+    resume path skips any output that already exists, so a half-written bundle from a
+    killed run would be silently accepted as a finished repetition and would reach the
+    classifier as truncated or unreadable features. A 2144-bundle extraction gets
+    interrupted often enough for this to matter, and the same reasoning already governs
+    ``squat_video_variants.write_video`` -- six 0-frame stubs there were the reason it
+    became atomic.
+
+    ``np.savez_compressed`` is handed an open file rather than the path because it
+    appends ``.npz`` to a path that lacks it, which would turn the temporary name into
+    ``<sample>.partial.npz`` and leave it behind looking like a sibling bundle.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        path,
-        sample_id=np.asarray(row["sample_id"]),
-        video_id=np.asarray(row["video_id"]),
-        exercise_id=np.asarray(row["exercise_id"]),
-        person_id=np.asarray(row["person_id"]),
-        camera=np.asarray(row["camera"]),
-        correctness=np.asarray(int(row["correctness"]), dtype=np.int64),
-        **bundle,
-        **{f"provenance_{key}": np.asarray(value) for key, value in provenance.items()},
-    )
+    partial = path.with_name(path.name + ".partial")
+    with partial.open("wb") as handle:
+        np.savez_compressed(
+            handle,
+            sample_id=np.asarray(row["sample_id"]),
+            video_id=np.asarray(row["video_id"]),
+            exercise_id=np.asarray(row["exercise_id"]),
+            person_id=np.asarray(row["person_id"]),
+            camera=np.asarray(row["camera"]),
+            correctness=np.asarray(int(row["correctness"]), dtype=np.int64),
+            **bundle,
+            **{f"provenance_{key}": np.asarray(value) for key, value in provenance.items()},
+        )
+    partial.replace(path)
 
 
 def group_rows_by_video(rows: Sequence[dict[str, str]]) -> list[tuple[str, list[dict[str, str]]]]:

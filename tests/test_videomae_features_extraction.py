@@ -4,12 +4,15 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
+from unittest import mock
+
 from src.rehab24.videomae_features import (
     FRAMING_VARIANTS,
     assert_fc_norm_pretrained,
     assert_output_dir_matches_variant,
     group_rows_by_video,
     sample_clip_starts,
+    save_feature,
     transform_frames,
 )
 from src.video.variant_geometry import LETTERBOX_FILL, Box
@@ -141,6 +144,56 @@ class TransformFramesTest(unittest.TestCase):
         for variant in FRAMING_VARIANTS:
             with self.subTest(variant=variant):
                 self.assertEqual(len(transform_frames(frames(640, 480, count=2), variant, box)), 2)
+
+
+class SaveFeatureAtomicityTest(unittest.TestCase):
+    """The resume path skips whatever already exists, so a half-written bundle would be
+    accepted as a finished repetition rather than re-extracted."""
+
+    def row(self) -> dict[str, str]:
+        return {
+            "sample_id": "Ex6_a_rep1_cam17",
+            "video_id": "a",
+            "exercise_id": "6",
+            "person_id": "1",
+            "camera": "cam17",
+            "correctness": "1",
+        }
+
+    def bundle(self) -> dict[str, np.ndarray]:
+        return {
+            "clip_features_mean_pool_fc_norm": np.ones((4, 768), dtype=np.float32),
+            "clip_starts": np.asarray([0, 10, 20, 30], dtype=np.int32),
+        }
+
+    def test_writes_a_readable_bundle_and_leaves_no_temp_file(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "train" / "Ex6_a_rep1_cam17.npz"
+            save_feature(path, self.row(), self.bundle(), {"variant": "full_frame_letterbox"})
+            with np.load(path, allow_pickle=False) as data:
+                self.assertEqual(data["clip_features_mean_pool_fc_norm"].shape, (4, 768))
+                self.assertEqual(str(data["provenance_variant"]), "full_frame_letterbox")
+            self.assertEqual(sorted(p.name for p in path.parent.iterdir()), ["Ex6_a_rep1_cam17.npz"])
+
+    def test_a_crash_mid_write_leaves_no_bundle_at_the_target_path(self):
+        """Without the rename this is exactly how a truncated .npz survives a kill and
+        is later counted as done."""
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "train" / "Ex6_a_rep1_cam17.npz"
+            with mock.patch("numpy.savez_compressed", side_effect=OSError("killed mid-write")):
+                with self.assertRaises(OSError):
+                    save_feature(path, self.row(), self.bundle(), {})
+            self.assertFalse(path.exists())
+
+    def test_overwrites_an_existing_bundle_in_place(self):
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "train" / "Ex6_a_rep1_cam17.npz"
+            save_feature(path, self.row(), self.bundle(), {})
+            replacement = self.bundle()
+            replacement["clip_features_mean_pool_fc_norm"] = np.full((4, 768), 7.0, dtype=np.float32)
+            save_feature(path, self.row(), replacement, {})
+            with np.load(path, allow_pickle=False) as data:
+                self.assertEqual(float(data["clip_features_mean_pool_fc_norm"][0, 0]), 7.0)
 
 
 class OutputDirVariantGuardTest(unittest.TestCase):
