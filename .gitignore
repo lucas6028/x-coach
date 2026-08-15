@@ -383,6 +383,7 @@ third_party/glog/
 # Virtualenv
 .venv/
 venv/
+.venv-cuda/
 
 # Log files
 *.log

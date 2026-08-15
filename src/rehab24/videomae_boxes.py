@@ -33,8 +33,7 @@ import numpy as np
 
 from src.rehab24.dataset import DEFAULT_DATA_ROOT, DEFAULT_PROCESSED_ROOT, load_manifest, resolve_data_path
 from src.video.box_geometry import box_from_points
-from src.video.squat_video_variants import expand_box
-from src.video.variant_geometry import DEFAULT_MARGIN, Box
+from src.video.variant_geometry import DEFAULT_MARGIN, Box, expand_box
 
 #: Stamped into the index and into every bundle's provenance, so a feature dir states
 #: where its rectangle came from instead of leaving it to a note.
