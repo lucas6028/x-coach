@@ -179,37 +179,30 @@ environment from the comparison and doubles as a reproduction check against 0.65
 Extraction is resumable: it skips any bundle already on disk, so re-invoking the same
 command continues rather than restarting.
 
-#### Extracting on the GPU (`.venv-cuda`)
+#### Extracting on a GPU (`.venv-cuda`)
 
 `.venv` holds a CPU-only torch and must stay that way — it serves the backend and the
 whole test suite. Extraction gets its own venv, the same way `--runtime mmpose` does:
+torch + torchvision from the CUDA index matching your card's compute capability, then
+`numpy`, `transformers`, `opencv-python` and `pillow` pinned to `.venv`'s versions.
 
-```bash
-py -3.12 -m venv .venv-cuda
-.venv-cuda/Scripts/python.exe -m pip install torch==2.13.0 torchvision==0.28.0 \
-  --index-url https://download.pytorch.org/whl/cu126
-.venv-cuda/Scripts/python.exe -m pip install numpy==2.4.3 transformers==5.5.0 \
-  opencv-python==4.13.0.92 pillow==12.2.0
-```
+Confirm `torch.cuda.get_arch_list()` covers your GPU's `sm_XX` before trusting a build:
+recent CUDA releases drop older architectures. `resolve_device` also runs a real strided
+`conv3d` probe, so a wheel missing the right kernels falls back to CPU in two seconds
+rather than dying hours in — the Kaggle P100/sm_60 failure that cost this study a run.
 
-`cu126`, not `cu13x`: this machine's card is a GTX 1660 Ti (Turing, **sm_75**) and CUDA
-13.x has been dropping older architectures. Check `torch.cuda.get_arch_list()` contains
-`sm_75` before trusting a build — and note `resolve_device` runs a real strided `conv3d`
-probe, so a wheel without the right kernels falls back to CPU in two seconds instead of
-dying six hours in (the Kaggle P100/sm_60 failure).
+Run several workers with `--num-chunks`/`--chunk-index`: the profile is CPU-bound, not
+GPU-bound (decode ~42% of a clip, the processor's resize most of the rest), so one worker
+leaves the GPU mostly idle. Measured here, 3 workers cut 9.30 s/bundle to 2.19 s. Cap
+`OMP_NUM_THREADS` per worker so the processes do not oversubscribe the cores. That is
+numerically safe *because* the forward is on the GPU: CPU threads then touch only decode
+and the processor, neither of which reduces across threads.
 
-Measured here, per repetition bundle: CPU 1 worker **9.30 s**, GPU 3 workers **2.19 s**
-(4.25x). Three workers because the profile is CPU-bound, not GPU-bound — decode is 42%
-of a clip, the processor's resize most of the rest, and the forward leaves a 1660 Ti at
-32% with 1.8 of 6 GB used. Cap `OMP_NUM_THREADS` per worker so three processes do not
-oversubscribe 12 logical cores; that is numerically safe *because* the forward is on the
-GPU, so CPU threads touch only decode and the processor, neither of which reduces across
-threads.
-
-**Both arms must come from the same venv.** Provenance records the transformers version
-but not the device, so a mixed arm is undetectable afterwards. Measured on 8 identical
-samples: CPU vs GPU differ by 4.1e-06 relative L2 (cosine 1.00000000), while Kaggle 5.0.0
-vs local 5.5.0 differ by 9.4e-04 — the library version dominates the hardware by ~230x.
+**Both arms must be extracted from the same venv.** Provenance records the transformers
+version but not the device, so a mixed arm is undetectable afterwards. Measured on 8
+identical samples: CPU vs GPU differ by 4.1e-06 relative L2 (cosine 1.00000000), while
+transformers 5.0.0 vs 5.5.0 differ by 9.4e-04 — the library version dominates the
+hardware by ~230x, which is the reason the baseline is re-extracted rather than reused.
 
 Fuse skeleton and VideoMAE features:
 
