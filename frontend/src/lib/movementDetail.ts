@@ -66,17 +66,34 @@ export interface MovementDetail {
   demo?: { clip: string };
 }
 
-// Only Squat has step illustrations so far (five figures, one per step, trimmed and re-encoded by
-// scripts/prep_movement_detail_art.py). The other fifteen fall back to their card art, which is
-// one pose rather than five — the numbered cues are still the useful part, and a code change
-// cannot honestly invent fifteen more figure sets. Adding a set is a drop-in: put the PNGs in
-// frontend/public/movements/steps/, run the script, and list the WebPs here.
+// Squat, Lunge and Deadlift have step illustrations so far (five figures each, one per step,
+// trimmed and re-encoded by scripts/prep_movement_detail_art.py). The other thirteen fall back to
+// their card art, which is one pose rather than five — the numbered cues are still the useful
+// part, and a code change cannot honestly invent thirteen more figure sets. Adding a set is a
+// drop-in: put the PNGs in frontend/public/movements/steps/, run the script, and list the WebPs
+// here.
 const SQUAT_STEP_ART = [
   "/movements/steps/squat-1.webp",
   "/movements/steps/squat-2.webp",
   "/movements/steps/squat-3.webp",
   "/movements/steps/squat-4.webp",
   "/movements/steps/squat-5.webp",
+];
+
+const LUNGE_STEP_ART = [
+  "/movements/steps/lunge-1.webp",
+  "/movements/steps/lunge-2.webp",
+  "/movements/steps/lunge-3.webp",
+  "/movements/steps/lunge-4.webp",
+  "/movements/steps/lunge-5.webp",
+];
+
+const DEADLIFT_STEP_ART = [
+  "/movements/steps/deadlift-1.webp",
+  "/movements/steps/deadlift-2.webp",
+  "/movements/steps/deadlift-3.webp",
+  "/movements/steps/deadlift-4.webp",
+  "/movements/steps/deadlift-5.webp",
 ];
 
 const step = (en: string, zh: string, image?: string): Step => ({
@@ -121,12 +138,13 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["quads", "glutes"],
     secondary: ["hamstrings", "abs", "calves"],
     steps: [
-      step("Stand tall with the feet hip-width apart.", "雙腳與髖同寬，站直。"),
-      step("Take a controlled step forward and plant the whole foot.", "有控制地向前跨一步，整個腳掌踩實。"),
-      step("Bend both knees until the back knee is just above the floor.", "雙膝同時彎曲，後腳膝蓋接近地面。"),
-      step("Keep the front knee over the mid-foot and the torso upright.", "前腳膝蓋對齊腳掌中央，軀幹保持直立。"),
-      step("Drive through the front heel to stand, then switch sides.", "前腳跟推地站起，再換邊。"),
+      step("Stand tall with the feet hip-width apart.", "雙腳與髖同寬，站直。", LUNGE_STEP_ART[0]),
+      step("Take a controlled step forward and plant the whole foot.", "有控制地向前跨一步，整個腳掌踩實。", LUNGE_STEP_ART[1]),
+      step("Bend both knees until the back knee is just above the floor.", "雙膝同時彎曲，後腳膝蓋接近地面。", LUNGE_STEP_ART[2]),
+      step("Keep the front knee over the mid-foot and the torso upright.", "前腳膝蓋對齊腳掌中央，軀幹保持直立。", LUNGE_STEP_ART[3]),
+      step("Drive through the front heel to stand, then switch sides.", "前腳跟推地站起，再換邊。", LUNGE_STEP_ART[4]),
     ],
+    plate: "/movements/muscles-worked/lunge.webp",
   },
 
   Deadlift: {
@@ -142,12 +160,13 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["glutes", "hamstrings"],
     secondary: ["lowerBack", "upperBack", "lats", "forearms", "quads"],
     steps: [
-      step("Stand with the mid-foot under the bar, feet about hip-width.", "腳掌中央對準槓下，雙腳與髖同寬。"),
-      step("Hinge down and grip the bar just outside the knees.", "髖部後推下蹲，雙手握在膝蓋外側。"),
-      step("Flatten the back, pull the slack out of the bar and brace.", "背部打平，先拉緊槓鈴的鬆弛，核心收緊。"),
-      step("Push the floor away and stand tall, bar close to the legs.", "推地站直，槓鈴貼著大腿走。"),
-      step("Hinge at the hips first, then bend the knees to lower it.", "先髖部後推，再屈膝把槓放回地面。"),
+      step("Stand with the mid-foot under the bar, feet about hip-width.", "腳掌中央對準槓下，雙腳與髖同寬。", DEADLIFT_STEP_ART[0]),
+      step("Hinge down and grip the bar just outside the knees.", "髖部後推下蹲，雙手握在膝蓋外側。", DEADLIFT_STEP_ART[1]),
+      step("Flatten the back, pull the slack out of the bar and brace.", "背部打平，先拉緊槓鈴的鬆弛，核心收緊。", DEADLIFT_STEP_ART[2]),
+      step("Push the floor away and stand tall, bar close to the legs.", "推地站直，槓鈴貼著大腿走。", DEADLIFT_STEP_ART[3]),
+      step("Hinge at the hips first, then bend the knees to lower it.", "先髖部後推，再屈膝把槓放回地面。", DEADLIFT_STEP_ART[4]),
     ],
+    plate: "/movements/muscles-worked/deadlift.webp",
   },
 
   "Leg Abduction": {
@@ -169,6 +188,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Stop where the pelvis starts to tip and hold briefly.", "抬到骨盆快要傾斜就停住，稍作停留。"),
       step("Lower under control without letting the foot crash down.", "有控制地放下，不要讓腳直接落地。"),
     ],
+    plate: "/movements/muscles-worked/leg-abduction.webp",
   },
 
   "Shoulder Bridge": {
@@ -190,6 +210,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Stop where hips, knees and shoulders form one line.", "抬到髖、膝、肩成一直線就停住。"),
       step("Lower one vertebra at a time back to the floor.", "一節一節把脊椎放回地面。"),
     ],
+    plate: "/movements/muscles-worked/shoulder-bridge.webp",
   },
 
   "Push-up": {
@@ -211,6 +232,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Lower the chest to just above the floor.", "胸口下降到接近地面。"),
       step("Push the floor away without letting the hips sag.", "推地回到起始，過程中髖部不要下沉。"),
     ],
+    plate: "/movements/muscles-worked/push-up.webp",
     demo: { clip: "pushups" },
   },
 
@@ -233,6 +255,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Finish with the arms locked and biceps by the ears.", "手臂鎖定，二頭肌貼近耳朵。"),
       step("Lower under control back to the shoulders.", "有控制地降回肩膀高度。"),
     ],
+    plate: "/movements/muscles-worked/overhead-press.webp",
   },
 
   Row: {
@@ -254,6 +277,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Squeeze the shoulder blades without shrugging.", "肩胛骨後收，但不要聳肩。"),
       step("Lower the weight all the way without rocking the torso.", "完全放下重量，軀幹不要前後擺動。"),
     ],
+    plate: "/movements/muscles-worked/row.webp",
   },
 
   "Bicep Curl": {
@@ -275,6 +299,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Stop before the elbows drift forward.", "在手肘往前跑之前停住。"),
       step("Lower slowly to a full stretch.", "緩慢放下，回到完全伸展。"),
     ],
+    plate: "/movements/muscles-worked/bicep-curl.webp",
   },
 
   "Band Pull Apart": {
@@ -296,6 +321,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Stop when the band touches the chest, ribs down.", "拉到彈力帶碰到胸口就停，肋骨保持下收。"),
       step("Return under tension rather than letting it snap back.", "維持張力回到起始，不要讓帶子彈回去。"),
     ],
+    plate: "/movements/muscles-worked/band-pull-apart.webp",
   },
 
   "Arm Abduction": {
@@ -317,6 +343,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Stop at shoulder height without shrugging.", "抬到肩膀高度，不要聳肩。"),
       step("Lower under control, keeping both sides level.", "有控制地放下，兩側保持同高。"),
     ],
+    plate: "/movements/muscles-worked/arm-abduction.webp",
   },
 
   "Arm VW": {
@@ -338,6 +365,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Squeeze the shoulder blades together at the bottom.", "在最低點把肩胛骨往中間夾。"),
       step("Return to the V slowly, keeping the arms in view.", "緩慢回到 V 字，手臂維持在視線範圍內。"),
     ],
+    plate: "/movements/muscles-worked/arm-vw.webp",
   },
 
   "Sit-up": {
@@ -359,6 +387,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Continue up until the torso is off the floor.", "繼續往上，直到軀幹離開地面。"),
       step("Lower one segment at a time, without dropping back.", "一段一段放下，不要整個往後倒。"),
     ],
+    plate: "/movements/muscles-worked/sit-up.webp",
     demo: { clip: "situps" },
   },
 
@@ -381,6 +410,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Move only as far as the hips can stay square.", "轉到髖部快要跟著轉之前就停。"),
       step("Return through the middle and repeat the other way.", "回到中間再轉向另一側。"),
     ],
+    plate: "/movements/muscles-worked/torso-twist.webp",
   },
 
   "Jumping Jacks": {
@@ -402,6 +432,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Land softly on the balls of the feet.", "以前腳掌輕柔落地。"),
       step("Jump back to the start and keep the tempo even.", "跳回起始位置，維持穩定節奏。"),
     ],
+    plate: "/movements/muscles-worked/jumping-jacks.webp",
   },
 
   "High Knee": {
@@ -423,6 +454,7 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
       step("Keep the torso upright rather than leaning back.", "軀幹保持直立，不要往後仰。"),
       step("Land on the balls of the feet and keep the rhythm.", "以前腳掌落地，維持節奏。"),
     ],
+    plate: "/movements/muscles-worked/high-knee.webp",
     demo: { clip: "highknee" },
   },
 };
