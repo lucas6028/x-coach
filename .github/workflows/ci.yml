@@ -52,6 +52,7 @@ jobs:
             --ignore=tests/test_videomae_video_classifier.py \
             --ignore=tests/test_videomae_features_extraction.py \
             --ignore=tests/test_videomae_stage_a.py \
+            --ignore=tests/test_rehab24_videomae_framing_report.py \
             --ignore=tests/test_videomae_squat_extraction.py \
             --ignore=tests/test_squat_video_variants.py \
             --ignore=tests/test_video_level_error_classification.py \

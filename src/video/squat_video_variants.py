@@ -83,6 +83,7 @@ from src.video.variant_geometry import (  # re-exported: this stays the pixel-si
     LETTERBOX_FILL,
     VARIANTS,
     Box,
+    expand_box,
 )
 
 __all__ = [
@@ -140,26 +141,6 @@ def person_box_from_pose(
     if x1 <= x0 or y1 <= y0:
         return None
     return Box(x0, y0, x1, y1)
-
-
-def expand_box(box: Box, width: int, height: int, margin: float = DEFAULT_MARGIN) -> Box:
-    """Grow ``box`` by ``margin`` on each side, clamped inside the frame.
-
-    The margin is slack for landmarks the visibility threshold drops, not for body
-    parts the model does not emit: this pose JSON carries all 33 MediaPipe landmarks,
-    including the hands (17-22) and the heels and foot tips (29-32), so a
-    landmark-tight box already reaches the extremities. Measured over 120 videos, the
-    visible-only box misses a median -0.3% of the all-landmark box's area and more
-    than 10% of it in only 8.3% of videos. Aspect ratio is left alone -- squaring
-    happens later as padding, not as more background.
-    """
-    pad_x = (box.x1 - box.x0) * margin / 2.0
-    pad_y = (box.y1 - box.y0) * margin / 2.0
-    x0 = max(int(round(box.x0 - pad_x)), 0)
-    y0 = max(int(round(box.y0 - pad_y)), 0)
-    x1 = min(int(round(box.x1 + pad_x)), width)
-    y1 = min(int(round(box.y1 + pad_y)), height)
-    return Box(x0, y0, max(x1, x0 + 1), max(y1, y0 + 1))
 
 
 def letterbox_to_square(frame: np.ndarray, fill: int = LETTERBOX_FILL) -> np.ndarray:
