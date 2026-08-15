@@ -34,6 +34,14 @@
 沒有洩漏的跡象。若它高出 0.03 以上才是警報——那時唯一合理的解釋是同一位受試者的
 多支影片落在分割兩邊,而 Fitness-AQA 沒有 participant mapping,偵測不到。
 
+> **後續修正(見 [`rehab24_box_geometry_control.md`](rehab24_box_geometry_control.md)):
+> 這個閘門偵測不到本文最重要的洩漏。** 它比較的是兩個**都是 subject-blind** 的協定
+> (固定 split 與重抽,在 Fitness-AQA 上都無法按受試者分組),所以只能偵測「重抽是否
+> 比固定 split 洩漏得更多」,**永遠不可能偵測到兩者共有的洩漏**。閘門通過證明不了
+> 沒有洩漏。在 REHAB24-6 上量到的量級是:同一份特徵只換成 subject-blind 分割,
+> 分數上升 **+0.113**。本文的絕對數值因此可能被高估;臂與臂的比較共用分割,
+> 大致不受影響。
+
 ## 各臂結果(1623 支全部 out-of-fold,5 個 repeat)
 
 臂的定義——差別全在餵給 processor 之前對畫面做了什麼。processor 一律把短邊縮到 224
