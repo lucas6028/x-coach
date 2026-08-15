@@ -26,6 +26,12 @@ KG schema docs: `docs/kg-schema-generalization.md`, `docs/movement-kg-expansion-
   NEVER `source .venv/bin/activate` (POSIX-only, fails here), never bare `python`/`pip`.
   Use `.venv\Scripts\python.exe -m pip install ...` for deps.
   `.venv-mmpose\` is a second venv ONLY for the `--runtime mmpose` pose path.
+- **GPU:** this machine has a **GTX 1660 Ti** (Turing sm_75, 6 GB) and it works — `.venv`
+  simply holds a CPU-only torch build on purpose. Heavy extraction runs from
+  `.venv-cuda\` (torch `+cu126`; CUDA 13.x wheels drop older architectures). Measured on
+  VideoMAE: 4.25x over CPU with 3 parallel workers. Setup + why in
+  `scripts/rehab24/README.md`. Don't reach for Kaggle before checking whether the local
+  GPU is enough.
 - **Backend/ML tests:** `.venv\Scripts\python.exe -m pytest tests/` (always scope to
   `tests/`; never bare `pytest`).
   Single case: append `tests/test_x.py::Class::test_name`.
