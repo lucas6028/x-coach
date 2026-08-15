@@ -16,6 +16,7 @@ export default function CaptureStudio({
   onError,
   movement,
   tier: controlledTier,
+  initialMode = "upload",
 }: {
   onBlob: (blob: Blob, tier: PoseTier) => void;
   busy: boolean;
@@ -29,9 +30,13 @@ export default function CaptureStudio({
    *  the reference design) and the panel's own selector is hidden — two controls for one setting
    *  is how they drift apart. Omitted, the panel stays self-contained. */
   tier?: PoseTier;
+  /** Which tab the panel opens on. The seam exists so a link can point at the camera: the
+   *  movement detail page offers "Record live" and "Upload video" as two separate cards, and
+   *  without this both would land on the dropzone. Initial state only — the tabs own it after. */
+  initialMode?: Mode;
 }) {
   const { t } = useI18n();
-  const [mode, setMode] = useState<Mode>("upload");
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [ownTier, setOwnTier] = useState<PoseTier>(() => loadAnalysisTier());
   const controlled = controlledTier !== undefined;
   const tier = controlledTier ?? ownTier;

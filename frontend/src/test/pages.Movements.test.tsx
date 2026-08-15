@@ -41,9 +41,17 @@ import Movements from "../pages/Movements";
 
 // AppLayout renders real chrome (Header + desktop/mobile Sidebar), which contributes its own
 // <button> elements (nav toggles, "New analysis", language/theme menus). Scoping every query to
-// the "Analyze a video" accessible name is what the pre-existing tests below already did, and it
-// is what keeps the movement-card assertions from being polluted by that chrome.
-const liveButtons = () => screen.getAllByRole("button", { name: /Analyze a video/ });
+// the "Analyze" accessible name is what the pre-existing tests below already did, and it is what
+// keeps the movement-card assertions from being polluted by that chrome. The rail's own item is
+// spelled "Analyse", so the American spelling here matches only the cards.
+const liveButtons = () => screen.getAllByRole("button", { name: /Analyze/ });
+
+// The card is a <div> inside the section's <li>, not one big button: it has two destinations now
+// (the studio and the movement's detail page), so queries reach a card through its <li> and then
+// ask for the control they mean.
+const card = (name: string) => screen.getByText(name).closest("li")!;
+const analyzeIn = (name: string) =>
+  within(card(name)).getByRole("button", { name: /Analyze/ });
 
 const LIVE = [
   { name: "Squat", validated: true },
@@ -101,18 +109,15 @@ describe("Movements page", () => {
     renderWithProviders(<Movements />);
     const betas = await screen.findAllByText("Beta");
     expect(betas).toHaveLength(2);
-    const squatCard = screen.getByText("Squat").closest("button")!;
-    expect(within(squatCard).queryByText("Beta")).toBeNull();
+    expect(within(card("Squat")).queryByText("Beta")).toBeNull();
     // Named, not just counted: Overhead Press specifically carries the tag Squat does not.
-    const ohpCard = screen.getByText("Overhead Press").closest("button")!;
-    expect(within(ohpCard).getByText("Beta")).toBeInTheDocument();
+    expect(within(card("Overhead Press")).getByText("Beta")).toBeInTheDocument();
   });
 
   it("navigates to the studio with the chosen movement", async () => {
     renderWithProviders(<Movements />);
     await waitFor(() => expect(liveButtons()).toHaveLength(LIVE.length));
-    const pushup = screen.getByRole("button", { name: /Push-up/ });
-    await userEvent.click(pushup);
+    await userEvent.click(analyzeIn("Push-up"));
     expect(navigate).toHaveBeenCalledWith("/app?movement=Push-up");
   });
 
@@ -122,9 +127,28 @@ describe("Movements page", () => {
     // Names Overhead Press explicitly (the count-only checks above would also pass if this card
     // were actually some other movement, e.g. Row, misrouted by a typo'd name match) and pins the
     // one interesting case for encodeURIComponent: a movement name containing a space.
-    const ohp = screen.getByRole("button", { name: /Overhead Press/ });
-    await userEvent.click(ohp);
+    await userEvent.click(analyzeIn("Overhead Press"));
     expect(navigate).toHaveBeenCalledWith("/app?movement=Overhead%20Press");
+  });
+
+  it("gives every card a details link, analyzable or not", async () => {
+    renderWithProviders(<Movements />);
+    await waitFor(() => expect(liveButtons()).toHaveLength(LIVE.length));
+    // All sixteen, because the detail page is knowledge about the movement rather than a result
+    // of analysing one — the thirteen inert cards are exactly the ones that had no destination
+    // before this link existed.
+    expect(screen.getAllByRole("link", { name: /View details/ })).toHaveLength(
+      ALL_MOVEMENTS.length
+    );
+    // The href carries the canonical name, percent-encoded — the same identity /app?movement= uses.
+    expect(
+      within(card("Overhead Press")).getByRole("link", { name: /View details/ })
+    ).toHaveAttribute("href", "/movements/Overhead%20Press");
+    // A locked movement links out too.
+    expect(within(card("Bicep Curl")).getByRole("link", { name: /View details/ })).toHaveAttribute(
+      "href",
+      "/movements/Bicep%20Curl"
+    );
   });
 
   it("narrows to one body region when a filter pill is picked", async () => {
@@ -175,9 +199,9 @@ describe("Movements page", () => {
     await waitFor(() =>
       expect(screen.getAllByText(/Soon|即將開放/)).toHaveLength(ALL_MOVEMENTS.length - 1)
     );
-    const buttons = liveButtons();
-    expect(buttons).toHaveLength(1);
-    expect(within(buttons[0]).getByText("Squat")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Push-up/ })).toBeNull();
+    expect(liveButtons()).toHaveLength(1);
+    // And it is Squat's card that carries it, not just "some card".
+    expect(within(card("Squat")).getByRole("button", { name: /Analyze/ })).toBeTruthy();
+    expect(within(card("Push-up")).queryByRole("button", { name: /Analyze/ })).toBeNull();
   });
 });

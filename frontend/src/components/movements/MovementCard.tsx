@@ -1,4 +1,5 @@
-import { Lock, VideoCamera } from "@phosphor-icons/react";
+import { Info, Lock, VideoCamera } from "@phosphor-icons/react";
+import { Link } from "react-router-dom";
 import MovementArt from "./MovementArt";
 import MovementIcon from "./MovementIcon";
 import { movementLabel, useI18n } from "../../lib/i18n";
@@ -6,26 +7,40 @@ import { movementLabel, useI18n } from "../../lib/i18n";
 interface Props {
   /** Canonical English movement name — the data key. Never rendered; see `movementLabel`. */
   movement: string;
-  /** Absent when the pipeline has no detector for this movement, so the card is inert. */
+  /** Absent when the pipeline has no detector for this movement, so the card cannot be analysed.
+   *  It still links to its detail page — that is what a locked movement DOES have. */
   live?: { validated: boolean };
   onPick: () => void;
 }
 
-// One movement, as the exercise_library_muse-spark card: a titled tile with a preview stage and a
-// single action along the bottom.
+// One movement, as the exercise_library_muse-spark card: a titled tile with a preview stage and
+// its actions along the bottom.
 //
-// THREE DEPARTURES FROM THE REFERENCE CARD, all forced by facts the mock does not have:
+// TWO DEPARTURES FROM THE REFERENCE CARD:
 //
-//  * Its "View details" button is dropped rather than wired. There is no movement-detail view in
-//    this app, and shipping a control that opens nothing is the one thing a static mock can afford
-//    and a running app cannot.
 //  * Its category chip is dropped. The chip exists in the mock BECAUSE the mock has no sections —
 //    it filters with pills over one flat grid. This page keeps its body-region sections, so a chip
 //    would restate the heading directly above it on every card in the section.
-//  * The whole live card is ONE button, not a div with a button in its footer. The card has a
-//    single destination, so a nested control would be a second tab stop to the same place, and the
-//    surrounding 200px of card would be dead to the keyboard. The violet bar along the bottom is
-//    the affordance for the card, not a control of its own.
+//  * The reference's single "View details" button became a pair, side by side along the bottom:
+//    "View details" on the left, the primary action on the right. The mock's library has only the
+//    first because its detail page is where you start an analysis; here the library IS the launcher
+//    for the analyzable movements, and demoting that to a detail page would put a click in front of
+//    the main task.
+//
+// The card is NOT one big button any more. It has two destinations now — the studio and the detail
+// page — and a card-sized control with a nested link inside it is a control whose hit area lies
+// about where it goes.
+// The two halves of the action row share a shape, so the pair reads as one control strip rather
+// than two things that happen to be adjacent. `min-w` is what makes them wrap instead of squeezing.
+//
+// The icons fit again now that the primary action is the bare verb: "Analyze a video" was ~92px of
+// the ~116px each half gets at the four-column breakpoint, which left the label touching both edges
+// of its pill. "Analyze" is half that.
+const SLOT =
+  "flex min-w-[104px] flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs transition-colors";
+const ACTIVE =
+  "bg-primary font-semibold text-primary-content shadow-accent hover:bg-primary/90 active:scale-[0.99]";
+
 export default function MovementCard({ movement, live, onPick }: Props) {
   const { t } = useI18n();
   const name = movementLabel(t, movement);
@@ -61,33 +76,52 @@ export default function MovementCard({ movement, live, onPick }: Props) {
     </span>
   );
 
-  if (!live) {
-    // Not a disabled <button>: there is no action behind it, so it is listed as plain content
-    // rather than as a control that pretends to be one.
-    return (
-      <div className="flex h-full flex-col rounded-2xl border border-border-dark bg-surface p-3">
-        {title}
-        {stage}
-        <span className="mt-3 flex items-center justify-center gap-1.5 rounded-xl bg-content/[0.04] py-2 text-xs font-medium text-faint">
-          <Lock size={14} weight="duotone" />
-          {t("movements.soon")}
-        </span>
-      </div>
-    );
-  }
+  // The detail page exists for all sixteen, analysable or not — it is knowledge about the
+  // movement, not a result of analysing one. It sits on the LEFT of the action row, the quieter
+  // half of the pair.
+  const details = (
+    <Link
+      to={`/movements/${encodeURIComponent(movement)}`}
+      className={`${SLOT} border border-border-dark font-medium text-muted hover:border-primary/40 hover:text-content`}
+    >
+      <Info size={14} weight="duotone" className="shrink-0" />
+      <span className="truncate">{t("movements.viewDetails")}</span>
+    </Link>
+  );
+
+  // The right-hand half: the analysis, or the reason there isn't one.
+  const action = live ? (
+    <button type="button" onClick={onPick} className={`${SLOT} ${ACTIVE}`}>
+      <VideoCamera size={14} weight="fill" className="shrink-0" />
+      <span className="truncate">{t("movements.analyze")}</span>
+    </button>
+  ) : (
+    // Not a disabled <button>: there is no analysis behind it, so it is content rather than a
+    // control pretending to be one.
+    <span className={`${SLOT} bg-content/[0.04] font-medium text-faint`}>
+      <Lock size={14} weight="duotone" className="shrink-0" />
+      <span className="truncate">{t("movements.soon")}</span>
+    </span>
+  );
 
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      className="group flex h-full w-full flex-col rounded-2xl border border-border-dark bg-surface p-3 text-left shadow-card transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-card-hover active:translate-y-0"
+    <div
+      className={`flex h-full flex-col rounded-2xl border border-border-dark bg-surface p-3 ${
+        live
+          ? "shadow-card transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-card-hover"
+          : ""
+      }`}
     >
       {title}
       {stage}
-      <span className="mt-3 flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-semibold text-primary-content shadow-accent transition-colors group-hover:bg-primary/90">
-        <VideoCamera size={14} weight="fill" />
-        {t("movements.analyze")}
-      </span>
-    </button>
+      {/* One row, details first. `flex-wrap` with a min width on each half is the concession to a
+          narrow phone: two 2-column cards at 375px leave ~70px a side, which would truncate both
+          labels to nothing. Where they fit — which is every card from `sm` up — they sit side by
+          side; below that they stack rather than lie about what they say. */}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {details}
+        {action}
+      </div>
+    </div>
   );
 }

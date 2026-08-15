@@ -113,6 +113,20 @@ export default function App() {
   // The movement is user-asserted input, taken from the URL when the studio is entered from the
   // /movements menu. Validate it against the fetched list BEFORE enabling the dropzone: the
   // backend would 400 anyway, but only after the user picked and uploaded a file.
+  // `?capture=record` is a one-shot instruction from the movement detail page's "Start recording"
+  // card: open the capture panel on the camera rather than the dropzone. Read once and then
+  // stripped from the URL — left there it would re-apply every time the capture panel remounts
+  // (DemoIntro swaps it for the loader while an analysis runs), snapping the panel back to the
+  // camera and overriding whichever tab the user has picked since. `?movement=` is deliberately
+  // NOT stripped with it: that one describes the session, not a single action.
+  const [captureRecord] = useState(() => searchParams.get("capture") === "record");
+  useEffect(() => {
+    if (!searchParams.has("capture")) return;
+    const next = new URLSearchParams(searchParams);
+    next.delete("capture");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   const requestedMovement = searchParams.get("movement");
   const [movement, setMovement] = useState<string>(requestedMovement || "Squat");
   useEffect(() => {
@@ -336,6 +350,7 @@ export default function App() {
           movementError={movementError}
           movementsLoaded={movementsLoaded}
           tier={tier}
+          record={captureRecord}
         />
       ) : (
         // The reference's 12-column split: the clip and its dashboard cards on the left, the

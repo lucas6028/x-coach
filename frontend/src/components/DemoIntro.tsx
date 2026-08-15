@@ -21,6 +21,9 @@ interface Props {
   /** The extraction tier, owned by the studio header (StudioTitleBar) since the reference design
    *  moved every analysis control up into the page header. */
   tier: PoseTier;
+  /** True when the studio was opened with `?capture=record` — the movement detail page's "Start
+   *  recording" card. Opens the capture panel on the camera instead of the dropzone. */
+  record?: boolean;
 }
 
 const STEPS: { Icon: Icon; titleKey: string; bodyKey: string }[] = [
@@ -42,6 +45,7 @@ export default function DemoIntro({
   movementError,
   movementsLoaded,
   tier,
+  record,
 }: Props) {
   const { t } = useI18n();
   const reduce = useReducedMotion();
@@ -86,6 +90,7 @@ export default function DemoIntro({
                 onError={onError}
                 movement={movement}
                 tier={tier}
+                initialMode={record ? "record" : "upload"}
               />
             )}
 
