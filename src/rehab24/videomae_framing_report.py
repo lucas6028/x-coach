@@ -93,7 +93,16 @@ def seed_averaged_strata(
     key: str,
     drop_p10: bool = True,
 ) -> dict[str, dict[str, float]]:
-    """``{stratum: {subject: seed-averaged balanced accuracy}}`` for camera/exercise."""
+    """``{stratum: {subject: seed-averaged balanced accuracy}}`` for camera/exercise.
+
+    A cell is kept only when it is present in EVERY seed. ``stratified_metrics`` drops
+    a stratum whose fold has fewer than ``MIN_STRATUM_SAMPLES`` of it or only one
+    class, and that can differ between seeds -- so without this requirement one
+    subject's value would be an average over three seeds and another's over one, and
+    the two would sit in the same column looking alike. Dropped cells surface in the
+    summary's ``*_excluded`` record rather than vanishing.
+    """
+    n_seeds = len(folds_by_seed)
     per_stratum: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
     for folds in folds_by_seed.values():
         for fold in folds:
@@ -102,8 +111,15 @@ def seed_averaged_strata(
             for stratum, metrics in fold[key].items():
                 per_stratum[stratum][fold["test_subject"]].append(float(metrics["balanced_accuracy"]))
     return {
-        stratum: {subject: float(np.mean(values)) for subject, values in sorted(subjects.items(), key=lambda kv: int(kv[0]))}
+        stratum: complete
         for stratum, subjects in sorted(per_stratum.items())
+        if (
+            complete := {
+                subject: float(np.mean(values))
+                for subject, values in sorted(subjects.items(), key=lambda kv: int(kv[0]))
+                if len(values) == n_seeds
+            }
+        )
     }
 
 
@@ -126,18 +142,31 @@ def exact_wilcoxon(deltas: Sequence[float]) -> dict | None:
     return {"stat": float(stat), "p_value": float(p_value), "method": method}
 
 
-def verdict(mean_delta: float, p_value: float | None, band: float = PRACTICAL_EFFECT) -> str:
-    """Plan §8's reading rules, applied before the numbers existed.
+def practical_reading(mean_delta: float, majority_positive: bool, band: float = PRACTICAL_EFFECT) -> str:
+    """Plan §8's table, which is keyed on effect SIZE and direction -- never on p.
 
-    "undetermined" rather than "no difference" is deliberate and not hedging: at n=9
-    this design cannot distinguish a null from a real effect it is too small to see.
+    §8 row 1 is "Δ >= +0.02 且多數 subjects 同向", with no significance condition
+    attached. Folding p into this label would let a p just over 0.05 silently overrule
+    a pre-registered practical rule, and the correction §10 forbids is exactly the one
+    that would then be tempting: rewriting the plan to match the code. The p-value is
+    reported next to this, as its own axis, by ``significance_reading``.
     """
-    significant = p_value is not None and p_value < 0.05
     if abs(mean_delta) < band:
-        return "practically_small_point_estimate" if not significant else "small_but_consistent"
-    if not significant:
-        return "undetermined_direction_favours_candidate" if mean_delta > 0 else "undetermined_direction_favours_baseline"
+        # Explicitly NOT equivalence: a small point estimate with a wide interval is a
+        # small point estimate, and §8 says so.
+        return "practically_small_point_estimate"
+    consistent = majority_positive if mean_delta > 0 else not majority_positive
+    if not consistent:
+        return "practical_size_but_direction_inconsistent"
     return "practical_gain" if mean_delta > 0 else "practical_loss"
+
+
+def significance_reading(p_value: float | None) -> str:
+    """The other axis. "undetermined" rather than "no difference" is not hedging: at
+    n=9 this design cannot separate a null from an effect too small for it to see."""
+    if p_value is None:
+        return "not_testable"
+    return "significant" if p_value < 0.05 else "undetermined"
 
 
 def paired_comparison(candidate: dict[str, float], baseline: dict[str, float]) -> dict:
@@ -150,6 +179,7 @@ def paired_comparison(candidate: dict[str, float], baseline: dict[str, float]) -
     deltas = [candidate[subject] - baseline[subject] for subject in subjects]
     stats = exact_wilcoxon(deltas)
     mean_delta = float(np.mean(deltas)) if deltas else 0.0
+    majority_positive = sum(delta > 0 for delta in deltas) > len(deltas) / 2
     return {
         "n_subjects": len(subjects),
         "subjects": {
@@ -161,9 +191,11 @@ def paired_comparison(candidate: dict[str, float], baseline: dict[str, float]) -
         "delta": summarize(deltas),
         "delta_range": [float(min(deltas)), float(max(deltas))] if deltas else [0.0, 0.0],
         "n_positive": int(sum(delta > 0 for delta in deltas)),
-        "majority_positive": sum(delta > 0 for delta in deltas) > len(deltas) / 2,
+        "majority_positive": majority_positive,
         "wilcoxon": stats,
-        "verdict": verdict(mean_delta, stats["p_value"] if stats else None),
+        # Two axes, reported side by side, never collapsed into one label (§7.2 + §8).
+        "practical_reading": practical_reading(mean_delta, majority_positive),
+        "significance": significance_reading(stats["p_value"] if stats else None),
     }
 
 
@@ -181,6 +213,32 @@ def holm_correct(p_values: dict[str, float]) -> dict[str, dict[str, float | bool
         running = max(running, min(1.0, raw * (total - index)))
         corrected[name] = {"raw": raw, "holm": running, "significant": running < 0.05}
     return corrected
+
+
+def arm_provenance(feature_dir: Path) -> dict[str, str]:
+    """The provenance stamp one arm's features carry, recorded into the summary.
+
+    ``videomae_materialize`` forwards the raw stamp, so a materialized letterbox dir
+    still says ``variant: full_frame_letterbox``. Writing it into the report is what
+    makes a swapped ``--arm`` mapping visible after the fact: without it the summary
+    names arms only by the label whoever ran the command typed.
+    """
+    path = next(feature_dir.rglob("*.npz"), None)
+    if path is None:
+        return {}
+    with np.load(path, allow_pickle=False) as data:
+        return {key[len("provenance_") :]: str(data[key]) for key in data.files if key.startswith("provenance_")}
+
+
+def assert_arms_are_distinct(arm_dirs: dict[str, Path]) -> None:
+    """Two arms pointed at one directory yields all-zero deltas and no test at all,
+    which prints exactly like a null result rather than like the mistake it is."""
+    seen: dict[Path, str] = {}
+    for arm, path in arm_dirs.items():
+        resolved = path.resolve()
+        if resolved in seen:
+            raise SystemExit(f"Arms `{seen[resolved]}` and `{arm}` point at the same feature dir {path}.")
+        seen[resolved] = arm
 
 
 def run_all_arms(
@@ -217,16 +275,24 @@ def build_summary(
     seeds: Sequence[int],
 ) -> dict:
     accuracy = {arm: seed_averaged_accuracy(folds_by_seed) for arm, folds_by_seed in results.items()}
-    macro_f1 = {
-        arm: seed_averaged_accuracy(folds_by_seed, key="macro_f1") for arm, folds_by_seed in results.items()
+    # §7.1: the P10-inclusive 10-fold run is a SENSITIVITY analysis, reported next to
+    # the primary rather than instead of it. P10 contributes 16 samples, on which a
+    # balanced accuracy is barely defined.
+    accuracy_with_p10 = {arm: seed_averaged_accuracy(folds, drop_p10=False) for arm, folds in results.items()}
+    supplementary = {
+        key: {arm: seed_averaged_accuracy(folds, key=key) for arm, folds in results.items()}
+        # §7.1 asks for these alongside the primary endpoint; they do not replace it,
+        # and accuracy in particular is left out because class balance moves it.
+        for key in ("macro_f1", "recall", "specificity")
     }
 
     arms = {
         arm: {
             "seed_averaged_by_subject": subjects,
             "balanced_accuracy_no_p10": summarize(list(subjects.values())),
-            "macro_f1_no_p10": summarize(list(macro_f1[arm].values())),
+            "balanced_accuracy_with_p10_sensitivity": summarize(list(accuracy_with_p10[arm].values())),
             "above_chance": float(np.mean(list(subjects.values())) - 0.5),
+            **{f"{key}_no_p10": summarize(list(values[arm].values())) for key, values in supplementary.items()},
             "per_seed_balanced_accuracy": {
                 str(seed): summarize(
                     [f["balanced_accuracy"] for f in folds if f["n_test"] >= MIN_VAL_SUBJECT_SAMPLES]
@@ -239,13 +305,25 @@ def build_summary(
 
     def compare(candidate: str, baseline: str) -> dict:
         comparison = paired_comparison(accuracy[candidate], accuracy[baseline])
-        for key, label in (("by_camera", "by_camera"), ("by_exercise", "by_exercise")):
+        comparison["with_p10_sensitivity"] = paired_comparison(
+            accuracy_with_p10[candidate], accuracy_with_p10[baseline]
+        )
+        for key in ("by_camera", "by_exercise"):
             cand_strata = seed_averaged_strata(results[candidate], key)
             base_strata = seed_averaged_strata(results[baseline], key)
-            comparison[label] = {
+            shared = sorted(set(cand_strata) & set(base_strata))
+            comparison[key] = {
                 stratum: paired_comparison(cand_strata[stratum], base_strata[stratum])
-                for stratum in sorted(set(cand_strata) & set(base_strata))
+                for stratum in shared
                 if set(cand_strata[stratum]) == set(base_strata[stratum])
+            }
+            # §7.4 wants all six exercises reported. A stratum vanishes when a fold has
+            # fewer than MIN_STRATUM_SAMPLES of it or only one class, and an absent row
+            # reads as "not applicable" when it means "excluded" -- so name it.
+            comparison[f"{key}_excluded"] = {
+                stratum: sorted(set(cand_strata.get(stratum, {})) ^ set(base_strata.get(stratum, {})), key=int)
+                for stratum in sorted(set(cand_strata) | set(base_strata))
+                if stratum not in comparison[key]
             }
         return comparison
 
@@ -277,21 +355,31 @@ def print_comparison(name: str, result: dict, indent: str = "  ") -> None:
         f"[{result['delta_range'][0]:+.3f}, {result['delta_range'][1]:+.3f}]  "
         f"({result['n_positive']}/{result['n_subjects']} subjects positive{p_text})"
     )
-    print(f"{indent}  verdict: {result['verdict']}")
+    print(f"{indent}  practical (§8): {result['practical_reading']}   significance (§7.2): {result['significance']}")
 
 
 def print_summary(summary: dict) -> None:
     print(f"\n=== framing arms (seeds {summary['seeds']}, 9 subjects, P10 excluded) ===")
     for arm, values in summary["arms"].items():
         accuracy = values["balanced_accuracy_no_p10"]
-        print(f"  {arm:<26} bal_acc {accuracy['mean']:.4f} +/- {accuracy['std']:.4f}   above chance {values['above_chance']:+.4f}")
+        sensitivity = values["balanced_accuracy_with_p10_sensitivity"]
+        print(
+            f"  {arm:<26} bal_acc {accuracy['mean']:.4f} +/- {accuracy['std']:.4f}   "
+            f"above chance {values['above_chance']:+.4f}   "
+            f"macro-F1 {values['macro_f1_no_p10']['mean']:.4f}   "
+            f"recall {values['recall_no_p10']['mean']:.4f}   spec {values['specificity_no_p10']['mean']:.4f}   "
+            f"[10-fold sensitivity {sensitivity['mean']:.4f}]"
+        )
 
     print("\n=== primary (pre-registered, one test) ===")
     print_comparison(summary["primary"]["comparison"], summary["primary"])
+    print_comparison("  ^ 10-fold sensitivity (P10 included)", summary["primary"]["with_p10_sensitivity"])
     for key in ("by_camera", "by_exercise"):
         print(f"\n  --- primary {key} (mechanism check, not a substitute endpoint) ---")
         for stratum, result in summary["primary"].get(key, {}).items():
             print_comparison(stratum, result, indent="    ")
+        for stratum, subjects in summary["primary"].get(f"{key}_excluded", {}).items():
+            print(f"    {stratum}: EXCLUDED (unmatched subjects {subjects}; stratum too small or single-class)")
 
     if summary["secondary"]:
         print("\n=== secondary / exploratory (Holm-corrected) ===")
@@ -314,6 +402,7 @@ def main() -> None:
     args = parser.parse_args()
 
     arm_dirs = dict(parse_arm(spec) for spec in args.arm)
+    assert_arms_are_distinct(arm_dirs)
     primary = parse_pair(args.primary)
     secondary = [parse_pair(spec) for spec in args.secondary]
     for candidate, baseline in [primary, *secondary]:
@@ -349,7 +438,14 @@ def main() -> None:
 
     summary = build_summary(results, primary, secondary, args.seeds)
     summary["arm_dirs"] = {arm: str(path) for arm, path in arm_dirs.items()}
+    summary["arm_provenance"] = {arm: arm_provenance(path) for arm, path in arm_dirs.items()}
     summary["config"] = vars(config)
+
+    print("\n=== arm provenance (what each label's features actually are) ===")
+    for arm, stamp in summary["arm_provenance"].items():
+        print(f"  {arm:<26} variant={stamp.get('variant', 'full_frame (unstamped)')} "
+              f"pooling={stamp.get('token_pooling')} agg={stamp.get('clip_aggregation')} "
+              f"transformers={stamp.get('transformers_version')}")
     print_summary(summary)
 
     summary_path = Path(f"{args.output_prefix}_summary.json")
