@@ -1,12 +1,18 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
 from src.rehab24.videomae_features import (
+    FRAMING_VARIANTS,
     assert_fc_norm_pretrained,
+    assert_output_dir_matches_variant,
     group_rows_by_video,
     sample_clip_starts,
+    transform_frames,
 )
+from src.video.variant_geometry import LETTERBOX_FILL, Box
 
 
 def row(sample_id: str, video_path: str, first_frame: int) -> dict[str, str]:
@@ -66,6 +72,108 @@ class AssertFcNormPretrainedTest(unittest.TestCase):
 
     def test_accepts_weights_that_differ_only_in_bias(self):
         assert_fc_norm_pretrained(np.ones(768, dtype=np.float32), np.full(768, 0.1, dtype=np.float32), "m")
+
+
+def frames(width: int = 1920, height: int = 1080, count: int = 3) -> list[np.ndarray]:
+    rng = np.random.default_rng(0)
+    return [rng.integers(0, 255, size=(height, width, 3), dtype=np.uint8) for _ in range(count)]
+
+
+class TransformFramesTest(unittest.TestCase):
+    """The framing arms' pixel transform, applied between decode and the processor."""
+
+    def test_full_frame_is_the_untouched_source(self):
+        source = frames(64, 32, count=2)
+        result = transform_frames(source, "full_frame", None)
+        self.assertTrue(all(np.array_equal(a, b) for a, b in zip(result, source)))
+
+    def test_letterbox_squares_a_landscape_frame_without_cropping_or_stretching(self):
+        """cam17 is 1920x1080. Padding to 1920x1920 makes the processor's shortest-edge
+        resize plus 224 centre crop a no-op, which is the whole primary manipulation."""
+        source = frames(1920, 1080, count=2)
+        result = transform_frames(source, "full_frame_letterbox", None)
+        for original, padded in zip(source, result):
+            self.assertEqual(padded.shape, (1920, 1920, 3))
+            top = (1920 - 1080) // 2
+            np.testing.assert_array_equal(padded[top : top + 1080, :, :], original)
+
+    def test_letterbox_squares_a_portrait_frame_the_same_way(self):
+        """cam18 is 1080x1920 -- the camera whose feet the centre crop can take."""
+        result = transform_frames(frames(1080, 1920, count=1), "full_frame_letterbox", None)
+        self.assertEqual(result[0].shape, (1920, 1920, 3))
+
+    def test_letterbox_pads_with_the_neutral_grey_and_nothing_else(self):
+        padded = transform_frames(frames(1920, 1080, count=1), "full_frame_letterbox", None)[0]
+        self.assertTrue(np.all(padded[:100] == LETTERBOX_FILL))
+        self.assertTrue(np.all(padded[-100:] == LETTERBOX_FILL))
+
+    def test_letterbox_needs_no_box(self):
+        """It must never consult one: a box-shaped dependency here would give the arm a
+        null-box path, and a null box means 'leave untouched' one call deeper."""
+        result = transform_frames(frames(1920, 1080, count=1), "full_frame_letterbox", None)
+        self.assertNotEqual(result[0].shape, (1080, 1920, 3))
+
+    def test_letterbox_changes_the_pixels_on_every_rehab24_frame_size(self):
+        """Both REHAB24-6 cameras are non-square, so unlike Fitness-AQA there is no
+        video for which this arm is a no-op. A bit-identical output means the transform
+        did not run."""
+        for width, height in ((1920, 1080), (1080, 1920)):
+            source = frames(width, height, count=1)
+            result = transform_frames(source, "full_frame_letterbox", None)
+            self.assertNotEqual(result[0].shape, source[0].shape)
+
+    def test_box_variants_refuse_to_run_without_a_box(self):
+        for variant in ("person_crop", "background_only"):
+            with self.subTest(variant=variant), self.assertRaises(RuntimeError):
+                transform_frames(frames(640, 480, count=1), variant, None)
+
+    def test_person_crop_and_background_only_take_the_same_box(self):
+        box = Box(100, 50, 300, 400)
+        source = frames(640, 480, count=1)
+        cropped = transform_frames([f.copy() for f in source], "person_crop", box)[0]
+        painted = transform_frames([f.copy() for f in source], "background_only", box)[0]
+        self.assertEqual(cropped.shape, (350, 350, 3))  # 200x350 crop, letterboxed square
+        self.assertFalse(np.array_equal(painted[50:400, 100:300], source[0][50:400, 100:300]))
+        np.testing.assert_array_equal(painted[:50], source[0][:50])
+
+    def test_every_advertised_variant_is_applicable(self):
+        box = Box(10, 10, 100, 200)
+        for variant in FRAMING_VARIANTS:
+            with self.subTest(variant=variant):
+                self.assertEqual(len(transform_frames(frames(640, 480, count=2), variant, box)), 2)
+
+
+class OutputDirVariantGuardTest(unittest.TestCase):
+    def write(self, directory: Path, name: str, **stamps: str) -> None:
+        directory.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(directory / name, video_feature=np.zeros(4), **stamps)
+
+    def test_accepts_an_empty_or_missing_dir(self):
+        with TemporaryDirectory() as tmp:
+            assert_output_dir_matches_variant(Path(tmp) / "nope", "full_frame_letterbox")
+            assert_output_dir_matches_variant(Path(tmp), "full_frame_letterbox")
+
+    def test_accepts_a_dir_already_holding_the_same_variant(self):
+        with TemporaryDirectory() as tmp:
+            self.write(Path(tmp) / "train", "a.npz", provenance_variant=np.asarray("full_frame_letterbox"))
+            assert_output_dir_matches_variant(Path(tmp), "full_frame_letterbox")
+
+    def test_rejects_writing_one_variant_into_another_variants_dir(self):
+        """Nothing downstream would notice: the audit's single-provenance check runs per
+        directory, and the resume path skips whatever already exists."""
+        with TemporaryDirectory() as tmp:
+            self.write(Path(tmp) / "train", "a.npz", provenance_variant=np.asarray("full_frame_letterbox"))
+            with self.assertRaises(SystemExit):
+                assert_output_dir_matches_variant(Path(tmp), "person_crop")
+
+    def test_treats_an_unstamped_bundle_as_full_frame(self):
+        """Bundles extracted before --variant existed carry no stamp; they are all
+        full_frame, and appending a variant to that dir must still be refused."""
+        with TemporaryDirectory() as tmp:
+            self.write(Path(tmp) / "train", "a.npz")
+            assert_output_dir_matches_variant(Path(tmp), "full_frame")
+            with self.assertRaises(SystemExit):
+                assert_output_dir_matches_variant(Path(tmp), "full_frame_letterbox")
 
 
 if __name__ == "__main__":
