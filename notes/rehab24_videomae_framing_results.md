@@ -1,23 +1,30 @@
-# Letterbox 結果:REHAB24-6 VideoMAE framing 第一臂
+# REHAB24-6 VideoMAE framing 結果(P0 letterbox + P1 background control)
 
 對應事前登錄:[`rehab24_videomae_framing_validation_plan.md`](rehab24_videomae_framing_validation_plan.md)
 (commit `32daa5a1`,**在任何 framing accuracy 產生前寫定**)。
-執行日期:2026-08-15 / 16。本 note 只報告 P0 primary arm;`background_only`(P1)與
-`person_crop`(P2)尚未抽取。
+執行日期:2026-08-15 / 16。已完成 **P0 `full_frame_letterbox`** 與
+**P1 `background_only` + `n_frames`**;`person_crop`(P2)尚未抽取。
 
 ---
 
-## 0. 一句話結論
+## 0. 兩句話結論
 
-`full_frame_letterbox` 確實修好了一個**實際存在、且已量到**的預處理缺陷——cam18 有
-**100%** 的樣本被 center crop 切掉身體,中位數切掉身高的 **22.3%**,而且切的是**下緣**
-(腳踝,正是深蹲判定的位置)——但**沒有換到可測得的 accuracy 增益**:
+**(P0 framing)** `full_frame_letterbox` 確實修好了一個**實際存在、且已量到**的預處理缺陷
+——cam18 有 **100%** 的樣本被 center crop 切掉身體,中位數切掉身高的 **22.3%**,而且切的是
+**下緣**(腳踝,正是深蹲判定的位置)——但**沒有換到可測得的 accuracy 增益**:
 paired Δ = **+0.011 ± 0.056**(9 折,5/9 同向,exact p = 0.570,區間 [−0.084, +0.097])。
 依 §8 事前判讀規則,這是 **practically small point estimate + undetermined**,
 **不得宣稱 equivalence**,也不得寫成「完整身體沒有用」。
-
-同時得到一個明確的正面答案:**Stage A 的 0.657 不是 cam18 裁腳造成的假象**。
+同時得到一個明確的正面答案:**Stage A 的 0.657 不是 cam18 裁腳造成的假象**——
 換成完全不裁切的 framing 後仍是 0.661,兩者重疊。
+
+**(P1 negative control)** **把人體移除後,訊號幾乎全部消失。**
+`background_only` 只有 **0.5074 ± 0.0304**(高於 chance 僅 +0.007),與
+`box_geometry`(0.5075)**完全打平**(Δ = −0.0000),而 `n_frames` 甚至在 chance 之下
+(0.4786)。三個非人體 arm 全部貼在 0.5,對照 `full_frame` 的 0.6505。
+**在這個資料集內,0.65 不是場景像素、不是片段長度、也不是人物框幾何。**
+這與 Fitness-AQA 完全相反(該資料集 background-only 0.6238、clip length 0.6139),
+理由也很清楚:REHAB24-6 只有一個實驗室與兩臺固定相機,「場景」無從辨識。
 
 ---
 
@@ -206,6 +213,57 @@ letterbox 修好了截斷(0% vs cam18 的 100%),卻沒換到 accuracy。可能�
 
 ---
 
+## 7A. P1 Negative control:移除人體後還剩多少?
+
+計畫 §2 把這一臂定義成「相對三個 floor 來讀」,而不是單看它的絕對分數。三個 floor 全部
+在同一次 run、同樣的 fold 與 seed 下評分。
+
+### 7A.1 六臂總表(seeds 42/7/1234,9 折,排除 P10)
+
+| Arm | 內容 | bal_acc | 高於 chance |
+| --- | --- | ---: | ---: |
+| `full_frame_letterbox` | 人 + 場景,完整身體 | **0.6612 ± 0.0567** | +0.161 |
+| `kaggle_full_frame` | (QC:封存 Kaggle 版) | 0.6506 ± 0.0548 | +0.151 |
+| `full_frame` | 人 + 場景,cam18 裁腳 | 0.6505 ± 0.0585 | +0.151 |
+| `box_geometry` | 12 個數字,無像素 | 0.5075 ± 0.0133 | +0.008 |
+| **`background_only`** | **場景,人體被塗掉** | **0.5074 ± 0.0304** | **+0.007** |
+| `n_frames` | 1 個數字(片段長度) | 0.4786 ± 0.0316 | −0.021 |
+
+### 7A.2 §7.3 指定的兩個負控制比較(secondary,Holm 校正)
+
+| 比較 | Δ | 同向 | raw p | Holm p | 判讀 |
+| --- | ---: | :---: | ---: | ---: | --- |
+| `background_only − n_frames` | +0.0289 | 5/9 | 0.2031 | 0.4062 | undetermined |
+| `background_only − box_geometry` | **−0.0000** | 4/9 | 0.5703 | 0.5703 | 完全打平 |
+
+### 7A.3 讀法
+
+依 §8 的事前規則:「background-only ≤ n_frames/box_geometry → **未量到額外場景像素訊號**」。
+本次結果比這更乾淨——`background_only` 不只沒有超過 floor,它**本身就在 chance 上**
+(+0.007,std 0.030)。把人體塗掉之後,VideoMAE 從 0.65 掉到 0.51。
+
+三個非人體 arm 互相一致,這件事本身也有意義:
+
+- `background_only` 與 `box_geometry` 差 **0.0000**。`background_only` 唯一無法消除的洩漏
+  就是那個矩形的位置與大小(`squat_video_variants` docstring 明載),而 `box_geometry`
+  正是「只有矩形位置與大小」的 arm。兩者打平,等於直接量到**該洩漏也沒有攜帶訊號**。
+- `n_frames` 落在 chance **之下**(0.4786)。片段長度在 REHAB24-6 完全不是捷徑,與
+  Fitness-AQA 的 0.6139 形成強烈對比([[clip-length-shortcut]] 的結論**不外推**到本資料集)。
+
+**與既有紀錄的一個小差異**:`box_geometry` 舊紀錄為 0.5316 ± 0.0274
+(`correctness_loso_box_geometry.json`,單一 seed),本次三 seed 平均為 0.5075 ± 0.0133。
+兩次的 `FoldConfig` 逐欄相同,差異純粹來自 seed。一個 chance 附近的 control 光換 seed 就能
+移動 ~0.024,這正是 §7.2 要求跨 seed 平均的理由。兩個數字都在 chance 附近,結論不變。
+
+### 7A.4 這一臂的內建限制(在看到分數前就成立)
+
+- 遮罩覆蓋 cam17 畫面的 **45.2%**、cam18 的 **69.5%**。cam18 只剩約三成像素,
+  所以「場景」在本設計中本來就所剩不多——這降低了偵測場景捷徑的敏感度。
+- 框貼到畫面邊緣時(cam18 的 `x0 = 0`),水平內插退化成單邊拉伸。
+- 因此「沒量到場景訊號」的正確讀法是**在這個遮罩定義下**,不是「背景絕對無訊號」。
+
+---
+
 ## 8. 可以說 / 不能說
 
 **可以說:**
@@ -226,20 +284,43 @@ letterbox 修好了截斷(0% vs cam18 的 100%),卻沒換到 accuracy。可能�
   區間 [−0.084, +0.097] 寬到同時容得下實務上有意義的正負效果。
 - ❌「letterbox 沒用,所以可以繼續用 `full_frame`」——(b) 的抵銷解釋同樣未被排除。
 - ❌ 任何以 cam18 或單一動作的正向 Δ 作為結論的說法。
-- ❌ 任何關於 0.657 是否含**背景/場景捷徑**的說法——那需要 `background_only`,尚未執行。
+
+**P1 之後新增可以說的:**
+
+- **在 REHAB24-6 內,0.65 的訊號不是背景像素、不是片段長度、也不是人物框幾何。**
+  三個非人體 arm 全部落在 chance(0.479 / 0.507 / 0.508),對照 full_frame 的 0.6505。
+  這是本計畫對「該分數是否為資料集捷徑」最直接的一次回答,且方向是正面的。
+- `background_only` 與 `box_geometry` 打平(Δ = −0.0000)⇒ 遮罩矩形的位置/大小洩漏
+  **本身不帶訊號**,這個已知限制被量到了,不必再當成未知風險。
+- [[clip-length-shortcut]](Fitness-AQA 上 clip length = 0.6139)**不外推**到 REHAB24-6:
+  這裡的 `n_frames` 在 chance 之下。
+
+**P1 之後仍然不能說:**
+
+- ❌「模型在新場景、新醫院、消費者手機影片上不會用背景捷徑」——本資料集只有一個實驗室、
+  兩臺固定相機,**沒有場景變異可供辨識**,所以這裡測不到捷徑是預期中的,而不是外部效度的證據。
+- ❌「背景完全不含資訊」——遮罩已覆蓋 cam18 的 69.5%,剩下的場景本來就很少。
+- ❌ 以 `background_only` ≈ chance 反推「模型看的一定是動作品質」。它排除的是
+  場景/長度/框幾何,**不排除人體外觀**(體型、衣著、個人特徵)。要分離那一層需要
+  `person_crop`(P2)以及本計畫未涵蓋的 identity control。
 
 ---
 
-## 9. 下一步(依計畫優先序)
+## 9. 下一步
 
-1. **`n_frames` duration-only control(P0,近乎免費)**:純 manifest 運算,不需抽取。
-   `box_geometry` 已有 0.528 ± 0.028,但 duration 需單獨拆出來當 floor。
-2. **`background_only`(P1)**:若要在論文中主張 0.66 是人體動作品質而非場景捷徑,
-   這一臂是必要的。抽取成本與本次相同(~3.5h/臂,GPU 3 workers)。
-3. **`person_crop`(P2)**:完成 body/background 完整拆解。
+**已完成**:P0 `full_frame_letterbox`、P1 `background_only`、`n_frames` duration floor。
 
-三個 arm 的 pixel transform、box resolver、gates 與 report runner **都已實作並測試完成**,
-只差抽取:`--variant background_only --box-index ...` 即可,box index 已建好(130 支影片)。
+**剩下 `person_crop`(P2)**,計畫 §2 的 secondary:`person_crop − full_frame_letterbox`。
+兩臂都保留完整身體,差別在有無場景,是本設計中最接近「背景有無」的對比。
+
+需要注意的是,P1 的結果已經**削弱了 P2 的邊際價值**:既然 `background_only` 已落在 chance,
+「場景帶有訊號」這條路基本上已經關閉,`person_crop` 主要能回答的變成
+「**縮小並移除場景後,人體訊號是否仍保留**」——即 §8 表格最後兩列的 body-scale/aspect 效應,
+而那正好也是 P0 無法與 F2 分離的那個因子。若要繼續,建議把它讀成**對 F3(body scale)的
+探測**,而不是再一次的背景控制。
+
+抽取成本與本次相同(~2h/臂,GPU 3 workers);pixel transform、box resolver、gates 與
+report runner 都已就緒,`--variant person_crop --box-index ...` 即可。
 
 ---
 
@@ -251,7 +332,12 @@ data/REHAB24-6/processed/videomae_framing_geometry.json    # geometry gate
 data/REHAB24-6/processed/videomae_framing_pairing.json     # pairing gate
 data/REHAB24-6/processed/videomae_framing_audit.json       # feature audit
 data/REHAB24-6/processed/videomae_framing_seed{42,7,1234}.json
-data/REHAB24-6/processed/videomae_framing_summary.json     # 本 note 全部數字的來源
+data/REHAB24-6/processed/videomae_framing_summary.json     # P0 三臂
+data/REHAB24-6/processed/n_frames_features/                # duration floor(由 box control 切出)
+data/REHAB24-6/processed/videomae_framing_pairing_background_only.json
+data/REHAB24-6/processed/videomae_framing_audit_background_only.json
+data/REHAB24-6/processed/videomae_framing_p1_seed{42,7,1234}.json
+data/REHAB24-6/processed/videomae_framing_p1_summary.json  # §7A 全部數字的來源(六臂)
 ```
 
 重跑指令與 gate 順序:`scripts/rehab24/README.md`「Framing arms」。
