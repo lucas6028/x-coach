@@ -66,12 +66,14 @@ export interface MovementDetail {
   demo?: { clip: string };
 }
 
-// Squat, Lunge and Deadlift have step illustrations so far (five figures each, one per step,
-// trimmed and re-encoded by scripts/prep_movement_detail_art.py). The other thirteen fall back to
-// their card art, which is one pose rather than five — the numbered cues are still the useful
-// part, and a code change cannot honestly invent thirteen more figure sets. Adding a set is a
-// drop-in: put the PNGs in frontend/public/movements/steps/, run the script, and list the WebPs
-// here.
+// Every movement in the catalog now has step illustrations: five figures each, one per step,
+// trimmed and re-encoded by scripts/prep_movement_detail_art.py. The fallback in StepFigure (see
+// pages/MovementDetail.tsx), which repeats the movement's one-pose card art, is therefore
+// unreachable from this file today — keep it anyway, since a set can only be added by hand and the
+// next movement added to the catalog will arrive without one. Adding a set is a drop-in: put the
+// PNGs in frontend/public/movements/steps/, run the script, and list the WebPs here. Art that
+// arrives as one numbered sheet instead of five files goes through scripts/split_step_sheet.py
+// first — the thirteen sets below the first three did.
 const SQUAT_STEP_ART = [
   "/movements/steps/squat-1.webp",
   "/movements/steps/squat-2.webp",
@@ -94,6 +96,115 @@ const DEADLIFT_STEP_ART = [
   "/movements/steps/deadlift-3.webp",
   "/movements/steps/deadlift-4.webp",
   "/movements/steps/deadlift-5.webp",
+];
+
+// The thirteen sets cut from numbered sheets. Each keeps whatever its sheet drew on it — arrows,
+// dashed guides, angle labels — which say what a caption beside the figure cannot; of all thirteen
+// only Shoulder Bridge and Push-up came with any. Those two plus Sit-up are also the only art here
+// wider than it is tall (the other floor movement, Torso Twist, is drawn seated and upright) — see
+// the max-width on the step strip's <img> in pages/MovementDetail.tsx.
+const SHOULDER_BRIDGE_STEP_ART = [
+  "/movements/steps/shoulder-bridge-1.webp",
+  "/movements/steps/shoulder-bridge-2.webp",
+  "/movements/steps/shoulder-bridge-3.webp",
+  "/movements/steps/shoulder-bridge-4.webp",
+  "/movements/steps/shoulder-bridge-5.webp",
+];
+
+const PUSH_UP_STEP_ART = [
+  "/movements/steps/push-up-1.webp",
+  "/movements/steps/push-up-2.webp",
+  "/movements/steps/push-up-3.webp",
+  "/movements/steps/push-up-4.webp",
+  "/movements/steps/push-up-5.webp",
+];
+
+const OVERHEAD_PRESS_STEP_ART = [
+  "/movements/steps/overhead-press-1.webp",
+  "/movements/steps/overhead-press-2.webp",
+  "/movements/steps/overhead-press-3.webp",
+  "/movements/steps/overhead-press-4.webp",
+  "/movements/steps/overhead-press-5.webp",
+];
+
+const ROW_STEP_ART = [
+  "/movements/steps/row-1.webp",
+  "/movements/steps/row-2.webp",
+  "/movements/steps/row-3.webp",
+  "/movements/steps/row-4.webp",
+  "/movements/steps/row-5.webp",
+];
+
+const BICEP_CURL_STEP_ART = [
+  "/movements/steps/bicep-curl-1.webp",
+  "/movements/steps/bicep-curl-2.webp",
+  "/movements/steps/bicep-curl-3.webp",
+  "/movements/steps/bicep-curl-4.webp",
+  "/movements/steps/bicep-curl-5.webp",
+];
+
+const BAND_PULL_APART_STEP_ART = [
+  "/movements/steps/band-pull-apart-1.webp",
+  "/movements/steps/band-pull-apart-2.webp",
+  "/movements/steps/band-pull-apart-3.webp",
+  "/movements/steps/band-pull-apart-4.webp",
+  "/movements/steps/band-pull-apart-5.webp",
+];
+
+const SIT_UP_STEP_ART = [
+  "/movements/steps/sit-up-1.webp",
+  "/movements/steps/sit-up-2.webp",
+  "/movements/steps/sit-up-3.webp",
+  "/movements/steps/sit-up-4.webp",
+  "/movements/steps/sit-up-5.webp",
+];
+
+const JUMPING_JACKS_STEP_ART = [
+  "/movements/steps/jumping-jacks-1.webp",
+  "/movements/steps/jumping-jacks-2.webp",
+  "/movements/steps/jumping-jacks-3.webp",
+  "/movements/steps/jumping-jacks-4.webp",
+  "/movements/steps/jumping-jacks-5.webp",
+];
+
+const HIGH_KNEE_STEP_ART = [
+  "/movements/steps/high-knee-1.webp",
+  "/movements/steps/high-knee-2.webp",
+  "/movements/steps/high-knee-3.webp",
+  "/movements/steps/high-knee-4.webp",
+  "/movements/steps/high-knee-5.webp",
+];
+
+const ARM_ABDUCTION_STEP_ART = [
+  "/movements/steps/arm-abduction-1.webp",
+  "/movements/steps/arm-abduction-2.webp",
+  "/movements/steps/arm-abduction-3.webp",
+  "/movements/steps/arm-abduction-4.webp",
+  "/movements/steps/arm-abduction-5.webp",
+];
+
+const ARM_VW_STEP_ART = [
+  "/movements/steps/arm-vw-1.webp",
+  "/movements/steps/arm-vw-2.webp",
+  "/movements/steps/arm-vw-3.webp",
+  "/movements/steps/arm-vw-4.webp",
+  "/movements/steps/arm-vw-5.webp",
+];
+
+const LEG_ABDUCTION_STEP_ART = [
+  "/movements/steps/leg-abduction-1.webp",
+  "/movements/steps/leg-abduction-2.webp",
+  "/movements/steps/leg-abduction-3.webp",
+  "/movements/steps/leg-abduction-4.webp",
+  "/movements/steps/leg-abduction-5.webp",
+];
+
+const TORSO_TWIST_STEP_ART = [
+  "/movements/steps/torso-twist-1.webp",
+  "/movements/steps/torso-twist-2.webp",
+  "/movements/steps/torso-twist-3.webp",
+  "/movements/steps/torso-twist-4.webp",
+  "/movements/steps/torso-twist-5.webp",
 ];
 
 const step = (en: string, zh: string, image?: string): Step => ({
@@ -182,11 +293,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["glutes"],
     secondary: ["obliques", "lowerBack", "abs"],
     steps: [
-      step("Stand tall with the weight on the supporting leg.", "站直，重心放在支撐腳上。"),
-      step("Brace the core so the trunk does not lean away.", "收緊核心，軀幹不要往反方向倒。"),
-      step("Lift the working leg out to the side, toes forward.", "工作腳向側邊抬起，腳尖朝前。"),
-      step("Stop where the pelvis starts to tip and hold briefly.", "抬到骨盆快要傾斜就停住，稍作停留。"),
-      step("Lower under control without letting the foot crash down.", "有控制地放下，不要讓腳直接落地。"),
+      step("Stand tall with the weight on the supporting leg.", "站直，重心放在支撐腳上。", LEG_ABDUCTION_STEP_ART[0]),
+      step("Brace the core so the trunk does not lean away.", "收緊核心，軀幹不要往反方向倒。", LEG_ABDUCTION_STEP_ART[1]),
+      step("Lift the working leg out to the side, toes forward.", "工作腳向側邊抬起，腳尖朝前。", LEG_ABDUCTION_STEP_ART[2]),
+      step("Stop where the pelvis starts to tip and hold briefly.", "抬到骨盆快要傾斜就停住，稍作停留。", LEG_ABDUCTION_STEP_ART[3]),
+      step("Lower under control without letting the foot crash down.", "有控制地放下，不要讓腳直接落地。", LEG_ABDUCTION_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/leg-abduction.webp",
   },
@@ -204,11 +315,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["glutes", "hamstrings"],
     secondary: ["lowerBack", "abs"],
     steps: [
-      step("Lie on your back with the knees bent and feet flat.", "仰躺，屈膝、雙腳踩地。"),
-      step("Tuck the ribs down so the lower back stays long.", "肋骨微收，讓下背保持延展。"),
-      step("Press through the heels and lift the hips.", "腳跟推地，把髖部抬起。"),
-      step("Stop where hips, knees and shoulders form one line.", "抬到髖、膝、肩成一直線就停住。"),
-      step("Lower one vertebra at a time back to the floor.", "一節一節把脊椎放回地面。"),
+      step("Lie on your back with the knees bent and feet flat.", "仰躺，屈膝、雙腳踩地。", SHOULDER_BRIDGE_STEP_ART[0]),
+      step("Tuck the ribs down so the lower back stays long.", "肋骨微收，讓下背保持延展。", SHOULDER_BRIDGE_STEP_ART[1]),
+      step("Press through the heels and lift the hips.", "腳跟推地，把髖部抬起。", SHOULDER_BRIDGE_STEP_ART[2]),
+      step("Stop where hips, knees and shoulders form one line.", "抬到髖、膝、肩成一直線就停住。", SHOULDER_BRIDGE_STEP_ART[3]),
+      step("Lower one vertebra at a time back to the floor.", "一節一節把脊椎放回地面。", SHOULDER_BRIDGE_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/shoulder-bridge.webp",
   },
@@ -226,11 +337,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["chest", "triceps"],
     secondary: ["shoulders", "abs", "obliques"],
     steps: [
-      step("Start in a high plank with the hands under the shoulders.", "從高棒式開始，雙手位於肩膀正下方。"),
-      step("Make one straight line from the head to the heels.", "頭到腳跟連成一直線。"),
-      step("Bend the elbows about 45° from the torso and lower.", "手肘與軀幹約 45 度彎曲，身體下降。"),
-      step("Lower the chest to just above the floor.", "胸口下降到接近地面。"),
-      step("Push the floor away without letting the hips sag.", "推地回到起始，過程中髖部不要下沉。"),
+      step("Start in a high plank with the hands under the shoulders.", "從高棒式開始，雙手位於肩膀正下方。", PUSH_UP_STEP_ART[0]),
+      step("Make one straight line from the head to the heels.", "頭到腳跟連成一直線。", PUSH_UP_STEP_ART[1]),
+      step("Bend the elbows about 45° from the torso and lower.", "手肘與軀幹約 45 度彎曲，身體下降。", PUSH_UP_STEP_ART[2]),
+      step("Lower the chest to just above the floor.", "胸口下降到接近地面。", PUSH_UP_STEP_ART[3]),
+      step("Push the floor away without letting the hips sag.", "推地回到起始，過程中髖部不要下沉。", PUSH_UP_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/push-up.webp",
     demo: { clip: "pushups" },
@@ -249,11 +360,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["shoulders", "triceps"],
     secondary: ["upperBack", "abs", "lowerBack"],
     steps: [
-      step("Hold the weights at shoulder height, wrists stacked.", "重量置於肩膀高度，手腕與前臂對齊。"),
-      step("Ribs down, glutes tight, chest tall.", "肋骨下收、臀部夾緊、胸口挺起。"),
-      step("Press straight up, moving the head out of the way.", "垂直推起，頭部稍微後讓開路徑。"),
-      step("Finish with the arms locked and biceps by the ears.", "手臂鎖定，二頭肌貼近耳朵。"),
-      step("Lower under control back to the shoulders.", "有控制地降回肩膀高度。"),
+      step("Hold the weights at shoulder height, wrists stacked.", "重量置於肩膀高度，手腕與前臂對齊。", OVERHEAD_PRESS_STEP_ART[0]),
+      step("Ribs down, glutes tight, chest tall.", "肋骨下收、臀部夾緊、胸口挺起。", OVERHEAD_PRESS_STEP_ART[1]),
+      step("Press straight up, moving the head out of the way.", "垂直推起，頭部稍微後讓開路徑。", OVERHEAD_PRESS_STEP_ART[2]),
+      step("Finish with the arms locked and biceps by the ears.", "手臂鎖定，二頭肌貼近耳朵。", OVERHEAD_PRESS_STEP_ART[3]),
+      step("Lower under control back to the shoulders.", "有控制地降回肩膀高度。", OVERHEAD_PRESS_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/overhead-press.webp",
   },
@@ -271,11 +382,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["lats", "upperBack"],
     secondary: ["biceps", "forearms", "lowerBack"],
     steps: [
-      step("Hinge forward with a flat back and soft knees.", "背部打平、膝蓋微彎，身體前傾。"),
-      step("Let the arms hang straight under the shoulders.", "手臂自然垂在肩膀正下方。"),
-      step("Pull the elbows back toward the hips.", "手肘往髖部方向後拉。"),
-      step("Squeeze the shoulder blades without shrugging.", "肩胛骨後收，但不要聳肩。"),
-      step("Lower the weight all the way without rocking the torso.", "完全放下重量，軀幹不要前後擺動。"),
+      step("Hinge forward with a flat back and soft knees.", "背部打平、膝蓋微彎，身體前傾。", ROW_STEP_ART[0]),
+      step("Let the arms hang straight under the shoulders.", "手臂自然垂在肩膀正下方。", ROW_STEP_ART[1]),
+      step("Pull the elbows back toward the hips.", "手肘往髖部方向後拉。", ROW_STEP_ART[2]),
+      step("Squeeze the shoulder blades without shrugging.", "肩胛骨後收，但不要聳肩。", ROW_STEP_ART[3]),
+      step("Lower the weight all the way without rocking the torso.", "完全放下重量，軀幹不要前後擺動。", ROW_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/row.webp",
   },
@@ -293,11 +404,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["biceps"],
     secondary: ["forearms"],
     steps: [
-      step("Stand tall with the weights hanging at the sides.", "站直，重量自然垂在身體兩側。"),
-      step("Pin the elbows against the ribs.", "手肘固定貼在肋骨旁。"),
-      step("Curl the weights up by bending the elbows only.", "只靠屈肘把重量捲起。"),
-      step("Stop before the elbows drift forward.", "在手肘往前跑之前停住。"),
-      step("Lower slowly to a full stretch.", "緩慢放下，回到完全伸展。"),
+      step("Stand tall with the weights hanging at the sides.", "站直，重量自然垂在身體兩側。", BICEP_CURL_STEP_ART[0]),
+      step("Pin the elbows against the ribs.", "手肘固定貼在肋骨旁。", BICEP_CURL_STEP_ART[1]),
+      step("Curl the weights up by bending the elbows only.", "只靠屈肘把重量捲起。", BICEP_CURL_STEP_ART[2]),
+      step("Stop before the elbows drift forward.", "在手肘往前跑之前停住。", BICEP_CURL_STEP_ART[3]),
+      step("Lower slowly to a full stretch.", "緩慢放下，回到完全伸展。", BICEP_CURL_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/bicep-curl.webp",
   },
@@ -315,11 +426,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["upperBack", "shoulders"],
     secondary: ["lats"],
     steps: [
-      step("Hold the band at shoulder width, arms out in front.", "雙手與肩同寬握住彈力帶，手臂前伸。"),
-      step("Raise the band to chest height with straight arms.", "手臂打直，把彈力帶抬到胸口高度。"),
-      step("Pull the band apart, leading with the hands.", "由手部帶動，把彈力帶往兩側拉開。"),
-      step("Stop when the band touches the chest, ribs down.", "拉到彈力帶碰到胸口就停，肋骨保持下收。"),
-      step("Return under tension rather than letting it snap back.", "維持張力回到起始，不要讓帶子彈回去。"),
+      step("Hold the band at shoulder width, arms out in front.", "雙手與肩同寬握住彈力帶，手臂前伸。", BAND_PULL_APART_STEP_ART[0]),
+      step("Raise the band to chest height with straight arms.", "手臂打直，把彈力帶抬到胸口高度。", BAND_PULL_APART_STEP_ART[1]),
+      step("Pull the band apart, leading with the hands.", "由手部帶動，把彈力帶往兩側拉開。", BAND_PULL_APART_STEP_ART[2]),
+      step("Stop when the band touches the chest, ribs down.", "拉到彈力帶碰到胸口就停，肋骨保持下收。", BAND_PULL_APART_STEP_ART[3]),
+      step("Return under tension rather than letting it snap back.", "維持張力回到起始，不要讓帶子彈回去。", BAND_PULL_APART_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/band-pull-apart.webp",
   },
@@ -337,11 +448,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["shoulders"],
     secondary: ["upperBack"],
     steps: [
-      step("Stand tall with the arms relaxed at the sides.", "站直，雙手自然放鬆在身側。"),
-      step("Turn the thumbs slightly up.", "拇指略微朝上。"),
-      step("Raise both arms out to the side at the same speed.", "雙手以相同速度向側邊抬起。"),
-      step("Stop at shoulder height without shrugging.", "抬到肩膀高度，不要聳肩。"),
-      step("Lower under control, keeping both sides level.", "有控制地放下，兩側保持同高。"),
+      step("Stand tall with the arms relaxed at the sides.", "站直，雙手自然放鬆在身側。", ARM_ABDUCTION_STEP_ART[0]),
+      step("Turn the thumbs slightly up.", "拇指略微朝上。", ARM_ABDUCTION_STEP_ART[1]),
+      step("Raise both arms out to the side at the same speed.", "雙手以相同速度向側邊抬起。", ARM_ABDUCTION_STEP_ART[2]),
+      step("Stop at shoulder height without shrugging.", "抬到肩膀高度，不要聳肩。", ARM_ABDUCTION_STEP_ART[3]),
+      step("Lower under control, keeping both sides level.", "有控制地放下，兩側保持同高。", ARM_ABDUCTION_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/arm-abduction.webp",
   },
@@ -359,11 +470,13 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["upperBack", "shoulders"],
     secondary: ["lats"],
     steps: [
-      step("Stand or lie face down with the arms overhead in a V.", "站姿或俯臥，雙手在頭頂張成 V 字。"),
-      step("Keep the ribs down and the neck long.", "肋骨下收，頸部保持延長。"),
-      step("Pull the elbows down and back into a W.", "手肘下拉後收，形成 W 字。"),
-      step("Squeeze the shoulder blades together at the bottom.", "在最低點把肩胛骨往中間夾。"),
-      step("Return to the V slowly, keeping the arms in view.", "緩慢回到 V 字，手臂維持在視線範圍內。"),
+      // The cue offers standing or face-down; the sheet is titled "Arm V to W (Standing)" and draws
+      // only the standing version. A superset, not a contradiction — the art shows one of the two.
+      step("Stand or lie face down with the arms overhead in a V.", "站姿或俯臥，雙手在頭頂張成 V 字。", ARM_VW_STEP_ART[0]),
+      step("Keep the ribs down and the neck long.", "肋骨下收，頸部保持延長。", ARM_VW_STEP_ART[1]),
+      step("Pull the elbows down and back into a W.", "手肘下拉後收，形成 W 字。", ARM_VW_STEP_ART[2]),
+      step("Squeeze the shoulder blades together at the bottom.", "在最低點把肩胛骨往中間夾。", ARM_VW_STEP_ART[3]),
+      step("Return to the V slowly, keeping the arms in view.", "緩慢回到 V 字，手臂維持在視線範圍內。", ARM_VW_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/arm-vw.webp",
   },
@@ -381,11 +494,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["abs"],
     secondary: ["obliques", "hipFlexors"],
     steps: [
-      step("Lie on your back, knees bent, feet flat on the floor.", "仰躺，屈膝、雙腳踩地。"),
-      step("Rest the hands on the chest or beside the head.", "雙手放在胸前或頭部兩側。"),
-      step("Curl the head and shoulders up first.", "先把頭與肩膀捲起。"),
-      step("Continue up until the torso is off the floor.", "繼續往上，直到軀幹離開地面。"),
-      step("Lower one segment at a time, without dropping back.", "一段一段放下，不要整個往後倒。"),
+      step("Lie on your back, knees bent, feet flat on the floor.", "仰躺，屈膝、雙腳踩地。", SIT_UP_STEP_ART[0]),
+      step("Rest the hands on the chest or beside the head.", "雙手放在胸前或頭部兩側。", SIT_UP_STEP_ART[1]),
+      step("Curl the head and shoulders up first.", "先把頭與肩膀捲起。", SIT_UP_STEP_ART[2]),
+      step("Continue up until the torso is off the floor.", "繼續往上，直到軀幹離開地面。", SIT_UP_STEP_ART[3]),
+      step("Lower one segment at a time, without dropping back.", "一段一段放下，不要整個往後倒。", SIT_UP_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/sit-up.webp",
     demo: { clip: "situps" },
@@ -404,11 +517,15 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["obliques"],
     secondary: ["abs", "lowerBack"],
     steps: [
-      step("Stand with the feet planted hip-width apart.", "雙腳與髖同寬踩穩。"),
-      step("Hold the arms in front or across the chest.", "雙手前伸或交叉於胸前。"),
-      step("Rotate the ribcage to one side, hips facing forward.", "肋廓向一側旋轉，髖部保持朝前。"),
-      step("Move only as far as the hips can stay square.", "轉到髖部快要跟著轉之前就停。"),
-      step("Return through the middle and repeat the other way.", "回到中間再轉向另一側。"),
+      // "Sit", not "Stand" as this read before the art arrived: the sheet draws the movement seated
+      // on the floor, and four of its five captions match these cues verbatim while the fifth
+      // differs by exactly that word. Nothing else in the entry names a position, so the seated
+      // reading is consistent. Revert this one line (and re-source the sheet) for a standing twist.
+      step("Sit with the feet planted hip-width apart.", "坐姿，雙腳與髖同寬踩穩。", TORSO_TWIST_STEP_ART[0]),
+      step("Hold the arms in front or across the chest.", "雙手前伸或交叉於胸前。", TORSO_TWIST_STEP_ART[1]),
+      step("Rotate the ribcage to one side, hips facing forward.", "肋廓向一側旋轉，髖部保持朝前。", TORSO_TWIST_STEP_ART[2]),
+      step("Move only as far as the hips can stay square.", "轉到髖部快要跟著轉之前就停。", TORSO_TWIST_STEP_ART[3]),
+      step("Return through the middle and repeat the other way.", "回到中間再轉向另一側。", TORSO_TWIST_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/torso-twist.webp",
   },
@@ -426,11 +543,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["shoulders", "calves"],
     secondary: ["quads", "glutes", "adductors", "abs"],
     steps: [
-      step("Stand with the feet together and the arms at the sides.", "雙腳併攏，雙手放在身側。"),
-      step("Jump the feet out wider than the hips.", "跳開雙腳，比髖部更寬。"),
-      step("Sweep the arms overhead on the same beat.", "同一拍把雙手往頭頂揮上。"),
-      step("Land softly on the balls of the feet.", "以前腳掌輕柔落地。"),
-      step("Jump back to the start and keep the tempo even.", "跳回起始位置，維持穩定節奏。"),
+      step("Stand with the feet together and the arms at the sides.", "雙腳併攏，雙手放在身側。", JUMPING_JACKS_STEP_ART[0]),
+      step("Jump the feet out wider than the hips.", "跳開雙腳，比髖部更寬。", JUMPING_JACKS_STEP_ART[1]),
+      step("Sweep the arms overhead on the same beat.", "同一拍把雙手往頭頂揮上。", JUMPING_JACKS_STEP_ART[2]),
+      step("Land softly on the balls of the feet.", "以前腳掌輕柔落地。", JUMPING_JACKS_STEP_ART[3]),
+      step("Jump back to the start and keep the tempo even.", "跳回起始位置，維持穩定節奏。", JUMPING_JACKS_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/jumping-jacks.webp",
   },
@@ -448,11 +565,11 @@ export const MOVEMENT_DETAIL: Record<string, MovementDetail> = {
     primary: ["hipFlexors", "quads"],
     secondary: ["calves", "abs", "glutes"],
     steps: [
-      step("Stand tall with the feet under the hips.", "站直，雙腳位於髖部正下方。"),
-      step("Drive one knee up toward hip height.", "把一邊膝蓋抬向髖部高度。"),
-      step("Swap legs with a light bounce off the floor.", "以輕盈的彈跳換腳。"),
-      step("Keep the torso upright rather than leaning back.", "軀幹保持直立，不要往後仰。"),
-      step("Land on the balls of the feet and keep the rhythm.", "以前腳掌落地，維持節奏。"),
+      step("Stand tall with the feet under the hips.", "站直，雙腳位於髖部正下方。", HIGH_KNEE_STEP_ART[0]),
+      step("Drive one knee up toward hip height.", "把一邊膝蓋抬向髖部高度。", HIGH_KNEE_STEP_ART[1]),
+      step("Swap legs with a light bounce off the floor.", "以輕盈的彈跳換腳。", HIGH_KNEE_STEP_ART[2]),
+      step("Keep the torso upright rather than leaning back.", "軀幹保持直立，不要往後仰。", HIGH_KNEE_STEP_ART[3]),
+      step("Land on the balls of the feet and keep the rhythm.", "以前腳掌落地，維持節奏。", HIGH_KNEE_STEP_ART[4]),
     ],
     plate: "/movements/muscles-worked/high-knee.webp",
     demo: { clip: "highknee" },

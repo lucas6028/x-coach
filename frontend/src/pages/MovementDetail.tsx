@@ -236,8 +236,15 @@ function Overview({
   );
 }
 
-// The step strip. Squat has real figures; everything else falls back to its card art, which is
-// one pose rather than five — the numbered cues are still the useful part.
+// The step strip. Every movement in the catalog now has real figures, so the card-art fallback
+// below is currently unreachable — it stays for the next movement added without a set, which would
+// otherwise render five blanks.
+//
+// The max-width is what stops a figure from spilling into its neighbour's column: the strip gives
+// each step about that much room. It binds only on the sets wider than the box (Shoulder Bridge at
+// ~2.6:1, Sit-up at ~1.7:1 and Push-up at ~1.6:1), which then read shorter than the 132px box —
+// correct, since all three are performed on the floor, and consistent within a set because its
+// five share a canvas.
 function StepFigure({ movement, image }: { movement: string; image?: string }) {
   if (image) {
     return (
@@ -592,9 +599,12 @@ function HowToTab({ movement, detail }: { movement: string; detail: Detail }) {
         <p className="mt-3 text-[17px] font-semibold leading-relaxed text-content">
           {step.text[lang]}
         </p>
+        {/* max-w-full on the figure because a wide one (Shoulder Bridge is ~2.6:1) comes to
+            ~730px at this height, and an img sized by `h-full w-auto` will not shrink to fit its
+            flex parent. It never binds on the sets drawn standing. */}
         <div className="mt-6 flex h-[280px] items-center justify-center rounded-[24px] bg-content/[0.03] p-4">
           {step.image ? (
-            <img src={step.image} alt="" className="h-full w-auto object-contain" />
+            <img src={step.image} alt="" className="h-full w-auto max-w-full object-contain" />
           ) : (
             <span className="h-full w-[220px]">
               <MovementArt movement={movement} />

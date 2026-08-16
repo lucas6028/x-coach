@@ -132,10 +132,20 @@ def prepare_steps(directory: Path) -> int:
       * identical output dimensions, so whatever the page does to size them applies equally.
 
     The set is everything sharing a `<movement>-<n>.png` prefix.
+
+    A PNG whose name does not END in a number is not a step and is skipped. That is not a style
+    rule: the multi-panel SHEETS some art arrives as live in this directory too (see
+    split_step_sheet.py), and `shoulder-bridge-steps.png` would otherwise join the shoulder-bridge
+    group as a sixth "step" -- a whole sheet, five times taller than a figure, silently becoming
+    the tallest member the set is scaled by.
     """
     groups: dict[str, list[Path]] = {}
     for source in sorted(directory.glob("*.png")):
-        groups.setdefault(source.stem.rsplit("-", 1)[0], []).append(source)
+        movement, _, index = source.stem.rpartition("-")
+        if not index.isdigit():
+            print(f"skipping {source.name} -- not a numbered step figure")
+            continue
+        groups.setdefault(movement, []).append(source)
 
     made = 0
     for movement, sources in groups.items():
