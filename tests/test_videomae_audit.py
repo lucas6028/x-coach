@@ -94,6 +94,36 @@ class AuditTest(unittest.TestCase):
         report = audit_feature_dir(self.feature_dir, self.manifest, self.labels)
         self.assertFalse(report["checks"]["no_constant_features"])
 
+    def test_a_one_dimensional_control_is_not_called_constant(self):
+        """Within-sample std is 0 by construction at dim 1, so applying that check to a
+        duration-only control fails every legitimate dim-1 arm -- and a gate that cannot
+        pass teaches people to ignore gates."""
+        for sid, split, value in (("s1", "train", 15.0), ("s2", "train", 110.0), ("s3", "test", 585.0)):
+            write_feature(self.feature_dir / split / f"{sid}.npz", np.asarray([value], dtype=np.float32))
+        report = audit_feature_dir(self.feature_dir, self.manifest, self.labels)
+        self.assertTrue(report["checks"]["no_constant_features"])
+        self.assertTrue(report["checks"]["features_vary_across_samples"])
+        self.assertTrue(report["passed"], report["checks"])
+
+    def test_detects_a_dim_one_arm_that_carries_no_information(self):
+        """The check that DOES matter at dim 1: identical values everywhere trains to
+        chance and still reports a number."""
+        for sid, split in (("s1", "train"), ("s2", "train"), ("s3", "test")):
+            write_feature(self.feature_dir / split / f"{sid}.npz", np.asarray([42.0], dtype=np.float32))
+        report = audit_feature_dir(self.feature_dir, self.manifest, self.labels)
+        self.assertFalse(report["checks"]["features_vary_across_samples"])
+        self.assertFalse(report["passed"])
+
+    def test_detects_an_identical_vector_repeated_across_every_sample(self):
+        """Same failure at full width: each sample varies internally, so the per-sample
+        check passes, yet the dir carries no signal at all."""
+        shared = np.arange(8, dtype=np.float32)
+        for sid, split in (("s1", "train"), ("s2", "train"), ("s3", "test")):
+            write_feature(self.feature_dir / split / f"{sid}.npz", shared.copy())
+        report = audit_feature_dir(self.feature_dir, self.manifest, self.labels)
+        self.assertTrue(report["checks"]["no_constant_features"])
+        self.assertFalse(report["checks"]["features_vary_across_samples"])
+
     def test_detects_split_mismatch(self):
         write_feature(self.feature_dir / "train" / "s1.npz", self.good["s1"])
         write_feature(self.feature_dir / "train" / "s2.npz", self.good["s2"])

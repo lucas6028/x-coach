@@ -44,6 +44,7 @@ def audit_feature_dir(
     split_mismatch: list[str] = []
     unreadable: list[str] = []
     constant_features: list[str] = []
+    stacked_features: list[np.ndarray] = []
 
     for stem, stem_paths in stems_to_paths.items():
         path = stem_paths[0]
@@ -57,8 +58,15 @@ def audit_feature_dir(
                 dtypes[str(feature.dtype)] += 1
                 if not np.all(np.isfinite(feature)):
                     nonfinite.append(stem)
-                if float(np.std(feature)) == 0.0:
+                # Within-sample spread only says anything when there is more than one
+                # dimension to spread across. A 1-dim control (the duration floor) has
+                # std 0 by construction, so applying this to it makes the gate fail for
+                # every legitimate dim-1 arm -- a gate that cannot pass teaches people
+                # to ignore gates. Cross-sample variation, checked below, is the
+                # question that actually matters and it is well-defined at any width.
+                if feature.size > 1 and float(np.std(feature)) == 0.0:
                     constant_features.append(stem)
+                stacked_features.append(feature)
                 if "clip_features" in data.files:
                     clip_counts[int(data["clip_features"].shape[0])] += 1
                 provenance = {
@@ -82,6 +90,13 @@ def audit_feature_dir(
     if labeled_ids is not None:
         unlabeled = sorted(found - labeled_ids)
 
+    # A feature dir where every sample carries the identical vector trains to chance and
+    # still reports a number. Only checkable when the shapes agree, which `single_feature_dim`
+    # already reports on separately.
+    features_vary = True
+    if len(dims) == 1 and len(stacked_features) > 1:
+        features_vary = bool(np.any(np.std(np.stack(stacked_features), axis=0) > 0))
+
     checks = {
         "coverage_complete": not missing,
         "no_unexpected_samples": not unexpected,
@@ -91,6 +106,7 @@ def audit_feature_dir(
         "single_clip_count": len(clip_counts) <= 1,
         "all_finite": not nonfinite,
         "no_constant_features": not constant_features,
+        "features_vary_across_samples": features_vary,
         "splits_match_manifest": not split_mismatch,
         "all_readable": not unreadable,
         "single_provenance": len(provenances) <= 1,
