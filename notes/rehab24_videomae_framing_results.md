@@ -18,6 +18,12 @@ paired Δ = **+0.011 ± 0.056**(9 折,5/9 同向,exact p = 0.570,區間 [−0.08
 同時得到一個明確的正面答案:**Stage A 的 0.657 不是 cam18 裁腳造成的假象**——
 換成完全不裁切的 framing 後仍是 0.661,兩者重疊。
 
+**(P2,最終圖像)** **分界線不在 framing,而在「畫面裡有沒有人」。**
+四個含人體的臂全部落在 **0.6505 – 0.6612**(全距僅 0.011),即使它們之間腳截斷率從 100%
+到 0%、body area 差 **2.7 倍**、背景從保留到移除;三個不含人體的臂全部落在 **0.479 – 0.508**
+(chance)。`person_crop − letterbox = −0.0009`(p = 1.0000)也**推翻了 P0 的第二種解釋**:
+letterbox 沒有增益,不是因為「完整身體的好處被縮小人體抵銷」。
+
 **(P1 negative control)** **把人體移除後,訊號幾乎全部消失。**
 `background_only` 只有 **0.5074 ± 0.0304**(高於 chance 僅 +0.007),與
 `box_geometry`(0.5075)**完全打平**(Δ = −0.0000),而 `n_frames` 甚至在 chance 之下
@@ -199,17 +205,22 @@ balanced accuracy 在該折幾乎沒有意義——這正是它被列為 sensiti
 
 ---
 
-## 7. 判讀:兩種解釋,本設計分不開
+## 7. 判讀:兩種解釋——已由 P2 分開
 
-letterbox 修好了截斷(0% vs cam18 的 100%),卻沒換到 accuracy。可能是:
+letterbox 修好了截斷(0% vs cam18 的 100%),卻沒換到 accuracy。當時有兩種解釋:
 
 - **(a) 完整身體對這個分類任務不重要** —— 模型本來就沒在用腳踝資訊;或
 - **(b) F2 的增益被 F3 的損失抵銷** —— 補成正方形後人體在 224×224 內縮小,
   body area 中位數 0.786 → 0.290(cam18 0.950 → 0.415)。完整但更小,對上不完整但更大。
 
-**這兩者本設計無法分離**,而且這一點在 §3.1 的 geometry report 中已事先寫下,不是事後
-找的理由。要分開需要第三種 framing(例如把 crop window 重新置中於人體、不縮放),
-計畫並未登錄該臂。
+本 note 的前一版寫「本設計無法分離」,並說要分開需要第三種 framing。
+**`person_crop`(P2)正是那一臂,而且它本來就在計畫裡**:它同時具備
+**0% 截斷**與 **0.778 的 body area**——完整身體 **且** 不縮小。結果見 §7B:
+`person_crop` 與 letterbox 差 **−0.0009**(p = 1.0000),即 **body scale 差 2.7 倍卻沒有
+任何可測差異**。因此 **(b) 不被支持,(a) 是較受支持的讀法**。
+
+(仍須註明:`person_crop` 相對 letterbox 同時「放大人體」與「移除背景」兩個變動。
+把這個 null 歸因於 scale,依賴的是 §7A 已量到「背景 ≈ chance」;若沒有 P1,這個歸因不成立。)
 
 ---
 
@@ -264,6 +275,53 @@ letterbox 修好了截斷(0% vs cam18 的 100%),卻沒換到 accuracy。可能�
 
 ---
 
+## 7B. P2 `person_crop`:訊號在人體,且對 framing 幾乎免疫
+
+### 7B.1 七臂總表(seeds 42/7/1234,9 折,排除 P10)
+
+| Arm | 截斷 | body area | 背景 | bal_acc | 高於 chance |
+| --- | ---: | ---: | :---: | ---: | ---: |
+| `full_frame_letterbox` | 0% | 0.290 | 有 | **0.6612 ± 0.0567** | +0.161 |
+| `person_crop` | 0% | 0.778 | 幾乎無 | **0.6603 ± 0.0467** | +0.160 |
+| `kaggle_full_frame`(QC) | 87.6% | 0.786 | 有 | 0.6506 ± 0.0548 | +0.151 |
+| `full_frame` | 87.6% | 0.786 | 有 | 0.6505 ± 0.0585 | +0.151 |
+| `box_geometry` | — | — | 無像素 | 0.5075 ± 0.0133 | +0.008 |
+| `background_only` | — | — | 有(人被塗掉) | 0.5074 ± 0.0304 | +0.007 |
+| `n_frames` | — | — | 無像素 | 0.4786 ± 0.0316 | −0.021 |
+
+### 7B.2 §7.3 的四個 secondary(Holm 校正,family size = 4)
+
+| 比較 | Δ | 同向 | raw p | Holm p |
+| --- | ---: | :---: | ---: | ---: |
+| `person_crop − full_frame_letterbox` | **−0.0009** | 4/9 | 1.0000 | 1.0000 |
+| `person_crop − full_frame` | +0.0098 | 5/9 | 0.5703 | 1.0000 |
+| `background_only − n_frames` | +0.0289 | 5/9 | 0.2031 | 0.8125 |
+| `background_only − box_geometry` | −0.0000 | 4/9 | 0.5703 | 1.0000 |
+
+### 7B.3 讀法:一條乾淨的分界線
+
+把七臂排序後,結構非常清楚——**只有兩群,分界不在 framing,而在「畫面裡有沒有人」**:
+
+- **有人體的四臂全部落在 0.6505 – 0.6612**,全距僅 **0.011**。而這四臂之間的差異其實很大:
+  腳被切掉 100%(cam18 的 `full_frame`)對上完全不切;body area 0.290 對上 0.786(**2.7 倍**);
+  背景保留對上背景幾乎移除。**這些都沒有讓分數移動超過 0.011。**
+- **沒有人體的三臂全部落在 0.479 – 0.508**,即 chance。
+
+也就是說,這個表徵**對 framing 幾乎免疫,但對人體在不在完全敏感**。
+`person_crop − letterbox = −0.0009`(p = 1.0000)是本研究中最接近「真的沒有差」的一個數字,
+但**依 §7.2 仍寫成 undetermined**:n=9 的檢定力不足以宣稱 equivalence,區間仍有
+[−0.053, +0.055]。
+
+分層上兩臺相機方向相反且互相抵銷(cam17 +0.021、cam18 −0.023),沒有機制訊號。
+
+### 7B.4 這一臂的限制
+
+- 人物框來自 **mocap ground truth**,不是偵測器。因此本結果說的是「控制相同人體區域後的
+  表徵差異」,**不能推論部署時可取得同品質的框**(計畫 §4.1 已事先寫明)。
+- `person_crop` 相對 letterbox 同時改變 scale 與背景兩個因子(見 §7 括號)。
+
+---
+
 ## 8. 可以說 / 不能說
 
 **可以說:**
@@ -295,32 +353,44 @@ letterbox 修好了截斷(0% vs cam18 的 100%),卻沒換到 accuracy。可能�
 - [[clip-length-shortcut]](Fitness-AQA 上 clip length = 0.6139)**不外推**到 REHAB24-6:
   這裡的 `n_frames` 在 chance 之下。
 
-**P1 之後仍然不能說:**
+**P2 之後新增可以說的:**
+
+- **這個表徵對 framing 幾乎免疫,對「有沒有人」極度敏感。** 四個含人體的臂全距只有 0.011,
+  即使其中腳截斷率從 100% 到 0%、body area 差 2.7 倍、背景從保留到移除;三個不含人體的臂
+  全部在 chance。這是本計畫最完整的一句話。
+- **P0 的雙重解釋已經收斂到 (a)。** letterbox 的 null 不是「F2 增益被 F3 損失抵銷」造成的,
+  因為把 scale 還回去(`person_crop`,body area 0.778)並沒有帶來任何增益(−0.0009)。
+
+**P1 / P2 之後仍然不能說:**
 
 - ❌「模型在新場景、新醫院、消費者手機影片上不會用背景捷徑」——本資料集只有一個實驗室、
   兩臺固定相機,**沒有場景變異可供辨識**,所以這裡測不到捷徑是預期中的,而不是外部效度的證據。
 - ❌「背景完全不含資訊」——遮罩已覆蓋 cam18 的 69.5%,剩下的場景本來就很少。
 - ❌ 以 `background_only` ≈ chance 反推「模型看的一定是動作品質」。它排除的是
-  場景/長度/框幾何,**不排除人體外觀**(體型、衣著、個人特徵)。要分離那一層需要
-  `person_crop`(P2)以及本計畫未涵蓋的 identity control。
+  場景/長度/框幾何,**不排除人體外觀**(體型、衣著、個人特徵)。`person_crop`(P2)
+  **也不能**分離這一層——它把畫面縮到人身上,反而讓外觀更突出。要分離需要本計畫未登錄的
+  identity control(例如同一受試者跨 correctness 的配對,或 appearance-shuffled control)。
+  **這是目前最大的未解捷徑風險。**
+- ❌ 「framing 對這個任務不重要」的通則。四臂全距 0.011 是在 **n=9、每臂 ±0.05 級距**的
+  精度下量到的;它排除的是**大效應**,不是所有效應。
 
 ---
 
 ## 9. 下一步
 
-**已完成**:P0 `full_frame_letterbox`、P1 `background_only`、`n_frames` duration floor。
+**計畫登錄的三個 arm 全部完成**:P0 `full_frame_letterbox`、P1 `background_only`、
+P2 `person_crop`,外加 `n_frames` duration floor 與 `box_geometry`。本計畫到此結束。
 
-**剩下 `person_crop`(P2)**,計畫 §2 的 secondary:`person_crop − full_frame_letterbox`。
-兩臂都保留完整身體,差別在有無場景,是本設計中最接近「背景有無」的對比。
+計畫**未涵蓋**、但由結果直接指出的下一個問題:
 
-需要注意的是,P1 的結果已經**削弱了 P2 的邊際價值**:既然 `background_only` 已落在 chance,
-「場景帶有訊號」這條路基本上已經關閉,`person_crop` 主要能回答的變成
-「**縮小並移除場景後,人體訊號是否仍保留**」——即 §8 表格最後兩列的 body-scale/aspect 效應,
-而那正好也是 P0 無法與 F2 分離的那個因子。若要繼續,建議把它讀成**對 F3(body scale)的
-探測**,而不是再一次的背景控制。
-
-抽取成本與本次相同(~2h/臂,GPU 3 workers);pixel transform、box resolver、gates 與
-report runner 都已就緒,`--variant person_crop --box-index ...` 即可。
+1. **Identity / appearance control(最高優先)。** 現在已知訊號在人體、且對 framing 免疫。
+   但「人體」同時包含動作品質**與**個人外觀。REHAB24-6 有 `person_id`,而 LOSO 已保證
+   受試者不跨 train/test——所以模型不可能靠「認得這個人」得分,但仍可能靠
+   **體型/衣著與 correctness 的相關性**得分。可行的控制:同一受試者內配對、
+   或 appearance-shuffled control。§8 已把這列為目前最大的未解捷徑風險。
+2. **精度而非新臂。** 四個含人體的臂全距 0.011,而每臂的 subject 級距是 ±0.05。
+   要把「framing 不重要」從「測不到大效應」升級成更強的敘述,需要的是**更多受試者**,
+   不是更多 framing 變體。REHAB24-6 只有 10 位,這是硬上限。
 
 ---
 
@@ -337,7 +407,11 @@ data/REHAB24-6/processed/n_frames_features/                # duration floor(由 
 data/REHAB24-6/processed/videomae_framing_pairing_background_only.json
 data/REHAB24-6/processed/videomae_framing_audit_background_only.json
 data/REHAB24-6/processed/videomae_framing_p1_seed{42,7,1234}.json
-data/REHAB24-6/processed/videomae_framing_p1_summary.json  # §7A 全部數字的來源(六臂)
+data/REHAB24-6/processed/videomae_framing_p1_summary.json  # §7A 的來源(六臂)
+data/REHAB24-6/processed/videomae_framing_pairing_person_crop.json
+data/REHAB24-6/processed/videomae_framing_audit_person_crop.json
+data/REHAB24-6/processed/videomae_framing_p2_seed{42,7,1234}.json
+data/REHAB24-6/processed/videomae_framing_p2_summary.json  # §7B 的來源(七臂,最終)
 ```
 
 重跑指令與 gate 順序:`scripts/rehab24/README.md`「Framing arms」。
