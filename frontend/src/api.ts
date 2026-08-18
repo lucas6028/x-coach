@@ -711,6 +711,12 @@ export const api = {
 
   // The complete, movement-scoped fault list (name + connectivity), enumerated by the graph's
   // `movement` node attribute so no fault is hidden. Backs GET /api/knowledge/faults.
+  //
+  // NO PAGE CALLS THIS TODAY. The movement detail page's "common mistakes" tab used to, and now
+  // renders lib/movementMistakes.ts instead — the faults the rule detectors actually report,
+  // rather than every Fault node the graph defines. Kept because it is the only way to enumerate
+  // the graph's own fault index, which is what a KG browser would want; delete it, and the
+  // endpoint behind it, if that never gets built.
   movementFaults: (movement: string) =>
     getJSON<{ movement: string; faults: MovementFault[] }>(
       `/api/knowledge/faults?movement=${encodeURIComponent(movement)}`

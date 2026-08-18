@@ -3,7 +3,9 @@ import {
   ArrowLeft,
   ArrowsLeftRight,
   CaretRight,
+  Check,
   Crosshair,
+  Lightbulb,
   MapPin,
   Path,
   Record as RecordIcon,
@@ -11,16 +13,18 @@ import {
   Timer,
   UploadSimple,
   WarningCircle,
+  X,
 } from "@phosphor-icons/react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import MovementArt from "../components/movements/MovementArt";
 import MuscleMap from "../components/movements/MuscleMap";
-import { api, type HistoryItem, type MovementFault, type Retrieval } from "../api";
+import { api, type HistoryItem, type Retrieval } from "../api";
 import { useAuth } from "../lib/auth";
-import { faultLabel, movementLabel, useI18n } from "../lib/i18n";
+import { movementLabel, useI18n } from "../lib/i18n";
 import { MOVEMENT_GROUPS, type AnalyzableMovement } from "../lib/movements";
 import { movementDetail, type Muscle, type MovementDetail as Detail } from "../lib/movementDetail";
+import { movementMistakes, type Mistake } from "../lib/movementMistakes";
 import { summaryCategory } from "../lib/retrieval";
 
 // One movement, in full: what it is, how it is performed, which muscles it trains, the faults the
@@ -635,12 +639,35 @@ function HowToTab({ movement, detail }: { movement: string; detail: Detail }) {
   );
 }
 
-// The fault list comes from the knowledge graph, which is also what the analyzer cites — so this
-// tab and a real analysis can never disagree about what a fault is called.
+// Common mistakes. Built against the reference mock (~/Downloads/squat-mistakes-react): a numbered
+// row per fault, a wrong/correct illustration pair, the fault stated and argued, and a boxed list
+// of corrective cues.
 //
-// Fetched in two steps on purpose: the list endpoint is one request, while each fault's causes /
-// risks / cues is a graph traversal. Expanding one fault costs one traversal; opening the tab
-// costs none.
+// WHAT THE MOCK'S SHELL CONTRIBUTED: nothing. Its sidebar, breadcrumbs, "Watch tutorial" /
+// "Start analysis" buttons and "Back to Squat" link all already exist on this page, one level up.
+// Its body-region tab strip (All / Lower body / Upper body / Core / Full body) is dropped outright
+// rather than ported: it filters a list of movements, and this page is ONE movement, so every tab
+// but that movement's own would render empty. Only the card, and the tip strip under it, are new.
+//
+// WHERE THE LIST COMES FROM, and this is the change from the version this replaced: the faults are
+// the ones this movement's rule detector can actually report, authored in lib/movementMistakes.ts
+// and pinned to src/pose/movements/<movement>.py by tests/test_movement_mistakes_roster.py. The
+// previous version listed every Fault node the knowledge graph defines for the movement, which for
+// a flagship is dozens of concepts the analyzer will never mention -- a browsable index of the
+// graph rather than an answer to "what will this app tell me I did wrong".
+//
+// The graph is still here, one hop deeper. Expanding a card fetches that fault's causes / risks /
+// cues by its detector's own `kg_query`, so the concepts a card shows are exactly the ones a real
+// detection of that fault would retrieve.
+//
+// WHAT IS NOT SHARED, and it is worth stating rather than discovering: the NAME. A card's heading
+// is authored for a reader ("Knees caving in"), while the studio renders a detection through
+// `faultLabel(t, d.fault_name)`, which for this fault comes out as its detector's own
+// "Knees Inward / Knee Valgus". Same `fault_id`, same retrieval, two headings -- deliberate here,
+// because the mock's copy is the friendlier one and the studio's is the clinical one, but if the
+// two are ever to be unified it is the studio that should read from lib/movementMistakes.ts, not
+// this page that should go back to reciting detector strings.
+
 // Cause -> risk -> fix, the same three buckets and the same labels the studio's FaultCard uses,
 // so a fault read about here and the same fault detected in a clip are described identically.
 const CHAIN = [
@@ -649,148 +676,249 @@ const CHAIN = [
   { cat: "corrections", labelKey: "feedback.cue" },
 ] as const;
 
+/** One half of the wrong/correct pair.
+ *
+ *  The slot is always drawn, the image is optional, and neither half of that is arbitrary. The
+ *  slot is always drawn so the pair reads as part of the card from day one and so dropping the
+ *  art in later reflows nothing. The image is optional because it is the thing that carries the
+ *  fault: with none, the panel does NOT fall back to the movement's generic card art, since the
+ *  same drawing captioned "wrong" on the left and "correct" on the right is a picture that lies.
+ *  It shows its verdict badge over a tinted ground and says which side it is, and that is all. */
+function MistakePanel({ tone, src, alt }: { tone: "wrong" | "correct"; src?: string; alt: string }) {
+  const { t } = useI18n();
+  const wrong = tone === "wrong";
+  return (
+    <div
+      className={`relative flex h-[152px] items-center justify-center overflow-hidden rounded-[14px] ${
+        wrong ? "bg-danger/[0.06]" : "bg-secondary/[0.07]"
+      }`}
+    >
+      <span
+        className={`absolute left-2.5 top-2.5 z-10 flex h-6 w-6 items-center justify-center rounded-full text-white ${
+          wrong ? "bg-danger" : "bg-secondary"
+        }`}
+      >
+        {wrong ? <X size={13} weight="bold" /> : <Check size={13} weight="bold" />}
+      </span>
+      {src ? (
+        <img src={src} alt={alt} loading="lazy" decoding="async" className="h-full w-full object-contain" />
+      ) : (
+        <span
+          className={`px-3 text-center text-[11px] font-semibold ${
+            wrong ? "text-danger/70" : "text-secondary/80"
+          }`}
+        >
+          {t(wrong ? "detail.mistakeWrong" : "detail.mistakeCorrect")}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function MistakeCard({
+  mistake,
+  index,
+  open,
+  onToggle,
+  loaded,
+}: {
+  mistake: Mistake;
+  index: number;
+  open: boolean;
+  onToggle: () => void;
+  loaded?: Retrieval | "loading" | "error";
+}) {
+  const { t, lang } = useI18n();
+  const title = mistake.title[lang];
+  const retrieval = typeof loaded === "string" ? undefined : loaded;
+  const panelId = `mistake-${mistake.id}`;
+
+  // Three regions on a wide screen, in the mock's own order: the pair, the fault stated and
+  // argued, the fixes.
+  const columns = "xl:grid-cols-[296px_minmax(0,1fr)_minmax(0,336px)]";
+
+  return (
+    <article className="rounded-[22px] border border-border-dark bg-surface p-4 shadow-card sm:p-5">
+      <div className="flex items-start gap-3.5 xl:items-center xl:gap-4">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-danger text-[14px] font-bold text-white ring-4 ring-danger/15">
+          {index + 1}
+        </span>
+
+        <div className={`grid min-w-0 flex-1 items-center gap-4 ${columns}`}>
+          {/* Capped below xl, where this region spans the whole card: at full width each panel
+              becomes a 490x152 letterbox, and the figures going in here are standing bodies. The
+              cap keeps both halves near the square the xl column already gives them. */}
+          <div className="grid w-full max-w-[296px] grid-cols-2 gap-1.5 xl:max-w-none">
+            <MistakePanel
+              tone="wrong"
+              src={mistake.art?.wrong}
+              alt={t("detail.mistakeWrongAlt", { fault: title })}
+            />
+            <MistakePanel
+              tone="correct"
+              src={mistake.art?.correct}
+              alt={t("detail.mistakeCorrectAlt", { fault: title })}
+            />
+          </div>
+
+          <div className="min-w-0">
+            <h3 className="text-[15.5px] font-bold leading-snug text-content">{title}</h3>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-muted">{mistake.subtitle[lang]}</p>
+            <span className="mt-3 inline-block rounded-md bg-primary/10 px-2 py-1 text-[11px] font-semibold text-primary">
+              {t("detail.mistakeWhy")}
+            </span>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-muted">{mistake.why[lang]}</p>
+          </div>
+
+          <div className="rounded-[14px] border border-primary/15 bg-primary/[0.05] p-4">
+            <h4 className="text-[12px] font-semibold text-primary">{t("detail.mistakeFix")}</h4>
+            <ul className="mt-2.5 space-y-2">
+              {mistake.fixes[lang].map((fix) => (
+                <li key={fix} className="flex items-start gap-2 text-[12.2px] leading-snug text-muted">
+                  <span className="mt-[3px] flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-secondary text-white">
+                    <Check size={8} weight="bold" />
+                  </span>
+                  {fix}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* The mock's detail arrow, given the job the old list's row-button had: one graph
+            traversal, on demand, for this fault's causes / risks / cues. */}
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={panelId}
+          onClick={onToggle}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-faint transition-colors hover:bg-content/[0.04] hover:text-content"
+        >
+          <span className="sr-only">{t("detail.mistakeMore", { fault: title })}</span>
+          <CaretRight size={18} className={`transition-transform ${open ? "rotate-90" : ""}`} />
+        </button>
+      </div>
+
+      {open && (
+        <div id={panelId} className="mt-4 border-t border-border-dark pt-4 text-[12.5px]">
+          {loaded === "loading" ? (
+            <p className="text-muted">{t("detail.mistakesLoading")}</p>
+          ) : loaded === "error" ? (
+            <p className="flex items-center gap-2 text-muted">
+              <WarningCircle size={14} className="shrink-0 text-danger" />
+              {t("detail.mistakesError")}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {CHAIN.map(({ cat, labelKey }) => {
+                const items = summaryCategory(retrieval, cat);
+                if (!items.length) return null;
+                return (
+                  <div key={cat}>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                      {t(labelKey)}
+                    </p>
+                    <ul className="mt-1 flex flex-wrap gap-1.5">
+                      {items.map((x) => (
+                        <li key={x} className="rounded-full bg-content/[0.05] px-2.5 py-1 text-muted">
+                          {x}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+              {!CHAIN.some(({ cat }) => summaryCategory(retrieval, cat).length) && (
+                <p className="text-muted">{t("detail.mistakesNoLinks")}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+    </article>
+  );
+}
+
 function MistakesTab({ movement }: { movement: string }) {
   const { t } = useI18n();
-  const [faults, setFaults] = useState<MovementFault[] | null>(null);
-  const [error, setError] = useState(false);
+  const mistakes = movementMistakes(movement);
   const [open, setOpen] = useState<string | null>(null);
-  const [detailByFault, setDetailByFault] = useState<Record<string, Retrieval | "loading">>({});
+  const [detailByFault, setDetailByFault] = useState<
+    Record<string, Retrieval | "loading" | "error">
+  >({});
 
+  // The list is local, so switching movements must not leave the previous one's expansion open.
   useEffect(() => {
-    let cancelled = false;
-    setFaults(null);
-    setError(false);
-    api
-      .movementFaults(movement)
-      .then((r) => {
-        if (!cancelled) setFaults(r.faults);
-      })
-      .catch(() => {
-        if (!cancelled) setError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setOpen(null);
+    setDetailByFault({});
   }, [movement]);
 
   const expand = useCallback(
-    async (name: string) => {
-      setOpen((prev) => (prev === name ? null : name));
-      if (detailByFault[name]) return;
-      setDetailByFault((prev) => ({ ...prev, [name]: "loading" }));
+    async (mistake: Mistake) => {
+      const known = detailByFault[mistake.id];
+      // A failed traversal keeps the card OPEN and retries in place. Toggling it shut on the click
+      // that retries would land the result behind a closed card, so the reader would have to click
+      // a third time to see whether the retry worked.
+      const closing = open === mistake.id && known !== "error";
+      setOpen(closing ? null : mistake.id);
+      if (closing || (known && known !== "error")) return;
+      setDetailByFault((prev) => ({ ...prev, [mistake.id]: "loading" }));
       try {
-        const context = await api.graph(name, movement);
+        // Queried by the detector's own kg_query, not by the card's title: the title is written
+        // for a reader, the query has to be the string the analyzer would send.
+        const context = await api.graph(mistake.kgQuery, movement);
         // summaryCategory reads a Retrieval, which is how the studio already derives causes /
         // risks / cues from exactly this payload. Wrapping the context rather than re-implementing
         // the walk keeps one derivation in the app (lib/retrieval.ts).
         setDetailByFault((prev) => ({
           ...prev,
-          [name]: {
-            fault_id: name,
-            fault_name: name,
-            query_text: name,
+          [mistake.id]: {
+            fault_id: mistake.id,
+            fault_name: mistake.kgQuery,
+            query_text: mistake.kgQuery,
             retrieval_mode: "kg",
             context,
           },
         }));
       } catch {
-        setDetailByFault((prev) => {
-          const next = { ...prev };
-          delete next[name];
-          return next;
-        });
+        setDetailByFault((prev) => ({ ...prev, [mistake.id]: "error" }));
       }
     },
-    [detailByFault, movement]
+    [detailByFault, movement, open]
   );
 
-  if (error) {
-    return <Empty icon="warn" text={t("detail.mistakesError")} />;
-  }
-  if (faults === null) {
-    return <Empty text={t("detail.mistakesLoading")} />;
-  }
-  if (faults.length === 0) {
-    return <Empty text={t("detail.mistakesEmpty")} />;
-  }
+  // Catalog movements with no registered detector (Jumping Jacks, High Knee) land here, and this
+  // is the honest answer for them: nothing is authored because nothing can be detected.
+  if (mistakes.length === 0) return <Empty text={t("detail.mistakesEmpty")} />;
 
   return (
     <div className="mt-5">
       <p className="max-w-2xl text-[13px] leading-relaxed text-muted">{t("detail.mistakesSub")}</p>
-      {/* Richest first. The endpoint sorts alphabetically, which for a flagship movement's ~40
-          faults buries the ones that actually have causes and cues behind a run of bare names. */}
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
-        {[...faults]
-          .sort((a, b) => b.connectivity - a.connectivity || a.name.localeCompare(b.name))
-          .map((f) => {
-          const loaded = detailByFault[f.name];
-          const retrieval = loaded === "loading" ? undefined : loaded;
-          return (
-            <div key={f.name} className="rounded-[22px] border border-border-dark bg-surface shadow-card">
-              <button
-                type="button"
-                aria-expanded={open === f.name}
-                onClick={() => void expand(f.name)}
-                className="flex w-full items-start gap-2.5 p-5 text-left"
-              >
-                <WarningCircle size={18} weight="duotone" className="mt-0.5 shrink-0 text-danger" />
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[15px] font-bold text-content">
-                    {faultLabel(t, f.name)}
-                  </span>
-                  <span className="mt-0.5 block text-[12px] text-faint">
-                    {f.connectivity === 0
-                      ? t("detail.mistakesNoLinks")
-                      : f.connectivity === 1
-                        ? t("detail.mistakesLink")
-                        : t("detail.mistakesLinks", { n: f.connectivity })}
-                  </span>
-                </span>
-                <CaretRight
-                  size={14}
-                  className={`mt-1 shrink-0 text-faint transition-transform ${
-                    open === f.name ? "rotate-90" : ""
-                  }`}
-                />
-              </button>
 
-              {open === f.name && (
-                <div className="border-t border-border-dark px-5 py-4 text-[12.5px]">
-                  {loaded === "loading" ? (
-                    <p className="text-muted">{t("detail.mistakesLoading")}</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {CHAIN.map(({ cat, labelKey }) => {
-                        const items = summaryCategory(retrieval, cat);
-                        if (!items.length) return null;
-                        return (
-                          <div key={cat}>
-                            <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
-                              {t(labelKey)}
-                            </p>
-                            <ul className="mt-1 flex flex-wrap gap-1.5">
-                              {items.map((x) => (
-                                <li
-                                  key={x}
-                                  className="rounded-full bg-content/[0.05] px-2.5 py-1 text-muted"
-                                >
-                                  {x}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        );
-                      })}
-                      {!CHAIN.some(({ cat }) => summaryCategory(retrieval, cat).length) && (
-                        <p className="text-muted">{t("detail.mistakesNoLinks")}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      {/* In the detector's own rule order, which is what the numbers count. Not sorted by anything
+          derived: a stable number per fault is what lets someone say "mistake 3". */}
+      <div className="mt-4 space-y-3">
+        {mistakes.map((mistake, index) => (
+          <MistakeCard
+            key={mistake.id}
+            mistake={mistake}
+            index={index}
+            open={open === mistake.id}
+            onToggle={() => void expand(mistake)}
+            loaded={detailByFault[mistake.id]}
+          />
+        ))}
+      </div>
+
+      <div className="mt-3.5 flex items-center gap-3 rounded-[18px] border border-primary/15 bg-primary/[0.05] px-4 py-3.5">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+          <Lightbulb size={18} weight="duotone" />
+        </span>
+        <div className="min-w-0">
+          <h4 className="text-[13.5px] font-bold text-content">{t("detail.mistakeTipTitle")}</h4>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-muted">{t("detail.mistakeTip")}</p>
+        </div>
       </div>
     </div>
   );

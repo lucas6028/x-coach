@@ -441,3 +441,7 @@ docs/paper/
 # writes beside them. Drop a new PNG in, run the script, commit the .webp.
 frontend/public/movements/steps/*.png
 frontend/public/movements/muscles-worked/*.png
+# Same bargain for the common-mistake sheets, whose script is scripts/prep_mistake_art.py: the
+# two-panel PNG is the source, the wrong/correct WebPs are what ships. `--preview` writes its
+# tinted check images beside them (also PNG), and they are working files too, never assets.
+frontend/public/movements/mistakes/*.png
