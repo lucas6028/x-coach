@@ -68,11 +68,10 @@ describe("the authored common mistakes", () => {
   });
 
   it("points every declared illustration at a file that exists", () => {
-    // Twenty-seven pairs declared and fifty-three still to come, so this runs against a moving
-    // target:
-    // a typo'd or not-yet-exported pair fails here rather than rendering as two broken images in
-    // the middle of the page. It reads public/ off disk, so it also fails if a WebP is deleted
-    // without its `art(...)` call going with it.
+    // Thirty-four pairs declared and forty-six still to come, so this runs against a moving
+    // target: a typo'd or not-yet-exported pair fails here rather than rendering as two broken
+    // images in the middle of the page. It reads public/ off disk, so it also fails if a WebP is
+    // deleted without its `art(...)` call going with it.
     for (const [movement, m] of ALL) {
       if (!m.art) continue;
       for (const path of [m.art.wrong, m.art.correct]) {

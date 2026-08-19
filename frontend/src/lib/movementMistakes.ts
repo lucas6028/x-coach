@@ -759,7 +759,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "整組維持頸部拉長。",
           "換更輕的彈力帶，直到不再聳肩。",
         ],
-      }
+      },
+      art("bpa_shrugging")
     ),
     mistake(
       "bpa_incomplete_rom",
@@ -783,7 +784,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "全程保持手肘打直。",
           "選一條能完全拉開的彈力帶。",
         ],
-      }
+      },
+      art("bpa_incomplete_rom")
     ),
     mistake(
       "bpa_trunk_extension_compensation",
@@ -807,7 +809,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "撐住核心，軀幹保持不動。",
           "換更輕的彈力帶。",
         ],
-      }
+      },
+      art("bpa_trunk_extension_compensation")
     ),
   ],
 
@@ -834,7 +837,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "上臂完全不動，只彎前臂。",
           "改做斜板彎舉或牧師椅彎舉，直接消掉手肘位移。",
         ],
-      }
+      },
+      art("curl_elbow_drift_forward")
     ),
     mistake(
       "curl_trunk_swing_momentum",
@@ -858,7 +862,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "下放時數三秒慢慢放。",
           "換成不用擺盪就舉得起來的重量。",
         ],
-      }
+      },
+      art("curl_trunk_swing_momentum")
     ),
     mistake(
       "curl_incomplete_rom",
@@ -882,7 +887,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "最高點確實捲到底。",
           "要減的是重量，不是行程。",
         ],
-      }
+      },
+      art("curl_incomplete_rom")
     ),
   ],
 
@@ -1118,7 +1124,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "第一次旋轉前先把腹部撐好。",
           "放慢旋轉、縮小幅度，直到撐得住為止。",
         ],
-      }
+      },
+      art("tt_trunk_not_braced")
     ),
   ],
 };

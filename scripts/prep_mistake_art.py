@@ -40,11 +40,11 @@ here:
     panel's arrows point inward and the correct panel's point outward, and outward is wider. One
     size, one scale, one body. See split_sheet for why rows are shared outright and columns are not.
 
-The pair is then checked before it is written: each half has to carry its own colour and outrun
-the other's. A left/right swap survives every other check here and both vitest and the roster test
-(all of which assert only that the files EXIST), and it ships a picture that lies -- the one thing
-the page refuses to do. The arrows are the only thing in the drawing that knows which half it is,
-which is why DOMINANCE is fussier than it looks.
+The pair is then checked before it is written, and checked on GREEN -- see split_sheet for why
+red cannot decide it. A left/right swap survives every other check here and both vitest and the
+roster test (all of which assert only that the files EXIST), and it ships a picture that lies --
+the one thing the page refuses to do. The annotations are the only thing in the drawing that knows
+which half it is, which is why DOMINANCE is fussier than it looks.
 
 What NOTHING here can check is that a sheet is mapped to the right fault: both halves come out
 correctly coloured and the pair simply lands on the wrong card. SHEETS is the only thing standing
@@ -101,12 +101,17 @@ SHEETS: dict[str, str] = {
     "deadlift-hips-shooting-up-first.png": "deadlift-hips-shoot-up",
     "shoulder-bridge-hips-not-reaching-the-top.png": "bridge-incomplete-hip-extension",
     "leg-abduction-leaning-the-trunk-to-lift-the-leg.png": "abd-pelvic-drop-trunk-lean",
+    # The first of these three is misspelt at source ("aparts-hrugging"); the table is explicit
+    # precisely so a sheet's name never has to be trusted or corrected.
+    "band-pull-aparts-hrugging-the-shoulders.png": "bpa-shrugging",
+    "band-pull-aparts-not-spreading-the-hands-fully.png": "bpa-incomplete-rom",
+    "band-pull-aparts-leaning-back-to-open-the-band.png": "bpa-trunk-extension-compensation",
+    "bicep-curl-elbows-drifting-forward.png": "curl-elbow-drift-forward",
+    "bicep-curl-swinging-the-body.png": "curl-trunk-swing-momentum",
+    "bicep-curl-half-reps.png": "curl-incomplete-rom",
+    "torso-twist-losing-the-braced-torso.png": "tt-trunk-not-braced",
 }
 
-# How far clear of the third largest ink mass the second has to be for the top two to be taken as
-# the two figures. Measured across the five sheets: bodies 121k-149k px, third place 2.2k, so the
-# real ratio is 55x and this only has to catch a sheet that is not shaped like these at all.
-BODY_MARGIN = 10
 # A gap narrower than this between the two figures is not something to split on.
 MIN_GUTTER = 8
 # Breathing room kept around the art, in source pixels.
@@ -151,12 +156,8 @@ SEAM_RADIUS = 25
 # And how many such pixels make a half "annotated". The finished halves carry 267-1538 of their own
 # colour; this is the floor below which a scatter of resampled edge pixels would pass for an arrow.
 MIN_MARK_PIXELS = 100
-# How far a half's own colour has to outrun the other's. A half is checked for DOMINANCE by its own
-# mark, not for ABSENCE of the other's, because absence is not quite true: the skin contours leave
-# up to 93 red pixels in a correct half (the heel rise sheet), 7 short of failing a check that
-# demanded none. Swaps are still caught -- swap the halves and each one's own colour drops to what
-# the other's was, which is 0-93, under the floor above -- and the measured margins are 7.7x at
-# worst rather than 7 pixels.
+# How far the correct half's green has to outrun the wrong half's. See split_sheet for why the
+# orientation is decided on GREEN and only corroborated by red.
 MARK_MARGIN = 3
 
 # Rendered size, x3 for a high-DPI screen. MistakePanel is `h-[152px]`, and its width comes from
@@ -189,11 +190,12 @@ def _flatten(path: Path) -> Image.Image:
 def _band(knocked: Image.Image, name: str) -> tuple[int, int]:
     """The candidate split columns: the clear span between the two drawn figures.
 
-    The figures are the two largest connected masses of surviving ink, which on these sheets is not
-    a close call -- measured across all five, the two bodies run 121k-149k px and the next mass
-    down is 2.2k. That ratio is asserted rather than assumed, because a sheet where it does not
-    hold is a sheet whose panels this cannot find, and mis-splitting one silently is how a limb
-    ends up in the neighbour's panel.
+    The figures are the two largest connected masses of surviving ink. What has to be checked is
+    not that they DWARF everything else -- an earlier version demanded a 10x margin over the third
+    mass, on the evidence that the squat bodies run 121k-149k px against a third place of 2.2k, and
+    the bicep curl sheet is a counter-example rather than a malformed sheet: it draws two magnified
+    circular insets per panel, at 42k each, and they are as much a part of their panel as the body
+    is. What has to hold is that the two anchors are ONE PER PANEL, which is asserted directly.
 
     Deliberately NOT "the emptiest run of columns", which was the first rule here and is wrong on
     the shallow depth sheet: its two panels share one grey dashed floor line spanning the whole
@@ -206,16 +208,16 @@ def _band(knocked: Image.Image, name: str) -> tuple[int, int]:
         raise SystemExit(f"{name}: found {count} ink mass(es) -- a two-panel sheet has two figures")
     sizes = ndimage.sum(mask, labels, range(1, count + 1))
     ranked = np.argsort(sizes)[::-1]
-    third = sizes[ranked[2]] if count > 2 else 0
-    if third * BODY_MARGIN > sizes[ranked[1]]:
-        raise SystemExit(
-            f"{name}: the third largest ink mass ({int(third)} px) is not far enough below the "
-            f"second ({int(sizes[ranked[1]])} px) for the top two to be the figures -- refusing to "
-            f"guess where the panels divide"
-        )
 
     columns = [np.nonzero(labels == label + 1)[1] for label in ranked[:2]]
     left, right = sorted(columns, key=lambda c: c.min())
+    midline = knocked.width / 2
+    if not left.mean() < midline <= right.mean():
+        raise SystemExit(
+            f"{name}: the two largest ink masses are centred at x={left.mean():.0f} and "
+            f"x={right.mean():.0f} on a sheet {knocked.width} wide, so they are not one figure per "
+            f"panel -- refusing to guess where the panels divide"
+        )
     lo, hi = int(left.max()) + 1, int(right.min())
     if hi - lo < MIN_GUTTER:
         raise SystemExit(
@@ -455,17 +457,35 @@ def split_sheet(sheet: Path, slug: str, preview: bool) -> None:
         raise SystemExit(f"{sheet.name}: the halves came out different sizes -- {cut['wrong'].size} "
                          f"vs {cut['correct'].size} -- so the page would draw one body bigger")
 
-    # Each half checked for its own colour, so the check fails on a swap from either side rather
-    # than only on the half that happens to lose its colour.
-    for tone, channel, mine, theirs in (("wrong", 0, "red", "green"), ("correct", 1, "green", "red")):
-        own = _mark_pixels(cut[tone], channel)
-        other = _mark_pixels(cut[tone], 1 - channel)
-        if own < MIN_MARK_PIXELS or own < other * MARK_MARGIN:
-            raise SystemExit(
-                f"{sheet.name}: the {tone} half does not read as {mine}-annotated -- {own} {mine} "
-                f"px against {other} {theirs}. The halves are probably swapped, and a mislabelled "
-                f"pair is worse than no pair"
-            )
+    # WHICH HALF IS WHICH IS DECIDED ON GREEN. Red cannot decide it, and the band pull apart sheets
+    # are why: they draw the resistance band ITSELF in red, so a correct half carries ~1000 red
+    # pixels of equipment before any arrow is drawn, and on the incomplete-rom sheet the correct
+    # half carries MORE red than the wrong one (1011 vs 619) because a fully spread band is longer
+    # than a short one. Every rule of the form "the correct half is not red" or "the wrong half is
+    # redder" gets that sheet wrong, and gets it wrong in the direction that refuses good art.
+    #
+    # Green has no such problem, and it is the same asymmetry that splits DOMINANCE: this palette
+    # contains a great deal of red -- skin, contour strokes, and now equipment -- and contains no
+    # green whatsoever. Measured across all 34 sheets the wrong half carries 0-2 green pixels and
+    # the correct half 175-1446, without a single exception. So green exclusivity decides it, and
+    # it catches a swap from either side: swap the halves and the correct one is left with the 0.
+    #
+    # Red is kept as a presence check only -- a wrong half with no red marks at all is a sheet that
+    # is not annotated the way this expects, whatever else is true of it.
+    red_wrong = _mark_pixels(cut["wrong"], 0)
+    green_wrong = _mark_pixels(cut["wrong"], 1)
+    green_correct = _mark_pixels(cut["correct"], 1)
+    if green_correct < MIN_MARK_PIXELS or green_wrong * MARK_MARGIN > green_correct:
+        raise SystemExit(
+            f"{sheet.name}: green is not where it should be -- {green_correct} px in the correct "
+            f"half against {green_wrong} in the wrong one. The halves are probably swapped, and a "
+            f"mislabelled pair is worse than no pair"
+        )
+    if red_wrong < MIN_MARK_PIXELS:
+        raise SystemExit(
+            f"{sheet.name}: the wrong half carries only {red_wrong} red px, so it is not annotated "
+            f"the way this expects -- refusing to write a pair it cannot check"
+        )
 
     for tone, art in cut.items():
         out = MISTAKES_DIR / f"{slug}-{tone}.webp"

@@ -27,14 +27,16 @@ so dropping the files in changes what is inside the slot and reflows nothing aro
    same body at two sizes, and refuses to write a pair whose red and green annotations say the
    halves are swapped. The source PNG is gitignored; only the WebPs are committed.
 
-   Twenty-seven sheets in, it has needed generalising twice and both times the sheets disagreed
-   about
-   something invisible: the greens differ by a factor of two in saturation (a threshold tuned on
-   the squat sheets finds ZERO pixels of the push-up green, which reads downstream as "this half
-   has no green, so the pair is swapped"), and whether the socks survive is a matter of whether
-   that particular drawing happens to enclose them. Expect the seventeenth to disagree about
-   something else, and fix it in the script rather than by hand — the whole point of the file is
-   that the remaining pairs cost one line each.
+   Thirty-four sheets in, it has needed generalising four times, and every time the sheets
+   disagreed about something invisible until it broke: the greens differ by a factor of two in
+   saturation (a threshold tuned on squat finds ZERO pixels of the push-up green, which reads
+   downstream as "this half has no green, so the pair is swapped"); whether the socks survive the
+   knock-out is an accident of whether that drawing encloses them; a bicep curl panel is a figure
+   PLUS two magnified insets, so a panel is not one mass; and band pull apart draws the band itself
+   in RED, so a correct half carries a thousand red pixels of equipment and the orientation has to
+   be decided on green alone. Expect the next one to disagree about something else again, and fix
+   it in the script rather than by hand — the whole point of the file is that the remaining pairs
+   cost one line each.
 2. In `frontend/src/lib/movementMistakes.ts`, pass `art("<fault_id>")` as the last argument of that
    fault's `mistake(...)` call. `art()` hyphenates the id for you, which is why the files below are
    hyphenated and the ids in the TS file are not.
