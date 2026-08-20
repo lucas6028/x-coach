@@ -10,9 +10,9 @@ import { mockAnalysis } from "./fixtures";
 // <video>/WASM pipeline jsdom cannot run, and these tests are about the PLAN write-back, not about
 // pose extraction or thumbnail capture.
 vi.mock("../lib/poseExtract", () => ({
-  extractPoseFromBlob: vi.fn().mockResolvedValue({
-    metadata: { fps: 30, width: 1, height: 1, total_frames: 0 },
-    frames: [],
+  extractPoseWithReps: vi.fn().mockResolvedValue({
+    pose: { metadata: { fps: 30, width: 1, height: 1, total_frames: 0 }, frames: [] },
+    reps: { max_reps: 3, fallback: null, segments: [] },
   }),
 }));
 vi.mock("../lib/thumbnail", () => ({ captureThumbnail: () => Promise.resolve(null) }));

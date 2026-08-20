@@ -1,6 +1,7 @@
 import { ChartBar } from "@phosphor-icons/react";
 import type { Analysis } from "../../api";
 import { faultLabel, useI18n, viewLabel, type TFunc } from "../../lib/i18n";
+import { validFrameStat } from "../../lib/quality";
 import StudioCard from "./StudioCard";
 
 interface Cell {
@@ -44,13 +45,20 @@ function cellsFor(analysis: Analysis, t: TFunc): Cell[] {
   }
 
   const q = analysis.quality;
+  const frames = validFrameStat(q);
   const quality: Cell[] = [
+    // Denominator: the frames that were EXTRACTED, when the payload says so — see
+    // `validFrameStat`. Value, bar and tone all read the SAME ratio; feeding the bar
+    // `valid_frame_ratio` while the number came from the extracted denominator would print "96%"
+    // over a 29%-wide red bar.
     {
       label: t("metric.validFrames"),
-      value: `${((q.valid_frame_ratio ?? 0) * 100).toFixed(0)}%`,
-      sub: t("metric.framesRatio", { valid: q.valid_frames ?? 0, total: q.total_frames ?? 0 }),
-      fill: q.valid_frame_ratio ?? 0,
-      tone: (q.valid_frame_ratio ?? 0) >= 0.8 ? "good" : "bad",
+      value: `${(frames.ratio * 100).toFixed(0)}%`,
+      sub: frames.extracted > 0
+        ? t("metric.framesRatioExtracted", { valid: frames.valid, extracted: frames.extracted })
+        : t("metric.framesRatio", { valid: frames.valid, total: q.total_frames ?? 0 }),
+      fill: frames.ratio,
+      tone: frames.ratio >= 0.8 ? "good" : "bad",
     },
     {
       label: t("metric.lowerBodyVis"),

@@ -7,13 +7,13 @@ import App from "../App";
 import { mockAnalysis } from "./fixtures";
 
 // The upload path extracts pose client-side before hitting the API (CaptureStudio ->
-// runPoseAnalysis -> extractPoseFromBlob -> api.analyzePose). The real implementation needs a
+// runPoseAnalysis -> extractPoseWithReps -> api.analyzePose). The real implementation needs a
 // <video>/WASM pipeline jsdom cannot run, so stub it — these tests are about which MOVEMENT
 // reaches the request, not about extraction. Mirrors App.test.tsx's stub.
 vi.mock("../lib/poseExtract", () => ({
-  extractPoseFromBlob: vi.fn().mockResolvedValue({
-    metadata: { fps: 30, width: 1, height: 1, total_frames: 0 },
-    frames: [],
+  extractPoseWithReps: vi.fn().mockResolvedValue({
+    pose: { metadata: { fps: 30, width: 1, height: 1, total_frames: 0 }, frames: [] },
+    reps: { max_reps: 3, fallback: null, segments: [] },
   }),
 }));
 
@@ -68,7 +68,6 @@ describe("studio movement selection", () => {
     await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
     // The movement is analyzePose's FIRST argument. It shipped hardcoded to "Squat" when the
     // client-capture path landed; this asserts the user's actual selection now reaches it.
-    // Trailing args: pose, video blob, and the (mocked-null) thumbnail — not this test's concern.
     await vi.waitFor(() =>
       expect(analyze).toHaveBeenCalledWith(
         "Push-up",
@@ -76,7 +75,10 @@ describe("studio movement selection", () => {
         expect.anything(),
         // The mocked captureThumbnail above always resolves null; expect.anything() does not
         // match null/undefined, so this asserts the literal value it actually forwards.
-        null
+        null,
+        // Fifth arg is the rep plan extractPoseWithReps returns (Task 10) — the mock above
+        // supplies one on every call, so a 4-arg expectation would under-match the real call.
+        expect.anything()
       )
     );
   });
@@ -140,14 +142,18 @@ describe("studio movement selection", () => {
       );
 
       await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
+      // Fourth arg is the rep plan (Task 10) — see the note on the earlier assertion of this shape.
       await vi.waitFor(() =>
         expect(analyze).toHaveBeenCalledWith(
-          "Push-up",
+        "Push-up",
           expect.anything(),
           expect.anything(),
           // The mocked captureThumbnail above always resolves null; expect.anything() does not
           // match null/undefined, so this asserts the literal value it actually forwards.
-          null
+          null,
+          // Fifth arg is the rep plan extractPoseWithReps returns (Task 10) — the mock above
+          // supplies one on every call, so a 4-arg expectation would under-match the real call.
+          expect.anything()
         )
       );
     }
@@ -178,7 +184,9 @@ describe("studio movement selection", () => {
     const input = await findFileInput();
     await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
     await vi.waitFor(() =>
-      expect(analyze).toHaveBeenCalledWith("Push-up", expect.anything(), expect.anything(), null)
+      expect(analyze).toHaveBeenCalledWith(
+        "Push-up", expect.anything(), expect.anything(), null, expect.anything()
+      )
     );
   });
 

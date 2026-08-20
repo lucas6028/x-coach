@@ -428,3 +428,73 @@ class TestMovementRegistry(unittest.TestCase):
                 "Shoulder Bridge", "Leg Abduction", "Torso Twist",
             },
         )
+
+
+class RunDetectorWithRepPlanTest(unittest.TestCase):
+    """RS-SP2: the browser extracts only the selected reps, so it -- not run_detector -- owns the
+    rep boundaries. Frames outside those windows do not exist here, which is why segment_reps
+    cannot simply be re-run (spec §2.3)."""
+
+    def _frames(self, count: int) -> list[dict]:
+        from tests.test_pose_rule_detector import frame  # the existing 33-landmark builder
+        return [frame(frame_index=i) for i in range(count)]
+
+    def test_supplied_windows_replace_segmentation(self) -> None:
+        from src.pose.movements import registry
+        from src.pose.movements.base import RepPlan, run_detector
+        from src.pose.rep_segmentation import RepWindow
+
+        detector = registry.get_detector("Squat")
+        frames = self._frames(90)
+        window = RepWindow(index=1, start=10, end=49, partial=False)
+        plan = RepPlan(reps=(window,), analyzed=(window,), fallback=None)
+        run = run_detector(detector, frames, 30.0, "side", 0.9, rep_plan=plan)
+
+        self.assertEqual([r.index for r in run.reps], [1])
+        self.assertEqual([r.index for r in run.analyzed], [1])
+        self.assertIsNone(run.fallback)
+        # Frames outside the supplied window belong to no rep, so they are never scored.
+        self.assertTrue(all(c.phase == "rest" for c in run.core[:10]))
+        self.assertTrue(all(c.phase == "rest" for c in run.core[50:]))
+        self.assertFalse(all(c.phase == "rest" for c in run.core[10:50]))
+
+    def test_supplied_fallback_analyses_the_whole_clip(self) -> None:
+        from src.pose.movements import registry
+        from src.pose.movements.base import RepPlan, run_detector
+
+        detector = registry.get_detector("Squat")
+        run = run_detector(
+            detector, self._frames(90), 30.0, "side", 0.9,
+            rep_plan=RepPlan(reps=(), analyzed=(), fallback="no_reps_detected"),
+        )
+        self.assertEqual(run.fallback, "no_reps_detected")
+        self.assertEqual(run.analyzed, [])
+        self.assertTrue(all(c.phase != "rest" for c in run.core))
+
+    def test_rep_plan_wins_over_max_reps(self) -> None:
+        """The client already applied its cap; re-selecting here could only analyse FEWER reps
+        than were actually extracted (spec §4.3)."""
+        from src.pose.movements import registry
+        from src.pose.movements.base import RepPlan, run_detector
+        from src.pose.rep_segmentation import RepWindow
+
+        detector = registry.get_detector("Squat")
+        windows = tuple(
+            RepWindow(index=i + 1, start=i * 30, end=i * 30 + 29, partial=False) for i in range(3)
+        )
+        run = run_detector(
+            detector, self._frames(90), 30.0, "side", 0.9,
+            max_reps=1, rep_plan=RepPlan(reps=windows, analyzed=windows, fallback=None),
+        )
+        self.assertEqual([r.index for r in run.analyzed], [1, 2, 3])
+
+    def test_no_rep_plan_is_byte_for_byte_sp1(self) -> None:
+        from src.pose.movements import registry
+        from src.pose.movements.base import run_detector
+
+        detector = registry.get_detector("Squat")
+        frames = self._frames(90)
+        a = run_detector(detector, frames, 30.0, "side", 0.9)
+        b = run_detector(detector, frames, 30.0, "side", 0.9, rep_plan=None)
+        self.assertEqual([d.fault_id for d in a.detections], [d.fault_id for d in b.detections])
+        self.assertEqual([c.phase for c in a.core], [c.phase for c in b.core])

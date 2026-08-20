@@ -9,13 +9,14 @@ import { api, UploadLimitError } from "../api";
 import { mockAnalysis } from "./fixtures";
 
 // The upload path now extracts pose client-side before hitting the API (CaptureStudio ->
-// runPoseAnalysis -> extractPoseFromBlob -> api.analyzePose). extractPoseFromBlob's real
+// runPoseAnalysis -> extractPoseWithReps -> api.analyzePose). extractPoseWithReps's real
 // implementation needs a real <video>/WASM pipeline that jsdom can't run — stub it so these tests
-// exercise the new request path (api.analyzePose against the mocked fetch below) instead.
+// exercise the new request path (api.analyzePose against the mocked fetch below) instead. The stub
+// returns the same { pose, reps } shape the real two-pass extractor resolves to (Task 6).
 vi.mock("../lib/poseExtract", () => ({
-  extractPoseFromBlob: vi.fn().mockResolvedValue({
-    metadata: { fps: 30, width: 1, height: 1, total_frames: 0 },
-    frames: [],
+  extractPoseWithReps: vi.fn().mockResolvedValue({
+    pose: { metadata: { fps: 30, width: 1, height: 1, total_frames: 0 }, frames: [] },
+    reps: { max_reps: 3, fallback: null, segments: [] },
   }),
 }));
 

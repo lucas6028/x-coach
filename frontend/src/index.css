@@ -25,6 +25,11 @@
   --c-faint: 99 112 159; /* #63709f */
   --c-track: 240 241 248; /* #f0f1f8 */
   --c-fault: 183 121 31; /* amber, darkened for contrast on light canvas */
+  /* Timeline.tsx's "unexamined span" hatch. The scrub bar now lives inside the video card's DARK
+     control pill (white text on a `bg-white/30` track), so the stripe has to be light-on-dark —
+     a dark value there is invisible, and an invisible "not analyzed" span reads as an analyzed
+     one. There is one (light) palette since the muse-spark redesign, so this is the only value. */
+  --c-hatch: rgba(255, 255, 255, 0.55);
   /* Soft, cool-tinted card elevation — the reference's borderless-white-card look.
      Tinted toward slate (16 24 40) rather than pure black so shadows sit in the palette. */
   --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 24px -8px rgb(16 24 40 / 0.10);
@@ -60,6 +65,7 @@
   --ms-green-soft: #e6f7ed;
   --ms-red: #ff6b6b;
   --ms-red-soft: #fff5f5;
+
 }
 
 body {

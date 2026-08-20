@@ -166,7 +166,7 @@ class _StubbedAnalyzePath(unittest.TestCase):
         analysis_service.store_artifacts = lambda staged, *, thumbnail=None: 0
         analysis_service.discard_stage = lambda staged: None
         analysis_service.analyze_pose_payload = (
-            lambda payload, *, movement, video_id=None, pose_json_path=None, max_reps=-1: {
+            lambda payload, *, movement, video_id=None, pose_json_path=None, max_reps=-1, rep_plan=None: {
                 "video_id": video_id, "source": "upload", "movement": movement, "detections": [],
             }
         )
@@ -195,6 +195,7 @@ class _StubbedAnalyzePath(unittest.TestCase):
                 _TINY_POSE,
                 UploadFile(file=io.BytesIO(data), filename="clip.webm"),
                 max_reps=None,
+                reps=None,
                 thumbnail=None,
                 user=user,
             )

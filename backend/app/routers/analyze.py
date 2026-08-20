@@ -322,6 +322,130 @@ def _validate_pose_landmarks(payload: dict) -> None:
                 raise HTTPException(status_code=400, detail="Malformed pose landmarks.")
 
 
+MAX_REP_SEGMENTS = 200
+_FALLBACKS = {None, "no_reps_detected", "only_partial_reps", "segmentation_disabled"}
+
+
+def _validate_reps(raw: str | None, frames: list) -> "RepPlan | None":
+    """Turn a client-supplied rep plan into a RepPlan, rejecting anything malformed.
+
+    EVERY violation is a 400 rather than a silent fall-through to the backend's own segmentation.
+    Under RS-SP2 the frames outside the extracted spans carry no landmarks, so re-segmenting that
+    signal does not fail loudly -- it produces plausible windows over data that was never
+    measured, and the result reads like a normal analysis (spec §4.3).
+    """
+    from src.pose.movements.base import RepPlan
+    from src.pose.rep_segmentation import RepWindow
+
+    if raw is None:
+        return None
+    try:
+        plan = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Malformed reps JSON.") from exc
+    if not isinstance(plan, dict) or not isinstance(plan.get("segments"), list):
+        raise HTTPException(status_code=400, detail="reps must have a 'segments' list.")
+    fallback = plan.get("fallback")
+    if fallback not in _FALLBACKS:
+        raise HTTPException(status_code=400, detail="Unknown reps.fallback value.")
+
+    segments = plan["segments"]
+    if len(segments) > MAX_REP_SEGMENTS:
+        raise HTTPException(status_code=400, detail=f"At most {MAX_REP_SEGMENTS} rep segments.")
+
+    windows: list[RepWindow] = []
+    analyzed: list[RepWindow] = []
+    # `segment["refined"]` never reaches `RepWindow` -- the dataclass has no such field, so the
+    # value is write-only past this function (spec §4.2 calls it a diagnostic field the backend
+    # "does not change behaviour" for, which is true, but the spec also claims `"clipped"` is what
+    # makes an insufficient REP_PADDING_FRAMES visible; on its own it reaches no log, no store, no
+    # UI, so nothing was actually visible). Logging it here is the smallest fix that makes the spec's
+    # claim true in production, without giving the value any behavioural power it shouldn't have.
+    clipped_indices: list[int] = []
+    previous_end = -1
+    for position, segment in enumerate(segments):
+        if not isinstance(segment, dict):
+            raise HTTPException(status_code=400, detail="Malformed rep segment.")
+        try:
+            index = int(segment["index"])
+            start = int(segment["start_frame"])
+            end = int(segment["end_frame"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Malformed rep segment.") from exc
+        if index != position + 1:
+            raise HTTPException(status_code=400, detail="rep indices must run 1..N in order.")
+        if start < 0 or end >= len(frames) or start > end:
+            raise HTTPException(status_code=400, detail="rep window out of range.")
+        if start <= previous_end:
+            raise HTTPException(status_code=400, detail="rep windows must not overlap.")
+        previous_end = end
+
+        window = RepWindow(index=index, start=start, end=end, partial=bool(segment.get("partial")))
+        windows.append(window)
+        if segment.get("refined") == "clipped":
+            clipped_indices.append(index)
+        if segment.get("analyzed"):
+            if fallback is not None:
+                # A fallback means the whole clip was analysed as one unit -- see run_detector,
+                # where a non-None fallback forces whole-clip phase assignment. No individual rep
+                # can ALSO be marked as separately scored: that combination is exactly the
+                # mis-phasing this module exists to prevent, just reached through `reps` instead
+                # of through re-segmentation -- rules would run per-rep over phases that were
+                # never assigned per-rep.
+                raise HTTPException(
+                    status_code=400,
+                    detail="A rep segment cannot be 'analyzed' when reps.fallback is set.",
+                )
+            # The check the others miss: a window over frames that were never extracted scores
+            # all-invalid data and yields an empty detection list, i.e. a clean verdict from
+            # nothing. See the test that pins this.
+            #
+            # `any(...)`, deliberately NOT `all(...)`: this is a "was this span ever extracted"
+            # check, not a "is every frame in it detected" check -- those are different questions.
+            # The shipped client's dense sampling (poseExtract.ts's `sampleFrames`) calls
+            # `landmarksToFrame` for every index in the span unconditionally, but `toPts` returns
+            # `null` per-frame whenever MediaPipe found no pose that frame -- motion blur at the
+            # bottom of a squat, brief self-occlusion, a barbell crossing the hips. Ordinary
+            # home-recording behaviour, not a sign the span was never sampled. `all()` was tried
+            # here once already and reverted: it turned a single such dropout, deep inside an
+            # otherwise-normal rep, into a hard 400 on the whole upload -- a worse outcome than the
+            # empty-detections failure this guard exists to catch. `any()` still catches that real
+            # failure (an analyzed window entirely over an unextracted span has zero landmark-
+            # carrying frames) without punishing a window that's mostly fine.
+            if not any(
+                isinstance(frames[i], dict) and frames[i].get("landmarks")
+                for i in range(start, end + 1)
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="An analyzed rep window contains frames that were never extracted.",
+                )
+            analyzed.append(window)
+
+    # A non-fallback plan asserts "I segmented this clip into reps myself" -- if it then analyzes
+    # NONE of them, run_detector takes the per-rep phasing path (`segmented = reps`) but scores an
+    # empty `analyzed` list, i.e. rules run over the whole sparse clip while phases are per-rep. The
+    # extracted frames within `reps` are still valid, so `valid_frames > 0` and an empty detection
+    # list renders as a clean rep on a clip that was mostly never measured -- the exact failure
+    # frontend/src/lib/quality.ts exists to prevent. Fallback plans are exempt: their `analyzed` is
+    # legitimately empty because the WHOLE clip was scored as one unit (see the fallback check above).
+    if fallback is None and not analyzed:
+        raise HTTPException(
+            status_code=400, detail="A reps plan without a fallback must analyze at least one segment."
+        )
+
+    if clipped_indices:
+        # The only place this ever surfaces: `refined: "clipped"` means the dense-refined window
+        # touched the edge of its padded span (not the clip's own edge), i.e. REP_PADDING_FRAMES=24
+        # (repSpans.ts) was not wide enough for that rep and part of it was cut off. See spec §2.8.
+        logger.info(
+            "reps plan carries clipped segment(s) (REP_PADDING_FRAMES may be insufficient): rep index %s",
+            clipped_indices,
+        )
+
+    return RepPlan(reps=tuple(windows), analyzed=tuple(analyzed), fallback=fallback)
+
+
 async def _parse_pose_upload(pose: str | UploadFile) -> dict[str, Any]:
     """Decode a bounded client pose payload.
 
@@ -407,6 +531,7 @@ async def analyze_pose(
     pose: UploadFile = File(...),
     file: UploadFile = File(...),
     max_reps: int | None = Form(None),
+    reps: str | None = Form(None),
     thumbnail: UploadFile | None = File(None),
     user: CurrentUser | None = Depends(get_optional_user),
 ) -> dict:
@@ -424,6 +549,7 @@ async def analyze_pose(
     resolved_max_reps = _validated_max_reps(max_reps)
 
     payload = await _parse_pose_upload(pose)
+    rep_plan = _validate_reps(reps, payload["frames"])
 
     thumb = await _read_thumbnail(thumbnail)
 
@@ -434,6 +560,7 @@ async def analyze_pose(
             video_id=staged.video_id,
             pose_json_path=staged.pose_path,
             max_reps=resolved_max_reps,
+            rep_plan=rep_plan,
         )
 
     return await _stage_analyze_persist(

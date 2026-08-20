@@ -141,6 +141,27 @@ export default function MobileVideoCard({
               className="absolute top-1/2 h-[5px] -translate-y-1/2 rounded-full bg-[#8b7bff]"
               style={{ width: pct(time) }}
             />
+            {/* Spans RS-SP2 never extracted, hatched exactly as the desktop scrubber hatches them
+                (Timeline.tsx carries the full rationale). The phone shows its own scrub bar rather
+                than mounting Timeline, so without this the mobile viewer would get a verdict
+                computed on 3 of 5 reps with nothing on screen saying so. */}
+            {(analysis.reps?.segments ?? [])
+              .filter((seg) => !seg.analyzed)
+              .map((seg) => (
+                <div
+                  key={`un-${seg.index}`}
+                  data-testid="unanalyzed-span"
+                  title={t("timeline.unanalyzed")}
+                  className="absolute top-1/2 h-[5px] -translate-y-1/2 rounded-full bg-white/25"
+                  style={{
+                    left: pct(seg.start_time),
+                    width: `${Math.max(2, ((seg.end_time - seg.start_time) / dur) * 100)}%`,
+                    backgroundImage:
+                      "repeating-linear-gradient(45deg, transparent, transparent 3px, " +
+                      "var(--c-hatch) 3px, var(--c-hatch) 6px)",
+                  }}
+                />
+              ))}
             {analysis.detections.map((d, i) => (
               <div
                 key={i}
@@ -165,6 +186,19 @@ export default function MobileVideoCard({
             {fmtTime(dur)}
           </span>
         </div>
+        {/* How much of the clip the verdict covers. Its own line under the control bar, because
+            the phone bar has no room left beside the scrubber — but it is not optional: without
+            it a three-rep verdict on a five-rep clip reads as a verdict on all five. */}
+        {analysis.reps && (
+          <div className="absolute inset-x-0 bottom-0 z-20 px-3 pb-1 text-center text-[10px] font-medium tabular-nums text-white/70">
+            {analysis.reps.fallback
+              ? t("timeline.wholeClip")
+              : t("timeline.repsSummary", {
+                  detected: analysis.reps.detected,
+                  list: analysis.reps.analyzed.join(t("timeline.repsListSeparator")),
+                })}
+          </div>
+        )}
       </div>
     </div>
   );

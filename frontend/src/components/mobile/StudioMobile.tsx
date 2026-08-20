@@ -14,7 +14,7 @@ import { fmtTime } from "../../lib/format";
 import { faultLabel, movementLabel, severityText, useI18n, viewLabel } from "../../lib/i18n";
 import { keyEvidence, retrievalByFault, summaryCategory } from "../../lib/retrieval";
 import { useVideoSrc } from "../../lib/useVideoSrc";
-import { wasMeasured } from "../../lib/quality";
+import { validFrameStat, wasMeasured } from "../../lib/quality";
 import CoachTray from "../CoachTray";
 import PreviousSessionsCard from "../studio/PreviousSessionsCard";
 import { LumenAvatar } from "../LumenLoader";
@@ -325,7 +325,12 @@ export default function StudioMobile({
           <dl className="space-y-2 text-[12px]">
             {[
               [t("metric.cameraView"), viewLabel(t, analysis.view.view_type)],
-              [t("metric.validFrames"), `${((q.valid_frame_ratio ?? 0) * 100).toFixed(0)}%`],
+              // Extracted-frame denominator (lib/quality.ts) — same figure as the desktop
+              // Key-metrics card, which is why it comes from the shared helper.
+              [
+                t("metric.validFrames"),
+                `${(validFrameStat(q).ratio * 100).toFixed(0)}%`,
+              ],
               [
                 t("metric.lowerBodyVis"),
                 `${((q.lower_body_visibility_mean ?? 0) * 100).toFixed(0)}%`,
