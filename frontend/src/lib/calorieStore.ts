@@ -13,10 +13,10 @@ export interface CalorieTotals {
 }
 
 const STORAGE_KEY = "xcoach.calories.v1";
-const GAME_IDS: GameId[] = ["sixseven", "ninja"];
+const GAME_IDS: GameId[] = ["sixseven", "ninja", "webslinger"];
 
 function empty(): CalorieTotals {
-  return { total: 0, byGame: { sixseven: 0, ninja: 0 }, sessions: 0 };
+  return { total: 0, byGame: { sixseven: 0, ninja: 0, webslinger: 0 }, sessions: 0 };
 }
 
 const finite = (v: unknown): number =>

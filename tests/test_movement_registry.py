@@ -57,6 +57,48 @@ class MovementRegistryTests(unittest.TestCase):
             with self.subTest(spelling=spelling):
                 self.assertEqual(registry.get_detector(spelling).name, "Push-up")
 
+    def test_lunge_detector_resolves_case_insensitively(self) -> None:
+        from src.pose.movements.registry import get_detector
+
+        self.assertEqual(get_detector("Lunge").name, "Lunge")
+        self.assertEqual(get_detector("lunge").name, "Lunge")
+
+    def test_lunge_is_not_marked_validated(self) -> None:
+        # Thresholds are spec-derived; Phase 2 measures them. Beta until evidence says otherwise.
+        from src.pose.movements.registry import get_detector
+
+        self.assertFalse(get_detector("Lunge").validated)
+
+    def test_row_detector_resolves_case_insensitively(self) -> None:
+        from src.pose.movements.registry import get_detector
+
+        self.assertEqual(get_detector("Row").name, "Row")
+        self.assertEqual(get_detector("row").name, "Row")
+
+    def test_row_is_not_marked_validated(self) -> None:
+        # No labeled row repetition exists anywhere in this repository; see row.py's docstring.
+        from src.pose.movements.registry import get_detector
+
+        self.assertFalse(get_detector("Row").validated)
+
+    def test_lunge_registers_all_four_spec_rules(self) -> None:
+        """All four fire, unlike push-up's permanently-silent `rule_scapular_winging` --
+        mirrors `test_pushup_registers_all_five_spec_rules`."""
+        from src.pose.movements import lunge
+
+        detector = registry.get_detector("Lunge")
+        self.assertEqual(
+            [rule.__name__ for rule in detector.rules],
+            [
+                "rule_knee_past_toes",
+                "rule_knee_valgus",
+                "rule_insufficient_depth",
+                "rule_pelvic_drop",
+            ],
+        )
+        self.assertIs(detector.compute_raw, lunge.lunge_compute_raw)
+        self.assertIs(detector.assign_phases, lunge.lunge_assign_phases)
+
     def test_pushup_registers_all_five_spec_rules(self) -> None:
         """Four firing rules plus the permanently-silent `rule_scapular_winging`, which is
         registered so the spec and the code stay 1:1 (see its docstring)."""
@@ -176,20 +218,85 @@ class MovementRegistryTests(unittest.TestCase):
         """A detector's rep signal must be one of the metrics it actually emits, or the
         segmenter would read NaN for every frame and silently find zero reps."""
         expected = {
-            "Squat": ("avg_knee_angle", "min"),
-            "Push-up": ("min_elbow_angle", "min"),
-            "Overhead Press": ("avg_elbow_angle", "max"),
+            "Squat": ("avg_knee_angle", "min", "extended"),
+            "Push-up": ("min_elbow_angle", "min", "extended"),
+            "Overhead Press": ("avg_elbow_angle", "max", "extended"),
+            "Lunge": ("min_knee_angle", "min", "extended"),
+            # Deadlift is the one movement that starts flexed (bar on the floor), not extended
+            # -- see base.py:55 and src/pose/movements/deadlift.py's registration comment.
+            "Deadlift": ("hip_angle_deg", "min", "flexed"),
+            "Row": ("min_elbow_angle", "min", "extended"),
+            # The first movement whose rep signal is FRONTAL rather than sagittal, and the
+            # second (after OHP) to peak at its signal's maximum -- hands together -> spread ->
+            # together. Assigned by RS-SP1 spec §3.4; verified end-to-end in
+            # tests/test_band_pull_apart.py::EndToEndSegmentationTest.
+            "Band Pull Apart": ("wrist_spread_shoulder_norm", "max", "extended"),
+            # The only detector whose rep signal AVERAGES the two arms rather than taking an
+            # extremum, and the choice was measured rather than preferred: left/right elbow
+            # angles correlate r=0.992-0.996 across all 8 Fit3D subjects, so the arms are in
+            # phase and the mean halves per-arm landmark noise. Verified end-to-end in
+            # tests/test_bicep_curl.py::EndToEndSegmentationTest.
+            "Bicep Curl": ("avg_elbow_angle", "min", "extended"),
+            # The second averaging signal, and the first whose polarity and averaging BOTH come
+            # from measurement rather than inference: left/right arm elevation correlates
+            # r=0.9896-0.9964 across all 8 Fit3D `side_lateral_raise` subjects. Peaks at its
+            # MAXIMUM (arms down -> raised -> down). Verified end-to-end in
+            # tests/test_arm_abduction.py::EndToEndSegmentationTest.
+            "Arm Abduction": ("avg_arm_elevation_deg", "max", "extended"),
+            # The third averaging signal, sharing Arm Abduction's metric and INVERTING its
+            # polarity: this movement's effort peak is the W, where arm elevation is at its
+            # LOWEST. Measured on REHAB24-6 Ex2's 208 annotated reps -- median start 140.4 deg,
+            # median trough 54.7 at position 0.508 of the rep, median end 141.1 -- and the arms
+            # correlate r=0.9977 within-rep (min 0.9628), which is what justifies averaging them.
+            # Verified end-to-end in tests/test_arm_vw.py::EndToEndSegmentationTest, which
+            # asserts WHICH end of the signal `peak` lands on so it cannot pass under `max`.
+            "Arm VW": ("avg_arm_elevation_deg", "min", "extended"),
+            # The fourth averaging signal, and the FIRST that is not an arm quantity: the trunk's
+            # own `angle(shoulder, hip, knee)`. Peaks at its MINIMUM (supine -> curled -> supine),
+            # sharing Arm VW's polarity. Chosen because it is JOINT-RELATIVE and therefore
+            # invariant under camera roll -- the parent spec's "trunk flexion vs the
+            # floor/horizontal" is not recoverable from the image, and EgoExo-Fitness ships its
+            # sagittal sit-up frames rolled 90 degrees with no EXIF tag. Verified end-to-end in
+            # tests/test_situp.py::EndToEndSegmentationTest, and the roll invariance is pinned
+            # separately by tests/test_situp.py::RollInvarianceTest.
+            "Sit-up": ("hip_angle_deg", "min", "extended"),
+            # Shoulder Bridge reads the SAME signal as Sit-up on the SAME supine body, with the
+            # INVERSE polarity: a bridge's effort peak is the hip OPENING to the shoulder-hip-knee
+            # straight line, so it peaks at the signal's MAXIMUM, where a sit-up's curl peaks at
+            # its minimum. `extended` names the end away from the effort peak -- here the hips
+            # FLEXED on the mat, so the framework's word and the anatomy's word point opposite
+            # ways and the framework's is what the flag selects. Roll invariance is pinned by
+            # tests/test_shoulder_bridge.py::RollInvarianceTest.
+            "Shoulder Bridge": ("hip_angle_deg", "max", "extended"),
+            # Leg Abduction's signal is the only one in the registry that is a MAX OVER TWO
+            # SIDES rather than a mean or a single side, and that is forced: `compute_raw` runs
+            # over the whole clip before `segment_reps`, so there is no repetition boundary yet
+            # and therefore no way to know which leg is working. The trunk-referenced pair is
+            # used rather than the support-limb pair because only the trunk-referenced one is
+            # side-independent -- see `leg_abduction._thigh_trunk_angles`. Roll invariance is
+            # pinned by tests/test_leg_abduction.py::RollInvarianceTest.
+            "Leg Abduction": ("max_thigh_trunk_deg", "max", "extended"),
+            # Torso Twist is the FIRST AND ONLY user of `rep_rectify`, which base.py:55 declared
+            # for it by name and which had no user until the fourteenth detector. Its signal is
+            # BIPOLAR -- the hands swing to both sides of the body -- so rectifying makes each
+            # swing its own excursion from zero, and one swing is one repetition, which is the
+            # cited source's own definition ("each swing to a side counting as one repetition").
+            # `max` then orients the rectified signal so the effort peak is the low value
+            # `segment_reps` looks for. Roll invariance is pinned by
+            # tests/test_torso_twist.py::InvarianceTest.
+            "Torso Twist": ("twist_offset_ratio", "max", "extended"),
         }
-        for name, (signal, polarity) in expected.items():
+        rectified = {"Torso Twist"}
+        for name, (signal, polarity, rep_start) in expected.items():
             with self.subTest(movement=name):
                 detector = registry.get_detector(name)
                 self.assertEqual(detector.rep_signal, signal)
                 self.assertEqual(detector.rep_polarity, polarity)
                 self.assertIn(detector.rep_signal, detector.metric_keys)
-                # The other knobs exist for movements RS-SP1 does not implement (spec §3.4);
-                # these three use the defaults.
-                self.assertFalse(detector.rep_rectify)
-                self.assertEqual(detector.rep_start, "extended")
+                # `rep_rectify` was declared by RS-SP1 (spec §3.4) for bipolar signals and went
+                # unused for thirteen detectors; every one of them still takes the default.
+                self.assertEqual(detector.rep_rectify, name in rectified)
+                self.assertEqual(detector.rep_start, rep_start)
 
     def test_multi_rep_clip_is_mis_phased_by_the_legacy_path_and_fixed_by_the_new_one(self) -> None:
         """Pins BOTH sides of the fix.
@@ -216,19 +323,90 @@ class MovementRegistryTests(unittest.TestCase):
 
 
 class TestMovementRegistry(unittest.TestCase):
-    def test_lists_all_three_detectors_in_registration_order(self) -> None:
+    def test_lists_all_detectors_in_registration_order(self) -> None:
         from src.pose.movements import registry
 
         names = [d.name for d in registry.list_detectors()]
-        self.assertEqual(names, ["Squat", "Overhead Press", "Push-up"])
+        self.assertEqual(
+            names,
+            [
+                "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
+            ],
+        )
 
     def test_only_squat_is_validated(self) -> None:
-        """Push-up and Overhead Press rules are literature-derived and never checked against
-        ground-truth labels. The UI marks them Beta off this flag."""
+        """Push-up, Overhead Press, Lunge, Deadlift and Row rules are literature-derived and never
+        checked against ground-truth labels. The UI marks them Beta off this flag."""
         from src.pose.movements import registry
 
         validated = {d.name: d.validated for d in registry.list_detectors()}
-        self.assertEqual(validated, {"Squat": True, "Overhead Press": False, "Push-up": False})
+        self.assertEqual(
+            validated,
+            {
+                "Squat": True,
+                "Overhead Press": False,
+                "Push-up": False,
+                "Lunge": False,
+                "Deadlift": False,
+                "Row": False,
+                "Band Pull Apart": False,
+                "Bicep Curl": False,
+                # Arm Abduction ships Beta even though REHAB24-6 Ex1 IS arm abduction with 178
+                # human-labeled reps. Lunge got there first (Ex5, validated in
+                # notes/lunge-rule-validation.md); this is the first movement whose labeled data
+                # EXISTS while the check has NOT been run. See arm_abduction.py's registration
+                # comment for what Ex1 can and cannot decide.
+                "Arm Abduction": False,
+                # Arm VW is the SECOND movement whose labeled data exists unchecked, and the
+                # first whose labeled data matches the variant the app models: REHAB24-6 Ex2 is
+                # arm VW, 208 reps (the largest labeled set of any non-squat movement), 94
+                # correct / 114 incorrect, and BILATERAL on measurement. See arm_vw.py's
+                # registration comment for what Ex2 does and does not decide.
+                "Arm VW": False,
+                # Sit-up is Beta for a THIRD distinct reason. Deadlift, Row, Band Pull Apart and
+                # Bicep Curl are False because no labeled data exists; Arm Abduction and Arm VW
+                # because nobody ran the check against data that does. Sit-up is False because the
+                # labeled data that exists -- EgoExo-Fitness, 82 human-judged sit-up actions --
+                # describes a DIFFERENT VARIANT: its canonical guidance is a full sit-up ("touch
+                # your feet with your hands") while the parent spec specifies a curl-up. REHAB24-6
+                # has no sit-up and Fit3D has no supine action at all. See situp.py's registration
+                # comment.
+                "Sit-up": False,
+                # Shoulder Bridge is Beta for a FOURTH distinct reason, and the only one that a
+                # DOWNLOAD fixes rather than research. The labels exist AND match the variant:
+                # EgoExo-Fitness has 77 human-judged Shoulder Bridge actions whose canonical
+                # guidance names this detector's endpoint verbatim, and one of its twelve criteria
+                # IS this rule ("Progressively raise your body until your knees, hips, and
+                # shoulders align in a straight line", faulted on 16/77). What is missing is the
+                # PIXELS: `frames_open` downloads in 3 GiB parts, part `.ac` is absent, and only 2
+                # of the 77 judged actions fall in a record that decodes. See shoulder_bridge.py's
+                # registration comment.
+                "Shoulder Bridge": False,
+                # Leg Abduction is Beta for a FIFTH reason, and the first that is not a gap in
+                # the evidence: the check WAS RUN. REHAB24-6 Ex4 is standing leg abduction --
+                # 210 human-labeled repetitions, 120 correct / 90 incorrect, 9 subjects, two
+                # orthogonal cameras -- and it is the matching variant, so unlike Sit-up there
+                # was no escape hatch and unlike Shoulder Bridge the pixels are all present. The
+                # run decided the roster: it silenced `rule_insufficient_abduction_rom` and
+                # confirmed `rule_trunk_lean_compensation`'s signal. What it CANNOT establish is
+                # a fault-level claim, because REHAB24-6 labels each repetition correct or
+                # incorrect and never names which fault occurred. See leg_abduction.py's
+                # registration comment and notes/leg-abduction-rule-validation.md.
+                "Leg Abduction": False,
+                # Torso Twist is Beta for SIT-UP'S reason -- the labeled data describes a
+                # different variant -- and deliberately NOT a sixth one. What is new is only that
+                # the same reason holds three times over: REHAB24-6 has no twist at all, Fit3D's
+                # `standing_ab_twists` is a standing cross-body knee-to-elbow twist (looked at,
+                # not inferred from the name), and EgoExo-Fitness's 95 judged `Kneeling Side
+                # Torso Twist` actions are a prone LATERAL FLEXION exercise. Fit3D's twist data
+                # WAS used here, for a sensing-fidelity measurement of how much true 3-D rotation
+                # survives projection -- that is camera geometry and transfers across variants;
+                # a threshold would not. See torso_twist.py's registration comment.
+                "Torso Twist": False,
+            },
+        )
 
     def test_validated_defaults_to_false(self) -> None:
         """A new detector must fail toward Beta, never silently present as validated."""
@@ -244,7 +422,11 @@ class TestMovementRegistry(unittest.TestCase):
 
         self.assertEqual(
             {d.name for d in registry.list_detectors()},
-            {"Squat", "Push-up", "Overhead Press"},
+            {
+                "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
+                "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
+            },
         )
 
 

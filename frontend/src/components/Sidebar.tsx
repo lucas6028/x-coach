@@ -1,34 +1,75 @@
-import { Barbell, ClockCounterClockwise, Folders, GameController, Plus, ShieldCheck, VideoCamera, X } from "@phosphor-icons/react";
+import {
+  Barbell,
+  CaretDoubleLeft,
+  CaretDoubleRight,
+  ClipboardText,
+  ClockCounterClockwise,
+  GameController,
+  GearSix,
+  Plus,
+  ShieldCheck,
+  VideoCamera,
+  X,
+  type Icon,
+} from "@phosphor-icons/react";
+import { CircleNotch, SignIn } from "@phosphor-icons/react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { useI18n } from "../lib/i18n";
+import AccountMenu from "./AccountMenu";
+import {
+  RAIL_CELL_ACTIVE,
+  RAIL_CELL_IDLE,
+  RAIL_CTA,
+  RAIL_FRAME,
+  RAIL_LABEL,
+  RailMark,
+  railCell,
+} from "./railStyles";
+
+// The brand mark and the row styling now live in components/railStyles.tsx so the admin console's
+// rail (pages/admin/AdminLayout.tsx) renders identically without this component being generalized.
+// The reference design's chevron placeholder is gone: with the top row carrying no lockup any
+// more, the rail shows the real X-Coach icon.
+const Mark = RailMark;
 
 interface Props {
   open: boolean;
   width: number;
   // Animate width changes (toggle) but not while the user is dragging the resize handle.
   animate: boolean;
-  onOpenLibrary: () => void;
   // Start a fresh studio session (clears the current analysis / routes into the studio).
   onNewAnalysis: () => void;
   // Mobile drawer only: when provided, the sidebar renders a brand + close row at the top and
-  // wires the ✕ button to it. The desktop rail omits this — its brand lives in the top navbar,
-  // and its collapse toggle lives there too (see Header).
+  // wires the ✕ button to it. The desktop rail omits this — its brand is the mark below.
   onClose?: () => void;
+  // Desktop rail only: flips `open`. Omitted by the drawer, which is always labelled and closes
+  // outright rather than shrinking to a strip.
+  onToggle?: () => void;
 }
 
-// The navigation rail: labelled when `open`, a slim icon rail when collapsed. The brand lockup and
-// the collapse toggle now live in the full-width top navbar (Header), so this component is purely the
-// nav list + footer. The aside itself is borderless and shares the main canvas background; the
-// divider between the desktop rail and the content area is drawn by the wrapper in AppLayout.
-export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnalysis, onClose }: Props) {
+// The navigation rail: a floating white card, one horizontal icon + label row per destination, and
+// a soft violet pill under the active one. `open` is the labelled 236px rail; collapsed drops to a
+// 76px icon-only strip with the labels living in the rows' tooltips. The mobile drawer reuses the
+// same component with a brand + close row on top and no collapse control.
+export default function Sidebar({
+  open,
+  width,
+  animate,
+  onNewAnalysis,
+  onClose,
+  onToggle,
+}: Props) {
   const { t } = useI18n();
-  const { isAdmin } = useAuth();
+  const { isAdmin, user, lineAuthenticating } = useAuth();
   const { pathname } = useLocation();
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
   const onMovements = pathname === "/movements";
+  // The detail route lights the same entry as the list — /plans/<id> is still "Plans".
+  const onPlans = pathname === "/plans" || pathname.startsWith("/plans/");
+  const onSettings = pathname === "/settings";
   const onAdmin = pathname === "/admin";
 
   // The Admin link is admin-only UX gating (the /admin page + backend re-check are the real
@@ -37,105 +78,177 @@ export default function Sidebar({ open, width, animate, onOpenLibrary, onNewAnal
 
   // The games hub, plus the individual game routes it links into, all light up the one Games entry.
   const onGames = pathname === "/games" || pathname === "/67" || pathname === "/ninja";
-  const navBase =
-    "flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors";
-  // Borderless, softly-tinted active pill (the reference's sidebar look) — no outline ring.
-  const navActive = "bg-primary/10 text-primary font-semibold";
-  const navIdle = "text-muted hover:bg-content/5 hover:text-content";
+
+  const cell = railCell(open);
+  const cellActive = RAIL_CELL_ACTIVE;
+  const cellIdle = RAIL_CELL_IDLE;
+  const label = RAIL_LABEL;
+
+  const Cell = ({ icon: Ico, text, active }: { icon: Icon; text: string; active: boolean }) => (
+    <>
+      <Ico size={21} weight="duotone" className="shrink-0" />
+      {open && (
+        <span className={`${label} ${active ? "font-semibold" : "font-medium"}`}>{text}</span>
+      )}
+    </>
+  );
+
   return (
     <aside
       style={{ width }}
-      className={`h-full shrink-0 bg-background-dark flex flex-col justify-between overflow-hidden ${
-        animate ? "transition-[width] duration-200 ease-in-out" : ""
-      }`}
+      // `glass-rail` — the second of the page's three blurred surfaces (shell, rail, popovers).
+      // The scroll lives on the inner block, NOT here: an overflow container clips absolutely
+      // positioned descendants, and the account menu at the foot opens upward out of the rail.
+      className={`${RAIL_FRAME} ${animate ? "transition-[width] duration-200 ease-in-out" : ""}`}
     >
-      <div>
-        {/* Mobile drawer only: brand + close. The desktop rail keeps its top clear (brand is in the navbar). */}
+      <div className="min-h-0 flex-1 overflow-y-auto scrollbar-none rounded-t-[28px]">
+        {/* Mobile drawer only: brand + close. */}
         {onClose && (
-          <div className="h-16 flex items-center gap-2 px-3 border-b border-border-dark">
+          <div className="h-16 flex items-center gap-2 px-3 border-b border-[#f0f1f8]">
             <div className="flex items-center min-w-0 flex-1">
-              <img src="/icon.svg" alt="" className="w-9 h-9 rounded-xl shadow-accent ring-1 ring-black/5 shrink-0" />
-              <span className="ml-2.5 font-display font-bold tracking-tight truncate">X-Coach</span>
+              <Mark className="!h-9 !w-9 shrink-0" />
+              <span className="ml-2.5 font-display font-bold tracking-tight truncate text-[#1e2142]">
+                X-Coach
+              </span>
             </div>
             <button
               onClick={onClose}
               aria-label={t("nav.hide")}
               title={t("nav.hide")}
-              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-muted hover:bg-content/5 hover:text-content transition-colors"
+              className="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-[#59648f] hover:bg-[#f5f6fb] hover:text-[#1e2142] transition-colors"
             >
               <X size={20} />
             </button>
           </div>
         )}
-        <nav className="flex flex-col gap-1 p-2 pt-3">
+
+        {/* The rail's brand — the top row no longer carries a lockup, so this is the shell's own
+            and it links home. Mark plus wordmark, the lockup the landing nav uses, so the first
+            click into /app does not drop the visitor into a shell that names itself differently.
+            The wordmark goes when the rail collapses to its 76px strip: there is no room for it,
+            and the link keeps its aria-label so the bare mark is still named. `px-4` puts the
+            mark's left edge on the nav rows' icon inset below (nav px-2 + cell px-3 + the link's
+            own p-1). */}
+        {!onClose && (
+          <div className={`flex pt-5 pb-2 ${open ? "px-4" : "justify-center"}`}>
+            <Link
+              to="/app"
+              aria-label="X-Coach"
+              title="X-Coach"
+              className="flex min-w-0 items-center gap-2.5 rounded-xl p-1"
+            >
+              <Mark />
+              {open && (
+                <span className="truncate font-display text-lg font-bold tracking-tight text-[#1e2142]">
+                  X-Coach
+                </span>
+              )}
+            </Link>
+          </div>
+        )}
+
+        <nav className="flex flex-col gap-1 px-2 py-3">
           {/* Primary CTA: start a fresh analysis from anywhere in the app. */}
           <button
             onClick={onNewAnalysis}
             title={t("nav.newAnalysis")}
-            className={`${navBase} mb-1.5 bg-primary text-primary-content font-semibold shadow-accent hover:bg-primary/90 active:scale-[0.99] ${
-              open ? "" : "justify-center"
-            }`}
+            className={`${cell} ${RAIL_CTA}`}
           >
-            <Plus size={22} weight="bold" />
-            {open && <span className="text-sm">{t("nav.newAnalysis")}</span>}
+            <Plus size={21} weight="bold" className="shrink-0" />
+            {open && <span className={`${label} font-semibold`}>{t("nav.newAnalysis")}</span>}
           </button>
           <Link
             to="/app"
             title={t("nav.analyse")}
-            className={`${navBase} ${onStudio ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            className={`${cell} ${onStudio ? cellActive : cellIdle}`}
           >
-            <VideoCamera size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.analyse")}</span>}
-          </Link>
-          <button
-            onClick={onOpenLibrary}
-            className={`${navBase} ${navIdle} ${open ? "" : "justify-center"}`}
-          >
-            <Folders size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.library")}</span>}
-          </button>
-          <Link
-            to="/games"
-            title={t("nav.games")}
-            className={`${navBase} ${onGames ? navActive : navIdle} ${open ? "" : "justify-center"}`}
-          >
-            <GameController size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.games")}</span>}
+            <Cell icon={VideoCamera} text={t("nav.analyse")} active={onStudio} />
           </Link>
           <Link
             to="/movements"
             title={t("nav.movements")}
-            className={`${navBase} ${onMovements ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            className={`${cell} ${onMovements ? cellActive : cellIdle}`}
           >
-            <Barbell size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.movements")}</span>}
+            <Cell icon={Barbell} text={t("nav.movements")} active={onMovements} />
+          </Link>
+          {/* Plans sits between the movement library and the history: the library is where you
+              pick what to train, a plan is when you train it, and the history is what came out. */}
+          <Link
+            to="/plans"
+            title={t("nav.plans")}
+            className={`${cell} ${onPlans ? cellActive : cellIdle}`}
+          >
+            <Cell icon={ClipboardText} text={t("nav.plans")} active={onPlans} />
           </Link>
           <Link
             to="/history"
             title={t("nav.history")}
-            className={`${navBase} ${onHistory ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+            className={`${cell} ${onHistory ? cellActive : cellIdle}`}
           >
-            <ClockCounterClockwise size={22} weight="duotone" />
-            {open && <span className="text-sm font-medium">{t("nav.history")}</span>}
+            <Cell icon={ClockCounterClockwise} text={t("nav.history")} active={onHistory} />
+          </Link>
+          <Link
+            to="/games"
+            title={t("nav.games")}
+            className={`${cell} ${onGames ? cellActive : cellIdle}`}
+          >
+            <Cell icon={GameController} text={t("nav.games")} active={onGames} />
+          </Link>
+          <Link
+            to="/settings"
+            title={t("nav.settings")}
+            className={`${cell} ${onSettings ? cellActive : cellIdle}`}
+          >
+            <Cell icon={GearSix} text={t("nav.settings")} active={onSettings} />
           </Link>
           {isAdmin && (
             <Link
               to="/admin"
               title={t("admin.nav")}
-              className={`${navBase} ${onAdmin ? navActive : navIdle} ${open ? "" : "justify-center"}`}
+              className={`${cell} ${onAdmin ? cellActive : cellIdle}`}
             >
-              <ShieldCheck size={22} weight="duotone" />
-              {open && <span className="text-sm font-medium">{t("admin.nav")}</span>}
+              <Cell icon={ShieldCheck} text={t("admin.nav")} active={onAdmin} />
             </Link>
           )}
         </nav>
       </div>
-      {open && (
-        <div className="p-2 border-t border-border-dark px-3 flex flex-col gap-0.5">
-          <p className="text-[10px] text-faint uppercase tracking-wider">{t("sidebar.version")}</p>
-          <p className="text-[10px] text-faint">{t("sidebar.tagline")}</p>
+
+      {/* The width toggle stays INSIDE the rail rather than pinned to the shell's edge: the shell
+          is a rounded card, and anything absolutely positioned on the seam ends up outside the
+          radius. Drawer variant has no toggle — it closes outright instead of shrinking. */}
+      {onToggle && (
+        <div className={`flex px-2 py-1 ${open ? "justify-end" : "justify-center"}`}>
+          <button
+            onClick={onToggle}
+            aria-label={open ? t("nav.collapse") : t("nav.expand")}
+            title={open ? t("nav.collapse") : t("nav.expand")}
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-[#59648f] transition-colors hover:bg-[#f5f6fb] hover:text-[#1e2142]"
+          >
+            {open ? <CaretDoubleLeft size={16} weight="bold" /> : <CaretDoubleRight size={16} weight="bold" />}
+          </button>
         </div>
       )}
+
+      {/* The account cluster now lives at the foot of the rail rather than the content card's top
+          row. The same slot carries all three states, so the corner is never just empty: the
+          avatar when signed in, the in-flight LINE auto-login, otherwise the way in. */}
+      <div className="border-t border-[#f0f1f8] p-2">
+        {user ? (
+          <AccountMenu rail={open ? "open" : "closed"} />
+        ) : lineAuthenticating ? (
+          // Silent LINE auto-login is in flight (typically the web redirect-return): show a
+          // "signing in" affordance instead of the log-in link, which would read as failed.
+          <span aria-live="polite" className={`${cell} ${cellIdle} pointer-events-none`}>
+            <CircleNotch size={21} weight="bold" className="shrink-0 animate-spin" />
+            {open && <span className={`${label} font-medium`}>{t("account.lineSigningIn")}</span>}
+          </span>
+        ) : (
+          <Link to="/login" title={t("account.signin")} className={`${cell} ${cellIdle}`}>
+            <SignIn size={21} className="shrink-0" />
+            {open && <span className={`${label} font-medium`}>{t("account.signin")}</span>}
+          </Link>
+        )}
+      </div>
     </aside>
   );
 }

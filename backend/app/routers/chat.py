@@ -65,6 +65,14 @@ class ChatContext(BaseModel):
     fault_count: int = 0
     quality: dict[str, Any] = Field(default_factory=dict)
     faults: list[FaultContext] = Field(default_factory=list)
+    # The FULL analysis document (detections + retrievals, minus the heavy `pose` block), shipped so
+    # the `get_analysis` tool can read the detail `buildChatContext` compresses away — exact measured
+    # values and complete reference passages. Optional: absent from a client predating v3, and
+    # deliberately omitted by `/api/chat/followups`, which shares this model but can never use it.
+    #
+    # This is NOT persisted (`upsert_conversation` stores messages + followups only) and never enters
+    # the prompt unless a tool returns part of it, so its cost is request body size, not tokens.
+    detail: dict[str, Any] | None = None
 
 
 class ChatRequest(BaseModel):

@@ -1,0 +1,76 @@
+# Hot-reload override. Use together with docker-compose.yml, never alone:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+#
+#   app -> http://localhost:5173 (Vite, HMR)   API -> http://localhost:8000
+#
+# The backend runs uvicorn --reload over bind-mounted source; the frontend runs the Vite
+# dev server instead of nginx, proxying /api to the `backend` service.
+
+services:
+  backend:
+    environment:
+      # inotify events do not cross the bind mount here, so uvicorn --reload never fires
+      # without this. The mount is live either way (a host append is visible to `stat` in
+      # the container instantly) — the event just never arrives, and the failure is silent:
+      # the reloader logs "Will watch for changes" and then does nothing. Not the `:ro`
+      # flag below; re-tested read-write with the same result.
+      #
+      # CAVEAT, measured on a sandboxed Docker (bind mounts appear as a `fakeowner` FUSE
+      # mount): with polling on, watchfiles itself detects every edit reliably, but the
+      # uvicorn reloader on top of it acted on them only intermittently — some reloads
+      # landed ~11s after the write, other edits were missed entirely. If a change does not
+      # take, `docker compose ... restart backend`. Stock Docker Engine on Linux may not
+      # have this problem at all; the frontend's HMR path (chokidar) was solid throughout.
+      # Cost of polling is negligible here — the watched trees are ~140 files, and
+      # --reload-dir keeps the sweep off the mounted data/.
+      WATCHFILES_FORCE_POLLING: "true"
+    command:
+      - uvicorn
+      - backend.app.main:app
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8000"
+      - --reload
+      - --reload-dir
+      - backend
+      - --reload-dir
+      - src
+    volumes:
+      - ./data:/app/data:ro
+      - xcoach-runtime:/app/data/runtime
+      # Live source. Read-only: the reloader only needs to watch, and __pycache__ writes
+      # are already off (PYTHONDONTWRITEBYTECODE).
+      - ./backend:/app/backend:ro
+      - ./src:/app/src:ro
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    image: x-coach-frontend:dev
+    depends_on:
+      backend:
+        # No health gate in dev: Vite should come up immediately and proxy calls once the
+        # backend is ready, rather than blocking the UI on a cold API start.
+        condition: service_started
+    environment:
+      # vite.config.ts reads this; inside the network the API is `backend`, not localhost.
+      VITE_PROXY_TARGET: http://backend:8000
+      # Switches Vite's watcher to polling (vite.config.ts -> server.watch). Unlike the
+      # backend flag this is insurance rather than a fix: HMR was measured to fire on the
+      # same mounts WITHOUT it, so chokidar copes where watchfiles did not. Left on because
+      # bind mounts on Docker Desktop and WSL2 routinely drop inotify events and the failure
+      # mode is silent; turn it off for lower idle CPU once HMR is confirmed on your host.
+      # (CHOKIDAR_USEPOLLING would do nothing here: chokidar reads no env vars of its own.)
+      VITE_USE_POLLING: "true"
+    # !override, not a merge: the base file publishes nginx's :80, which nothing listens
+    # on in this target.
+    ports: !override
+      - "${VITE_PORT:-5173}:5173"
+    volumes:
+      - ./frontend:/app
+      # Anonymous volume shadows the host's node_modules so the container keeps the
+      # Linux-native install from the image (esbuild/rollup ship platform binaries).
+      - /app/node_modules

@@ -4,6 +4,7 @@ import { CameraError, getCameraStream } from "../lib/camera";
 import { LIVE_OVERLAY_TIER } from "../lib/poseTier";
 import { POSE_CONNECTIONS } from "../lib/pose";
 import { waitForVideoFrame } from "../lib/videoFrame";
+import { createLivePoseSchedule, shouldRunLivePoseInference } from "../lib/livePoseScheduler";
 
 function pickMime(): string {
   const prefs = ["video/webm;codecs=vp9", "video/webm", "video/mp4"];
@@ -31,11 +32,23 @@ export default function RecordPanel({
   useEffect(() => {
     let cancelled = false;
     let raf = 0;
+    let ctx: CanvasRenderingContext2D | null = null;
+    const poseSchedule = createLivePoseSchedule();
     let landmarker: { detectForVideo(v: HTMLVideoElement, t: number): { landmarks?: { x: number; y: number }[][] }; close(): void } | null = null;
 
     (async () => {
       try {
-        const stream = await getCameraStream({ video: { facingMode: "user", width: 1280, height: 720 }, audio: false });
+        // This stream is also recorded for later Heavy analysis and replay, so do not trade away
+        // stored-video detail for the lighter live-overlay model.
+        const stream = await getCameraStream({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 30 },
+          },
+          audio: false,
+        });
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;
         const video = videoRef.current!;
@@ -48,9 +61,21 @@ export default function RecordPanel({
         const draw = () => {
           if (cancelled) return;
           const canvas = canvasRef.current!;
-          const ctx = canvas.getContext("2d")!;
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
+          ctx ??= canvas.getContext("2d");
+          if (!ctx) {
+            raf = requestAnimationFrame(draw);
+            return;
+          }
+          if (!shouldRunLivePoseInference(poseSchedule, video.currentTime, performance.now())) {
+            raf = requestAnimationFrame(draw);
+            return;
+          }
+          // A canvas resize clears and reallocates the backing store, so resize only after a
+          // genuine camera renegotiation rather than on every animation frame.
+          if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+          }
           ctx.clearRect(0, 0, canvas.width, canvas.height);
           const res = landmarker!.detectForVideo(video, performance.now());
           const pts = res.landmarks?.[0];

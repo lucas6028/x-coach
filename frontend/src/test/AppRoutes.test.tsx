@@ -18,12 +18,17 @@ vi.mock("../landing/Landing", () => ({ default: () => <div>landing page</div> })
 vi.mock("../pages/Login", () => ({ default: () => <div>login page</div> }));
 vi.mock("../pages/History", () => ({ default: () => <div>history page</div> }));
 vi.mock("../pages/Movements", () => ({ default: () => <div>movements page</div> }));
+vi.mock("../pages/MovementDetail", () => ({ default: () => <div>movement detail page</div> }));
+vi.mock("../pages/Plans", () => ({ default: () => <div>plans page</div> }));
+vi.mock("../pages/PlanDetail", () => ({ default: () => <div>plan detail page</div> }));
 vi.mock("../pages/Settings", () => ({ default: () => <div>settings page</div> }));
 vi.mock("../pages/Games", () => ({ default: () => <div>games page</div> }));
+vi.mock("../pages/WebSlinger", () => ({ default: () => <div>web slinger page</div> }));
 vi.mock("../pages/LiffDiag", () => ({ default: () => <div>liff diag page</div> }));
 vi.mock("../pages/admin/AdminLogin", () => ({ default: () => <div>admin login page</div> }));
 vi.mock("../pages/admin/AdminLayout", () => ({ default: () => <div>admin page</div> }));
 vi.mock("../pages/admin/AdminOverview", () => ({ default: () => <div>admin overview</div> }));
+vi.mock("../pages/admin/AdminLine", () => ({ default: () => <div>admin line</div> }));
 vi.mock("../pages/admin/AdminUsers", () => ({ default: () => <div>admin users</div> }));
 vi.mock("../pages/admin/AdminSettingsLlm", () => ({ default: () => <div>admin llm</div> }));
 vi.mock("../pages/admin/AdminSettingsRag", () => ({ default: () => <div>admin rag</div> }));
@@ -59,6 +64,15 @@ describe("AppRoutes — public routes", () => {
     expect(screen.queryByText("login page")).not.toBeInTheDocument();
   });
 
+  // The detail page is the catalog entry for one movement — the same public information the
+  // library lists, plus the KG's fault list, which /api/knowledge/* also serves unauthenticated.
+  // Its "My records" tab asks for a sign-in in place instead of gating the page.
+  it("serves a movement's detail page to a signed-out visitor", () => {
+    renderAnonymousAt("/movements/Overhead%20Press");
+    expect(screen.getByText("movement detail page")).toBeInTheDocument();
+    expect(screen.queryByText("login page")).not.toBeInTheDocument();
+  });
+
   it.each([
     ["/", "landing page"],
     ["/app", "studio page"],
@@ -70,6 +84,11 @@ describe("AppRoutes — public routes", () => {
     renderAnonymousAt(path);
     expect(screen.getByText(marker)).toBeInTheDocument();
   });
+
+  it("serves the lazy web-slinger route to a signed-out visitor", async () => {
+    renderAnonymousAt("/web-slinger");
+    expect(await screen.findByText("web slinger page")).toBeInTheDocument();
+  });
 });
 
 describe("AppRoutes — gated routes", () => {
@@ -78,6 +97,11 @@ describe("AppRoutes — gated routes", () => {
   it.each([
     ["/history", "history page"],
     ["/settings", "settings page"],
+    // A plan is one user's own data — its name, its exercises and its progress — so BOTH the list
+    // and the detail route stay gated. /movements next door is public, and this pins that the two
+    // decisions are separate ones.
+    ["/plans", "plans page"],
+    ["/plans/abc-123", "plan detail page"],
   ])("redirects %s to /login when signed out", (path, marker) => {
     renderAnonymousAt(path);
     expect(screen.getByText("login page")).toBeInTheDocument();

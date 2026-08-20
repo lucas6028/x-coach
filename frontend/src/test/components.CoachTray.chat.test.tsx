@@ -76,6 +76,13 @@ function renderTray() {
   );
 }
 
+// Types a follow-up into the composer and sends it — the common "user acts" prelude shared by tests
+// that need to observe in-flight stream state (deliberately not awaited by some callers; see below).
+async function sendMessage(text: string) {
+  await userEvent.type(screen.getByPlaceholderText(/Ask a follow-up/i), text);
+  await userEvent.click(screen.getByLabelText(/Send message/i));
+}
+
 describe("CoachTray — follow-up chat", () => {
   beforeEach(() => {
     h.auth = { configured: true, user: { id: "u1" } };
@@ -210,6 +217,32 @@ describe("CoachTray — follow-up chat", () => {
     await userEvent.keyboard("{Enter}");
 
     await screen.findByRole("alert");
+    expect(h.putConversation).not.toHaveBeenCalled();
+  });
+
+  it("rolls back and does not persist when the stream ends without done or error", async () => {
+    // FIX 1 (whole-branch review): api.chatStream resolves normally the instant the reader drains,
+    // regardless of which frame (if any) was last seen -- a dropped connection / proxy idle-timeout
+    // looks exactly like success here unless the component checks that `done` actually arrived.
+    // Without that check this would commit `{ role: "assistant", content: acc }` (here, a truncated
+    // partial answer) and persist it via putConversation.
+    h.chatStream.mockImplementation(
+      async (_m: unknown, _c: unknown, handlers: { onDelta: (t: string) => void }) => {
+        handlers.onDelta("Drive your kne");
+        // Resolves WITHOUT ever calling onDone or onError.
+      }
+    );
+    renderTray();
+
+    const box = screen.getByPlaceholderText(/Ask a follow-up/i) as HTMLInputElement;
+    await userEvent.type(box, "why?");
+    await userEvent.keyboard("{Enter}");
+
+    await screen.findByRole("alert");
+    // No assistant turn committed, and the (rolled-back) user turn isn't left orphaned either.
+    expect(screen.queryByText("Drive your kne")).not.toBeInTheDocument();
+    expect(screen.queryByText("why?")).not.toBeInTheDocument();
+    expect(box.value).toBe("why?"); // restored for retry
     expect(h.putConversation).not.toHaveBeenCalled();
   });
 
@@ -445,5 +478,296 @@ describe("CoachTray — follow-up chat", () => {
     expect(scrollTo.mock.calls.length).toBe(beforeChips);
 
     Reflect.deleteProperty(HTMLElement.prototype, "scrollTo");
+  });
+
+  it("shows a named tool record with its label and subject, and keeps it once the answer streams", async () => {
+    // Subject is deliberately NOT "knee valgus": the fixture's own FaultCard evidence already
+    // renders "knee valgus ratio 0.82" on first paint (lib/retrieval.ts keyEvidence), so that text
+    // would satisfy findByText immediately — before the tool ever ran — and this test would pass
+    // vacuously (releaseTool never actually needed). A collision-free subject forces the assertion
+    // to wait on the real tool line. Uses h.chatStream (like every other test in this file), not
+    // vi.spyOn(api, ...) — this file's vi.mock("../api") already makes api.chatStream === h.chatStream,
+    // so spying on api.chatStream would replace that reference for every test that runs after this
+    // one (nothing in setup.ts restores mocks between tests), leaking this implementation forward.
+    let releaseTool!: () => void;
+    let releaseDelta!: () => void;
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "kg_query", "zzqury-kg-subject");
+      handlers.onToolDone?.(0, []);
+      await new Promise<void>((r) => (releaseTool = r)); // assert while the tool is running
+      handlers.onDelta("Answer");
+      await new Promise<void>((r) => (releaseDelta = r)); // assert while the answer streams
+      handlers.onDone("m");
+    });
+    const { container } = renderTray();
+    void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
+
+    // The tool line is up, naming BOTH the tool's label and its subject in one node — asserting on
+    // the subject alone would also pass if the label lookup were broken (e.g. hard-coded to the
+    // generic fallback), since the subject would still render.
+    // Separator now goes through t("chat.tool.sep") (FIX 5, whole-branch review) -- English renders
+    // ": " (halfwidth), not the fullwidth "：" that used to be hard-coded regardless of language.
+    expect(
+      await screen.findByText(/Searching the knowledge graph: zzqury-kg-subject/)
+    ).toBeTruthy();
+
+    // onToolDone already fired (with an empty `sources`, as get_analysis always does) and must have
+    // cleared `pending` on this run. CoachTray's own thinking dots are suppressed once a tool row
+    // exists (toolRuns.length === 0 gate), so the only ".lm-dots" left in the tree would be this
+    // row's own pending marker — its absence proves the empty-sources tool_done actually resolved
+    // the row instead of leaving it spinning forever (the exact failure this feature prevents).
+    expect(container.querySelector(".lm-dots")).toBeNull();
+
+    // Unlike v3, the record is NOT cleared once the answer starts streaming — it is the answer's
+    // provenance and belongs beside it (v3.1).
+    releaseTool();
+    expect(await screen.findByText("Answer")).toBeTruthy();
+    expect(screen.getByText(/zzqury-kg-subject/)).toBeTruthy();
+
+    releaseDelta();
+  });
+
+  it("falls back to a generic label for a tool it has no i18n string for", async () => {
+    // `t()` returns the key itself on a miss (i18n.tsx:1421), so an unguarded lookup would render
+    // "chat.tool.something_else" straight into the tray. The subject is deliberately unique gibberish
+    // — a bare "x" is a substring of the KnowledgeGraphWidget caption ("Fault → cause → fix"), which
+    // let this assertion pass even before the tool line existed.
+    let release!: () => void;
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "something_else", "zzqux-subject");
+      handlers.onToolDone?.(0, []);
+      await new Promise<void>((r) => (release = r));
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    void sendMessage("why?");
+    expect(await screen.findByText(/zzqux-subject/)).toBeTruthy();
+    expect(screen.queryByText(/chat\.tool\./)).toBeNull();
+    release();
+  });
+
+  it("discards streamed narration when the server sends reset, but keeps tool records made before it", async () => {
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "kg_query", "zzq-early-subject");
+      handlers.onToolDone?.(0, []);
+      handlers.onDelta("Let me check.");
+      handlers.onReset?.();
+      handlers.onTool?.(1, "kg_query", "valgus");
+      handlers.onToolDone?.(1, []);
+      handlers.onDelta("Real answer");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    expect(await screen.findByText("Real answer")).toBeTruthy();
+    expect(screen.queryByText(/Let me check/)).toBeNull();
+    // The tool call made BEFORE the reset really happened and really fed the answer — reset only
+    // retracts the narration text, not the record of what was looked up.
+    expect(screen.getByText(/zzq-early-subject/)).toBeTruthy();
+  });
+
+  it("keeps tool records visible after the answer starts streaming", async () => {
+    // Live-state assertion (parked, NOT awaited): sendMessage is deliberately left in flight so this
+    // is the sole guard against a reintroduced `setToolRuns([])` in `onDelta` — every other new test
+    // in this block awaits `sendMessage` and therefore only ever sees committed state. (This test
+    // owns the name that best describes it; the sibling below the record surviving into the
+    // committed message is a related but distinct guarantee.)
+    let release!: () => void;
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "rag_search", "zzq-live-subject");
+      handlers.onToolDone?.(0, [{ label: "zzq-Live-Source", kind: "encyclopedia" }]);
+      handlers.onDelta("Real ans");
+      await new Promise<void>((r) => (release = r)); // assert while still streaming, pre-commit
+      handlers.onDone("m");
+    });
+    const { container } = renderTray();
+    void sendMessage("why?"); // NOT awaited — the stream is deliberately still open
+    expect(await screen.findByText("Real ans")).toBeTruthy();
+    expect(screen.getByText(/zzq-live-subject/)).toBeTruthy();
+    // Collapsed by default (v3.2) — the count is what shows; the label is one click away.
+    await userEvent.click(screen.getByRole("button", { name: /Sources · 1/ }));
+    expect(screen.getByText("zzq-Live-Source")).toBeTruthy();
+    // The record sits ABOVE the streamed answer text, matching where it lands on the committed
+    // message once the turn commits (nothing should shift at commit time) — the layout decision the
+    // whole feature was specified around ("答案上方,預設展開").
+    const text = container.textContent ?? "";
+    expect(text.indexOf("zzq-live-subject")).toBeGreaterThan(-1);
+    expect(text.indexOf("zzq-live-subject")).toBeLessThan(text.indexOf("Real ans"));
+    release();
+  });
+
+  it("keeps tool records on the committed assistant message once the turn completes", async () => {
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "rag_search", "zzq-ankle-subject");
+      handlers.onToolDone?.(0, [{ label: "zzq-Wiki-Source", kind: "encyclopedia" }]);
+      handlers.onDelta("Real answer");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    // Committed, so this survives the finally — the whole point of v3.1.
+    expect(await screen.findByText("Real answer")).toBeTruthy();
+    expect(screen.getByText(/zzq-ankle-subject/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: /Sources · 1/ }));
+    expect(screen.getByText("zzq-Wiki-Source")).toBeTruthy();
+  });
+
+  it("appends successive tool calls instead of replacing them", async () => {
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "kg_query", "zzq-first-subject");
+      handlers.onToolDone?.(0, []);
+      handlers.onTool?.(1, "rag_search", "zzq-second-subject");
+      handlers.onToolDone?.(1, []);
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    expect(await screen.findByText("A")).toBeTruthy();
+    expect(screen.getByText(/zzq-first-subject/)).toBeTruthy();
+    expect(screen.getByText(/zzq-second-subject/)).toBeTruthy();
+  });
+
+  it("counts a kg_query run as concepts and a rag_search run as sources, keyed by kind not tool name", async () => {
+    // v3.1's red line, carried through the v3.2 collapse: a knowledge-graph node carries no citation
+    // anywhere in the graph, so it must never be counted under the same word as a retrieved paper.
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "kg_query", "zzq-concept-subject");
+      handlers.onToolDone?.(0, [{ label: "zzq-Concept-Label", kind: "concept" }]);
+      handlers.onTool?.(1, "rag_search", "zzq-paper-subject");
+      handlers.onToolDone?.(1, [{ label: "zzq-Paper-Label", kind: "paper" }]);
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    expect(await screen.findByText("A")).toBeTruthy();
+
+    const conceptToggle = screen.getByRole("button", { name: /Knowledge-graph concepts · 1/ });
+    const sourceToggle = screen.getByRole("button", { name: /Sources · 1/ });
+    await userEvent.click(conceptToggle);
+    await userEvent.click(sourceToggle);
+
+    // Each row lists only its own tool's label, under its own count — not the other's.
+    const conceptBlock = conceptToggle.parentElement as HTMLElement;
+    const sourceBlock = sourceToggle.parentElement as HTMLElement;
+    expect(conceptBlock.textContent).toContain("zzq-Concept-Label");
+    expect(conceptBlock.textContent).not.toContain("zzq-Paper-Label");
+    expect(sourceBlock.textContent).toContain("zzq-Paper-Label");
+    expect(sourceBlock.textContent).not.toContain("zzq-Concept-Label");
+  });
+
+  it("keeps tool records when the server retracts narration with reset", async () => {
+    // reset retracts the model's narration, but the tool calls really happened and really fed the
+    // answer — erasing them would misreport the reasoning chain. The tool call fires BEFORE the
+    // reset (a realistic round-1-tool, round-2-narrate-then-reset sequence) so that a handler which
+    // clears `runs` inside `onReset` is actually caught: clearing an empty list would be unobservable.
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "kg_query", "zzq-early-subject");
+      handlers.onToolDone?.(0, []);
+      handlers.onDelta("zzq-narration");
+      handlers.onReset?.();
+      handlers.onTool?.(1, "rag_search", "zzq-kept-subject");
+      handlers.onToolDone?.(1, []);
+      handlers.onDelta("Real answer");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    expect(await screen.findByText("Real answer")).toBeTruthy();
+    expect(screen.queryByText(/zzq-narration/)).toBeNull();
+    expect(screen.getByText(/zzq-early-subject/)).toBeTruthy();
+    expect(screen.getByText(/zzq-kept-subject/)).toBeTruthy();
+  });
+
+  it("persists tool records with the committed turn", async () => {
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "rag_search", "ankle");
+      handlers.onToolDone?.(0, [{ label: "zzq-Persisted-Source", kind: "paper" }]);
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    await screen.findByText("A");
+    const thread = h.putConversation.mock.calls[0][1] as Array<{ role: string; tools?: unknown[] }>;
+    expect(thread[thread.length - 1].tools).toEqual([
+      { name: "rag_search", query: "ankle", sources: [{ label: "zzq-Persisted-Source", kind: "paper" }] },
+    ]);
+  });
+
+  it("restores tool records from a stored conversation", async () => {
+    h.getConversation.mockResolvedValue({
+      video_id: "v1",
+      messages: [
+        { role: "user", content: "why?" },
+        {
+          role: "assistant",
+          content: "stored answer",
+          tools: [{ name: "kg_query", query: "zzq-restored-subject", sources: [] }],
+        },
+      ],
+      followups: [],
+    });
+    renderTray();
+    expect(await screen.findByText("stored answer")).toBeTruthy();
+    expect(screen.getByText(/zzq-restored-subject/)).toBeTruthy();
+  });
+
+  it("lands each tool call's sources on its own row when the same tool is called twice", async () => {
+    // The case that actually exercises correlation, and it is reachable today: one round can call
+    // rag_search twice, and two rounds routinely do. tool_done arrives OUT of start order here, so
+    // a "last pending run" rule would attach both source sets to the wrong rows.
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "rag_search", "zzq-first-query");
+      handlers.onTool?.(1, "rag_search", "zzq-second-query");
+      handlers.onToolDone?.(1, [{ label: "zzq-Second-Source", kind: "paper" }]);
+      handlers.onToolDone?.(0, [{ label: "zzq-First-Source", kind: "paper" }]);
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    await screen.findByText("A");
+    const thread = h.putConversation.mock.calls[0][1] as Array<{ tools?: unknown[] }>;
+    expect(thread[thread.length - 1].tools).toEqual([
+      { name: "rag_search", query: "zzq-first-query", sources: [{ label: "zzq-First-Source", kind: "paper" }] },
+      { name: "rag_search", query: "zzq-second-query", sources: [{ label: "zzq-Second-Source", kind: "paper" }] },
+    ]);
+  });
+
+  it("drops a tool_done whose id matches no run", async () => {
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "rag_search", "zzq-orphan-query");
+      handlers.onToolDone?.(99, [{ label: "zzq-Orphan-Source", kind: "paper" }]);
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    await screen.findByText("A");
+    const thread = h.putConversation.mock.calls[0][1] as Array<{ tools?: unknown[] }>;
+    expect(thread[thread.length - 1].tools).toEqual([
+      { name: "rag_search", query: "zzq-orphan-query" },
+    ]);
+  });
+
+  it("commits tool records without the in-memory id and pending fields", async () => {
+    // These are transport/UI state. The backend's ToolRun model would ignore them, but that
+    // backstop is coincidental — the strip is the mechanism, exactly as with `tools` on /api/chat.
+    h.chatStream.mockImplementation(async (_m, _c, handlers) => {
+      handlers.onTool?.(0, "kg_query", "zzq-strip-query");
+      handlers.onToolDone?.(0, []);
+      handlers.onDelta("A");
+      handlers.onDone("m");
+    });
+    renderTray();
+    await sendMessage("why?");
+    await screen.findByText("A");
+    const thread = h.putConversation.mock.calls[0][1] as Array<{ tools?: unknown[] }>;
+    const blob = JSON.stringify(thread[thread.length - 1].tools);
+    expect(blob).not.toContain("pending");
+    expect(blob).not.toContain('"id"');
   });
 });

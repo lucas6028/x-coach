@@ -15,7 +15,7 @@ describe("api.analyzePose", () => {
     const [, init] = fetchMock.mock.calls[0];
     const form = init!.body as FormData;
     expect(form.get("movement")).toBe("Squat");
-    expect(JSON.parse(form.get("pose") as string).metadata.fps).toBe(30);
+    expect(JSON.parse(await (form.get("pose") as Blob).text()).metadata.fps).toBe(30);
     expect(form.get("file")).toBeInstanceOf(Blob);
   });
 
@@ -26,23 +26,47 @@ describe("api.analyzePose", () => {
     await expect(api.analyzePose("Squat", pose as never, new Blob(["x"]))).rejects.toThrow("frames");
   });
 
+  it("surfaces the endpoint-specific pose payload limit", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: { code: "pose_too_large", limit_mb: 16 } }), { status: 413 })
+    );
+    await expect(api.analyzePose("Squat", pose as never, new Blob(["x"]))).rejects.toThrow("16 MB");
+  });
+
+  // `vi.spyOn`, NOT `vi.stubGlobal`: the file's afterEach only calls `restoreAllMocks`, which does
+  // not unstub globals — a stubbed fetch would leak into the thumbnail case below and swallow its
+  // request.
   it("posts the rep plan alongside the pose JSON", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ video_id: "v1" }), { status: 200 })
+    );
     const reps = { max_reps: 3, fallback: null, segments: [
       { index: 1, start_frame: 0, end_frame: 29, partial: false, analyzed: true, refined: true as const },
     ] };
     await api.analyzePose("Squat", { metadata: { fps: 30, width: 1, height: 1, total_frames: 1 }, frames: [] },
-      new Blob([], { type: "video/webm" }), reps);
-    const form = fetchMock.mock.calls[0][1].body as FormData;
+      new Blob([], { type: "video/webm" }), null, reps);
+    const form = fetchMock.mock.calls[0][1]!.body as FormData;
     expect(JSON.parse(form.get("reps") as string)).toEqual(reps);
   });
 
   it("omits reps entirely when there is no plan, so old behaviour is unchanged", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ video_id: "v1" }), { status: 200 })
+    );
     await api.analyzePose("Squat", { metadata: { fps: 30, width: 1, height: 1, total_frames: 1 }, frames: [] },
       new Blob([], { type: "video/webm" }));
-    expect((fetchMock.mock.calls[0][1].body as FormData).get("reps")).toBeNull();
+    expect((fetchMock.mock.calls[0][1]!.body as FormData).get("reps")).toBeNull();
+  });
+});
+
+describe("api.analyzePose thumbnail", () => {
+  it("appends the thumbnail when one was captured", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    await api.analyzePose("Squat", pose as never, new Blob(["v"], { type: "video/webm" }),
+      new Blob(["jpeg"], { type: "image/jpeg" }));
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeInstanceOf(Blob);
   });
 });

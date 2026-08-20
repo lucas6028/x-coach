@@ -13,7 +13,7 @@ a working web app on top of the research pipelines:
 - **ML/perception library** in `src/` (pose, video, knowledge, rehab24, fit3d, egoexo)
   with thin CLI entry points in `scripts/` — the research foundation.
 - **Backend** in `backend/` — FastAPI app (`backend/app/main.py`); routers: analyze,
-  analyses, chat, conversations, knowledge, videos; Supabase for auth/history;
+  analyses, chat, conversations, knowledge, plans, videos; Supabase for auth/history;
   chat via OpenRouter (spec: `specs/llm-chat-spec.md`).
 - **Frontend** in `frontend/` — React 18 + Vite + TypeScript + Tailwind, Supabase client.
 
@@ -26,6 +26,8 @@ KG schema docs: `docs/kg-schema-generalization.md`, `docs/movement-kg-expansion-
   NEVER `source .venv/bin/activate` (POSIX-only, fails here), never bare `python`/`pip`.
   Use `.venv\Scripts\python.exe -m pip install ...` for deps.
   `.venv-mmpose\` is a second venv ONLY for the `--runtime mmpose` pose path.
+  `.venv` deliberately holds a CPU-only torch; GPU extraction gets its own venv
+  (`scripts/rehab24/README.md`), so check for a local GPU before assuming Kaggle.
 - **Backend/ML tests:** `.venv\Scripts\python.exe -m pytest tests/` (always scope to
   `tests/`; never bare `pytest`).
   Single case: append `tests/test_x.py::Class::test_name`.
@@ -36,6 +38,12 @@ KG schema docs: `docs/kg-schema-generalization.md`, `docs/movement-kg-expansion-
   `yarn dev` / `yarn test` (vitest run) / `yarn test:coverage` / `yarn build`.
 - **CI** (`.github/workflows/ci.yml`): backend pytest (py 3.11/3.12) + coverage gate;
   frontend `yarn test:coverage`. Match it locally before claiming tests pass.
+- **Docker** (web app only, not the research pipelines): `docker compose up --build` →
+  app :8080, API :8000. Add `-f docker-compose.dev.yml` for hot reload (Vite :5173).
+  `requirements-docker.txt` is the web subset of `requirements.txt` (no torch/transformers)
+  and must be updated by hand alongside it. Full notes: `docs/docker.md`.
+- **Azure deployment** (same two images, on Container Apps): Bicep in `infra/main.bicep`,
+  walkthrough in `docs/azure-deployment.md`. Supabase and Cloudflare R2 stay external.
 - `GOOGLE_API_KEY` is only needed for Gemini KG extraction (`src/knowledge/extract_kg.py`).
   Everything else, including RAG, runs fully offline.
 - **Kaggle:** drive the Kaggle CLI via `uv` in the shell. Do NOT use the `kaggle` MCP
@@ -80,3 +88,21 @@ Project knowledge graph at `graphify-out/` (graph.json + GRAPH_REPORT.md; no wik
   concept; `GRAPH_REPORT.md` only for broad architecture review.
 - After modifying code, run `graphify update .` (AST-only, no API cost). Note the graph
   is scoped to the project proper (memory `graphify-graph-scoped`).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `lucas6028/x-coach`, driven via the `gh` CLI.
+See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name (`needs-triage`,
+`needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`).
+See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root, created lazily by
+`/domain-modeling` — neither exists yet. See `docs/agents/domain.md`.

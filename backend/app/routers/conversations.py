@@ -19,9 +19,31 @@ from backend.app.services import store
 router = APIRouter(prefix="/api", tags=["conversations"])
 
 
+class ToolSource(BaseModel):
+    """One provenance entry the tray shows under a tool call.
+
+    ``kind`` is a corpus ``source_type`` for ``rag_search`` but the literal ``"concept"`` for
+    ``kg_query``, whose knowledge-graph nodes carry no source field at all — the client keys off it
+    to keep a graph concept out of the citation slot (spec v3.1 section 1).
+    """
+
+    label: str
+    kind: str
+
+
+class ToolRun(BaseModel):
+    name: str
+    query: str = ""
+    sources: list[ToolSource] = Field(default_factory=list)
+
+
 class ConversationMessage(BaseModel):
     role: Literal["user", "assistant"]
     content: str = Field(..., min_length=1)
+    # The tool calls that produced this answer, persisted so a reload or a history replay restores
+    # the answer's provenance and not just its text. Empty for every user turn and for any row
+    # written before v3.1. `conversations.messages` is jsonb, so this needed no migration.
+    tools: list[ToolRun] = Field(default_factory=list)
 
 
 class ConversationBody(BaseModel):

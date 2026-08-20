@@ -1,132 +1,37 @@
-import { CircleNotch, List, SignIn } from "@phosphor-icons/react";
-import { Link } from "react-router-dom";
-import type { Analysis } from "../api";
-import { useI18n, movementLabel, viewLabel } from "../lib/i18n";
-import { useAuth } from "../lib/auth";
-import ThemeToggle from "./ThemeToggle";
-import LanguageToggle from "./LanguageToggle";
-import AccountMenu from "./AccountMenu";
+import { List } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
+import { useI18n } from "../lib/i18n";
 
 interface Props {
-  analysis: Analysis | null;
-  loading: boolean;
-  // A plain page title (History/Settings). When set, the navbar shows just this name and drops the
-  // analysis status line; the studio leaves it unset to show the session + status pill.
-  title?: string;
-  // The studio's currently-selected movement, BEFORE a result exists (there is no `analysis` yet
-  // to read it off of). Used only to keep the pre-result heading honest — "{movement} Analysis"
-  // instead of a hardcoded "Squat Analysis" — for whichever movement the user actually picked.
-  // Falls back to "Squat" when omitted (matches the studio's own default).
-  movement?: string;
   onMenu?: () => void;
-  // Desktop sidebar collapse toggle. Rendered only when supplied (i.e. inside AppLayout); a
-  // standalone Header omits it so its accessible name can't collide with the mobile menu button.
-  onToggleSidebar?: () => void;
-  sidebarOpen?: boolean;
+  /** The page's own header (breadcrumb, title, its controls), rendered beside the drawer button. */
+  children?: ReactNode;
 }
 
-export default function Header({
-  analysis,
-  loading,
-  title,
-  movement,
-  onMenu,
-  onToggleSidebar,
-  sidebarOpen = true,
-}: Props) {
+// The top row of the content card: the page's own header, and the drawer button that opens the
+// rail below `lg`. Everything else has moved to the rail — the brand is its mark, every
+// destination is an entry, and the account cluster (avatar, sign-in, the in-flight LINE login)
+// sits at its foot. Language lives in the settings dialog behind that avatar; there is no theme
+// picker any more, the app is light-only.
+// Colours are the reference's own fixed hexes.
+export default function Header({ onMenu, children }: Props) {
   const { t } = useI18n();
-  const { user, lineAuthenticating } = useAuth();
+
   return (
-    <header className="relative z-30 h-16 shrink-0 border-b border-border-dark bg-surface flex items-center gap-2 sm:gap-3 px-3 lg:px-4">
-      {/* Mobile: open the off-canvas drawer */}
+    // `items-start`: the page header can be three lines tall (breadcrumb, title, subtitle) and the
+    // drawer button belongs at the top of that band, not centred against it.
+    <header className="relative z-30 flex shrink-0 items-start gap-2 sm:gap-3">
+      {/* Mobile only: open the off-canvas drawer. */}
       <button
         onClick={onMenu}
         aria-label={t("nav.show")}
-        className="lg:hidden shrink-0 w-10 h-10 flex items-center justify-center rounded-xl text-muted hover:bg-content/5 hover:text-content transition-colors"
+        className="lg:hidden shrink-0 w-10 h-10 flex items-center justify-center rounded-2xl text-[#59648f] hover:bg-[#f5f6fb] hover:text-[#1e2142] transition-colors"
       >
         <List size={22} />
       </button>
-      {/* Desktop: collapse the sidebar rail (this is the navbar's role in the reference layout) */}
-      {onToggleSidebar && (
-        <button
-          onClick={onToggleSidebar}
-          aria-label={sidebarOpen ? t("nav.hide") : t("nav.show")}
-          title={sidebarOpen ? t("nav.hide") : t("nav.show")}
-          className="hidden lg:flex shrink-0 w-10 h-10 items-center justify-center rounded-xl text-muted hover:bg-content/5 hover:text-content transition-colors"
-        >
-          <List size={20} />
-        </button>
-      )}
-      {/* Brand lockup — lives in the full-width navbar, above where the sidebar begins */}
-      <Link to="/app" aria-label="X-Coach" className="flex items-center gap-2.5 shrink-0">
-        <img src="/icon.svg" alt="" className="w-9 h-9 rounded-xl shadow-accent ring-1 ring-black/5" />
-        <span className="hidden sm:block font-display font-bold tracking-tight">X-Coach</span>
-      </Link>
-      <div className="hidden sm:block h-6 w-px bg-border-dark mx-1 shrink-0" />
-      <div className="flex flex-1 flex-col min-w-0">
-        <h1 className="text-content text-sm lg:text-base font-semibold tracking-tight truncate">
-          {title ??
-            (analysis
-              ? t("header.session", { id: analysis.video_id })
-              : t("header.title", { movement: movementLabel(t, movement ?? "Squat") }))}
-        </h1>
-        {!title && (
-          <div className="flex items-center gap-2 text-[11px] text-muted font-mono">
-            <span
-              className={`inline-block w-2 h-2 rounded-full ${
-                loading ? "bg-yellow-400 animate-pulse" : analysis ? "bg-green-500" : "bg-faint"
-              }`}
-            />
-            {loading
-              ? t("header.processing")
-              : analysis
-                ? t("header.complete")
-                : t("header.awaiting")}
-            {analysis && (
-              <>
-                {/* Which movement's rules produced this verdict — the ONLY UI surface that names it
-                    on the common (fault-detected) result path, so it must not be sm:hidden. */}
-                <span className="text-faint">|</span>
-                <span>{movementLabel(t, analysis.movement ?? "Squat")}</span>
-                <span className="text-faint">|</span>
-                <span>{t("header.view", { type: viewLabel(t, analysis.view.view_type) })}</span>
-                <span className="text-faint hidden sm:inline">|</span>
-                <span className="hidden sm:inline uppercase">{analysis.source}</span>
-              </>
-            )}
-          </div>
-        )}
-      </div>
 
-      {/* Top-right controls: language, theme, account. */}
-      <div className="flex items-center gap-1 shrink-0">
-        <LanguageToggle />
-        <ThemeToggle />
-        <div className="mx-1 h-6 w-px bg-border-dark" />
-        {user ? (
-          <AccountMenu />
-        ) : lineAuthenticating ? (
-          // Silent LINE auto-login is in flight (typically the web redirect-return): show a
-          // "signing in" affordance instead of the log-in link, which would read as failed.
-          <span
-            aria-live="polite"
-            className="flex items-center gap-1.5 h-10 px-2.5 text-sm font-medium text-muted"
-          >
-            <CircleNotch size={18} weight="bold" className="animate-spin" />
-            <span className="hidden sm:inline">{t("account.lineSigningIn")}</span>
-          </span>
-        ) : (
-          <Link
-            to="/login"
-            aria-label={t("account.signin")}
-            title={t("account.signin")}
-            className="flex items-center gap-1.5 h-10 px-2.5 rounded-lg text-muted hover:bg-content/5 hover:text-content transition-colors"
-          >
-            <SignIn size={20} />
-            <span className="hidden sm:inline text-sm font-medium">{t("account.signin")}</span>
-          </Link>
-        )}
-      </div>
+      {/* The page's own header, or just a spacer when a page supplies none. */}
+      <div className="min-w-0 flex-1">{children}</div>
     </header>
   );
 }

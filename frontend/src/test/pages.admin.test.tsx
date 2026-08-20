@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import {
@@ -11,6 +11,7 @@ import {
 } from "../api";
 import AdminLayout from "../pages/admin/AdminLayout";
 import AdminOverviewPage from "../pages/admin/AdminOverview";
+import AdminLinePage from "../pages/admin/AdminLine";
 import AdminUsers from "../pages/admin/AdminUsers";
 import AdminSettingsLlm from "../pages/admin/AdminSettingsLlm";
 import AdminSettingsRag from "../pages/admin/AdminSettingsRag";
@@ -27,7 +28,12 @@ const SAMPLE_SETTINGS: AdminSettingsResponse = {
       followup_timeout: 15,
     },
     rag_kg: { rag_top_k: 5, kg_hops: 1, kg_seeds: 5 },
-    analyze: { allowed_upload_suffixes: [".mp4", ".mov"], max_concurrent_analyses: 2 },
+    analyze: {
+      allowed_upload_suffixes: [".mp4", ".mov"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+      max_concurrent_analyses: 2,
+    },
   },
   defaults: {
     llm: {
@@ -39,7 +45,12 @@ const SAMPLE_SETTINGS: AdminSettingsResponse = {
       followup_timeout: 15,
     },
     rag_kg: { rag_top_k: 5, kg_hops: 1, kg_seeds: 5 },
-    analyze: { allowed_upload_suffixes: [".mp4", ".mov"], max_concurrent_analyses: 2 },
+    analyze: {
+      allowed_upload_suffixes: [".mp4", ".mov"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+      max_concurrent_analyses: 2,
+    },
   },
 };
 
@@ -59,6 +70,12 @@ const SAMPLE_LINE_STATUS: LineStatus = {
   channel_id: "2010629653",
   quota: { type: "limited", used: 12, value: 200, remaining: 188 },
   quota_error: null,
+  bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "bot", mark_as_read_mode: "auto" },
+  bot_info_error: null,
+  webhook: { endpoint: "https://x-coach.app/api/line/webhook", active: true },
+  webhook_error: null,
+  delivery: { date: "20260720", reply: 4, push: 3 },
+  delivery_error: null,
 };
 
 // Row "u1" is the signed-in admin (self, cannot self-demote); "u2" is a non-admin togglable user.
@@ -96,6 +113,7 @@ function renderAdmin(path: string) {
         <Routes>
           <Route path="/admin" element={<AdminLayout />}>
             <Route index element={<AdminOverviewPage />} />
+            <Route path="line" element={<AdminLinePage />} />
             <Route path="users" element={<AdminUsers />} />
             <Route path="settings/llm" element={<AdminSettingsLlm />} />
             <Route path="settings/rag" element={<AdminSettingsRag />} />
@@ -127,16 +145,25 @@ beforeEach(() => {
   vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: SAMPLE_USERS });
   vi.spyOn(api, "getAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
   vi.spyOn(api, "getLineStatus").mockResolvedValue(SAMPLE_LINE_STATUS);
+  vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+    result: { success: true, status_code: 200, reason: "OK", detail: "200" }, error: null,
+  });
 });
-afterEach(() => vi.restoreAllMocks());
+// unstubAllGlobals is not optional here: the clipboard tests replace `navigator` wholesale, and a
+// leaked stub would follow every later test in the file.
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe("AdminLayout gate", () => {
   it("renders the admin nav for an admin", async () => {
     renderAdmin("/admin");
-    // The nav lists all five admin destinations (plus the back-to-app link). The rail is rendered in
+    // The nav lists all six admin destinations (plus the back-to-app link). The rail is rendered in
     // both the desktop shell and the (off-canvas) mobile drawer, so each link appears more than once.
     expect((await screen.findAllByRole("link", { name: "Users" })).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "LLM chat" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "LINE" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "Back to app" }).length).toBeGreaterThan(0);
     expect(
       screen.queryByText("You don't have access to the admin panel.")
@@ -178,8 +205,27 @@ describe("AdminOverview", () => {
     expect(screen.getByText("1/2 ready")).toBeInTheDocument();
   });
 
-  it("renders the LINE quota cards when messaging is configured with a limit", async () => {
+  it("no longer fetches the LINE status (moved to its own page)", async () => {
     renderAdmin("/admin");
+    await screen.findByText("Total users");
+    expect(api.getLineStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("AdminLine", () => {
+  it("renders the page header", async () => {
+    renderAdmin("/admin/line");
+    expect(await screen.findByRole("heading", { name: "LINE" })).toBeInTheDocument();
+  });
+
+  it("shows a load error when the LINE status fetch fails", async () => {
+    vi.spyOn(api, "getLineStatus").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("Couldn't load the LINE status.")).toBeInTheDocument();
+  });
+
+  it("renders the LINE quota cards when messaging is configured with a limit", async () => {
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Push used this month")).toBeInTheDocument();
     expect(screen.getByText("12 / 200")).toBeInTheDocument();
     expect(screen.getByText("Free remaining")).toBeInTheDocument();
@@ -191,7 +237,7 @@ describe("AdminOverview", () => {
       ...SAMPLE_LINE_STATUS,
       quota: { type: "none", used: 9 },
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("9")).toBeInTheDocument(); // used, no "/ limit"
     expect(screen.getByText("—")).toBeInTheDocument();
     expect(
@@ -205,16 +251,8 @@ describe("AdminOverview", () => {
       quota: null,
       quota_error: "unreachable",
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     expect(await screen.findByText("Couldn't reach LINE for quota.")).toBeInTheDocument();
-  });
-
-  it("does not break the overview when the LINE status fetch fails", async () => {
-    vi.spyOn(api, "getLineStatus").mockRejectedValue(new Error("500 boom"));
-    renderAdmin("/admin");
-    // Main overview still renders; the LINE section simply renders nothing.
-    expect(await screen.findByText("Total users")).toBeInTheDocument();
-    expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
   });
 
   it("shows only the connection-status cards when LINE is not configured", async () => {
@@ -224,23 +262,237 @@ describe("AdminOverview", () => {
       channel_id: "",
       quota: null,
       quota_error: null,
+      bot_info: null,
+      bot_info_error: null,
+      webhook: null,
+      webhook_error: null,
+      delivery: null,
+      delivery_error: null,
     });
-    renderAdmin("/admin");
+    renderAdmin("/admin/line");
     // The two LINE connection cards render (both "Not configured"), but no quota UI appears.
     expect(await screen.findByText("LINE login bridge")).toBeInTheDocument();
     expect(screen.getByText("LINE bot")).toBeInTheDocument();
     expect(screen.queryByText("Push used this month")).not.toBeInTheDocument();
     expect(screen.queryByText("Free remaining")).not.toBeInTheDocument();
     expect(screen.queryByText("Couldn't reach LINE for quota.")).not.toBeInTheDocument();
+    // Unconfigured must NOT masquerade as a failed read: no "couldn't read" notes, no Test button.
+    expect(screen.queryByRole("button", { name: "Test webhook" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Couldn't read/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the bot info, webhook, and delivery cards", async () => {
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("x-coach")).toBeInTheDocument();
+    expect(screen.getByText("@xcoach")).toBeInTheDocument();
+    expect(screen.getByText("Webhook")).toBeInTheDocument();
+    expect(screen.getByText("Replies yesterday")).toBeInTheDocument();
+    expect(screen.getByText("4")).toBeInTheDocument(); // reply count
+    expect(screen.getByText("3")).toBeInTheDocument(); // push count
+  });
+
+  it("warns when the bot is in chat mode (webhook won't receive events)", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      bot_info: { display_name: "x-coach", basic_id: "@xcoach", premium_id: null, chat_mode: "chat", mark_as_read_mode: "auto" },
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText(/won't receive message events/i)).toBeInTheDocument();
+  });
+
+  it("shows 'not ready yet' when delivery counts are unavailable", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      delivery: { date: "20260720", reply: null, push: null },
+    });
+    renderAdmin("/admin/line");
+    expect((await screen.findAllByText("Not ready yet")).length).toBeGreaterThan(0);
+  });
+
+  it("runs the webhook test and shows a reachable result", async () => {
+    const testFn = vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+      result: { success: true, status_code: 200, reason: "OK", detail: "200" },
+      error: null,
+    });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    await waitFor(() => expect(testFn).toHaveBeenCalled());
+    expect(await screen.findByText(/Reachable \(200\)/i)).toBeInTheDocument();
+  });
+
+  it("shows an error when the webhook test can't reach LINE", async () => {
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error: "unreachable" });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    expect(await screen.findByText("Couldn't reach LINE.")).toBeInTheDocument();
+  });
+
+  it("shows the status code and reason when the webhook test reports success: false", async () => {
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({
+      result: { success: false, status_code: 500, reason: "ERROR", detail: "500" },
+      error: null,
+    });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    const msg = await screen.findByText(/Failed/i);
+    expect(msg.textContent).toContain("500");
+    expect(msg.textContent).toContain("ERROR");
+  });
+
+  it("never fires the webhook test on page load — only on an explicit click", async () => {
+    renderAdmin("/admin/line");
+    await screen.findByRole("button", { name: "Test webhook" });
+    expect(api.testLineWebhook).not.toHaveBeenCalled();
+  });
+
+  it("renders the delivery date under the reply/push count cards", async () => {
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("Replies yesterday")).toBeInTheDocument();
+    expect(screen.getByText("Counts for 2026-07-20")).toBeInTheDocument();
+  });
+
+  // A failed read must FLAG itself, never erase its own card — otherwise the panel hides the exact
+  // misconfiguration it exists to diagnose, and the admin reads "broken" as "never shipped".
+  it("keeps the webhook card and its Test button when the webhook read failed", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      webhook: null,
+      webhook_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText(/Couldn't read the webhook setting/i)).toBeInTheDocument();
+    // The active probe is the only way left to learn WHY, so it must survive the failed read.
+    expect(screen.getByRole("button", { name: "Test webhook" })).toBeInTheDocument();
+  });
+
+  it("flags a failed bot-info read instead of dropping the card", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      bot_info: null,
+      bot_info_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText("Official account")).toBeInTheDocument();
+    expect(screen.getByText(/Couldn't read the official-account info/i)).toBeInTheDocument();
+  });
+
+  it("flags a failed delivery read instead of dropping the counts", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      delivery: null,
+      delivery_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    expect(await screen.findByText(/Couldn't read yesterday's delivery counts/i)).toBeInTheDocument();
+  });
+
+  // Login and messaging are two SEPARATE LINE channels. A green "Enabled" on a server where only
+  // one of them is wired up would be the status page misreporting the exact thing it exists to
+  // report, so half-configured has to read as its own state.
+  it.each([
+    [true, true, "Enabled"],
+    [true, false, "Partly configured"],
+    [false, true, "Partly configured"],
+    // Distinct from the cards' own "Not configured" so this assertion can't pass by matching one
+    // of them instead of the header summary.
+    [false, false, "Not set up"],
+  ])(
+    "reports login=%s messaging=%s as '%s' in the header",
+    async (login_configured, messaging_configured, expected) => {
+      vi.spyOn(api, "getLineStatus").mockResolvedValue({
+        ...SAMPLE_LINE_STATUS,
+        login_configured,
+        messaging_configured,
+      });
+      renderAdmin("/admin/line");
+      expect(await screen.findByText(expected)).toBeInTheDocument();
+    }
+  );
+
+  it("copies the webhook endpoint to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Copy webhook URL" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("https://x-coach.app/api/line/webhook"));
+    expect(await screen.findByText("Copied")).toBeInTheDocument();
+  });
+
+  // A copy button that silently no-ops (insecure origin, embedded webview) leaves the admin
+  // pasting whatever was in the buffer before. Say it failed and tell them to select it by hand.
+  it("says so when the clipboard write is rejected instead of claiming success", async () => {
+    vi.stubGlobal("navigator", {
+      ...navigator,
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("denied")) },
+    });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Copy webhook URL" }));
+    expect(await screen.findByText(/select the URL and copy it manually/i)).toBeInTheDocument();
+    expect(screen.queryByText("Copied")).not.toBeInTheDocument();
+  });
+
+  // The verdict is a modal now, not a line of text under the button — so it has to be dismissible,
+  // and it must not be on screen before the probe is ever run.
+  it("shows the webhook-test verdict in a dialog and closes it again", async () => {
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Reachable \(200\)/i)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("closes the webhook-test dialog on Escape", async () => {
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    await screen.findByRole("dialog");
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("shows no verdict dialog until the test is actually run", async () => {
+    renderAdmin("/admin/line");
+    await screen.findByRole("button", { name: "Test webhook" });
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows no copy button when the webhook endpoint couldn't be read", async () => {
+    vi.spyOn(api, "getLineStatus").mockResolvedValue({
+      ...SAMPLE_LINE_STATUS,
+      webhook: null,
+      webhook_error: "unreachable",
+    });
+    renderAdmin("/admin/line");
+    await screen.findByText(/Couldn't read the webhook setting/i);
+    expect(screen.queryByRole("button", { name: "Copy webhook URL" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["unauthorized" as const, /rejected the channel access token/i],
+    ["rate_limited" as const, /rate-limited/i],
+    ["no_endpoint" as const, /No webhook endpoint is set/i],
+    ["not_configured" as const, /isn't configured on this server/i],
+  ])("names the cause when the webhook test fails with %s", async (error, pattern) => {
+    // Reporting a bad token or a rate limit as "couldn't reach LINE" sends the admin chasing
+    // connectivity — the diagnostics tool would be the source of the misdiagnosis.
+    vi.spyOn(api, "testLineWebhook").mockResolvedValue({ result: null, error });
+    renderAdmin("/admin/line");
+    fireEvent.click(await screen.findByRole("button", { name: "Test webhook" }));
+    expect(await screen.findByText(pattern)).toBeInTheDocument();
+    expect(screen.queryByText("Couldn't reach LINE.")).not.toBeInTheDocument();
   });
 });
 
 describe("AdminUsers", () => {
+  // Scoped to the table on purpose: the signed-in admin ("ada@x.com", row u1) is now also named by
+  // the account cluster in the nav rail, which the shell renders twice (desktop rail + off-canvas
+  // drawer). An unscoped getByText would match three nodes and fail on a page that is correct.
   it("renders the users table rows with the self tag", async () => {
     renderAdmin("/admin/users");
     expect(await screen.findByText("bob@x.com")).toBeInTheDocument();
-    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
-    expect(screen.getByText("You")).toBeInTheDocument();
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("ada@x.com")).toBeInTheDocument();
+    expect(table.getByText("You")).toBeInTheDocument();
   });
 
   it("toggles a non-self user's role and refreshes the list", async () => {
@@ -341,10 +593,15 @@ describe("Admin settings pages", () => {
     ).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: /max concurrent/i })).toBeNull();
 
-    // Saving only sends the editable upload-formats field — never max_concurrent_analyses.
+    // Saving sends only the editable analyze knobs — never max_concurrent_analyses. Kept as an
+    // exact-equality assertion (not toMatchObject) precisely because that absence is the claim.
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => expect(update).toHaveBeenCalled());
-    expect(update.mock.calls[0][0]).toEqual({ allowed_upload_suffixes: [".mp4", ".mov"] });
+    expect(update.mock.calls[0][0]).toEqual({
+      allowed_upload_suffixes: [".mp4", ".mov"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+    });
   });
 });
 
@@ -450,7 +707,7 @@ describe("AdminSettingsRag save-error + full edit", () => {
 });
 
 describe("AdminSettingsAnalyze edit + save-error", () => {
-  it("sends only the edited upload suffixes on save", async () => {
+  it("sends the analyze group — suffixes plus both upload limits — on save", async () => {
     const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
     renderAdmin("/admin/settings/analyze");
     fireEvent.change(await screen.findByLabelText("Allowed upload formats"), {
@@ -458,7 +715,47 @@ describe("AdminSettingsAnalyze edit + save-error", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
     await waitFor(() => expect(update).toHaveBeenCalled());
-    expect(update.mock.calls[0][0]).toEqual({ allowed_upload_suffixes: [".mp4", ".avi"] });
+    expect(update.mock.calls[0][0]).toEqual({
+      allowed_upload_suffixes: [".mp4", ".avi"],
+      max_upload_bytes: 104857600,
+      user_storage_quota_bytes: 524288000,
+    });
+  });
+
+  it("persists edited upload limits, so the panel really can retune them without a redeploy", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/analyze");
+    fireEvent.change(await screen.findByLabelText("Max upload size (bytes)"), {
+      target: { value: "262144000" },
+    });
+    fireEvent.change(screen.getByLabelText("Per-user storage quota (bytes)"), {
+      target: { value: "2147483648" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0][0].max_upload_bytes).toBe(262144000);
+    expect(update.mock.calls[0][0].user_storage_quota_bytes).toBe(2147483648);
+  });
+
+  it("shows the effective limits and their defaults", async () => {
+    renderAdmin("/admin/settings/analyze");
+    expect(await screen.findByLabelText("Max upload size (bytes)")).toHaveValue("104857600");
+    expect(screen.getByLabelText("Per-user storage quota (bytes)")).toHaveValue("524288000");
+    expect(screen.getByText("Default: 104857600")).toBeInTheDocument();
+    expect(screen.getByText("Default: 524288000")).toBeInTheDocument();
+  });
+
+  it("blocks the save and shows the invalid-number error when a limit is cleared", async () => {
+    const update = vi.spyOn(api, "updateAdminSettings").mockResolvedValue(SAMPLE_SETTINGS);
+    renderAdmin("/admin/settings/analyze");
+    fireEvent.change(await screen.findByLabelText("Max upload size (bytes)"), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Save changes/i }));
+    expect(
+      await screen.findByText("Please enter a valid number for every field.")
+    ).toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("shows the save-error state when the update rejects", async () => {
@@ -508,9 +805,11 @@ describe("AdminUsers error / empty / toggle-failure", () => {
     // Inline per-row error is shown; the list was NOT re-fetched (only the initial load ran).
     expect(await screen.findByText("Couldn't update this user's role.")).toBeInTheDocument();
     expect(list).toHaveBeenCalledTimes(1);
-    // Both rows survive — the failed toggle didn't corrupt the table.
-    expect(screen.getByText("ada@x.com")).toBeInTheDocument();
-    expect(screen.getByText("bob@x.com")).toBeInTheDocument();
+    // Both rows survive — the failed toggle didn't corrupt the table. Scoped to the table because
+    // the signed-in admin's own email also appears in the rail's account cluster (see above).
+    const table = within(screen.getByRole("table"));
+    expect(table.getByText("ada@x.com")).toBeInTheDocument();
+    expect(table.getByText("bob@x.com")).toBeInTheDocument();
   });
 
   it("falls back to the id for a null email and shows 'Never' for an unparseable date", async () => {
@@ -541,25 +840,28 @@ describe("AdminLayout loading + mobile nav", () => {
     expect(await screen.findByText("Checking your access…")).toBeInTheDocument();
   });
 
+  // The backdrop is selected by its tint class because it carries no other stable hook. That tint
+  // is `bg-black/40` to match the app shell's own drawer (components/AppLayout.tsx) — if the shells
+  // are restyled again, these selectors move with it.
   it("opens the mobile drawer (backdrop) and closes it via the drawer's close button", async () => {
     const { container } = renderAdmin("/admin");
     await screen.findByLabelText("Show navigation");
     // Drawer starts closed: the off-canvas backdrop is not mounted yet.
-    expect(container.querySelector(".bg-black\\/50")).toBeNull();
+    expect(container.querySelector(".bg-black\\/40")).toBeNull();
     // Open: the header's menu button mounts the backdrop.
     fireEvent.click(screen.getByLabelText("Show navigation"));
-    expect(container.querySelector(".bg-black\\/50")).not.toBeNull();
+    expect(container.querySelector(".bg-black\\/40")).not.toBeNull();
     // Close: the drawer's onNavigate close button collapses it again.
     fireEvent.click(screen.getByLabelText("Hide navigation"));
-    await waitFor(() => expect(container.querySelector(".bg-black\\/50")).toBeNull());
+    await waitFor(() => expect(container.querySelector(".bg-black\\/40")).toBeNull());
   });
 
   it("closes the mobile drawer when the backdrop is clicked", async () => {
     const { container } = renderAdmin("/admin");
     fireEvent.click(await screen.findByLabelText("Show navigation"));
-    const backdrop = container.querySelector(".bg-black\\/50");
+    const backdrop = container.querySelector(".bg-black\\/40");
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop as Element);
-    await waitFor(() => expect(container.querySelector(".bg-black\\/50")).toBeNull());
+    await waitFor(() => expect(container.querySelector(".bg-black\\/40")).toBeNull());
   });
 });

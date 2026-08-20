@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Analysis } from "../api";
 import { POSE_CONNECTIONS, FAULT_LANDMARKS, edgeIsFaulty } from "../lib/pose";
+import { containRect } from "../lib/videoRect";
 
 interface Props {
   analysis: Analysis;
@@ -68,22 +69,13 @@ export default function SkeletonOverlay({ analysis, videoRef, onActiveFault }: P
       // full canvas, otherwise the skeleton drifts off the body.
       const vw = video.videoWidth || analysis.metadata.width || analysis.pose.width || 1;
       const vh = video.videoHeight || analysis.metadata.height || analysis.pose.height || 1;
-      const videoAspect = vw / vh;
-      const boxAspect = canvas.width / canvas.height;
-      let rW: number, rH: number, oX: number, oY: number;
-      if (boxAspect > videoAspect) {
-        // pillarboxed (bars left/right)
-        rH = canvas.height;
-        rW = rH * videoAspect;
-        oX = (canvas.width - rW) / 2;
-        oY = 0;
-      } else {
-        // letterboxed (bars top/bottom)
-        rW = canvas.width;
-        rH = rW / videoAspect;
-        oX = 0;
-        oY = (canvas.height - rH) / 2;
-      }
+      // Shared with the DOM-positioned fault chips (lib/videoRect) — they annotate the same
+      // joints this canvas highlights, so the two must agree on where the video actually is.
+      const { offsetX: oX, offsetY: oY, width: rW, height: rH } = containRect(
+        canvas.width,
+        canvas.height,
+        vw / vh
+      );
       const px = (x: number) => oX + x * rW;
       const py = (y: number) => oY + y * rH;
 

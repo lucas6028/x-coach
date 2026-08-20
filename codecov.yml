@@ -25,3 +25,6 @@ ignore:
   # Camera + rAF page shells: impure edges only; their logic is unit-tested in src/lib/*.
   - "frontend/src/pages/SixSeven.tsx"
   - "frontend/src/pages/FruitNinja.tsx"
+  # The worker entry itself has the browser-only MediaPipe GPU boundary; the runner is tested.
+  - "frontend/src/workers/poseInference.worker.ts"
+  - "frontend/src/components/poseLandmarker.ts"

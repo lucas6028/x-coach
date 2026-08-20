@@ -6,6 +6,7 @@ import {
   GameController,
   HandWaving,
   Knife,
+  MaskHappy,
   Trophy,
   Warning,
   type Icon,
@@ -16,6 +17,7 @@ import { useLiffContext } from "../lib/liffContext";
 import { loadCalories } from "../lib/calorieStore";
 import { bestScore as bestNinjaScore } from "../lib/ninja/leaderboard";
 import { loadLeaderboard as loadSixBoard } from "../lib/sixseven/leaderboard";
+import { bestScore as bestWebScore } from "../lib/webslinger/leaderboard";
 import type { GameId } from "../lib/calories";
 
 interface GameCard {
@@ -67,10 +69,22 @@ export default function Games() {
       best: bestSix,
       bestLabelKey: "games.stat.bestCount",
     },
+    {
+      id: "webslinger",
+      to: "/web-slinger",
+      emoji: "🕸️",
+      gradient: "from-rose-700/30 via-slate-700/20 to-sky-400/10",
+      icon: MaskHappy,
+      titleKey: "web.title",
+      descKey: "games.web.desc",
+      tagKey: "web.badge",
+      best: bestWebScore(),
+      bestLabelKey: "games.stat.bestScore",
+    },
   ];
 
   return (
-    <AppLayout title={t("games.title")}>
+    <AppLayout>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         <motion.div
           initial={reduce ? false : { opacity: 0, y: 14 }}

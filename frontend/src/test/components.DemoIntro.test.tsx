@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import DemoIntro from "../components/DemoIntro";
 import { renderWithProviders } from "./renderWithProviders";
 
@@ -8,18 +7,22 @@ import { renderWithProviders } from "./renderWithProviders";
 // through App so the URL-driven wiring is covered end to end). These props are fixed to an
 // always-available, already-loaded Squat so the pre-existing assertions below — none of which are
 // about movement selection — keep observing the same dropzone/loader behavior as before.
+//
+// The <select> itself now lives in the studio's page header (StudioTitleBar), not here: the
+// reference design moved every analysis control up into the header, and two selectors for one
+// setting is how they drift apart. So DemoIntro no longer takes `movements`/`onMovementChange`,
+// and the tier it forwards to CaptureStudio is supplied from above too.
 const movementProps = {
-  movements: [{ name: "Squat", validated: true }],
   movement: "Squat",
-  onMovementChange: vi.fn(),
   movementError: "",
   movementsLoaded: true,
+  tier: "heavy" as const,
 };
 
 describe("DemoIntro", () => {
   it("shows the heading", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
       "Analyze your Squat in about 20 seconds."
@@ -34,13 +37,11 @@ describe("DemoIntro", () => {
       <DemoIntro
         onBlob={vi.fn()}
         onError={vi.fn()}
-        onOpenLibrary={vi.fn()}
         loading={false}
         statusMsg=""
         error=""
         {...movementProps}
         movement="Push-up"
-        movements={[{ name: "Push-up", validated: true }]}
       />
     );
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
@@ -51,38 +52,26 @@ describe("DemoIntro", () => {
 
   it("shows the sub-heading description", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
-    expect(screen.getByText(/Upload a clip or open a labeled sample/)).toBeInTheDocument();
+    expect(screen.getByText(/Upload or record a clip/)).toBeInTheDocument();
   });
 
-  it("shows the 'Open a sample clip' button", () => {
+  // The sample library is gone: the studio's empty state is now the capture panel alone. Pinned
+  // because the button, its "or" divider and the copy promising a labeled sample were three
+  // separate places that had to agree, and a leftover of any one of them offers a route into a
+  // picker that no longer exists.
+  it("offers no sample-clip route", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
-    expect(screen.getByRole("button", { name: /Open a sample clip/i })).toBeInTheDocument();
-  });
-
-  it("calls onOpenLibrary when the sample button is clicked", async () => {
-    const user = userEvent.setup();
-    const onOpenLibrary = vi.fn();
-    renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={onOpenLibrary} loading={false} statusMsg="" error="" {...movementProps} />
-    );
-    await user.click(screen.getByRole("button", { name: /Open a sample clip/i }));
-    expect(onOpenLibrary).toHaveBeenCalledOnce();
-  });
-
-  it("disables the sample button while loading", () => {
-    renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={true} statusMsg="Processing…" error="" {...movementProps} />
-    );
-    expect(screen.getByRole("button", { name: /Open a sample clip/i })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /sample/i })).toBeNull();
+    expect(screen.queryByText(/labeled sample/i)).toBeNull();
   });
 
   it("swaps the dropzone for the Lumen scan loader while loading", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={true} statusMsg="Extracting pose…" error="" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={true} statusMsg="Extracting pose…" error="" {...movementProps} />
     );
     // The Lumen waiting state takes over the upload target, carrying the status message…
     expect(screen.getByRole("status")).toHaveAttribute("aria-label", "Extracting pose…");
@@ -95,7 +84,6 @@ describe("DemoIntro", () => {
       <DemoIntro
         onBlob={vi.fn()}
         onError={vi.fn()}
-        onOpenLibrary={vi.fn()}
         loading={false}
         statusMsg=""
         error=""
@@ -111,7 +99,7 @@ describe("DemoIntro", () => {
 
   it("shows the error panel when error is non-empty", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="Video too short" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="Video too short" {...movementProps} />
     );
     expect(screen.getByText("That clip did not go through")).toBeInTheDocument();
     expect(screen.getByText("Video too short")).toBeInTheDocument();
@@ -119,25 +107,28 @@ describe("DemoIntro", () => {
 
   it("does not show the error panel when error is empty", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
     expect(screen.queryByText("That clip did not go through")).not.toBeInTheDocument();
   });
 
   it("renders the three 'what comes back' step cards", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
     expect(screen.getByText("Skeleton and faults")).toBeInTheDocument();
     expect(screen.getByText("Grounded feedback")).toBeInTheDocument();
     expect(screen.getByText("Knowledge graph")).toBeInTheDocument();
   });
 
-  it("shows the movement select with the current value", () => {
+  // The selector moved to the studio's page header (see the note on `movementProps`); this pins
+  // that it did NOT get left behind here too, which would give the app two of them and break
+  // App.movement.test.tsx's single-select lookup.
+  it("no longer renders a movement select — that lives in the page header", () => {
     renderWithProviders(
-      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} onOpenLibrary={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="" {...movementProps} />
     );
-    expect((screen.getByLabelText(/movement/i) as HTMLSelectElement).value).toBe("Squat");
+    expect(screen.queryByLabelText(/movement/i)).toBeNull();
   });
 
   it("shows the movementError panel instead of the dropzone, and hides no other content", () => {
@@ -145,7 +136,6 @@ describe("DemoIntro", () => {
       <DemoIntro
         onBlob={vi.fn()}
         onError={vi.fn()}
-        onOpenLibrary={vi.fn()}
         loading={false}
         statusMsg=""
         error=""

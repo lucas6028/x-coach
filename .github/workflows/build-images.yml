@@ -1,0 +1,103 @@
+name: Build images
+
+# The two deployment images are built here rather than in Azure: `az acr build` runs on
+# ACR Tasks, and ACR Tasks is disabled for subscriptions spending trial or student credit
+# (TasksOperationsNotAllowed). GitHub Actions is the free builder that remains, and pushing
+# to GHCR needs no credential beyond the automatic GITHUB_TOKEN.
+#
+# The images are pulled by Azure Container Apps, which needs no registry credentials while
+# the two packages are public. See docs/azure-deployment.md.
+
+on:
+  workflow_dispatch:
+  push:
+    # claude/** as well as main: workflow_dispatch only works for workflows already on the
+    # default branch, so a deployment branch has no other way to produce the first images.
+    branches: [main, "claude/**"]
+    # Only when something that lands in an image changes. Docs, notes and the research
+    # pipelines under src/{video,rehab24,fit3d,egoexo} do not.
+    paths:
+      - backend/**
+      - src/knowledge/**
+      - src/pose/**
+      - frontend/**
+      - requirements-docker.txt
+      - .dockerignore
+      - .github/workflows/build-images.yml
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-images-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The backend's build context is the REPOSITORY ROOT: it imports backend.* and
+          # src.* by absolute package path, so both trees must be in the image.
+          - name: backend
+            image: x-coach-backend
+            context: .
+            dockerfile: backend/Dockerfile
+          - name: frontend
+            image: x-coach-frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Lowercased because a GHCR path must be lowercase and the owner's login may not be.
+      - name: Resolve image reference
+        id: ref
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "repo=${{ env.REGISTRY }}/$owner/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+
+      # Vite inlines VITE_* at BUILD time, so these are build args, not runtime env: changing
+      # one needs a rebuild, not a restart. The anon key is meant to ship in the bundle --
+      # row access is governed by Postgres RLS. SUPABASE_SERVICE_ROLE_KEY must never be here.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ steps.ref.outputs.repo }}:${{ github.sha }}
+            ${{ steps.ref.outputs.repo }}:latest
+          build-args: |
+            VITE_SUPABASE_URL=${{ secrets.VITE_SUPABASE_URL }}
+            VITE_SUPABASE_ANON_KEY=${{ secrets.VITE_SUPABASE_ANON_KEY }}
+            VITE_LIFF_ID=${{ secrets.VITE_LIFF_ID }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Summary
+        run: |
+          echo "### ${{ matrix.name }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "${{ steps.ref.outputs.repo }}:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

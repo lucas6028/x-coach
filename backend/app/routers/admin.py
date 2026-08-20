@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from backend.app import config, settings
 from backend.app.auth import CurrentUser, get_admin_user, get_current_user
-from backend.app.services import line_quota, runtime_config, store
+from backend.app.services import line_admin, runtime_config, store
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -51,6 +51,11 @@ def _effective_settings() -> dict[str, Any]:
         },
         "analyze": {
             "allowed_upload_suffixes": list(settings.allowed_upload_suffixes()),
+            # The upload limits, in BYTES (the key names carry the unit so nothing has to guess).
+            # Both are genuinely retunable at runtime — the getters read the overrides on every
+            # call, so a PUT here takes effect on the next upload with no redeploy.
+            "max_upload_bytes": settings.max_upload_bytes(),
+            "user_storage_quota_bytes": settings.user_storage_quota_bytes(),
             # READ-ONLY display value: the semaphore is fixed at import from the env var (see
             # routers/analyze), so this is never overridable — it is surfaced purely so the admin UI
             # can show the effective ceiling. It is sourced from the env constant and never written.
@@ -79,6 +84,8 @@ def _default_settings() -> dict[str, Any]:
         },
         "analyze": {
             "allowed_upload_suffixes": list(settings._DEFAULT_UPLOAD_SUFFIXES),
+            "max_upload_bytes": settings._DEFAULT_MAX_UPLOAD_BYTES,
+            "user_storage_quota_bytes": settings._DEFAULT_USER_STORAGE_QUOTA_BYTES,
             "max_concurrent_analyses": config.MAX_CONCURRENT_ANALYSES,
         },
     }
@@ -116,6 +123,20 @@ class AdminSettingsUpdate(BaseModel):
     # fixed at import from the env var and an override never applied, so the PUT no longer accepts it.
     # It remains a READ-ONLY, env-sourced display value in the GET payload (see ``_effective_settings``).
     allowed_upload_suffixes: list[str] | None = None
+    # Upload limits in BYTES. The bounds are the settings module's own clamp constants rather than
+    # literals so the two can't drift: ``_coerce_int`` CLAMPS instead of rejecting, so this validator
+    # is the layer that turns an out-of-range PUT into a 422, while the clamp keeps a direct-DB write
+    # contained to the same window. Sharing one pair of constants is what makes those agree.
+    max_upload_bytes: int | None = Field(
+        default=None,
+        ge=settings._MIN_MAX_UPLOAD_BYTES,
+        le=settings._MAX_MAX_UPLOAD_BYTES,
+    )
+    user_storage_quota_bytes: int | None = Field(
+        default=None,
+        ge=settings._MIN_USER_STORAGE_QUOTA_BYTES,
+        le=settings._MAX_USER_STORAGE_QUOTA_BYTES,
+    )
 
     @field_validator("llm_models")
     @classmethod
@@ -248,18 +269,53 @@ def admin_overview(user: CurrentUser = Depends(get_admin_user)) -> dict:
 def admin_line_status(user: CurrentUser = Depends(get_admin_user)) -> dict:
     """LINE connection status + this month's push-message quota (admin-only; read-only).
 
-    Never returns a secret: the channel access token is used server-side (in ``line_quota``) to
+    Never returns a secret: the channel access token is used server-side (in ``line_admin``) to
     read LINE's quota endpoints, and the channel secret / service_role key are never touched.
     ``channel_id`` is the non-secret LINE Login channel id, surfaced only so an admin can confirm
     which channel is wired. When messaging isn't configured we skip the LINE call entirely; when it
-    is configured but the read fails, ``quota`` is ``None`` and ``quota_error`` flags it.
+    is configured but a read fails, that field is ``None`` and its ``*_error`` companion flags it.
+
+    EVERY nullable read gets an error companion: without one the UI can't tell "not configured" from
+    "the read failed", so it renders nothing — silently hiding the exact misconfiguration this panel
+    exists to surface (a dead webhook would erase its own card, and with it the Test button).
     """
     s = settings.get_settings()
-    quota = line_quota.fetch_quota() if s.line_messaging_configured else None
+    configured = s.line_messaging_configured
+    quota = line_admin.fetch_quota() if configured else None
+    bot_info = line_admin.fetch_bot_info() if configured else None
+    webhook = line_admin.fetch_webhook() if configured else None
+    delivery = line_admin.fetch_delivery() if configured else None
+
+    def unreachable(value: object | None) -> str | None:
+        return "unreachable" if (configured and value is None) else None
+
     return {
-        "messaging_configured": s.line_messaging_configured,
+        "messaging_configured": configured,
         "login_configured": s.line_login_configured,
         "channel_id": s.line_channel_id,
         "quota": quota,
-        "quota_error": "unreachable" if (s.line_messaging_configured and quota is None) else None,
+        "quota_error": unreachable(quota),
+        "bot_info": bot_info,
+        "bot_info_error": unreachable(bot_info),
+        "webhook": webhook,
+        "webhook_error": unreachable(webhook),
+        "delivery": delivery,
+        "delivery_error": unreachable(delivery),
     }
+
+
+@router.post("/line/webhook-test")
+def admin_line_webhook_test(user: CurrentUser = Depends(get_admin_user)) -> dict:
+    """Ask LINE to POST a test event to the configured webhook and report the result (admin-only).
+
+    This has a side effect (LINE delivers a test event), so it is a distinct POST triggered only by an
+    explicit admin action — never by the status read. Returns no secret.
+
+    ``error`` names the failure kind (``unauthorized`` / ``rate_limited`` / ``no_endpoint`` /
+    ``unreachable``): this is the panel's one active probe, so it is where an admin gets told WHY.
+    """
+    s = settings.get_settings()
+    if not s.line_messaging_configured:
+        return {"result": None, "error": "not_configured"}
+    result, error = line_admin.test_webhook()
+    return {"result": result, "error": error}

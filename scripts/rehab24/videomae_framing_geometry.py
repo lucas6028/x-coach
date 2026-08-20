@@ -1,0 +1,23 @@
+"""Run the REHAB24-6 framing geometry gate.
+
+    .venv\\Scripts\\python.exe scripts/rehab24/videomae_framing_geometry.py
+
+Exact arithmetic on frame sizes and boxes -- no decoding, no model. Must pass, and be
+read, BEFORE any framing features are extracted. See
+``src/rehab24/videomae_framing_geometry.py``.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.rehab24.videomae_framing_geometry import main
+
+
+if __name__ == "__main__":
+    main()

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { api, ChatError, type ChatContext, type ChatMessage } from "../api";
+import { api, ChatError, UploadLimitError, type ChatContext, type ChatMessage } from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -8,6 +8,25 @@ function mockFetch(body: unknown, ok = true, status = 200) {
     statusText: ok ? "OK" : "Not Found",
     json: async () => body,
   } as Response);
+}
+
+// Mock fetch with a real ReadableStream body carrying the given (already byte-splittable) chunks,
+// so the client's frame-reassembly across chunk boundaries is exercised for real. Shared by every
+// describe block that exercises the SSE stream (chatStream itself and the tool/reset frame tests).
+function mockStream(chunks: string[]) {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const enc = new TextEncoder();
+      for (const c of chunks) controller.enqueue(enc.encode(c));
+      controller.close();
+    },
+  });
+  return vi.spyOn(globalThis, "fetch").mockResolvedValue({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    body,
+  } as unknown as Response);
 }
 
 describe("api.health", () => {
@@ -135,44 +154,6 @@ describe("api.setUserRole", () => {
   });
 });
 
-describe("api.listVideos", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it("builds the URL with default limit and offset", async () => {
-    mockFetch({ total: 0, items: [] });
-    await api.listVideos();
-    expect(fetch).toHaveBeenCalledWith("/api/videos?limit=50&offset=0");
-  });
-
-  it("appends the fault filter when provided", async () => {
-    mockFetch({ total: 1, items: [] });
-    await api.listVideos(10, 0, "knees_inward");
-    expect(fetch).toHaveBeenCalledWith("/api/videos?limit=10&offset=0&fault=knees_inward");
-  });
-
-  it("omits the fault param when not provided", async () => {
-    mockFetch({ total: 0, items: [] });
-    await api.listVideos(5, 0);
-    const url = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    expect(url).not.toContain("fault=");
-  });
-});
-
-describe("api.getAnalysis", () => {
-  afterEach(() => vi.restoreAllMocks());
-
-  it("fetches the correct endpoint", async () => {
-    mockFetch({ video_id: "abc" });
-    await api.getAnalysis("abc");
-    expect(fetch).toHaveBeenCalledWith("/api/analysis/abc");
-  });
-
-  it("throws on non-ok responses", async () => {
-    mockFetch({}, false, 404);
-    await expect(api.getAnalysis("missing")).rejects.toThrow("404");
-  });
-});
-
 describe("api.videoFileUrl", () => {
   it("returns the correct URL string", () => {
     expect(api.videoFileUrl("vid_001")).toBe("/api/video-file/vid_001");
@@ -261,6 +242,31 @@ describe("api.deleteAnalyses", () => {
   });
 });
 
+describe("api.deleteAnalysis", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("DELETEs the single analysis endpoint and returns the count", async () => {
+    const spy = mockFetch({ deleted: 1 });
+    const result = await api.deleteAnalysis("abc123");
+    expect(result).toEqual({ deleted: 1 });
+    expect(spy.mock.calls[0][0]).toBe("/api/analyses/abc123");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+
+  it("encodes the id into the URL", async () => {
+    const spy = mockFetch({ deleted: 1 });
+    await api.deleteAnalysis("urn:uuid:1/2 3");
+    expect(spy.mock.calls[0][0]).toBe(
+      `/api/analyses/${encodeURIComponent("urn:uuid:1/2 3")}`
+    );
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 404);
+    await expect(api.deleteAnalysis("abc123")).rejects.toThrow("404");
+  });
+});
+
 describe("api.analyzeUpload", () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -301,24 +307,6 @@ describe("api.chatStream", () => {
 
   const messages: ChatMessage[] = [{ role: "user", content: "why did my knees cave?" }];
   const context: ChatContext = { fault_count: 0, quality: {}, faults: [] };
-
-  // Mock fetch with a real ReadableStream body carrying the given (already byte-splittable) chunks,
-  // so the client's frame-reassembly across chunk boundaries is exercised for real.
-  function mockStream(chunks: string[]) {
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        const enc = new TextEncoder();
-        for (const c of chunks) controller.enqueue(enc.encode(c));
-        controller.close();
-      },
-    });
-    return vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: "OK",
-      body,
-    } as unknown as Response);
-  }
 
   function collectHandlers() {
     const deltas: string[] = [];
@@ -433,6 +421,206 @@ describe("api.chatStream", () => {
   });
 });
 
+describe("chat SSE tool frames", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("routes tool and reset frames to their handlers", async () => {
+    const seen: string[] = [];
+    const body = [
+      'event: tool\ndata: {"id":0,"name":"kg_query","query":"knee valgus"}\n\n',
+      'event: delta\ndata: {"text":"hm"}\n\n',
+      "event: reset\ndata: {}\n\n",
+      'event: delta\ndata: {"text":"answer"}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ].join("");
+    mockStream([body]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: (t) => seen.push(`delta:${t}`),
+      onDone: () => seen.push("done"),
+      onError: () => seen.push("error"),
+      onTool: (_id, n, q) => seen.push(`tool:${n}:${q}`),
+      onReset: () => seen.push("reset"),
+    });
+    expect(seen).toEqual([
+      "tool:kg_query:knee valgus",
+      "delta:hm",
+      "reset",
+      "delta:answer",
+      "done",
+    ]);
+  });
+
+  it("falls back to id -1 for a tool frame that omits its id", async () => {
+    const seen: number[] = [];
+    mockStream(['event: tool\ndata: {"name":"kg_query","query":"x"}\n\n', 'event: done\ndata: {"model":"m"}\n\n']);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onTool: (id) => seen.push(id),
+    });
+    expect(seen).toEqual([-1]);
+  });
+
+  it("ignores tool and reset frames when the handlers are absent", async () => {
+    const seen: string[] = [];
+    mockStream([
+      'event: tool\ndata: {"name":"kg_query","query":"x"}\n\nevent: reset\ndata: {}\n\nevent: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => seen.push("delta"),
+      onDone: () => seen.push("done"),
+      onError: () => seen.push("error"),
+    });
+    expect(seen).toEqual(["done"]);
+  });
+
+  it("strips detail from the followups request", async () => {
+    const fetchMock = mockFetch({ questions: [] });
+    await api.chatFollowups(
+      [{ role: "user", content: "hi" }],
+      { fault_count: 0, quality: {}, faults: [], detail: { detections: [] } }
+    );
+    const sent = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string);
+    expect(sent.context.detail).toBeUndefined();
+    expect(sent.context.fault_count).toBe(0);
+  });
+
+  it("routes tool_done sources to onToolDone, and an empty array when the frame omits them", async () => {
+    const seen: Array<[number, unknown]> = [];
+    mockStream([
+      'event: tool\ndata: {"id":0,"name":"rag_search","query":"ankle"}\n\n',
+      'event: tool_done\ndata: {"id":0,"sources":[{"label":"Wikipedia: Squat (exercise)","kind":"encyclopedia"}]}\n\n',
+      'event: tool\ndata: {"id":1,"name":"get_analysis","query":"Depth"}\n\n',
+      'event: tool_done\ndata: {"id":1}\n\n',
+      'event: delta\ndata: {"text":"A"}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onToolDone: (id, s) => seen.push([id, s]),
+    });
+    expect(seen).toEqual([
+      [0, [{ label: "Wikipedia: Squat (exercise)", kind: "encyclopedia" }]],
+      [1, []],
+    ]);
+  });
+
+  it("drops a tool_done frame whose id is not a number", async () => {
+    // A citation attached to the wrong tool is a worse failure than a citation lost: this feature
+    // exists to make provenance trustworthy, so an uncorrelatable frame is discarded outright.
+    const seen: unknown[] = [];
+    mockStream([
+      'event: tool_done\ndata: {"sources":[{"label":"L","kind":"paper"}]}\n\n',
+      'event: done\ndata: {"model":"m"}\n\n',
+    ]);
+    await api.chatStream([{ role: "user", content: "hi" }], { fault_count: 0, quality: {}, faults: [] }, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+      onToolDone: (id, s) => seen.push([id, s]),
+    });
+    expect(seen).toEqual([]);
+  });
+
+  it("strips tools from messages on both chat endpoints", async () => {
+    const thread = [
+      { role: "user" as const, content: "hi" },
+      {
+        role: "assistant" as const,
+        content: "answer",
+        tools: [{ name: "rag_search", query: "ankle", sources: [{ label: "L", kind: "paper" }] }],
+      },
+    ];
+    const ctx = { fault_count: 0, quality: {}, faults: [] };
+
+    // Uses the file's `mockFetch` helper (a `vi.spyOn`, like every other test here) rather than
+    // `vi.stubGlobal` directly: a raw global stub isn't undone by this describe block's
+    // `afterEach(() => vi.restoreAllMocks())` and would leak a stubbed `fetch` into every test
+    // that runs after this one in the file.
+    const followupFetch = mockFetch({ questions: [] });
+    await api.chatFollowups(thread, ctx);
+    const followupBody = JSON.parse((followupFetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(followupBody.messages[1].tools).toBeUndefined();
+    expect(followupBody.messages[1].content).toBe("answer");
+
+    const streamSpy = mockStream(['event: done\ndata: {"model":"m"}\n\n']);
+    await api.chatStream(thread, ctx, {
+      onDelta: () => undefined,
+      onDone: () => undefined,
+      onError: () => undefined,
+    });
+    const chatBody = JSON.parse((streamSpy.mock.calls[0][1] as RequestInit).body as string);
+    expect(chatBody.messages[1].tools).toBeUndefined();
+  });
+});
+
+describe("api.analyzeUpload thumbnail", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("appends the thumbnail when one was captured", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    const file = new File(["v"], "squat.mp4", { type: "video/mp4" });
+    await api.analyzeUpload(file, "Squat", new Blob(["jpeg"], { type: "image/jpeg" }));
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeInstanceOf(Blob);
+  });
+
+  it("omits the field when capture failed", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ video_id: "v" }), { status: 200 }));
+    const file = new File(["v"], "squat.mp4", { type: "video/mp4" });
+    await api.analyzeUpload(file, "Squat", null);
+    const form = fetchMock.mock.calls[0][1]?.body as FormData;
+    expect(form.get("thumbnail")).toBeNull();
+  });
+});
+
+describe("api.uploadMedia", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches the ownership-checked URL endpoint", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ video_url: "u", thumbnail_url: "t", expires_in: 3600 }),
+        { status: 200 }
+      )
+    );
+    const media = await api.uploadMedia("upload_a");
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/uploads/upload_a/url");
+    expect(media.video_url).toBe("u");
+  });
+});
+
+describe("api.uploadMediaBatch", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("posts every id and unwraps items", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ items: { a: { video_url: "u", thumbnail_url: "t" } }, expires_in: 3600 }),
+        { status: 200 }
+      )
+    );
+    const items = await api.uploadMediaBatch(["a", "b"]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({
+      video_ids: ["a", "b"],
+    });
+    expect(items.a.video_url).toBe("u");
+  });
+
+  it("short-circuits an empty list without a request", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    expect(await api.uploadMediaBatch([])).toEqual({});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("api.chatFollowups", () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -507,5 +695,67 @@ describe("api.conversations", () => {
   it("putConversation throws on a non-ok response", async () => {
     mockFetch({}, false, 500);
     await expect(api.putConversation("vid", [])).rejects.toThrow(/500/);
+  });
+});
+
+describe("upload limit errors", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("turns a 413 quota body into a typed error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: { code: "storage_quota_exceeded", used_mb: 480, limit_mb: 500 } }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(UploadLimitError);
+    expect(err.code).toBe("storage_quota_exceeded");
+    expect(err.usedMb).toBe(480);
+    expect(err.limitMb).toBe(500);
+  });
+
+  it("turns a 413 file-size body into a typed error with no used figure", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: { code: "upload_too_large", limit_mb: 100 } }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(UploadLimitError);
+    expect(err.code).toBe("upload_too_large");
+    expect(err.usedMb).toBeNull();
+  });
+
+  it("leaves a non-413 failure as a plain Error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ detail: "boom" }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(UploadLimitError);
+    expect(err.message).toBe("boom");
+  });
+
+  // Plan constraint: "A 413 the parser does not recognise (a reverse proxy's own error body,
+  // say) must fall through to the generic error path rather than being mislabelled as a quota
+  // problem." A body without one of the two known codes is exactly that case.
+  it("leaves an unrecognised 413 as a plain Error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 413,
+      json: async () => ({ detail: "Request Entity Too Large" }),
+    } as Response);
+    const err = await api
+      .analyzePose("Squat", { metadata: {}, frames: [] } as never, new Blob(["v"]))
+      .catch((e) => e);
+    expect(err).not.toBeInstanceOf(UploadLimitError);
+    expect(err.message).toBe("Request Entity Too Large");
   });
 });

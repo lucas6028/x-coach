@@ -80,6 +80,130 @@ Extract repetition-level VideoMAE features on Colab/GPU:
 python scripts/rehab24/extract_videomae_features.py --device cuda
 ```
 
+This writes *raw* bundles to `data/REHAB24-6/processed/videomae_raw/`, holding the
+per-clip stacks for **both** token-pooling modes from a single forward pass:
+
+- `mean_pool_fc_norm` — mean over patch tokens + the pretrained `fc_norm`, i.e. what
+  `VideoMAEForVideoClassification` actually does.
+- `legacy_first_token` — `last_hidden_state[:, 0, :]`, the historical extraction.
+  VideoMAE has **no CLS token**, so this is the first patch of the first tubelet, not a
+  clip representation. Kept only so a paired comparison can isolate the pooling fix.
+
+Aggregation over clips stays an offline choice (see `src/video/videomae_pooling.py` for
+why `max` is wrong after `fc_norm`). Materialize the LOSO-ready dirs, then audit them:
+
+```bash
+python scripts/rehab24/materialize_videomae_features.py
+python scripts/rehab24/audit_videomae_features.py \
+  data/REHAB24-6/processed/videomae_mean_pool_fc_norm_mean
+```
+
+`materialize` writes one dir per (token pooling x clip aggregation) combination, each
+storing `video_feature` — the key the LOSO drivers already read, so they consume these
+via `--feature-dir` unmodified. `audit` exits non-zero on incomplete coverage, duplicate
+stems, mixed dims/dtypes, non-finite values, split mismatches or mixed provenance.
+
+Run the Stage A evidence matrix (paired deltas, within-subject permuted-label null
+control, and camera/exercise stratification) in one pass:
+
+```bash
+python scripts/rehab24/videomae_stage_a.py --device cpu
+```
+
+### Framing arms (letterbox / person crop / background only)
+
+Pre-registration: `notes/rehab24_videomae_framing_validation_plan.md`. Run the steps in
+this order — the gates exist so nobody can look at an accuracy first and then decide
+which arm was "really" showing the whole athlete.
+
+```bash
+# 1. One fixed box per SOURCE VIDEO, from the dataset's own mocap 2D skeletons.
+#    Never one box per repetition: that would encode how far the rep travelled, which
+#    is a function of its correctness.
+python scripts/rehab24/build_videomae_boxes.py
+
+# 2. Geometry gate. Exact arithmetic on frame sizes and boxes; no decoding, no model.
+#    Must pass, and be READ, before any features exist.
+python scripts/rehab24/videomae_framing_geometry.py
+
+# 3. Extract each arm into its OWN raw dir (the extractor refuses to mix them).
+#    On this machine use .venv-cuda (see below); --num-chunks splits the manifest
+#    round-robin into disjoint sets, so workers never write the same file.
+OMP_NUM_THREADS=4 .venv-cuda/Scripts/python.exe scripts/rehab24/extract_videomae_features.py \
+  --variant full_frame_letterbox \
+  --output-dir data/REHAB24-6/processed/videomae_raw_full_frame_letterbox \
+  --device cuda --num-chunks 3 --chunk-index 0   # repeat for chunk-index 1 and 2
+
+# 4. Pairing gate: same ids, splits, clip starts and metadata; different pixels.
+python scripts/rehab24/videomae_framing_pairing.py \
+  --baseline-dir data/REHAB24-6/processed/videomae_raw_full_frame_local \
+  --candidate-dir data/REHAB24-6/processed/videomae_raw_full_frame_letterbox
+
+# 5. Materialize the primary representation only, once per variant. BOTH arms:
+#    the local full_frame baseline is an arm like any other.
+for variant in full_frame full_frame_letterbox; do
+  python scripts/rehab24/materialize_videomae_features.py \
+    --raw-dir data/REHAB24-6/processed/videomae_raw_${variant/full_frame/full_frame_local} \
+    --output-parent data/REHAB24-6/processed/videomae_framing/$variant \
+    --token-pooling mean_pool_fc_norm --aggregation mean
+done
+
+# 6. Audit the MATERIALIZED dirs. Not a duplicate of step 4: the audit needs the
+#    `video_feature` key raw bundles do not have, and it is what independently
+#    checks split placement against the manifest and catches constant features.
+python scripts/rehab24/audit_videomae_features.py \
+  data/REHAB24-6/processed/videomae_framing/full_frame/videomae_mean_pool_fc_norm_mean \
+  data/REHAB24-6/processed/videomae_framing/full_frame_letterbox/videomae_mean_pool_fc_norm_mean
+
+# 7. Paired LOSO across arms, three seeds, one pre-registered primary test.
+python scripts/rehab24/videomae_framing_report.py \
+  --arm full_frame=data/REHAB24-6/processed/videomae_framing/full_frame/videomae_mean_pool_fc_norm_mean \
+  --arm full_frame_letterbox=data/REHAB24-6/processed/videomae_framing/full_frame_letterbox/videomae_mean_pool_fc_norm_mean \
+  --arm kaggle_full_frame=data/REHAB24-6/processed/videomae_mean_pool_fc_norm_mean \
+  --primary full_frame_letterbox:full_frame --device cpu
+```
+
+`kaggle_full_frame` is declared as an arm but is **not** a `--secondary` comparison. It
+is a quality check, not a framing hypothesis: the runner scores every declared arm, so
+its seed-averaged balanced accuracy lands beside the local `full_frame` in the summary
+and answers whether the local re-extraction reproduces the published 0.657 — the way
+Stage A checked its legacy reproduction against the historical 0.536. Putting it in
+`--secondary` would drag a QC check into the Holm family.
+
+The baseline arm is re-extracted **locally** rather than reused from the archived
+`videomae_raw/`: those bundles came from a Kaggle kernel on transformers 5.0.0, and a
+local re-run of the same code differs by ~1e-3 relative L2 (cosine 0.9999996). Small,
+but it would sit inside the measured delta on one arm only. Re-extracting removes the
+environment from the comparison and doubles as a reproduction check against 0.657.
+
+Extraction is resumable: it skips any bundle already on disk, so re-invoking the same
+command continues rather than restarting.
+
+#### Extracting on a GPU (`.venv-cuda`)
+
+`.venv` holds a CPU-only torch and must stay that way — it serves the backend and the
+whole test suite. Extraction gets its own venv, the same way `--runtime mmpose` does:
+torch + torchvision from the CUDA index matching your card's compute capability, then
+`numpy`, `transformers`, `opencv-python` and `pillow` pinned to `.venv`'s versions.
+
+Confirm `torch.cuda.get_arch_list()` covers your GPU's `sm_XX` before trusting a build:
+recent CUDA releases drop older architectures. `resolve_device` also runs a real strided
+`conv3d` probe, so a wheel missing the right kernels falls back to CPU in two seconds
+rather than dying hours in — the Kaggle P100/sm_60 failure that cost this study a run.
+
+Run several workers with `--num-chunks`/`--chunk-index`: the profile is CPU-bound, not
+GPU-bound (decode ~42% of a clip, the processor's resize most of the rest), so one worker
+leaves the GPU mostly idle. Measured here, 3 workers cut 9.30 s/bundle to 2.19 s. Cap
+`OMP_NUM_THREADS` per worker so the processes do not oversubscribe the cores. That is
+numerically safe *because* the forward is on the GPU: CPU threads then touch only decode
+and the processor, neither of which reduces across threads.
+
+**Both arms must be extracted from the same venv.** Provenance records the transformers
+version but not the device, so a mixed arm is undetectable afterwards. Measured on 8
+identical samples: CPU vs GPU differ by 4.1e-06 relative L2 (cosine 1.00000000), while
+transformers 5.0.0 vs 5.5.0 differ by 9.4e-04 — the library version dominates the
+hardware by ~230x, which is the reason the baseline is re-extracted rather than reused.
+
 Fuse skeleton and VideoMAE features:
 
 ```bash
@@ -122,3 +246,23 @@ Export metadata for Colab:
 ```bash
 python scripts/rehab24/export_colab_package.py --include-skeleton-features
 ```
+
+Validate the **Lunge** rule detector against Ex5's 174 labeled repetitions (the only movement
+in this repo checked against human-labeled ground truth). Needs the Ex5 pose corpus under
+`data/REHAB24-6/processed/lunge_pose_json/` first — see
+`notes/lunge-view-reconnaissance.md` for the extraction command:
+
+```bash
+python scripts/rehab24/validate_lunge_rules.py \
+  --pose-dir data/REHAB24-6/processed/lunge_pose_json \
+  --segmentation data/REHAB24-6/Segmentation.csv \
+  --out data/REHAB24-6/processed/lunge_rule_validation.json
+# ~15 min; add --report-only to re-print the report from the saved JSON in ~1 s
+```
+
+Results, method and caveats: `notes/lunge-rule-validation.md`. The rules are replayed one
+labeled repetition at a time, twice — once with the view label the production estimator really
+produces, once with the dataset's ground-truth orientation — so a gate failure can be told
+apart from a rule failure. **The labels are binary (correct/incorrect) and never name the
+fault**, so this measures whether a rule's signal carries information about rep correctness,
+not per-fault precision.

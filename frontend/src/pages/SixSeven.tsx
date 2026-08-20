@@ -10,6 +10,7 @@ import { loadLeaderboard, saveScore, type SixSevenEntry } from "../lib/sixseven/
 import { estimateKcal, EFFORT } from "../lib/calories";
 import { addCalories } from "../lib/calorieStore";
 import { waitForVideoFrame } from "../lib/videoFrame";
+import { createLivePoseSchedule, shouldRunLivePoseInference } from "../lib/livePoseScheduler";
 import { CameraError, getCameraStream } from "../lib/camera";
 import { isInLiffClient } from "../lib/liff";
 import type { PoseLandmarker } from "@mediapipe/tasks-vision";
@@ -56,7 +57,7 @@ export default function SixSeven() {
   const g = useRef({
     running: false,
     roundEnd: 0,
-    lastVideoTime: -1,
+    poseSchedule: createLivePoseSchedule(),
     lastUi: 0,
     counter: initialCount as CountState,
     lead: "neutral" as Lead,
@@ -111,9 +112,8 @@ export default function SixSeven() {
     const now = performance.now();
     const secLeft = Math.max(0, Math.ceil((s.roundEnd - now) / 1000));
 
-    // Detection + counting run only on a fresh camera frame (MediaPipe needs rising timestamps).
-    if (video.currentTime !== s.lastVideoTime) {
-      s.lastVideoTime = video.currentTime;
+    // Keep GPU inference tied to useful camera cadence instead of the 60/120 Hz display rate.
+    if (shouldRunLivePoseInference(s.poseSchedule, video.currentTime, now)) {
       const lm = landmarker.detectForVideo(video, now).landmarks?.[0] ?? null;
       const hs = lm ? handLead(lm) : null;
       const lead = hs?.valid ? hs.lead : "neutral";
@@ -167,7 +167,7 @@ export default function SixSeven() {
         const s = g.current;
         s.running = true;
         s.roundEnd = performance.now() + ROUND_SECONDS * 1000;
-        s.lastVideoTime = -1;
+        s.poseSchedule = createLivePoseSchedule();
         s.lastUi = 0;
         s.counter = initialCount;
         s.lead = "neutral";
@@ -198,7 +198,14 @@ export default function SixSeven() {
       // Timeout-wrapped: inside the LINE (LIFF) in-app browser on iOS getUserMedia can hang
       // forever — the wrapper turns that into a catchable error (see lib/camera).
       const stream = await getCameraStream({
-        video: { facingMode: "user", width: 640, height: 480 },
+        // Match the 30fps inference budget so the camera ISP/decoder does not produce frames
+        // that this interaction can never consume.
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 30 },
+        },
         audio: false,
       });
       // getUserMedia resolved after an unmount — stop the orphaned track and bail. Also close the
@@ -281,7 +288,7 @@ export default function SixSeven() {
   const showCamera = phase === "playing" || phase === "countdown";
 
   return (
-    <AppLayout title={t("six.title")} initialSidebarOpen={false}>
+    <AppLayout initialSidebarOpen={false}>
       {phase === "intro" && (
         <SixSevenStartScreen
           leaderboard={leaderboard}

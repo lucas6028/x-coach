@@ -39,5 +39,15 @@ export function buildChatContext(analysis: Analysis): ChatContext {
     // So the coach is grounded in the movement whose rules actually ran, not "squat" by
     // assumption. Absent for analyses predating per-movement selection; the backend falls back.
     movement: analysis.movement,
+    // The uncompressed analysis, for the backend's `get_analysis` tool: the exact measured values
+    // and the complete retrieved passages this function summarises away above. `pose` is excluded —
+    // it is by far the heaviest block and the coach has no use for raw landmarks.
+    detail: {
+      metadata: analysis.metadata,
+      quality: analysis.quality,
+      view: analysis.view,
+      detections: analysis.detections,
+      retrievals: analysis.retrievals,
+    },
   };
 }

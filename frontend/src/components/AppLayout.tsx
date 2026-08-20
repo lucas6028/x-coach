@@ -1,130 +1,154 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import type { Analysis } from "../api";
 import Sidebar from "./Sidebar";
 import Header from "./Header";
 import LiffAppShell from "./LiffAppShell";
 import { useLiffContext } from "../lib/liffContext";
+import { useIsMobile } from "../lib/useIsMobile";
+import MobileTabBar from "./mobile/MobileTabBar";
+import MobileTopBar from "./mobile/MobileTopBar";
 
-// Fixed expanded width — the sidebar is no longer drag-resizable; it only toggles
-// between this and the 64px icon rail.
-const SIDEBAR_WIDTH = 200;
+// The rail: 236px with labels beside the icons, 76px icon-only when collapsed.
+const WIDTH_OPEN = 236;
+const WIDTH_CLOSED = 76;
 
 interface Props {
   children: ReactNode;
-  // Header content: analysis-mode (studio) shows the session + status pill; a plain `title`
-  // (History/Settings) shows just the page name. Analysis-mode wins when both are given.
-  analysis?: Analysis | null;
-  loading?: boolean;
+  /** The page's own header row (breadcrumb / title / its controls). Rendered inside the shell's
+   *  top row, beside the account cluster — see the branch in the body for why that matters.
+   *  Desktop only: the phone shell has no room for it and shows `title` instead. */
+  header?: ReactNode;
+  /** Short page name for the phone header's centred title. */
   title?: string;
-  // The studio's currently-selected movement, pre-result (see Header's `movement` prop). Ignored
-  // once `title` or `analysis` is set — both already know what to show.
-  movement?: string;
-  // The studio supplies a picker opener; other pages fall back to navigating into the studio.
-  onOpenLibrary?: () => void;
   // The studio resets its own state for a fresh session; other pages just route into the studio.
   onNewAnalysis?: () => void;
   // Whether the desktop sidebar starts expanded. Defaults to open; the games opt to start it
-  // collapsed so the camera/play area gets near-full width.
+  // collapsed so the camera/play area gets near-full width. It is the starting state only — the
+  // rail's own toggle owns it from the first click.
   initialSidebarOpen?: boolean;
 }
 
-// The shared app shell: collapsible/resizable desktop sidebar, off-canvas mobile drawer, and the
-// top navbar (Header). Every signed-in page (studio, history, settings) renders its content as
-// `children` so the sidebar + navbar stay identical across the app. Only the home/landing and the
-// pre-auth login gateway opt out. Inside the LINE in-app browser this delegates to LiffAppShell
-// instead (see lib/liffContext).
+// The shared app shell, in the motion_analysis_muse-spark idiom: a lavender canvas carrying a
+// floating white nav rail beside one big rounded content card, with the pill action row and the
+// account controls along the top of that card. Every signed-in page (studio, history, settings)
+// renders its content as `children` so the shell stays identical across the app. Only the
+// home/landing and the pre-auth login gateway opt out. Inside the LINE in-app browser this
+// delegates to LiffAppShell instead (see lib/liffContext).
+//
+// The palette is the reference's own, fixed light hexes — it is a light-only design, so the shell
+// does not follow the theme toggle (which still governs the token-styled page bodies).
 export default function AppLayout({
   children,
-  analysis = null,
-  loading = false,
+  header,
   title,
-  movement,
-  onOpenLibrary,
   onNewAnalysis,
   initialSidebarOpen = true,
 }: Props) {
   const navigate = useNavigate();
   const { isInClient } = useLiffContext();
-  // Desktop sidebar is a fixed-width rail; it only toggles between expanded and the icon rail.
+  const mobile = useIsMobile();
+  // The rail carries its own collapse control (the top row still carries none), so the width is
+  // live state seeded from the page's preference: the labelled 236px rail, or the 76px icon strip
+  // when a page asks to start there (the games want the extra width for their camera area).
   const [sidebarOpen, setSidebarOpen] = useState(initialSidebarOpen);
   const [mobileNav, setMobileNav] = useState(false);
 
-  // Off the studio there is no picker, so "Library" just routes into the studio.
-  const openLibrary = onOpenLibrary ?? (() => navigate("/app"));
   // Off the studio, "New analysis" routes into the studio; the studio resets in place.
   const newAnalysis = onNewAnalysis ?? (() => navigate("/app"));
 
   // Inside the LINE app the whole web chrome is replaced by the app shell: bottom tabs instead
   // of a sidebar, no marketing navbar. Every page renders through here, so this one branch
-  // converts the entire app without any page knowing about LIFF. openLibrary/newAnalysis are the
-  // same resolved actions the (now-hidden) Sidebar would have gotten — without threading them
-  // through, the shell's four tabs would be the whole app and there'd be no way to start a
-  // second analysis without leaving LINE.
+  // converts the entire app without any page knowing about LIFF. newAnalysis is the same resolved
+  // action the (now-hidden) Sidebar would have gotten — without threading it through, the shell's
+  // four tabs would be the whole app and there'd be no way to start a second analysis without
+  // leaving LINE.
   if (isInClient) {
     return (
-      <LiffAppShell title={title} movement={movement} onOpenLibrary={openLibrary} onNewAnalysis={newAnalysis}>
+      <LiffAppShell onNewAnalysis={newAnalysis} title={title}>
         {children}
       </LiffAppShell>
     );
   }
 
-  return (
-    <div className="h-[100dvh] w-full flex flex-col bg-background-dark text-content overflow-hidden">
-      {/* Full-width top navbar, spanning both the sidebar and main columns (the reference layout).
-          It carries the brand and the desktop sidebar-collapse toggle. */}
-      <Header
-        analysis={analysis}
-        loading={loading}
-        title={title}
-        movement={movement}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((v) => !v)}
-        onMenu={() => setMobileNav(true)}
-      />
+  // Phone web: the same shell the LINE app gets — round-button header, the page, and the five-slot
+  // tab bar. The desktop rail and its off-canvas drawer are both gone here; the tab bar replaces
+  // them, and keeping a drawer as well would be two navigations for one set of destinations.
+  if (mobile) {
+    return (
+      <div className="ms-shell flex h-[100dvh] w-full flex-col overflow-hidden bg-[#eef0fb] pt-[env(safe-area-inset-top)] font-body text-[#1e2142]">
+        <MobileTopBar title={title ?? "X-Coach"} onNewAnalysis={newAnalysis} />
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+        <MobileTabBar onNewAnalysis={newAnalysis} />
+      </div>
+    );
+  }
 
-      {/* Below the navbar: the sidebar and main sit side by side, split by a vertical divider. */}
-      <div className="flex flex-1 min-h-0 min-w-0">
-        {/* Desktop: inline, fixed-width sidebar with a divider between it and the main content. */}
-        <div className="hidden lg:flex shrink-0 border-r border-border-dark">
+  return (
+    // `ms-shell` re-declares the light design tokens for everything inside the frame — see
+    // index.css. The reference design is light-only, and a dark token set under these white
+    // cards puts dark text and dark scrollbars inside them.
+    <div className="ms-shell relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#eef0fb] p-2 font-body text-[#211f39] sm:p-3 lg:p-[14px]">
+      {/* Background wash: the reference's two soft colour blooms behind the cards. */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <div className="absolute -right-20 -top-20 h-[600px] w-[600px] rounded-full bg-[#e9e3ff] opacity-40 blur-[120px]" />
+        <div className="absolute -left-40 top-40 h-[500px] w-[500px] rounded-full bg-[#e0e7ff] opacity-30 blur-[100px]" />
+      </div>
+
+      {/* The frame is capped in BOTH axes and centred in whatever is left. Width was already
+          held at 1500px; height was not, so on a 1440px-tall monitor the content card stretched
+          to the full viewport and the studio's upload panel floated in ~300px of dead space top
+          and bottom. 940px is a maximised browser on a 1080p screen — the shell now looks the
+          same on a big display as on a normal one, instead of scaling up to fill it. */}
+      <div className="relative mx-auto my-auto flex h-full max-h-[940px] w-full max-w-[1500px] gap-3 lg:gap-4">
+        {/* Desktop: the floating nav rail. */}
+        <div className="hidden lg:flex">
           <Sidebar
             open={sidebarOpen}
-            width={sidebarOpen ? SIDEBAR_WIDTH : 64}
+            width={sidebarOpen ? WIDTH_OPEN : WIDTH_CLOSED}
             animate
-            onOpenLibrary={openLibrary}
+            onToggle={() => setSidebarOpen((v) => !v)}
             onNewAnalysis={newAnalysis}
           />
         </div>
 
-        {/* Mobile: off-canvas drawer + backdrop (overlays the navbar too) */}
+        {/* The one content card. `glass-shell` is the theme's outermost frosted pane: the tinted
+            gradient that the translucent panels inside sample from, plus the page's single
+            content-level blur. Everything nested in it stays unblurred by design (index.css). */}
+        <main className="glass-shell relative flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden rounded-[28px] border border-white/80 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_22px_58px_rgba(105,112,175,0.16)] sm:p-4 lg:gap-0 lg:rounded-[32px] lg:p-5">
+          {/* One row, in flow, whatever the page supplies. It used to need a floating variant for
+              header-less pages so the account cluster didn't hover over the page's own controls —
+              with that cluster moved to the rail's foot, the row holds only the page's header and
+              a drawer button that is hidden from `lg`, so it collapses to nothing on its own. */}
+          <Header onMenu={() => setMobileNav(true)}>{header}</Header>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        </main>
+
+        {/* Mobile: off-canvas drawer + backdrop. Rendered LAST although it sits on the left —
+            it is `fixed`, so DOM order costs nothing visually, and keeping it after the content
+            card puts the navbar's collapse toggle ahead of the drawer's close button in the
+            accessibility tree (both are labelled "Hide navigation"). */}
         {mobileNav && (
           <div
-            className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+            className="fixed inset-0 z-40 bg-black/40 lg:hidden"
             onClick={() => setMobileNav(false)}
           />
         )}
         <div
-          className={`fixed inset-y-0 left-0 z-50 w-[270px] max-w-[80vw] bg-background-dark transition-transform duration-200 ease-in-out lg:hidden ${
-            mobileNav ? "translate-x-0" : "-translate-x-full"
+          className={`fixed inset-y-2 left-2 z-50 w-[240px] max-w-[80vw] transition-transform duration-200 ease-in-out lg:hidden ${
+            mobileNav ? "translate-x-0" : "-translate-x-[110%]"
           }`}
         >
           <Sidebar
             open
-            width={270}
+            width={240}
             animate={false}
             onClose={() => setMobileNav(false)}
-            onOpenLibrary={() => {
-              setMobileNav(false);
-              openLibrary();
-            }}
             onNewAnalysis={() => {
               setMobileNav(false);
               newAnalysis();
             }}
           />
         </div>
-
-        <main className="flex-1 flex flex-col min-w-0 min-h-0">{children}</main>
       </div>
     </div>
   );

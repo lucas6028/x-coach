@@ -64,7 +64,7 @@ export default function AdminSettingsLlm() {
     };
   }, []);
 
-  if (status === "loading") return <SettingsLoading t={t} />;
+  if (status === "loading") return <SettingsLoading />;
   if (status === "error" || !form || !data) return <SettingsLoadError t={t} />;
 
   const set = (key: keyof LlmForm) => (value: string) => setForm((f) => (f ? { ...f, [key]: value } : f));
@@ -99,8 +99,9 @@ export default function AdminSettingsLlm() {
 
   const d = data.defaults;
 
+  // Long forms keep their own reading measure — see the note in AdminSettingsRag.
   return (
-    <div className="space-y-6">
+    <div className="max-w-3xl space-y-6">
       <SettingsCard
         icon={<Brain size={18} weight="duotone" className="text-primary" />}
         title={t("admin.settings.llm")}

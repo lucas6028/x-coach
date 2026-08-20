@@ -2,51 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Light theme (default). Channels are space-separated RGB for Tailwind's
-   `rgb(var(--x) / <alpha-value>)` opacity support. */
+/* Light theme (default) — the motion_analysis_muse-spark palette. Channels are space-separated
+   RGB for Tailwind's `rgb(var(--x) / <alpha-value>)` opacity support.
+
+   The reference design is light-only, so the shell and the studio page write its hexes directly
+   (--ms-* below). These semantic tokens are retuned to the SAME palette so the pages that still
+   style with tokens — history, settings, movements, games, admin — sit inside that shell without
+   clashing. This is the app's only token set: there is no theme picker and no dark block, so the
+   pages outside the shell (landing, admin) follow these too. */
 :root {
   color-scheme: light;
-  --c-bg: 246 247 249;
+  --c-bg: 238 240 251; /* #eef0fb — the lavender canvas */
   --c-surface: 255 255 255;
-  --c-border: 226 230 235;
-  --c-content: 21 25 30;
-  --c-muted: 91 100 112;
-  --c-faint: 138 146 156;
-  --c-track: 210 215 221;
+  --c-border: 235 234 246; /* #ebeaf6 */
+  --c-content: 30 33 66; /* #1e2142 */
+  /* Secondary text is darkened to the reference theme's own values (#59648f / #63709f). Its
+     glass.ts records why: the lighter tints it started from measured 4.27:1 and 3.64:1 on this
+     canvas, under the 4.5:1 WCAG AA floor for body copy. Ours were lighter still — `faint`
+     (#9aa0b8) is about 2.6:1 on white and carries real copy (dropzone hints, card sublabels,
+     timecodes). Same hue family, just legible. */
+  --c-muted: 89 100 143; /* #59648f */
+  --c-faint: 99 112 159; /* #63709f */
+  --c-track: 240 241 248; /* #f0f1f8 */
   --c-fault: 183 121 31; /* amber, darkened for contrast on light canvas */
-  /* Timeline.tsx's "unexamined span" hatch. Dark-on-track in light theme — white-on-white
-     (the dark theme's own value, reused unconditionally) was invisible here, since light is the
-     default theme and the timeline sits outside the always-black video panel. */
-  --c-hatch: rgba(21, 25, 30, 0.16);
+  /* Timeline.tsx's "unexamined span" hatch. The scrub bar now lives inside the video card's DARK
+     control pill (white text on a `bg-white/30` track), so the stripe has to be light-on-dark —
+     a dark value there is invisible, and an invisible "not analyzed" span reads as an analyzed
+     one. There is one (light) palette since the muse-spark redesign, so this is the only value. */
+  --c-hatch: rgba(255, 255, 255, 0.55);
   /* Soft, cool-tinted card elevation — the reference's borderless-white-card look.
      Tinted toward slate (16 24 40) rather than pure black so shadows sit in the palette. */
   --shadow-card: 0 1px 2px rgb(16 24 40 / 0.05), 0 10px 24px -8px rgb(16 24 40 / 0.10);
   --shadow-card-hover: 0 2px 6px rgb(16 24 40 / 0.07), 0 16px 34px -10px rgb(16 24 40 / 0.16);
-  --shadow-accent: 0 6px 16px -6px rgb(15 117 138 / 0.40); /* teal-tinted lift for the primary CTA */
+  --shadow-accent: 0 8px 20px rgb(123 92 255 / 0.30); /* violet lift for the primary CTA */
 }
 
-.dark {
-  color-scheme: dark;
-  --c-bg: 18 20 22;
-  --c-surface: 30 33 36;
-  --c-border: 42 46 51;
-  --c-content: 243 244 246;
-  --c-muted: 156 163 175;
-  --c-faint: 107 114 128;
-  --c-track: 55 65 81;
-  --c-fault: 245 185 69; /* amber #f5b945 for dark canvas */
-  /* Unchanged from the pre-fix value — dark theme's own hatch treatment was never the problem. */
-  --c-hatch: rgba(255, 255, 255, 0.12);
-  /* On the dark canvas soft shadows all but vanish, so go deeper and lean on the card's
-     hairline border for separation. */
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.45), 0 12px 28px -12px rgb(0 0 0 / 0.60);
-  --shadow-card-hover: 0 2px 6px rgb(0 0 0 / 0.55), 0 18px 36px -14px rgb(0 0 0 / 0.70);
-  --shadow-accent: 0 6px 18px -6px rgb(15 117 138 / 0.55);
+/* `.ms-shell` used to re-declare this whole token set, to hold the shell on light values while
+   the rest of the app followed a theme picker. The picker is gone and there is one palette now,
+   so the override was an exact copy of the block above — two places to edit, one of which would
+   eventually be forgotten. Deleted; the class stays as a styling hook on the layout roots. */
+
+/* ── muse-spark reference palette ───────────────────────────────────────────
+   Fixed values, deliberately NOT theme-switched: the reference design is light-only and the
+   shell / studio page are pinned to it. Kept as variables so the palette is stated once. */
+:root {
+  --ms-canvas: #eef0fb;
+  --ms-card: #ffffff;
+  --ms-card-soft: #fcfcff;
+  --ms-chip: #f5f6fb;
+  --ms-line: #ebeaf6;
+  --ms-line-soft: #f0f1f8;
+  --ms-ink: #1e2142;
+  --ms-ink-strong: #232535;
+  --ms-muted: #6b6f8a;
+  --ms-faint: #9aa0b8;
+  --ms-dim: #b8bcd3;
+  --ms-violet: #7b61ff;
+  --ms-violet-soft: #f3f0ff;
+  --ms-violet-line: #ece8ff;
+  --ms-green: #22c55e;
+  --ms-green-ink: #1a9e5a;
+  --ms-green-soft: #e6f7ed;
+  --ms-red: #ff6b6b;
+  --ms-red-soft: #fff5f5;
+
 }
 
 body {
   margin: 0;
-  font-family: "Space Grotesk", sans-serif;
+  font-family: "Inter", sans-serif;
   background-color: rgb(var(--c-bg));
   color: rgb(var(--c-content));
 }
@@ -58,6 +82,139 @@ body {
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: rgb(var(--c-border));
   border-radius: 9999px;
+}
+
+/* Horizontally scrollable strips (the shell's pill-tab row) scroll without a visible bar. */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Pale-violet glass ──────────────────────────────────────────────────────
+   Ported from the reference theme (Downloads/theme/glass.ts + its MUI overrides): the same
+   translucency, inset top highlight and deep soft shadow, expressed as plain classes because
+   this app is Tailwind, not MUI/emotion.
+
+   BLUR DISCIPLINE — the constraint the source spells out, and the reason it is worth repeating
+   here: `backdrop-filter` is applied ONLY to the outermost shell surface, the nav rail, and
+   transient popovers. Inner panels deliberately do NOT blur. Stacking four blurred layers costs
+   frames while scrolling, and this app's worst case is worse than the source's — /app scrolls a
+   page that is simultaneously decoding video, running a rAF playhead and repainting the skeleton
+   canvas over it. The over-video cards and the control bar therefore use high-opacity fills
+   instead of blur.
+
+   RADIUS IS DELIBERATELY NOT SET by any of these classes. They are plain selectors emitted after
+   `@tailwind utilities`, so a `border-radius` here would silently beat every `rounded-*` utility
+   on the same element (equal specificity, later in the file) — the panels would all snap to one
+   corner regardless of what their markup asked for. The theme's radii (18 panel / 14 popover /
+   24 bar) are applied at the call sites instead. */
+
+/* The outermost surface: the shell's own frosted pane. One of only three blurs on the page.
+   Thinned well below the source's .90–.94 so the lavender canvas and its two colour blooms read
+   THROUGH the card instead of being sealed off by it — that tint showing through is what makes
+   the panels stacked on top look like glass rather than like flat grey boxes. */
+.glass-shell {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.86),
+    rgba(248, 249, 255, 0.78) 45%,
+    rgba(252, 252, 255, 0.88)
+  );
+  backdrop-filter: blur(28px) saturate(1.3);
+}
+
+/* The nav rail — the source blurs this one too. */
+.glass-rail {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(24px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 58px rgba(105, 112, 175, 0.13);
+}
+
+/* Inner panels: translucent white over the shell gradient. No blur (see above), so the alpha is
+   the only thing carrying them — kept above ~.38 because everything below it is body copy. */
+.glass-panel {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 58px rgba(105, 112, 175, 0.13);
+}
+
+/* Same face as `.glass-panel` but without border or radius, for elements that own those — the
+   fault card's active state is a coloured ring, and a panel border would overwrite it. */
+.glass-face {
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 22px 58px rgba(105, 112, 175, 0.13);
+}
+
+/* Controls: the filter-pill / input language. Nested inside panels, so their fill compounds with
+   the one under them — this reads lighter on screen than the number suggests. */
+.glass-control {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 8px 20px rgba(105, 112, 170, 0.08);
+}
+.glass-control:hover {
+  border-color: #e1e6f5;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+/* The strip a row of controls sits on. */
+.glass-bar {
+  background: rgba(247, 248, 255, 0.58);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 16px 45px rgba(110, 116, 177, 0.1);
+}
+
+/* Popovers and modals — topmost layer, so this is where the third and last blur lives. Thinned to
+   .68: the source's .82 floor was for an unblurred-page backdrop, and the 22px blur here already
+   dissolves whatever is behind into colour rather than legible shapes. */
+.glass-popup {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(22px) saturate(1.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 18px 44px rgba(105, 112, 175, 0.22);
+}
+
+/* Cards that float over the black video. THIS IS THE ONE THAT STAYS NEARLY OPAQUE, and it is not
+   an oversight: everything else here is translucent over a pale canvas, but these sit on a black
+   clip and carry near-black label text. Take them down to the panel's fill and the fault names
+   and the form score become unreadable over the athlete. Blur cannot rescue them either — that is
+   the one surface where it costs frames (see the discipline note above). */
+.glass-over-video {
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 18px 44px rgba(20, 24, 60, 0.28);
+}
+
+/* Entrance motion, from the same source: `rise` for a page header, `pop` for the cards under it
+   (stagger with an inline animation-delay). Both collapse under reduced motion, below. */
+@keyframes xc-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes xc-pop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.xc-rise {
+  animation: xc-rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.xc-pop {
+  animation: xc-pop 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Landing: tracking-pulse on the flagged keypoint. CSS (not JS rAF) so it
@@ -73,6 +230,8 @@ body {
 }
 @media (prefers-reduced-motion: reduce) {
   .xc-pulse-ring { animation: none; opacity: 0; }
+  /* The glass theme's entrance motion (see the glass block below) collapses here too. */
+  .xc-rise, .xc-pop { animation: none; }
 }
 
 /* ── Lumen loader ───────────────────────────────────────────────────────────
@@ -205,4 +364,143 @@ body {
   .lm-glow, .lm-char, .lm-scan, .lm-dots b, .lm-el i { animation: none !important; }
   .lm-scan::after { opacity: 0; }
   .lm-el { display: none; }
+}
+
+/* ── Login stage (`/login`) ─────────────────────────────────────────────────
+   Everything the login page CAN express as a Tailwind utility, it does — this block holds only
+   what utilities have no vocabulary for: the layered radial blooms behind the athlete, the
+   organic (non-circular) floor sweep, the dot fields, the conic score ring, and the entrance /
+   idle keyframes.
+
+   Class selectors, never element selectors. The reference prototype this is ported from styled
+   `form label`, `footer` and `a` globally; in this app those would reach into history, settings,
+   movements, games and admin. Nothing below matches an element it was not handed, and every
+   class is prefixed `lgn-`. */
+
+/* The violet-into-white bloom the athlete stands in. Two ellipses (a cool halo up top, a warmer
+   one bottom-left) sit under everything; the ::after is the "floor" — a wide, slightly rotated
+   dome whose gradient runs white at the horizon into violet at the edges. */
+.lgn-stage::before {
+  position: absolute;
+  z-index: -4;
+  content: "";
+  inset: 11% 0 0 1%;
+  border-radius: 50% 42% 0 0;
+  background:
+    radial-gradient(ellipse at 60% 46%, rgba(217, 217, 255, 0.72) 0%, rgba(244, 244, 255, 0.42) 31%, transparent 59%),
+    radial-gradient(ellipse at 27% 88%, rgba(152, 125, 255, 0.33) 0%, rgba(213, 203, 255, 0.26) 42%, transparent 67%);
+}
+.lgn-stage::after {
+  position: absolute;
+  z-index: -3;
+  content: "";
+  left: -8%;
+  bottom: -31%;
+  width: 104%;
+  height: 63%;
+  transform: rotate(2deg);
+  border-radius: 49% 54% 0 0;
+  background: radial-gradient(
+    ellipse at 52% 15%,
+    rgba(255, 255, 255, 0.97) 0 24%,
+    rgba(220, 211, 255, 0.8) 55%,
+    rgba(113, 72, 246, 0.75) 100%
+  );
+  box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* Concentric "measurement" rings on the floor under the athlete's feet — a visual echo of the
+   app's own skeleton overlay. */
+.lgn-rings i {
+  position: absolute;
+  inset: 16%;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+}
+.lgn-rings i:nth-child(2) { inset: 32%; }
+.lgn-rings i:nth-child(3) { inset: 46%; }
+
+.lgn-dots {
+  background-image: radial-gradient(circle, #c4b4ff 2px, transparent 2.2px);
+  background-size: 22px 22px;
+}
+
+/* Score ring: a conic sweep with a white plug punched out of the middle. The arc stops at 330deg
+   so the ring reads as a gauge rather than a solid disc. */
+.lgn-ring {
+  background: conic-gradient(#11c267 0deg 330deg, #dff6e9 330deg 360deg);
+}
+.lgn-ring::before {
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  content: "";
+  border-radius: 50%;
+  background: #fff;
+}
+
+.lgn-copy { animation: lgn-rise 0.8s cubic-bezier(0.2, 0.75, 0.25, 1) both; }
+.lgn-art { animation: lgn-lift 1s 0.12s cubic-bezier(0.16, 0.8, 0.28, 1) both; }
+.lgn-panel { animation: lgn-slide 0.9s cubic-bezier(0.18, 0.8, 0.28, 1) both; }
+/* Entrance then idle drift. The four cards are staggered by explicit delay classes rather than
+   :nth-child so the markup order is free to change without reshuffling the choreography. */
+.lgn-card {
+  animation:
+    lgn-pop 0.8s 0.38s cubic-bezier(0.17, 0.77, 0.34, 1) both,
+    lgn-float 5.5s 1.3s ease-in-out infinite;
+}
+.lgn-card-b { animation-delay: 0.46s, 2.4s; }
+.lgn-card-c { animation-delay: 0.5s, 2s; }
+.lgn-card-d { animation-delay: 0.58s, 1.65s; }
+.lgn-orb { animation: lgn-orb 3.2s ease-in-out infinite; }
+.lgn-orb-b { animation-delay: 1s; }
+
+@keyframes lgn-rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes lgn-lift { from { opacity: 0; transform: translateY(24px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes lgn-slide { from { opacity: 0; transform: translateX(22px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes lgn-pop { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@keyframes lgn-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -5px; } }
+@keyframes lgn-orb { 0%, 100% { transform: scale(0.8); opacity: 0.35; } 50% { transform: scale(1.2); opacity: 0.8; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .lgn-copy, .lgn-art, .lgn-panel, .lgn-card, .lgn-orb { animation: none !important; }
+}
+
+/* SHORT-VIEWPORT TIER. A login page that has to be scrolled to reach its own submit button is
+   broken, and the page has to clear a LAPTOP viewport, not a laptop SCREEN: browser chrome takes
+   100–130px, so a 768px-tall display leaves roughly 640px of page and a 864px one roughly 730px.
+   The markup's own rhythm fits a desktop monitor; this block takes ~95px out of it for both of the
+   laptops above, rather than compressing every screen down to the smallest one. The 780px cut-off
+   is deliberately well clear of the 730px case it has to serve — a page that only fits when the
+   arithmetic is exact stops fitting the moment a font falls back or the reader zooms.
+
+   Only spacing and one type size move — every control stays at or above the 44px touch target.
+   These are plain selectors emitted after `@tailwind utilities`, so they beat the `py-*`/`h-*`
+   utilities they override on equal specificity by source order (same mechanism the RADIUS note
+   at the top of this file warns about, used deliberately here). */
+@media (max-height: 780px) {
+  .lgn-formcol { padding-bottom: 0.5rem; }
+  .lgn-panel { padding-top: 0.75rem; padding-bottom: 0.75rem; }
+  .lgn-title { font-size: 24px; }
+  .lgn-form { margin-top: 1rem; }
+  .lgn-field, .lgn-social, .lgn-submit { height: 2.75rem; }
+  .lgn-submit { margin-top: 1.15rem; }
+  .lgn-divider { margin-top: 0.5rem; margin-bottom: 0.5rem; }
+  .lgn-alt { margin-top: 0.7rem; }
+  .lgn-foot { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+}
+
+/* The two rules above that are NOT safe at every width, so they get the stage's own breakpoint.
+   Below `xl` the brand stage is gone and the brand link sits ABOVE the panel rather than beside it,
+   where a shortened top padding would run the panel under the logo. And `.lgn-card-a` is the one
+   piece of the stage that cannot ride the percentages down: the hero copy above it is text — three
+   lines in English where Chinese takes two — and its height does not shrink with the stage, so on a
+   short stage the card's 34% lands it on that third line. */
+@media (min-width: 1280px) and (max-height: 780px) {
+  .lgn-top { padding-top: 2.25rem; }
+  .lgn-card-a { top: 41%; }
+  /* And the card below it drops the same distance, to keep the pair apart. The clearance has to
+     survive `lgn-float`: the two cards drift ±5px on delays 0.7s apart, so a gap that merely looks
+     safe in a still frame closes while the page idles. */
+  .lgn-card-c { bottom: 15%; }
 }

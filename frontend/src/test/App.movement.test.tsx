@@ -17,11 +17,27 @@ vi.mock("../lib/poseExtract", () => ({
   }),
 }));
 
+// runPoseAnalysis also calls captureThumbnail on the same blob. The real implementation drives a
+// <video> decode jsdom cannot perform (it hung/failed these tests once App.tsx started calling
+// it); these tests are about which MOVEMENT reaches the request, not about thumbnail capture.
+vi.mock("../lib/thumbnail", () => ({ captureThumbnail: () => Promise.resolve(null) }));
+
 const LIVE = [
   { name: "Squat", validated: true },
   { name: "Overhead Press", validated: false },
   { name: "Push-up", validated: false },
 ];
+
+// The dropzone mounts only AFTER GET /api/movements settles — DemoIntro gates CaptureStudio on
+// `movementsLoaded` — while the header's movement selector renders from the URL on the very first
+// paint. So waiting on the selector does not imply the dropzone exists: it raced the fetch, and
+// under full-suite load it lost, leaving `querySelector('input[type=file]')` null. Wait for the
+// input itself; that also implies the catalog landed, so the Beta badge and the canonicalized
+// label are safe to assert synchronously afterwards.
+async function findFileInput(): Promise<HTMLInputElement> {
+  await vi.waitFor(() => expect(document.querySelector('input[type="file"]')).not.toBeNull());
+  return document.querySelector('input[type="file"]') as HTMLInputElement;
+}
 
 describe("studio movement selection", () => {
   beforeEach(() => {
@@ -31,14 +47,12 @@ describe("studio movement selection", () => {
 
   it("preselects the movement from the URL", async () => {
     renderWithProviders(<App />, { route: "/app?movement=Push-up" });
-    const select = (await screen.findByLabelText(/movement/i)) as HTMLSelectElement;
-    expect(select.value).toBe("Push-up");
+    expect(await screen.findByLabelText("Movement: Push-up")).toBeInTheDocument();
   });
 
   it("defaults to Squat when the URL says nothing", async () => {
     renderWithProviders(<App />, { route: "/app" });
-    const select = (await screen.findByLabelText(/movement/i)) as HTMLSelectElement;
-    expect(select.value).toBe("Squat");
+    expect(await screen.findByLabelText("Movement: Squat")).toBeInTheDocument();
   });
 
   it("sends the selected movement with the upload", async () => {
@@ -50,16 +64,21 @@ describe("studio movement selection", () => {
       .spyOn(api, "analyzePose")
       .mockResolvedValue({ ...mockAnalysis, video_id: "v1", movement: "Push-up" });
     renderWithProviders(<App />, { route: "/app?movement=Push-up" });
-    await screen.findByLabelText(/movement/i);
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const input = await findFileInput();
     await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
     // The movement is analyzePose's FIRST argument. It shipped hardcoded to "Squat" when the
     // client-capture path landed; this asserts the user's actual selection now reaches it.
-    // Fourth arg is the rep plan extractPoseWithReps returns (Task 10) — the mock above supplies
-    // one on every call now, so a bare 3-arg expectation would under-match the real call.
     await vi.waitFor(() =>
       expect(analyze).toHaveBeenCalledWith(
-        "Push-up", expect.anything(), expect.anything(), expect.anything()
+        "Push-up",
+        expect.anything(),
+        expect.anything(),
+        // The mocked captureThumbnail above always resolves null; expect.anything() does not
+        // match null/undefined, so this asserts the literal value it actually forwards.
+        null,
+        // Fifth arg is the rep plan extractPoseWithReps returns (Task 10) — the mock above
+        // supplies one on every call, so a 4-arg expectation would under-match the real call.
+        expect.anything()
       )
     );
   });
@@ -78,18 +97,19 @@ describe("studio movement selection", () => {
   });
 
   // Finding 1 + 2 of the 2026-07-25 review: the header title, the demo heading, and the upload
-  // prompt all stayed pinned to "squat" no matter which movement was selected — three surfaces
-  // upstream of the verdict telling a Push-up user they were uploading a squat. This is the
-  // end-to-end pin that all three now track the URL-driven selection together.
-  it("names the URL-selected movement in the header, heading, and upload prompt", async () => {
+  // prompt all stayed pinned to "squat" no matter which movement was selected — surfaces upstream
+  // of the verdict telling a Push-up user they were uploading a squat. The navbar title has since
+  // been removed app-wide, so the two remaining surfaces carry the pin.
+  it("names the URL-selected movement in the demo heading and upload prompt", async () => {
     renderWithProviders(<App />, { route: "/app?movement=Push-up" });
-    await screen.findByLabelText(/movement/i);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Push-up Analysis");
+    // The upload prompt lives INSIDE the dropzone, so this assertion needs the catalog to have
+    // landed too — waiting on the selector alone raced it the same way.
+    await findFileInput();
     expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
       "Analyze your Push-up in about 20 seconds."
     );
     expect(screen.getByText("Drop a Push-up video or tap to upload")).toBeInTheDocument();
-    expect(screen.queryByText(/Squat Analysis/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/your Squat in about/i)).not.toBeInTheDocument();
   });
 
   // The backend matches movements case-insensitively — `registry.get_detector` lowercases its
@@ -105,22 +125,35 @@ describe("studio movement selection", () => {
         .mockResolvedValue({ ...mockAnalysis, video_id: "v1", movement: "Push-up" });
       renderWithProviders(<App />, { route: `/app?movement=${encodeURIComponent(param)}` });
 
-      const select = (await screen.findByLabelText(/movement/i)) as HTMLSelectElement;
-      // Canonicalized, not merely accepted: the <select> value, the i18n label and the Beta badge
-      // all key off the registry's spelling, so a case-insensitive gate alone would leave the
-      // dropdown showing a phantom duplicate option and the Beta tag missing.
-      expect(select.value).toBe("Push-up");
+      // Gate every assertion below on the dropzone, not on the label: before the catalog lands,
+      // an unresolved `" Push-up "` still renders `aria-label="Movement:  Push-up "`, which RTL's
+      // default normalizer trims into a match — so `findByLabelText` could pass pre-load and drop
+      // the following sync assertions (Beta especially) into the unloaded render.
+      const input = await findFileInput();
+
+      // Canonicalized, not merely accepted: the control's current value, the i18n label and the
+      // Beta badge all key off the registry's spelling, so a case-insensitive gate alone would
+      // leave the dropdown showing a phantom duplicate option and the Beta tag missing.
+      expect(screen.getByLabelText("Movement: Push-up")).toBeInTheDocument();
       expect(screen.queryByText(/not.*analys|尚未/i)).toBeNull();
       expect(screen.getByText("Beta")).toBeTruthy();
-      expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Push-up Analysis");
+      expect(screen.getByRole("heading", { level: 2 })).toHaveTextContent(
+        "Analyze your Push-up in about 20 seconds."
+      );
 
-      const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-      expect(input).not.toBeNull();
       await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
       // Fourth arg is the rep plan (Task 10) — see the note on the earlier assertion of this shape.
       await vi.waitFor(() =>
         expect(analyze).toHaveBeenCalledWith(
-          "Push-up", expect.anything(), expect.anything(), expect.anything()
+        "Push-up",
+          expect.anything(),
+          expect.anything(),
+          // The mocked captureThumbnail above always resolves null; expect.anything() does not
+          // match null/undefined, so this asserts the literal value it actually forwards.
+          null,
+          // Fifth arg is the rep plan extractPoseWithReps returns (Task 10) — the mock above
+          // supplies one on every call, so a 4-arg expectation would under-match the real call.
+          expect.anything()
         )
       );
     }
@@ -131,6 +164,30 @@ describe("studio movement selection", () => {
     renderWithProviders(<App />, { route: "/app?movement=pushup" });
     expect(await screen.findByText(/not.*analys|尚未/i)).toBeTruthy();
     expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  // The rest of the file mocks getMovements as an already-resolved promise, which settles within a
+  // microtask of the first render — so close to it that whether the dropzone had mounted came down
+  // to scheduling luck, and a loaded machine flipped it (the full suite failed here while the file
+  // passed alone). This case pins the same wiring against a fetch that settles a macrotask later,
+  // the way a real network does: the dropzone appears afterwards, and the upload still carries the
+  // URL-selected movement.
+  it("mounts the dropzone and sends the movement after a slower movements fetch", async () => {
+    vi.spyOn(api, "getMovements").mockReturnValue(
+      new Promise((r) => setTimeout(() => r(LIVE), 0))
+    );
+    const analyze = vi
+      .spyOn(api, "analyzePose")
+      .mockResolvedValue({ ...mockAnalysis, video_id: "v1", movement: "Push-up" });
+    renderWithProviders(<App />, { route: "/app?movement=Push-up" });
+
+    const input = await findFileInput();
+    await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
+    await vi.waitFor(() =>
+      expect(analyze).toHaveBeenCalledWith(
+        "Push-up", expect.anything(), expect.anything(), null, expect.anything()
+      )
+    );
   });
 
   it("does not claim a movement is unavailable while the list is still loading", async () => {

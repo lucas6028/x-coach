@@ -32,7 +32,7 @@ function Corner({ pos }: { pos: "tl" | "tr" | "bl" | "br" }) {
     bl: "left-3 bottom-3 border-l-2 border-b-2",
     br: "right-3 bottom-3 border-r-2 border-b-2",
   } as const;
-  return <span aria-hidden className={`absolute h-5 w-5 border-[#3ee07a]/50 ${map[pos]}`} />;
+  return <span aria-hidden className={`absolute h-5 w-5 border-[#a78bfa]/70 ${map[pos]}`} />;
 }
 
 // Real MediaPipe skeleton drawn on a canvas synced to the <video>, revealed left-to-right
@@ -128,9 +128,11 @@ export default function SkeletonStage({
         ctx.beginPath();
         ctx.moveTo(px(pa[0]), py(pa[1]));
         ctx.lineTo(px(pb[0]), py(pb[1]));
-        ctx.strokeStyle = "#3ee07a";
+        // The app's own overlay colours (violet bones, near-white joints), not a landing-only
+        // palette — this canvas is showing what the studio draws.
+        ctx.strokeStyle = "#8b7bff";
         ctx.lineWidth = 3 * dpr;
-        ctx.shadowColor = "#16b8a8";
+        ctx.shadowColor = "#7b61ff";
         ctx.shadowBlur = 8 * dpr;
         ctx.stroke();
       }
@@ -141,7 +143,7 @@ export default function SkeletonStage({
         if (!p || p[2] < VIS) continue;
         ctx.beginPath();
         ctx.arc(px(p[0]), py(p[1]), 3 * dpr, 0, Math.PI * 2);
-        ctx.fillStyle = "#eafff0";
+        ctx.fillStyle = "#f4f2ff";
         ctx.fill();
       }
     };
@@ -157,11 +159,13 @@ export default function SkeletonStage({
     else v.pause();
   };
 
+  // The frame is the studio's video card (components/VideoPanel): a pale rounded border around a
+  // black stage. The clip stays dark on this light page because it is dark in the app.
   return (
     <div
       onMouseEnter={() => onHoverChange(true)}
       onMouseLeave={() => onHoverChange(false)}
-      className="group relative aspect-square w-full overflow-hidden rounded-2xl border border-white/10 bg-[#070b0a] shadow-[0_30px_80px_-30px_rgba(0,0,0,0.8)]"
+      className="group relative aspect-square w-full overflow-hidden rounded-[24px] border border-[#e6e8f0] bg-black shadow-card"
     >
       {/* base: original footage */}
       <video
@@ -186,7 +190,7 @@ export default function SkeletonStage({
         transition={REVEAL}
         style={reduce ? { clipPath: "inset(0 0% 0 0)" } : undefined}
       >
-        <div className="absolute inset-0 bg-[#06140c]/25" />
+        <div className="absolute inset-0 bg-[#1e2142]/25" />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 opacity-50"
@@ -203,7 +207,7 @@ export default function SkeletonStage({
       {!reduce && (
         <motion.div
           aria-hidden
-          className="absolute inset-y-0 z-10 w-px bg-gradient-to-b from-[#5ffb6f] via-[#16b8a8] to-[#5ffb6f] shadow-[0_0_18px_2px_rgba(62,224,122,0.55)]"
+          className="absolute inset-y-0 z-10 w-px bg-gradient-to-b from-[#c4b5fd] via-[#7b61ff] to-[#c4b5fd] shadow-[0_0_18px_2px_rgba(123,97,255,0.55)]"
           initial={{ left: "0%", opacity: 0 }}
           animate={{ left: "100%", opacity: [0, 1, 1, 0] }}
           transition={{ ...REVEAL, opacity: { ...REVEAL, times: [0, 0.06, 0.88, 1] } }}
@@ -216,9 +220,9 @@ export default function SkeletonStage({
       <Corner pos="br" />
 
       {/* status chip */}
-      <div className="pointer-events-none absolute left-4 top-4 z-20 flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 font-mono text-[11px] uppercase tracking-wider text-zinc-200 backdrop-blur">
+      <div className="glass-over-video pointer-events-none absolute left-4 top-4 z-20 flex items-center gap-2 rounded-full px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider text-[#1e2142]">
         <motion.span
-          className="h-1.5 w-1.5 rounded-full bg-[#3ee07a]"
+          className="h-1.5 w-1.5 rounded-full bg-primary"
           animate={reduce ? undefined : { opacity: [1, 0.3, 1] }}
           transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}
         />
@@ -227,15 +231,15 @@ export default function SkeletonStage({
 
       {/* active exercise name */}
       <div className="pointer-events-none absolute bottom-4 left-4 z-20">
-        <p className="font-display text-xl font-semibold text-zinc-50 drop-shadow">{name}</p>
-        <span className="mt-1 block h-0.5 w-10 rounded-full bg-gradient-to-r from-[#5ffb6f] to-[#16b8a8]" />
+        <p className="font-display text-xl font-semibold text-white drop-shadow-[0_2px_8px_rgba(18,20,42,0.7)]">{name}</p>
+        <span className="mt-1 block h-0.5 w-10 rounded-full bg-gradient-to-r from-[#c4b5fd] to-[#7b61ff]" />
       </div>
 
       {/* play / pause */}
       <button
         onClick={togglePlay}
         aria-label={playing ? pauseLabel : playLabel}
-        className="absolute bottom-4 right-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/45 text-zinc-100 backdrop-blur transition-transform hover:scale-105 active:scale-95"
+        className="absolute bottom-4 right-4 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-[#3a3d4d]/85 text-white shadow-[0_10px_24px_rgba(20,24,60,0.28)] transition-transform hover:scale-105 active:scale-95"
       >
         {playing ? <Pause weight="fill" size={16} /> : <Play weight="fill" size={16} />}
       </button>

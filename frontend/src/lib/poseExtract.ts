@@ -1,9 +1,12 @@
 // Client-side pose extraction: decode a recorded/uploaded clip frame-by-frame, run MediaPipe,
 // and emit pose JSON byte-compatible with src/pose/process_videos.py so the backend detector is
-// untouched. The pure serializer (landmarksToFrame) is unit-tested; the <video>/rVFC/WASM glue
-// in extractPoseWithReps (and the sampleFrames helper it shares with the coarse pass) is impure
-// and coverage-excluded like the other detector boundaries.
-import { createPoseLandmarker } from "../components/poseLandmarker";
+// untouched. The pure serializer (landmarksToFrame) is unit-tested; the <video>/WASM glue in
+// extractPoseWithReps (and the sampleFrames helper it shares with the coarse pass) is impure and
+// coverage-excluded like the other detector boundaries. Duration recovery moved out to
+// ./mediaDuration (thumbnail capture needs it without the pose bundle) and per-frame inference
+// runs through ./poseInference, which keeps MediaPipe off the main thread when the browser allows.
+import { resolveDuration } from "./mediaDuration";
+import { createPoseInferenceRunner, type PoseInferenceRunner } from "./poseInference";
 import type { PoseTier } from "./poseTier";
 import { LIVE_OVERLAY_TIER } from "./poseTier";
 import { TS_REP_SIGNALS, centeredMedian, type SignalLandmark } from "./repSignal";
@@ -14,8 +17,17 @@ import {
 } from "./repSpans";
 
 const LANDMARK_COUNT = 33;
+export const MAX_POSE_ANALYSIS_DURATION_SECONDS = 90;
 
-interface MpLandmark { x: number; y: number; z: number; visibility?: number }
+export function assertPoseAnalysisDuration(duration: number): void {
+  if (duration > MAX_POSE_ANALYSIS_DURATION_SECONDS) {
+    throw new Error(`Videos longer than ${MAX_POSE_ANALYSIS_DURATION_SECONDS} seconds cannot be analyzed.`);
+  }
+}
+
+// Worker structured-clone results from some WebViews can omit optional fields. Never serialize a
+// partial landmark: JSON.stringify would drop that key and the server would reject the payload.
+interface MpLandmark { x?: number; y?: number; z?: number; visibility?: number }
 export interface PoseJsonLandmark { x: number; y: number; z: number; visibility: number }
 export interface PoseJsonFrame {
   frame_index: number;
@@ -27,10 +39,19 @@ export interface PoseJson {
   frames: PoseJsonFrame[];
 }
 
-const toPts = (lms?: MpLandmark[]): PoseJsonLandmark[] | null =>
-  lms && lms.length >= LANDMARK_COUNT
-    ? lms.map((l) => ({ x: l.x, y: l.y, z: l.z, visibility: l.visibility ?? 0 }))
-    : null;
+const isFiniteCoordinate = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+const toPts = (lms?: MpLandmark[]): PoseJsonLandmark[] | null => {
+  if (!lms || lms.length < LANDMARK_COUNT) return null;
+  if (!lms.every((l) =>
+    isFiniteCoordinate(l.x) &&
+    isFiniteCoordinate(l.y) &&
+    isFiniteCoordinate(l.z) &&
+    (l.visibility === undefined || isFiniteCoordinate(l.visibility))
+  )) return null;
+  return lms.map((l) => ({ x: l.x!, y: l.y!, z: l.z!, visibility: l.visibility ?? 0 }));
+};
 
 export function landmarksToFrame(
   frameIndex: number,
@@ -38,75 +59,6 @@ export function landmarksToFrame(
   worldLandmarks?: MpLandmark[]
 ): PoseJsonFrame {
   return { frame_index: frameIndex, landmarks: toPts(landmarks), world_landmarks: toPts(worldLandmarks) };
-}
-
-// WHY THIS EXISTS. A MediaRecorder muxes its WebM as a LIVE stream: the Segment has unknown size
-// and the Info element carries only TimecodeScale — no Duration — with no Cues index. Verified by
-// parsing the clips this path actually produced (data/runtime/uploads/*.webm). The browser
-// therefore cannot report a length, and `video.duration` comes back NaN (observed) or Infinity for
-// a RECORDED clip, while an UPLOADED file reports a real number.
-//
-// `extractPoseWithReps`'s sampling loops bound themselves by that value, so every live recording
-// extracted ZERO frames and the app told the user "no frame in this clip could be measured" — a
-// verdict-shaped message for what was really a container quirk.
-//
-// The remedy is the standard one: seek far past any plausible end. The browser clamps the seek to
-// the true end of the media and fires `durationchange` carrying the recovered duration.
-const SEEK_PROBE = 1e101;
-
-/** The slice of HTMLVideoElement the duration probe touches. Narrow on purpose: jsdom has no
- *  decoder, so a full <video> cannot be exercised in tests, and this protocol is precisely where
- *  the live-record bug lived — it needs to be testable. */
-export interface DurationProbe {
-  duration: number;
-  currentTime: number;
-  addEventListener(type: string, listener: () => void): void;
-  removeEventListener(type: string, listener: () => void): void;
-}
-
-/**
- * Resolve a usable clip length, recovering it from the media itself when the container omits one.
- *
- * Rejects rather than returning 0 when the length never arrives: a 0 would flow into the sampling
- * loop as "no frames", and the app renders an empty frame list as a *form verdict* ("nothing could
- * be measured") rather than a failure. Reporting a decode problem as a coaching result is the exact
- * failure this codebase treats as unacceptable, so an honest error wins.
- */
-export function resolveDuration(video: DurationProbe, timeoutMs = 5000): Promise<number> {
-  // A well-formed upload already knows its length; probing it would be a pointless seek on the one
-  // path that has no bug.
-  if (Number.isFinite(video.duration) && video.duration > 0) return Promise.resolve(video.duration);
-
-  return new Promise<number>((resolve, reject) => {
-    let settled = false;
-    const cleanup = () => {
-      clearTimeout(timer);
-      video.removeEventListener("durationchange", check);
-      video.removeEventListener("seeked", check);
-    };
-    function check() {
-      // `durationchange` can fire while the length is still unknown — keep waiting until it is real.
-      if (settled || !Number.isFinite(video.duration) || video.duration <= 0) return;
-      settled = true;
-      cleanup();
-      video.currentTime = 0; // rewind: the caller samples forward from the start
-      resolve(video.duration);
-    }
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      video.currentTime = 0;
-      reject(new Error("Could not read the clip's length."));
-    }, timeoutMs);
-    // Attached BEFORE the seek: the browser may answer synchronously, and a listener registered
-    // afterwards would miss the only event it will ever get.
-    video.addEventListener("durationchange", check);
-    // Secondary signal only. A recorded clip has no Cues index, so `seeked` firing is not something
-    // this may depend on.
-    video.addEventListener("seeked", check);
-    video.currentTime = SEEK_PROBE;
-  });
 }
 
 export type RepsFallback =
@@ -132,8 +84,8 @@ export interface RepsPlan {
  *
  * EVERY fallback returns the WHOLE clip as one span. Sending a sparse frame list with no windows
  * would leave the backend to segment data that does not exist, and reporting a segmentation
- * failure as "no faults found" is the failure mode this codebase refuses (see resolveDuration's
- * comment below for the same rule applied to decoding). Not saving time is the correct trade.
+ * failure as "no faults found" is the failure mode this codebase refuses (mediaDuration's
+ * `resolveDuration` applies the same rule to decoding). Not saving time is the correct trade.
  */
 export function planReps(
   coarseSignal: number[], maxReps: number, lastFrameIndex: number, movement: string
@@ -263,8 +215,7 @@ function logTiming(label: string, ms: number): void {
 /** Seek to each frame_index in turn and run the landmarker. Shared by both passes. */
 async function sampleFrames(
   video: HTMLVideoElement,
-  landmarker: { detectForVideo(v: HTMLVideoElement, t: number): {
-    landmarks?: MpLandmark[][]; worldLandmarks?: MpLandmark[][] } },
+  runner: PoseInferenceRunner,
   frameIndices: number[],
   onProgress?: (p: number) => void
 ): Promise<PoseJsonFrame[]> {
@@ -274,8 +225,8 @@ async function sampleFrames(
     const t = index / CANONICAL_FPS;
     video.currentTime = t;
     await new Promise<void>((r) => { video.onseeked = () => r(); });
-    const result = landmarker.detectForVideo(video, Math.round(t * 1000));
-    out.push(landmarksToFrame(index, result.landmarks?.[0], result.worldLandmarks?.[0]));
+    const result = await runner.detect(video, Math.round(t * 1000));
+    out.push(landmarksToFrame(index, result.landmarks ?? undefined, result.worldLandmarks ?? undefined));
     onProgress?.((n + 1) / frameIndices.length);
   }
   return out;
@@ -317,11 +268,14 @@ export async function extractPoseWithReps(
   video.src = url;
 
   const coarseLoadStart = timing ? performance.now() : 0;
-  const coarseLandmarker = await createPoseLandmarker(LIVE_OVERLAY_TIER);
+  const coarseLandmarker = await createPoseInferenceRunner(LIVE_OVERLAY_TIER);
   if (timing) logTiming("coarse model load", performance.now() - coarseLoadStart);
   try {
     await metadataReady;
     const duration = await resolveDuration(video);
+    // Before either pass, not after: a clip over the cap is refused for free rather than after a
+    // full coarse sweep the user waits through and then sees thrown away.
+    assertPoseAnalysisDuration(duration);
     const lastFrameIndex = Math.max(0, frameIndexAt(duration) - 1);
 
     // Pass 1 — coarse. Lite, every COARSE_STRIDE-th frame, only to locate repetitions.
@@ -338,7 +292,7 @@ export async function extractPoseWithReps(
 
     // Pass 2 — dense, at the user's tier, over the padded spans only. ALWAYS a fresh instance,
     // even when tier === LIVE_OVERLAY_TIER ("Lite" is a real user-selectable analysis tier, not
-    // just the live-overlay default): createPoseLandmarker builds with runningMode: "VIDEO", and
+    // just the live-overlay default): the runner builds MediaPipe with runningMode: "VIDEO", and
     // MediaPipe requires the timestamp passed to detectForVideo to increase monotonically on a
     // given instance. The coarse pass runs the whole clip and its last call is near the final
     // frame; the dense pass then starts again at the first selected rep, an EARLIER frame — a
@@ -353,7 +307,7 @@ export async function extractPoseWithReps(
     // gets quantified.
     const denseIndices = spanFrameIndices(spans);
     const denseLoadStart = timing ? performance.now() : 0;
-    const denseLandmarker = await createPoseLandmarker(tier);
+    const denseLandmarker = await createPoseInferenceRunner(tier);
     if (timing) logTiming("dense model load", performance.now() - denseLoadStart);
     let denseFrames: PoseJsonFrame[];
     try {

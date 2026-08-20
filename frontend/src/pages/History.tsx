@@ -1,28 +1,44 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CaretRight,
-  FilmSlate,
-  PersonSimpleRun,
-  VideoCamera,
-  WarningCircle,
-} from "@phosphor-icons/react";
+import { FilmSlate, Trash, UploadSimple, VideoCamera, WarningCircle } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import { api, type HistoryItem } from "../api";
 import AppLayout from "../components/AppLayout";
+import ConfirmDialog from "../components/ConfirmDialog";
+import HistoryThumb from "../components/HistoryThumb";
+import HistoryFilters, {
+  EMPTY_FILTERS,
+  rangeStart,
+  type HistoryFilterState,
+} from "../components/history/HistoryFilters";
+import HistoryStats from "../components/history/HistoryStats";
 import { useAuth } from "../lib/auth";
 import { movementLabel, useI18n, viewLabel } from "../lib/i18n";
 
 type Status = "loading" | "ready" | "error";
 
-// "我的紀錄": the signed-in user's saved analyses. Each row replays into the studio via
-// /app?analysis=<id>. Product UI — kept in the app's token system, with loading/empty/error states.
+// "我的紀錄": the signed-in user's saved analyses, as a grid of cards grouped by day. Each card
+// replays into the studio via /app?analysis=<id>. Product UI — kept in the app's token system,
+// with loading/empty/error states.
 export default function History() {
   const { t, lang } = useI18n();
   const { user } = useAuth();
 
   const [items, setItems] = useState<HistoryItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState("");
+  const [filters, setFilters] = useState<HistoryFilterState>(EMPTY_FILTERS);
+
+  // Per-row deletion. Only one row can be in the confirm state at a time; `deleteError` is keyed by
+  // row id so the message appears under the row it belongs to, not at the top of the page.
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<{ id: string; message: string } | null>(null);
+
+  // Thumbnail URLs, keyed by video_id. Fetched in ONE batch for the whole page rather than per
+  // row: 50 rows would otherwise mean 50 presign requests. A failure here is silent — the rows
+  // still render, just with their icon placeholders.
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -30,7 +46,21 @@ export default function History() {
     try {
       const page = await api.listAnalyses();
       setItems(page.items);
+      // The all-time count, which the summary strip reports as-is. Everything else it shows is
+      // derived from `items` — one page — and it says so when the two differ.
+      setTotal(page.total);
       setStatus("ready");
+      const ids = page.items.map((it) => it.video_id);
+      try {
+        const media = await api.uploadMediaBatch(ids);
+        setThumbs(
+          Object.fromEntries(Object.entries(media).map(([id, m]) => [id, m.thumbnail_url]))
+        );
+      } catch {
+        // Thumbnails are decoration. A storage problem must not turn a readable history page
+        // into an error state.
+        setThumbs({});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setStatus("error");
@@ -41,19 +71,97 @@ export default function History() {
     void load();
   }, [load]);
 
+  // Splice the row out locally rather than refetching: `groups` is derived, so an emptied day
+  // header disappears on its own and deleting the last row falls back to the empty state.
+  const runDelete = async (id: string) => {
+    setDeletingId(id);
+    // Only clear this row's own error, if any -- a different row's still-unresolved failure
+    // must not be silently forgotten just because this row's delete was confirmed.
+    setDeleteError((prev) => (prev?.id === id ? null : prev));
+    try {
+      await api.deleteAnalysis(id);
+      setItems((prev) => prev.filter((it) => it.id !== id));
+      // Keep the all-time count in step with the splice, or the summary strip would keep claiming
+      // a row that is gone — and start showing its "these rates cover N of M" note for a page that
+      // is in fact complete.
+      setTotal((n) => Math.max(0, n - 1));
+      setPendingId(null);
+    } catch (e) {
+      setDeleteError({ id, message: e instanceof Error ? e.message : String(e) });
+      setPendingId(null);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   // The date now lives in the group header, so each row shows only its time.
   const fmtTime = (iso: string) => {
     const d = new Date(iso);
     return Number.isNaN(d.getTime()) ? iso : d.toLocaleTimeString(lang, { timeStyle: "short" });
   };
 
+  // The record the confirm dialog is about. Derived rather than stored, so a row that disappears
+  // (deleted, or a reload that no longer returns it) closes the dialog instead of stranding it.
+  const pendingItem = items.find((it) => it.id === pendingId);
+  const deletingPending = pendingItem !== undefined && deletingId === pendingItem.id;
+
+  // What the dialog echoes back: the same title the row shows, plus its time.
+  const rowLabel = (it: HistoryItem) =>
+    `${t("history.rowTitle", {
+      view: viewLabel(t, it.view_type ?? "unknown"),
+      movement: movementLabel(t, it.movement ?? "Squat"),
+    })} · ${fmtTime(it.created_at)}`;
+
+  // The movement types actually present, so the filter only offers what the rows contain. Keyed by
+  // the stored value (not its label) because that is what the filter compares against.
+  const movements = useMemo(() => {
+    const seen = new Set<string>();
+    for (const it of items) seen.add(it.movement ?? "Squat");
+    return [...seen].sort();
+  }, [items]);
+
+  // Client-side because the whole page is already in memory — a filter that re-queried would add a
+  // round trip per keystroke to narrow a list of at most 50.
+  const filtered = useMemo(() => {
+    const q = filters.search.trim().toLowerCase();
+    const from = rangeStart(filters.range);
+    return items.filter((it) => {
+      const movement = it.movement ?? "Squat";
+      if (filters.movement !== "all" && movement !== filters.movement) return false;
+      if (filters.result === "clean" && it.fault_count !== 0) return false;
+      if (filters.result === "faults" && it.fault_count === 0) return false;
+      if (from) {
+        const d = new Date(it.created_at);
+        // An unparseable timestamp can't be placed in time, so any dated range excludes it rather
+        // than silently keeping it in every window.
+        if (Number.isNaN(d.getTime()) || d < from) return false;
+      }
+      if (q) {
+        // Matched against what the card actually reads — the movement's label in the current
+        // language, plus its stored key so an English search still finds a Chinese card.
+        const hay = `${movementLabel(t, movement)} ${movement} ${viewLabel(t, it.view_type ?? "unknown")}`;
+        if (!hay.toLowerCase().includes(q)) return false;
+      }
+      return true;
+    });
+  }, [items, filters, t]);
+
   // Group the (newest-first) rows into day sections, preserving order — so the list reads as a
   // reverse-chronological timeline with a date header separating each day. Rows with an unparseable
   // timestamp fall into one trailing "unknown" group rather than being dropped.
   const groups = useMemo(() => {
-    const out: { key: string; label: string; items: HistoryItem[] }[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dayLabel = (d: Date) => {
+      const ago = Math.round((today.getTime() - new Date(d).setHours(0, 0, 0, 0)) / 86_400_000);
+      if (ago === 0) return t("history.today");
+      if (ago === 1) return t("history.yesterday");
+      return d.toLocaleDateString(lang, { dateStyle: "long" });
+    };
+
+    const out: { key: string; label: string; date: string | null; items: HistoryItem[] }[] = [];
     const index = new Map<string, number>();
-    for (const it of items) {
+    for (const it of filtered) {
       const d = new Date(it.created_at);
       const valid = !Number.isNaN(d.getTime());
       const key = valid ? d.toDateString() : "unknown";
@@ -63,34 +171,72 @@ export default function History() {
         index.set(key, i);
         out.push({
           key,
-          label: valid ? d.toLocaleDateString(lang, { dateStyle: "long" }) : it.created_at,
+          label: valid ? dayLabel(d) : it.created_at,
+          // Today/Yesterday say which day it is but not which date, so the full date rides
+          // alongside — and is redundant (so omitted) once the label already IS the date.
+          date: valid ? d.toLocaleDateString(lang, { dateStyle: "medium" }) : null,
           items: [],
         });
       }
       out[i].items.push(it);
     }
-    return out;
-  }, [items, lang]);
+    return out.map((g) => ({ ...g, date: g.date === g.label ? null : g.date }));
+  }, [filtered, lang, t]);
 
   return (
     <AppLayout title={t("history.title")}>
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <main className="mx-auto max-w-3xl px-4 py-8 lg:px-6 lg:py-12">
-          <p className="text-sm text-muted">
-            {user?.email ? t("history.subtitle", { email: user.email }) : t("history.subtitleAnon")}
-          </p>
+        {/* Wider than the old max-w-5xl: the grid is denser now (up to five tiles a row), and the
+            summary strip wants four tiles side by side without squeezing each into two lines. */}
+        <main className="mx-auto max-w-[1180px] px-4 py-6 lg:px-6 lg:py-8">
+          {/* Page header. Kept inside the scroll area rather than handed to AppLayout's top row:
+              the reference scrolls it away with the content, and the strip below it is part of
+              the same block. */}
+          <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="font-display text-[22px] font-bold tracking-tight text-content">
+                {t("history.title")}
+              </h1>
+              <p className="mt-1 text-sm text-muted">
+                {user?.email
+                  ? t("history.subtitle", { email: user.email })
+                  : t("history.subtitleAnon")}
+              </p>
+            </div>
+            <Link
+              to="/app"
+              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-primary px-5 py-2 text-[13px] font-semibold text-primary-content shadow-accent transition-colors hover:bg-primary/90 active:scale-[0.99]"
+            >
+              <UploadSimple size={15} weight="bold" />
+              {t("history.uploadCta")}
+            </Link>
+          </div>
+
+          {/* Summary + filters only once there is something to summarise or filter. On the empty
+              and error states they would be four zeroes and four dropdowns over nothing. */}
+          {status === "ready" && items.length > 0 && (
+            <div className="mb-6 flex flex-col gap-4">
+              <HistoryStats items={items} total={total} />
+              <HistoryFilters value={filters} onChange={setFilters} movements={movements} />
+            </div>
+          )}
 
         {status === "loading" && (
-          <ul className="mt-8 flex flex-col gap-2" aria-hidden="true">
-            {[0, 1, 2, 3].map((i) => (
+          // Same grid and same 3:4 tile as the loaded state, so the page does not reflow when the
+          // rows arrive.
+          <ul
+            className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5"
+            aria-hidden="true"
+          >
+            {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map((i) => (
               <li
                 key={i}
-                className="flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4"
+                className="overflow-hidden rounded-2xl border border-border-dark bg-surface-dark"
               >
-                <span className="h-10 w-10 shrink-0 animate-pulse rounded-lg bg-content/10" />
-                <span className="flex-1">
-                  <span className="block h-3.5 w-32 animate-pulse rounded bg-content/10" />
-                  <span className="mt-2 block h-3 w-24 animate-pulse rounded bg-content/5" />
+                <span className="block aspect-[3/4] w-full animate-pulse bg-content/10" />
+                <span className="block p-3">
+                  <span className="block h-3.5 w-24 animate-pulse rounded bg-content/10" />
+                  <span className="mt-2 block h-3 w-16 animate-pulse rounded bg-content/5" />
                 </span>
               </li>
             ))}
@@ -98,7 +244,7 @@ export default function History() {
         )}
 
         {status === "error" && (
-          <div className="mt-8 flex items-start gap-2.5 rounded-2xl border border-danger/30 bg-danger/[0.06] p-4 text-sm text-danger">
+          <div className="flex items-start gap-2.5 rounded-2xl border border-danger/30 bg-danger/[0.06] p-4 text-sm text-danger">
             <WarningCircle size={18} className="shrink-0" />
             <div className="min-w-0 flex-1">
               <p className="font-medium">{t("history.errorTitle")}</p>
@@ -114,7 +260,7 @@ export default function History() {
         )}
 
         {status === "ready" && items.length === 0 && (
-          <div className="mt-8 flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border-dark bg-content/[0.02] px-6 py-16 text-center">
+          <div className="flex flex-col items-center gap-4 rounded-2xl border border-dashed border-border-dark bg-content/[0.02] px-6 py-16 text-center">
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10 text-primary">
               <FilmSlate size={30} weight="duotone" />
             </span>
@@ -132,64 +278,105 @@ export default function History() {
           </div>
         )}
 
-        {status === "ready" && items.length > 0 && (
-          <div className="mt-8 flex flex-col gap-6">
+        {/* Distinct from the empty state above: there ARE records, the filters just exclude them
+            all. Telling the user "no saved analyses yet" here would read as data loss. */}
+        {status === "ready" && items.length > 0 && filtered.length === 0 && (
+          <div className="rounded-2xl border border-border-dark bg-surface-dark px-6 py-12 text-center text-sm text-muted">
+            {t("history.noMatch")}
+          </div>
+        )}
+
+        {status === "ready" && filtered.length > 0 && (
+          <div className="flex flex-col gap-6">
             {groups.map((g) => (
               <section key={g.key}>
                 {/* Date separator: one header per day, above that day's rows. */}
                 <h2 className="mb-2 flex items-center gap-3 text-xs font-medium uppercase tracking-wider text-muted">
                   <span>{g.label}</span>
+                  {g.date && <span className="font-normal normal-case text-faint">{g.date}</span>}
                   <span className="h-px flex-1 bg-border-dark" />
                 </h2>
-                <ul className="flex flex-col gap-2">
+                <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4 xl:grid-cols-5">
                   {g.items.map((it) => {
                     const clean = it.fault_count === 0;
                     return (
-                      <li key={it.id}>
+                      <li key={it.id} className="group relative">
                         <Link
                           to={`/app?analysis=${it.id}`}
-                          className="group flex items-center gap-4 rounded-2xl border border-border-dark bg-surface-dark p-4 transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
+                          className="flex h-full flex-col overflow-hidden rounded-2xl border border-border-dark bg-surface-dark transition-colors hover:border-primary/40 hover:bg-content/[0.03]"
                         >
-                          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <PersonSimpleRun size={22} weight="duotone" />
-                          </span>
-                          <div className="min-w-0 flex-1">
+                          {/* The verdict badge sits ON the frame rather than beside the title:
+                              it is the one thing worth reading at a glance across a grid, and
+                              the caption below has only two short lines to spare. */}
+                          <div className="relative">
+                            <HistoryThumb src={thumbs[it.video_id]} />
+                            {/* A DARK SCRIM plus coloured text, not the tinted-background pill the
+                                list rows used. Those sat on a known card background; this one sits
+                                on an arbitrary video frame, where a 25%-opacity tint of the accent
+                                colour can land on anything from a black gym to a bright window and
+                                lose all contrast. The scrim fixes the backdrop so only the text
+                                colour carries the verdict. */}
+                            <span
+                              className={`absolute bottom-2 left-2 rounded-full bg-surface-dark/85 px-2.5 py-1 text-xs font-medium ring-1 ring-inset backdrop-blur-sm ${
+                                clean
+                                  ? "text-secondary ring-secondary/30"
+                                  : "text-[rgb(var(--c-fault))] ring-[rgb(var(--c-fault))]/30"
+                              }`}
+                            >
+                              {clean
+                                ? t("history.clean")
+                                : it.fault_count === 1
+                                  ? t("history.faultOne")
+                                  : t("history.faultMany", { count: it.fault_count })}
+                            </span>
+                          </div>
+                          <div className="min-w-0 p-3">
                             <p className="truncate font-medium text-content">
                               {t("history.rowTitle", {
                                 view: viewLabel(t, it.view_type ?? "unknown"),
                                 movement: movementLabel(t, it.movement ?? "Squat"),
                               })}
                             </p>
-                            <p className="mt-0.5 flex items-center gap-2 font-mono text-xs text-muted">
+                            <p className="mt-0.5 flex min-w-0 items-center gap-2 font-mono text-xs text-muted">
                               {fmtTime(it.created_at)}
-                              <span className="rounded bg-content/5 px-1.5 py-0.5 text-[11px] font-medium text-muted">
+                              <span className="truncate rounded bg-content/5 px-1.5 py-0.5 text-[11px] font-medium text-muted">
                                 {/* The promoted column, then Squat. `HistoryItem` carries no
                                     `result` -- list_analyses selects only the promoted columns, not
-                                    the heavy document -- so there is no per-row echo to fall back
-                                    to here. Rows predating the column are Squat by construction:
+                                    the heavy document -- so there is no per-card echo to fall back
+                                    to here. Cards predating the column are Squat by construction:
                                     every analysis before this change was pinned to it. */}
                                 {movementLabel(t, it.movement ?? "Squat")}
                               </span>
                             </p>
                           </div>
-                          <span
-                            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
-                              clean
-                                ? "bg-secondary/15 text-secondary"
-                                : "bg-[rgb(var(--c-fault))]/15 text-[rgb(var(--c-fault))]"
-                            }`}
-                          >
-                            {clean
-                              ? t("history.clean")
-                              : it.fault_count === 1
-                                ? t("history.faultOne")
-                                : t("history.faultMany", { count: it.fault_count })}
-                          </span>
-                          <CaretRight
-                            size={18}
-                            className="shrink-0 text-muted transition-transform group-hover:translate-x-0.5"
-                          />
                         </Link>
+
+                        {/* Sibling of the Link, not a child: a <button> inside an <a> is invalid
+                            HTML and its click bubbles into navigation. Hidden until the card is
+                            hovered or the button is focused; always visible on touch. Sits over
+                            the frame, so it carries its own backdrop to stay legible on any image. */}
+                        <button
+                          type="button"
+                          aria-label={t("history.deleteAria")}
+                          title={t("history.deleteCta")}
+                          onClick={() => {
+                            setPendingId(it.id);
+                            // Only clear this card's own error, if any -- a different card's
+                            // still-unresolved failure must not be silently forgotten just
+                            // because the user opened another card's confirm.
+                            setDeleteError((prev) => (prev?.id === it.id ? null : prev));
+                          }}
+                          className="absolute right-2 top-2 rounded-lg bg-surface-dark/70 p-2 text-muted opacity-0 backdrop-blur-sm transition-opacity hover:bg-danger/20 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                        >
+                          <Trash size={16} weight="duotone" />
+                        </button>
+
+                        {deleteError?.id === it.id && (
+                          <p className="mt-1.5 flex items-center gap-1.5 px-1 text-xs text-danger">
+                            <WarningCircle size={14} weight="fill" className="shrink-0" />
+                            {t("history.deleteError")}
+                          </p>
+                        )}
                       </li>
                     );
                   })}
@@ -200,6 +387,20 @@ export default function History() {
         )}
         </main>
       </div>
+
+      {/* One dialog for the whole page, not one per row: `pendingId` says which record it is
+          about, and `detail` echoes that record back so the user can see they picked the right one. */}
+      <ConfirmDialog
+        open={pendingItem !== undefined}
+        title={t("history.deleteTitle")}
+        description={t("history.deleteDesc")}
+        detail={pendingItem && rowLabel(pendingItem)}
+        confirmLabel={deletingPending ? t("history.deleting") : t("history.deleteConfirm")}
+        cancelLabel={t("history.deleteCancel")}
+        busy={deletingPending}
+        onConfirm={() => pendingItem && void runDelete(pendingItem.id)}
+        onCancel={() => setPendingId(null)}
+      />
     </AppLayout>
   );
 }

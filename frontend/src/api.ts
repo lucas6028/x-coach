@@ -32,6 +32,14 @@ export interface Detection {
   peak_frame: number;
   phase: string;
   evidence: Record<string, number | string>;
+  /** Per-rep attribution (`PoseRuleDetection`, src/pose/pose_rule_detector.py:105-107), the seam
+   *  that makes "第 2 rep 膝蓋幾度" answerable via the backend's `get_analysis` tool. Optional,
+   *  same as `movement` above: analyses predating per-rep detection carry no per-rep attribution at
+   *  all, and the whole-clip fallback path sets these to their zero/empty defaults rather than
+   *  omitting them, so `undefined` here means "an older client/analysis", not "measured as zero". */
+  rep_index?: number;
+  occurred_reps?: number[];
+  rep_count?: number;
 }
 
 export interface SubgraphNode {
@@ -58,6 +66,83 @@ export interface RetrievalContext {
   results?: Array<Record<string, unknown>> | RagResult[];
   subgraph?: { nodes: SubgraphNode[]; edges: SubgraphEdge[] };
   query?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Training plans ("訓練菜單")
+// ---------------------------------------------------------------------------
+
+/** One exercise slot inside a plan's day. `day_index` is RELATIVE (Day 1..7), never a date — a
+ *  plan is a reusable template the user restarts, not a calendar. */
+export interface PlanItem {
+  id: string;
+  plan_id: string;
+  day_index: number;
+  position: number;
+  /** Canonical catalog spelling. All 16 are plannable; only the ones in `getMovements()` can be
+   *  analysed, so the rest are tick-only. */
+  movement: string;
+  sets: number;
+  reps: number;
+  notes: string | null;
+  /** Set for the CURRENT run only. Starting the plan again clears it (and `analysis_id`). */
+  completed_at: string | null;
+  /** The analysis the user recorded for this item, when they trained it through the studio. */
+  analysis_id: string | null;
+  created_at: string;
+}
+
+export interface Plan {
+  id: string;
+  name: string;
+  notes: string | null;
+  /** Which built-in template this was copied from, or null when built from scratch. Provenance
+   *  only — the copy is independent. */
+  template_key: string | null;
+  started_at: string | null;
+  created_at: string;
+  updated_at: string;
+  items: PlanItem[];
+}
+
+/** A plan as the list page shows it: no items, but the counts a card needs. */
+export interface PlanSummary extends Omit<Plan, "items"> {
+  item_count: number;
+  completed_count: number;
+  /** Distinct days used, derived server-side — NOT the highest day index. */
+  day_count: number;
+  /** Distinct movements in plan order, so a card can say what a plan trains without fetching it. */
+  movements: string[];
+}
+
+export interface PlanTemplate {
+  key: string;
+  /** English fallback. The UI renders `plans.template.<key>.name` and sends the localized name
+   *  back on create, so a plan created in Chinese is stored in Chinese. */
+  name: string;
+  description: string;
+  items: Array<{ day_index: number; movement: string; sets: number; reps: number }>;
+}
+
+export interface NewPlanItem {
+  day_index: number;
+  movement: string;
+  sets?: number;
+  reps?: number;
+  notes?: string | null;
+  position?: number;
+}
+
+export interface PlanItemPatch {
+  day_index?: number;
+  movement?: string;
+  sets?: number;
+  reps?: number;
+  notes?: string | null;
+  position?: number;
+  /** true stamps completion; false clears it AND the analysis link. */
+  completed?: boolean;
+  analysis_id?: string;
 }
 
 // One fault a movement defines, with its 1-hop graph connectivity (0 = no linked
@@ -99,6 +184,10 @@ export interface Analysis {
   // Present when an authenticated upload was persisted to the user's history (null if the
   // save failed). Absent for anonymous uploads and library clips.
   analysis_id?: string | null;
+  /** A short-lived presigned URL for the source clip, attached to the analyze RESPONSE only —
+   *  never stored in the history row, where it would already be expired on replay. Replays
+   *  re-sign through `api.uploadMedia`. */
+  video_url?: string | null;
   /** Which detector produced this analysis. Absent on analyses predating per-movement
    *  selection; consumers fall back to "Squat". */
   movement?: string;
@@ -133,6 +222,13 @@ export interface HistoryPage {
   items: HistoryItem[];
 }
 
+// Short-lived URLs for one upload's stored artifacts, from GET /api/uploads/{id}/url.
+export interface UploadMedia {
+  video_url: string;
+  thumbnail_url: string;
+  expires_in: number;
+}
+
 // A single stored analysis row; `result` is the full Analysis document for replay.
 export interface StoredAnalysis {
   id: string;
@@ -146,9 +242,38 @@ export interface StoredAnalysis {
 
 // ---- Conversational coaching (LLM chat, grounded in an analysis) --------------------------
 
+// One provenance entry under a tool call. `kind` is a corpus source_type for rag_search but the
+// literal "concept" for kg_query, whose knowledge-graph nodes carry no source field at all — the
+// renderer keys off it so a graph concept is never shown as a literature citation.
+export interface ToolSource {
+  label: string;
+  kind: string;
+}
+
+// One tool call the coach made while answering. `sources` is absent when the tool has nothing to
+// cite (get_analysis reads the user's own analysis), which is distinct from citing nothing.
+export interface ToolRun {
+  name: string;
+  query: string;
+  sources?: ToolSource[];
+}
+
+// One tool call as the client tracks it WHILE the turn streams. `id` correlates the `tool` frame
+// with the `tool_done` that follows it; `pending` is true until that frame arrives. Both are
+// transport/UI state — they are stripped when the run is committed to a ChatMessage, so the
+// persisted shape stays exactly `ToolRun`.
+export interface LiveToolRun extends ToolRun {
+  id: number;
+  pending: boolean;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  // The tool calls that produced this answer. Rendered above the message and persisted with it, so
+  // a reload restores the answer's provenance. Stripped before either chat endpoint is called — the
+  // LLM has no use for it and it would be re-uploaded every turn.
+  tools?: ToolRun[];
 }
 
 // One detected fault plus its retrieved knowledge, as the frontend already derives it for the
@@ -174,6 +299,9 @@ export interface ChatContext {
   quality: Record<string, number>;
   faults: ChatFaultContext[];
   movement?: string;
+  // The full analysis document (detections + retrievals, no `pose`), read server-side by the
+  // `get_analysis` tool. Never persisted, and never sent on the followups call.
+  detail?: Record<string, unknown>;
 }
 
 // Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
@@ -184,6 +312,16 @@ export interface ChatStreamHandlers {
   onDelta: (text: string) => void;
   onDone: (model: string) => void;
   onError: (detail: string) => void;
+  // The coach started a tool call. Fires BEFORE the tool runs, so the UI can name the lookup while
+  // it is still in flight. Optional so a caller that doesn't surface tool progress is unaffected.
+  onTool?: (id: number, name: string, query: string) => void;
+  // That tool call finished. Always fires once per `onTool`, even with no sources — it is the
+  // completion signal, not the sources signal, so a tool with nothing to cite still settles.
+  onToolDone?: (id: number, sources: ToolSource[]) => void;
+  // Discard everything streamed so far this turn: the round that produced it also called a tool, so
+  // its text was narration ("let me look that up"), not the answer. Safe because the caller commits
+  // the assistant turn only once the stream ends.
+  onReset?: () => void;
 }
 
 // A persisted chat thread for one analysed video (one per user+video_id). Restored on history-replay.
@@ -242,6 +380,9 @@ export interface AdminRagKgSettings {
 }
 export interface AdminAnalyzeSettings {
   allowed_upload_suffixes: string[];
+  // Upload limits, in BYTES (the key names carry the unit). Both are runtime-tunable here.
+  max_upload_bytes: number;
+  user_storage_quota_bytes: number;
   max_concurrent_analyses: number;
 }
 export interface AdminSettingsGroups {
@@ -269,6 +410,8 @@ export interface AdminSettingsUpdate {
   // max_concurrent_analyses is intentionally omitted: it's read-only (sourced from the
   // XCOACH_MAX_CONCURRENT_ANALYSES env var, applied at startup) and must never be sent in an update.
   allowed_upload_suffixes?: string[];
+  max_upload_bytes?: number;
+  user_storage_quota_bytes?: number;
 }
 
 // ---- Admin: user oversight + system overview (admin-only; P3) -----------------------------
@@ -304,14 +447,56 @@ export interface LineQuota {
   value?: number; // present only when type === "limited"
   remaining?: number; // present only when type === "limited"
 }
+export interface LineBotInfo {
+  display_name: string;
+  basic_id: string;
+  premium_id: string | null;
+  chat_mode: string; // "bot" | "chat" (string; chat mode means the webhook gets no message events)
+  mark_as_read_mode: string;
+}
+export interface LineWebhook {
+  endpoint: string;
+  active: boolean;
+}
+export interface LineDelivery {
+  date: string; // yyyymmdd the counts are for (yesterday, OA timezone)
+  reply: number | null; // null when LINE's data for that day isn't ready
+  push: number | null;
+}
+export interface LineWebhookTestResult {
+  success: boolean;
+  status_code: number | null;
+  reason: string | null;
+  detail: string | null;
+}
+// The active probe reports WHY it failed; the passive status reads only report THAT they did.
+export type LineWebhookTestError =
+  | "not_configured"
+  | "unauthorized"
+  | "rate_limited"
+  | "no_endpoint"
+  | "unreachable";
+export interface LineWebhookTestResponse {
+  result: LineWebhookTestResult | null;
+  error: LineWebhookTestError | null;
+}
 export interface LineStatus {
   messaging_configured: boolean;
   login_configured: boolean;
   // The LINE *Login* channel id (non-secret). NOTE: this is a DIFFERENT channel from the Messaging
   // bot — do not render it under the bot-status card. Currently surfaced for status only, not displayed.
   channel_id: string;
+  // Each nullable read carries an error companion: null + no error means "not configured", null +
+  // "unreachable" means the read failed. Without the companion a failed read is indistinguishable
+  // from an unconfigured one and the card silently disappears.
   quota: LineQuota | null;
   quota_error: "unreachable" | null;
+  bot_info: LineBotInfo | null;
+  bot_info_error: "unreachable" | null;
+  webhook: LineWebhook | null;
+  webhook_error: "unreachable" | null;
+  delivery: LineDelivery | null;
+  delivery_error: "unreachable" | null;
 }
 
 // Parse one SSE frame ("event: <e>\ndata: <json>") and dispatch it to the handlers. A frame with no
@@ -324,13 +509,32 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
   }
   if (!event) return;
-  let data: { text?: string; model?: string; detail?: string };
+  let data: {
+    text?: string;
+    model?: string;
+    detail?: string;
+    name?: string;
+    query?: string;
+    sources?: ToolSource[];
+    id?: number;
+  };
   try {
     data = JSON.parse(dataLines.join("\n"));
   } catch {
     return;
   }
   if (event === "delta") handlers.onDelta(data.text ?? "");
+  else if (event === "tool")
+    handlers.onTool?.(typeof data.id === "number" ? data.id : -1, data.name ?? "", data.query ?? "");
+  // An uncorrelatable tool_done is dropped, not defaulted: mis-attributing a citation is worse than
+  // losing one. A `tool` with no id still renders (id -1) and simply never resolves — it settles
+  // when the turn commits, since `pending` is stripped there. Theoretical consequence, unreachable
+  // against the current backend (which always sends an id): two id-less `tool` frames in one turn
+  // would both land as -1, and a `tool_done` carrying `id: -1` would then write to both rows. Not
+  // worth defensive code for a case the server never produces.
+  else if (event === "tool_done" && typeof data.id === "number")
+    handlers.onToolDone?.(data.id, data.sources ?? []);
+  else if (event === "reset") handlers.onReset?.();
   else if (event === "done") handlers.onDone(data.model ?? "");
   else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
 }
@@ -345,18 +549,6 @@ export class ChatError extends Error {
     super(message);
     this.name = "ChatError";
   }
-}
-
-export interface LibraryItem {
-  video_id: string;
-  split: string;
-  view_type: string;
-  fault_count: number;
-  faults: string[];
-}
-export interface LibraryPage {
-  total: number;
-  items: LibraryItem[];
 }
 
 // Bearer header for the current Supabase session, or {} when logged out / not configured.
@@ -374,6 +566,75 @@ async function getJSON<T>(url: string): Promise<T> {
   const res = Object.keys(headers).length ? await fetch(url, { headers }) : await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   return (await res.json()) as T;
+}
+
+/**
+ * A JSON write (POST/PATCH/DELETE) that returns JSON. The read path has `getJSON`; every plan
+ * mutation used to be six near-identical lines of fetch + status check, so they share this.
+ *
+ * The server's `detail` is preferred over the bare status line: the plan endpoints answer 400 with
+ * a real explanation ("Unknown movement 'Burpee'."), and swallowing it would leave the UI showing
+ * "400 Bad Request" for a problem the user can actually fix.
+ */
+async function sendJSON<T>(url: string, method: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(await authHeader()),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  if (!res.ok) {
+    const detail = (await res.json().catch(() => ({}))) as { detail?: unknown };
+    if (typeof detail.detail === "string") throw new Error(detail.detail);
+    throw new Error(`${res.status} ${res.statusText} for ${url}`);
+  }
+  return (await res.json()) as T;
+}
+
+export type UploadLimitCode = "upload_too_large" | "storage_quota_exceeded";
+
+/**
+ * A 413 from an analyze endpoint: the clip is over the per-file cap, or the user is out of
+ * storage. Typed rather than a plain Error because the message must be LOCALISED at the call
+ * site — this module has no access to the i18n `t()`, and the server's detail is English.
+ */
+export class UploadLimitError extends Error {
+  constructor(
+    readonly code: UploadLimitCode,
+    readonly limitMb: number,
+    readonly usedMb: number | null
+  ) {
+    super(code);
+    this.name = "UploadLimitError";
+  }
+}
+
+/** Parse an analyze failure body into an UploadLimitError, or null if it is not one. */
+function uploadLimitError(status: number, body: unknown): UploadLimitError | null {
+  if (status !== 413) return null;
+  const detail = (body as { detail?: unknown })?.detail as
+    | { code?: string; limit_mb?: number; used_mb?: number }
+    | undefined;
+  if (detail?.code !== "upload_too_large" && detail?.code !== "storage_quota_exceeded") {
+    // A 413 we do not recognise (a proxy's own body, say) falls through to the generic path
+    // rather than being mislabelled as a quota problem.
+    return null;
+  }
+  return new UploadLimitError(
+    detail.code,
+    Number(detail.limit_mb ?? 0),
+    detail.used_mb === undefined ? null : Number(detail.used_mb)
+  );
+}
+
+// Both chat endpoints get the conversation with `tools` removed. The records are a rendering and
+// persistence concern only: the backend's ChatMessage is {role, content}, so Pydantic would drop
+// them anyway — but relying on implicit stripping still re-uploads the whole array every turn, and
+// on a multi-tool thread that is not small.
+function leanMessages(messages: ChatMessage[]): Array<Pick<ChatMessage, "role" | "content">> {
+  return messages.map(({ role, content }) => ({ role, content }));
 }
 
 export const api = {
@@ -428,6 +689,17 @@ export const api = {
   // LINE connection status + push-quota usage (admin-only). Auth header auto-attached.
   getLineStatus: () => getJSON<LineStatus>("/api/admin/line/status"),
 
+  // Ask LINE to POST a test event to the webhook and report the outcome (admin-only). Side-effecting,
+  // so it is a POST triggered only by the admin's explicit click — never on a status read.
+  async testLineWebhook(): Promise<LineWebhookTestResponse> {
+    const res = await fetch("/api/admin/line/webhook-test", {
+      method: "POST",
+      headers: { ...(await authHeader()) },
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/admin/line/webhook-test`);
+    return (await res.json()) as LineWebhookTestResponse;
+  },
+
   // Grant/revoke another user's admin role (admin-only). The backend rejects self-demotion (400).
   async setUserRole(userId: string, makeAdmin: boolean): Promise<{ ok: boolean }> {
     const url = `/api/admin/users/${encodeURIComponent(userId)}/role`;
@@ -445,13 +717,6 @@ export const api = {
   getMovements: () =>
     getJSON<{ movements: AnalyzableMovement[] }>("/api/movements").then((r) => r.movements),
 
-  listVideos: (limit = 50, offset = 0, fault?: string) =>
-    getJSON<LibraryPage>(
-      `/api/videos?limit=${limit}&offset=${offset}` + (fault ? `&fault=${fault}` : "")
-    ),
-
-  getAnalysis: (videoId: string) => getJSON<Analysis>(`/api/analysis/${videoId}`),
-
   graph: (query: string, movement?: string) =>
     getJSON<RetrievalContext>(
       `/api/knowledge/graph?query=${encodeURIComponent(query)}` +
@@ -460,12 +725,41 @@ export const api = {
 
   // The complete, movement-scoped fault list (name + connectivity), enumerated by the graph's
   // `movement` node attribute so no fault is hidden. Backs GET /api/knowledge/faults.
+  //
+  // NO PAGE CALLS THIS TODAY. The movement detail page's "common mistakes" tab used to, and now
+  // renders lib/movementMistakes.ts instead — the faults the rule detectors actually report,
+  // rather than every Fault node the graph defines. Kept because it is the only way to enumerate
+  // the graph's own fault index, which is what a KG browser would want; delete it, and the
+  // endpoint behind it, if that never gets built.
   movementFaults: (movement: string) =>
     getJSON<{ movement: string; faults: MovementFault[] }>(
       `/api/knowledge/faults?movement=${encodeURIComponent(movement)}`
     ),
 
+  // Library demo clips only — uploads are not reachable here (they need an ownership check).
   videoFileUrl: (videoId: string) => `/api/video-file/${videoId}`,
+
+  // Short-lived URLs for ONE of the caller's uploads (requires a session).
+  uploadMedia: (videoId: string) =>
+    getJSON<UploadMedia>(`/api/uploads/${encodeURIComponent(videoId)}/url`),
+
+  // The same URLs for a whole history page in one round trip. Ids the caller does not own are
+  // absent from `items` rather than an error.
+  async uploadMediaBatch(
+    videoIds: string[]
+  ): Promise<Record<string, { video_url: string; thumbnail_url: string }>> {
+    if (videoIds.length === 0) return {};
+    const res = await fetch("/api/uploads/urls", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ video_ids: videoIds }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/uploads/urls`);
+    const body = (await res.json()) as {
+      items: Record<string, { video_url: string; thumbnail_url: string }>;
+    };
+    return body.items;
+  },
 
   // The caller's saved analyses, newest first (requires a signed-in session).
   listAnalyses: (limit = 50, offset = 0) =>
@@ -480,6 +774,61 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for /api/analyses`);
     return (await res.json()) as { deleted: number };
   },
+
+  // Delete ONE saved analysis (requires a session). 404 if it isn't the caller's row.
+  async deleteAnalysis(id: string): Promise<{ deleted: number }> {
+    const path = `/api/analyses/${encodeURIComponent(id)}`;
+    const res = await fetch(path, { method: "DELETE", headers: await authHeader() });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${path}`);
+    return (await res.json()) as { deleted: number };
+  },
+
+  // --- Training plans ------------------------------------------------------
+  // Everything but `planTemplates` requires a session: a plan is one user's own data.
+
+  /** The built-in starting points. Public, like `getMovements` — a static catalog. */
+  planTemplates: () =>
+    getJSON<{ templates: PlanTemplate[] }>("/api/plans/templates").then((r) => r.templates),
+
+  listPlans: () => getJSON<{ plans: PlanSummary[] }>("/api/plans").then((r) => r.plans),
+
+  getPlan: (id: string) => getJSON<Plan>(`/api/plans/${encodeURIComponent(id)}`),
+
+  /** Create a plan: empty, from explicit `items`, or copied from `template_key`. Passing both a
+   *  template and items is not merged — the server takes the template and ignores the items. */
+  createPlan: (body: {
+    name: string;
+    notes?: string | null;
+    template_key?: string;
+    items?: NewPlanItem[];
+  }) => sendJSON<Plan>("/api/plans", "POST", body),
+
+  updatePlan: (id: string, patch: { name?: string; notes?: string | null }) =>
+    sendJSON<Omit<Plan, "items">>(`/api/plans/${encodeURIComponent(id)}`, "PATCH", patch),
+
+  deletePlan: (id: string) =>
+    sendJSON<{ deleted: number }>(`/api/plans/${encodeURIComponent(id)}`, "DELETE"),
+
+  /** Begin a run: stamps `started_at` and CLEARS every item's tick and analysis link. Destructive
+   *  by design — the plan tracks the current run, while the analyses stay in 我的紀錄. */
+  startPlan: (id: string) =>
+    sendJSON<Plan>(`/api/plans/${encodeURIComponent(id)}/start`, "POST"),
+
+  addPlanItem: (planId: string, item: NewPlanItem) =>
+    sendJSON<PlanItem>(`/api/plans/${encodeURIComponent(planId)}/items`, "POST", item),
+
+  updatePlanItem: (planId: string, itemId: string, patch: PlanItemPatch) =>
+    sendJSON<PlanItem>(
+      `/api/plans/${encodeURIComponent(planId)}/items/${encodeURIComponent(itemId)}`,
+      "PATCH",
+      patch
+    ),
+
+  deletePlanItem: (planId: string, itemId: string) =>
+    sendJSON<{ deleted: number }>(
+      `/api/plans/${encodeURIComponent(planId)}/items/${encodeURIComponent(itemId)}`,
+      "DELETE"
+    ),
 
   // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
   // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user
@@ -498,7 +847,11 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
       // The server validates `model` against its allowlist; omit it to use the server default.
-      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+      body: JSON.stringify(
+        model
+          ? { messages: leanMessages(messages), context, model }
+          : { messages: leanMessages(messages), context }
+      ),
     });
     if (!res.ok || !res.body) {
       const detail = await res.json().catch(() => ({}));
@@ -535,10 +888,17 @@ export const api = {
     context: ChatContext,
     model?: string
   ): Promise<string[]> {
+    // Strip `detail`: it is the bulk of the payload (full RAG passage text for every fault) and this
+    // fire-and-forget call can never use it — the followups endpoint runs no tools. Chip latency is
+    // a defended ~1.5s and nothing gets added to this path.
+    const { detail: _unused, ...lean } = context;
+    const leanMsgs = leanMessages(messages);
     const res = await fetch("/api/chat/followups", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
-      body: JSON.stringify(model ? { messages, context, model } : { messages, context }),
+      body: JSON.stringify(
+        model ? { messages: leanMsgs, context: lean, model } : { messages: leanMsgs, context: lean }
+      ),
     });
     if (!res.ok) return [];
     const data = (await res.json().catch(() => ({}))) as { questions?: string[] };
@@ -566,12 +926,16 @@ export const api = {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
   },
 
-  async analyzeUpload(file: File, movement: string): Promise<Analysis> {
+  // No in-app caller today — App.tsx always goes through `analyzePose`. The `thumbnail`
+  // parameter exists so reviving this path does not silently lose thumbnails.
+  async analyzeUpload(file: File, movement: string, thumbnail?: Blob | null): Promise<Analysis> {
     const form = new FormData();
     form.append("file", file);
     // Which detector runs. The backend rejects an unregistered value with 400 before it spends
     // a MediaPipe pass, and echoes the canonical spelling back as `movement` on the result.
     form.append("movement", movement);
+    // Optional by design: a browser where frame capture failed must still be able to analyze.
+    if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
     const res = await fetch("/api/analyze", {
       method: "POST",
       body: form,
@@ -579,20 +943,31 @@ export const api = {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
+      const limit = uploadLimitError(res.status, detail);
+      if (limit) throw limit;
       throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
     }
     return (await res.json()) as Analysis;
   },
 
-  async analyzePose(movement: string, pose: PoseJson, video: Blob, reps?: RepsPlan): Promise<Analysis> {
+  async analyzePose(
+    movement: string,
+    pose: PoseJson,
+    video: Blob,
+    thumbnail?: Blob | null,
+    reps?: RepsPlan
+  ): Promise<Analysis> {
     const form = new FormData();
     form.append("movement", movement);
-    form.append("pose", JSON.stringify(pose));
+    // A pose can exceed Starlette's small text-field multipart limit after only a few seconds.
+    // Send it as a named JSON file so the API can apply its own endpoint-specific size limit.
+    form.append("pose", new Blob([JSON.stringify(pose)], { type: "application/json" }), "pose.json");
     // Only sent when the browser actually planned the extraction. Omitting it keeps the endpoint
     // on its pre-SP2 path, which is what the CLI and any old client rely on.
     if (reps) form.append("reps", JSON.stringify(reps));
     const ext = video.type.includes("mp4") ? "mp4" : "webm";
     form.append("file", video, `capture.${ext}`);
+    if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
     const res = await fetch("/api/analyze/pose", {
       method: "POST",
       body: form,
@@ -600,7 +975,15 @@ export const api = {
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
-      throw new Error((detail as { detail?: string }).detail || `Analyze failed (${res.status})`);
+      const limit = uploadLimitError(res.status, detail);
+      if (limit) throw limit;
+      const bodyDetail = (detail as { detail?: unknown }).detail;
+      if (typeof bodyDetail === "string") throw new Error(bodyDetail);
+      if ((bodyDetail as { code?: string } | undefined)?.code === "pose_too_large") {
+        const limitMb = (bodyDetail as { limit_mb?: number }).limit_mb ?? 16;
+        throw new Error(`Pose data is too large (limit ${limitMb} MB).`);
+      }
+      throw new Error(`Analyze failed (${res.status})`);
     }
     return (await res.json()) as Analysis;
   },

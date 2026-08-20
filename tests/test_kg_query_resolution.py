@@ -30,14 +30,65 @@ MODULE_MOVEMENTS = {
     "squat.py": "Squat",
     "pushup.py": "Push-up",
     "overhead_press.py": "Overhead Press",
+    "lunge.py": "Lunge",
+    "deadlift.py": "Deadlift",
+    "row.py": "Row",
+    "band_pull_apart.py": "Band Pull Apart",
+    "bicep_curl.py": "Bicep Curl",
+    "arm_abduction.py": "Arm Abduction",
+    "arm_vw.py": "Arm VW",
+    "situp.py": "Sit-up",
+    "shoulder_bridge.py": "Shoulder Bridge",
+    "leg_abduction.py": "Leg Abduction",
+    "torso_twist.py": "Torso Twist",
+    "jumping_jacks.py": "Jumping Jacks",
+    "high_knee.py": "High Knee",
+}
+
+# Modules whose every rule is permanently silent or withdrawn, so they contain NO
+# `build_detection` call and therefore no `kg_query` for this gate to resolve. Listing them
+# explicitly keeps `test_every_module_is_covered` honest -- a new detector still cannot be added
+# without touching this file -- while letting `test_queries_were_actually_found` stay a real
+# assertion for every module that does emit detections.
+ALL_SILENT_MODULES = {
+    # Jumping Jacks: two rules permanently silent, three withdrawn, detector not registered.
+    # See src/pose/movements/jumping_jacks.py and
+    # docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md.
+    "jumping_jacks.py",
+    # High Knee: one rule permanently silent, four withdrawn, detector not registered. See
+    # src/pose/movements/high_knee.py and
+    # docs/superpowers/specs/2026-08-10-high-knee-detector-design.md.
+    "high_knee.py",
 }
 
 
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    """Top-level `NAME = "literal"` assignments, so a `kg_query=SOME_NAME` reference can be
+    resolved to the string it names. `lunge.py` deliberately passes its four `kg_query` values
+    as module constants (`LUNGE_PAST_TOES_KG_QUERY`, etc. -- see that module's Step 0 docstring)
+    rather than retyping the literal at each call site, unlike squat/push-up/OHP which inline
+    the string directly. Only MODULE-LEVEL assignments are resolved; anything else (an
+    imported name, a computed value) is left unresolved and simply drops out of the corpus,
+    same as before this function existed."""
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not (isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                constants[target.id] = node.value.value
+    return constants
+
+
 def _kg_queries(module_path: Path) -> list[str]:
-    """Every literal kg_query= value in a detector module, paired with the retrieval_mode of
-    the same build_detection call. Parsed from the AST rather than imported, so this gate does
-    not depend on numpy/detector import side effects."""
+    """Every kg_query= value in a detector module (literal string OR a reference to a
+    module-level string constant), paired with the retrieval_mode of the same build_detection
+    call. Parsed from the AST rather than imported, so this gate does not depend on
+    numpy/detector import side effects."""
     tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    constants = _module_string_constants(tree)
     found: list[str] = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -45,27 +96,57 @@ def _kg_queries(module_path: Path) -> list[str]:
         kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg}
         query = kwargs.get("kg_query")
         mode = kwargs.get("retrieval_mode")
-        if not isinstance(query, ast.Constant) or not isinstance(query.value, str):
+        if isinstance(query, ast.Constant) and isinstance(query.value, str):
+            value = query.value
+        elif isinstance(query, ast.Name) and query.id in constants:
+            value = constants[query.id]
+        else:
             continue
         if isinstance(mode, ast.Constant) and mode.value != "kg":
             continue  # rag-mode rules query the vector DB, not the graph
-        found.append(query.value)
+        found.append(value)
     return found
 
 
 class TestKgQueryCorpus(unittest.TestCase):
     def test_every_module_is_covered(self) -> None:
         """Guard against a new detector module being added and silently skipped by this gate."""
+        # The subtracted names are the package's INFRASTRUCTURE modules -- the ones that hold no
+        # detector rules and therefore no `kg_query` for this gate to check. `catalog.py` joins
+        # them for that reason: it is the sixteen-name movement catalog the plan API validates
+        # against (all sixteen, not the fourteen registered here), and it contains no
+        # `build_detection` call at all. Anything else appearing in this directory is a detector
+        # and must be listed in MODULE_MOVEMENTS.
         present = {p.name for p in MOVEMENTS_DIR.glob("*.py")} - {
-            "__init__.py", "base.py", "registry.py"
+            "__init__.py", "base.py", "registry.py", "catalog.py"
         }
         self.assertEqual(present, set(MODULE_MOVEMENTS))
 
     def test_queries_were_actually_found(self) -> None:
         """A parser that silently returns [] would make the resolution test vacuously pass."""
         for filename in MODULE_MOVEMENTS:
+            if filename in ALL_SILENT_MODULES:
+                continue
             with self.subTest(module=filename):
                 self.assertGreater(len(_kg_queries(MOVEMENTS_DIR / filename)), 0)
+
+    def test_the_all_silent_exemption_is_earned_not_asserted(self) -> None:
+        """An exemption from the gate above must be a FACT about the module, not a way to hide a
+        parser that stopped working. A module is only allowed in `ALL_SILENT_MODULES` if it really
+        contains no `build_detection` call at all."""
+        for filename in ALL_SILENT_MODULES:
+            with self.subTest(module=filename):
+                source = (MOVEMENTS_DIR / filename).read_text(encoding="utf-8")
+                tree = ast.parse(source)
+                calls = [
+                    node
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "build_detection"
+                ]
+                self.assertEqual(calls, [])
+                self.assertEqual(_kg_queries(MOVEMENTS_DIR / filename), [])
 
     @unittest.skipUnless(
         GRAPH_FILE.exists(),

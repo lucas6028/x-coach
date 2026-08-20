@@ -4,9 +4,9 @@
   "description": "Explainable movement-coaching feedback.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#121416",
-  "theme_color": "#121416",
+  "background_color": "#eef0fb",
+  "theme_color": "#eef0fb",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
   ]
 }

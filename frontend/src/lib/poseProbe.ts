@@ -54,7 +54,12 @@ export async function probeLivePose(
     // Stage 1: camera (same constraints as the games).
     try {
       stream = await getCameraStream({
-        video: { facingMode: "user", width: 640, height: 480 },
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 30 },
+        },
         audio: false,
       });
     } catch (err) {

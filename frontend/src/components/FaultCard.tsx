@@ -13,14 +13,14 @@ function sevLevel(sev: number): SevLevel {
   return "mild";
 }
 const SEV_DOT: Record<SevLevel, string> = {
-  high: "bg-danger",
-  moderate: "bg-amber-500",
-  mild: "bg-faint",
+  high: "bg-[#ff6b6b]",
+  moderate: "bg-[#e0a33a]",
+  mild: "bg-[#b8bcd3]",
 };
 const SEV_CHIP: Record<SevLevel, string> = {
-  high: "bg-danger/10 text-danger",
-  moderate: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  mild: "bg-content/5 text-muted",
+  high: "bg-[#fff5f5] text-[#e05252] border border-[#ffe0e0]",
+  moderate: "bg-[#fff6d9] text-[#b8922e] border border-[#ffe9a8]",
+  mild: "bg-[#f5f6fb] text-[#59648f] border border-[#f0f1f8]",
 };
 
 type Rung = { kind: "cause" | "risk" | "fix"; label: string; text: string };
@@ -59,10 +59,13 @@ export default function FaultCard({
   return (
     <button
       onClick={() => onSeek(d.start_time)}
-      className={`block w-full rounded-xl border p-4 text-left transition-colors ${
+      // `glass-face` (fill + shadow only, no border) so the active state's violet ring and border
+      // survive — the panel class sets `border`, which would overwrite the one signal that says
+      // which fault the playhead is currently inside.
+      className={`glass-face block w-full rounded-[18px] border p-4 text-left transition-colors ${
         active
-          ? "border-primary/40 bg-surface ring-1 ring-primary/25"
-          : "border-border-dark bg-surface hover:bg-content/[0.03]"
+          ? "border-primary/60 ring-2 ring-primary/25"
+          : "border-white/80 hover:border-[#ddd8f5]"
       }`}
     >
       {/* header: time + phase, fault, severity */}

@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { landmarksToFrame, planReps, resolveDuration } from "../lib/poseExtract";
+import {
+  assertPoseAnalysisDuration, landmarksToFrame, MAX_POSE_ANALYSIS_DURATION_SECONDS, planReps,
+} from "../lib/poseExtract";
 import { COARSE_STRIDE } from "../lib/repSpans";
+import { resolveDuration } from "../lib/mediaDuration";
 
 const lm = (n: number) => Array.from({ length: n }, (_, i) => ({ x: i / 100, y: i / 50, z: 0.1, visibility: 0.9 }));
 
@@ -24,6 +27,20 @@ describe("landmarksToFrame", () => {
   it("emits null landmarks when the frame has no full 33-point pose", () => {
     expect(landmarksToFrame(1, undefined, undefined).landmarks).toBeNull();
     expect(landmarksToFrame(2, lm(20), lm(20)).landmarks).toBeNull(); // detector needs >=33
+  });
+
+  it("turns incomplete worker landmarks into a no-pose frame instead of malformed JSON", () => {
+    const missingZ = Array.from({ length: 33 }, () => ({ x: 0.1, y: 0.2, visibility: 0.9 }));
+    const frame = landmarksToFrame(3, missingZ, missingZ);
+    expect(frame.landmarks).toBeNull();
+    expect(frame.world_landmarks).toBeNull();
+  });
+});
+
+describe("pose analysis duration guard", () => {
+  it("rejects a clip before expensive frame-by-frame extraction exceeds the pose upload budget", () => {
+    expect(() => assertPoseAnalysisDuration(MAX_POSE_ANALYSIS_DURATION_SECONDS)).not.toThrow();
+    expect(() => assertPoseAnalysisDuration(MAX_POSE_ANALYSIS_DURATION_SECONDS + 0.01)).toThrow("90 seconds");
   });
 });
 

@@ -5,6 +5,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import { AuthProvider } from "../lib/auth";
 import App from "../App";
+import { api, UploadLimitError } from "../api";
 import { mockAnalysis } from "./fixtures";
 
 // The upload path now extracts pose client-side before hitting the API (CaptureStudio ->
@@ -18,6 +19,10 @@ vi.mock("../lib/poseExtract", () => ({
     reps: { max_reps: 3, fallback: null, segments: [] },
   }),
 }));
+
+// runPoseAnalysis also calls captureThumbnail on the same blob, driving a <video> decode jsdom
+// can't run either. Stub it the same way, for the same reason.
+vi.mock("../lib/thumbnail", () => ({ captureThumbnail: () => Promise.resolve(null) }));
 
 function renderApp() {
   return render(
@@ -37,9 +42,9 @@ function LocationProbe() {
   return <div data-testid="loc-search">{loc.search}</div>;
 }
 
-function renderAppWithLocation() {
+function renderAppWithLocation(entry = "/app") {
   return render(
-    <MemoryRouter initialEntries={["/app"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <AuthProvider>
         <I18nProvider>
           <App />
@@ -74,69 +79,39 @@ describe("App — initial state", () => {
     );
   });
 
-  it("renders the header with AWAITING INPUT status", () => {
-    renderApp();
-    expect(screen.getByText("AWAITING INPUT")).toBeInTheDocument();
-  });
-
   it("renders the sidebar", () => {
     renderApp();
     expect(screen.getAllByText("X-Coach").length).toBeGreaterThan(0);
   });
 });
 
-describe("App — library picker", () => {
-  it("opens the library picker when 'Open a sample clip' is clicked", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ total: 0, items: [] }),
-    } as Response);
-
-    const user = userEvent.setup();
+// The sample library is gone: uploading (or recording) a clip is the only way into an analysis
+// from the studio. Pinned through App because the picker had THREE entry points — the studio's
+// own button, the sidebar and the mobile tab bar — and each one was its own way back to a modal
+// that no longer exists.
+describe("App — no sample library", () => {
+  it("offers no route into a sample picker", () => {
     renderApp();
-    await user.click(screen.getByRole("button", { name: /Open a sample clip/i }));
-    expect(screen.getByText("Sample Library")).toBeInTheDocument();
-  });
-
-  it("closes the library picker when the close button is clicked", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ total: 0, items: [] }),
-    } as Response);
-
-    const user = userEvent.setup();
-    renderApp();
-    await user.click(screen.getByRole("button", { name: /Open a sample clip/i }));
-    await waitFor(() => expect(screen.getByText("Sample Library")).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: /Close/i }));
-    expect(screen.queryByText("Sample Library")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sample/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Library/i })).toBeNull();
+    expect(screen.queryByText("Sample Library")).toBeNull();
   });
 });
 
+// The detector's key evidence line now renders TWICE on the result screen — once in the video
+// card's floating "Detected errors" list and once on the coach panel's fault card — which is the
+// reference design's own arrangement, so these look it up with getAllByText.
 describe("App — analysis loaded", () => {
   it("shows analysis results when API returns data", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({ total: 1, items: [{ video_id: "vid_001", split: "test", view_type: "side", fault_count: 1, faults: ["knees_inward"] }] }),
-    } as Response);
-
-    const user = userEvent.setup();
-    renderApp();
-    await user.click(screen.getByRole("button", { name: /Open a sample clip/i }));
-    await waitFor(() => screen.getByText("vid_001"));
-
-    // Now mock getAnalysis and click the video
     vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => mockAnalysis,
     } as Response);
 
-    await user.click(screen.getByText("vid_001").closest("button")!);
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    renderApp();
+    await uploadAClip();
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
   });
 
   it("shows an error message when an upload fails", async () => {
@@ -167,6 +142,52 @@ describe("App — analysis loaded", () => {
     // The backend's detail message is surfaced to the user.
     expect(screen.getByText("Server error")).toBeInTheDocument();
   });
+
+  it("shows a localised message when the upload exceeds the storage quota", async () => {
+    vi.spyOn(api, "analyzePose").mockRejectedValue(
+      new UploadLimitError("storage_quota_exceeded", 500, 480)
+    );
+
+    renderApp();
+    await uploadAClip();
+
+    expect(
+      await screen.findByText(/Your storage is full \(480 MB of 500 MB\)/)
+    ).toBeInTheDocument();
+  });
+});
+
+// The movement detail page's "Start recording" card links here with ?capture=record. It is an
+// instruction for the arrival, not a description of the session.
+describe("App — ?capture=record", () => {
+  it("opens the capture panel on the camera and then drops the param", async () => {
+    renderAppWithLocation("/app?movement=Squat&capture=record");
+
+    // Re-queried each poll rather than held: the capture panel is swapped for the loader while
+    // GET /api/movements settles, so a node captured early can be a detached one.
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Record live" })).toHaveAttribute(
+        "aria-selected",
+        "true"
+      )
+    );
+
+    // Consumed: left in the URL it would re-apply on every remount of the capture panel and
+    // override whichever tab the user picked since. ?movement= survives — that one describes
+    // the session.
+    await waitFor(() =>
+      expect(screen.getByTestId("loc-search").textContent).toBe("?movement=Squat")
+    );
+    // And the panel stays where the user puts it after the param is gone.
+    await userEvent.click(screen.getByRole("tab", { name: "Upload video" }));
+    expect(screen.getByRole("tab", { name: "Upload video" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens on the dropzone without it", async () => {
+    renderAppWithLocation("/app?movement=Squat");
+    const uploadTab = await screen.findByRole("tab", { name: "Upload video" });
+    expect(uploadTab).toHaveAttribute("aria-selected", "true");
+  });
 });
 
 describe("App — upload reflects the analysis in the URL", () => {
@@ -181,15 +202,16 @@ describe("App — upload reflects the analysis in the URL", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
     // The URL now carries the id (shareable + refresh-survivable). Poll it: the router's location
     // update can settle a tick after the analysis render.
     await waitFor(() =>
       expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
     );
     // The replay effect is guarded, so the analysis is NOT re-fetched — if it were, GET
-    // /api/analyses/<id> would return this same (result-less) shape and drop "ANALYSIS COMPLETE".
-    expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument();
+    // /api/analyses/<id> would return this same (result-less) shape and the fault card's evidence
+    // line would disappear.
+    expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument();
   });
 
   it("leaves the URL untouched for an anonymous upload (no analysis_id)", async () => {
@@ -202,7 +224,7 @@ describe("App — upload reflects the analysis in the URL", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
     expect(screen.getByTestId("loc-search").textContent).toBe("");
   });
 });
@@ -219,7 +241,7 @@ describe("App — new analysis reset", () => {
     renderAppWithLocation();
     await uploadAClip();
 
-    await waitFor(() => expect(screen.getByText("ANALYSIS COMPLETE")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
     await waitFor(() =>
       expect(screen.getByTestId("loc-search").textContent).toBe("?analysis=bb718ecf")
     );
@@ -235,17 +257,14 @@ describe("App — new analysis reset", () => {
   });
 });
 
-describe("App — sidebar toggle", () => {
-  it("collapses the desktop sidebar when the navbar toggle is clicked", async () => {
-    const user = userEvent.setup();
+describe("App — shell chrome", () => {
+  // The navbar's rail-collapse toggle is gone: the rail is 84px, so collapsing it bought 20px in
+  // exchange for a permanent control in the top row. Both rails (desktop + mobile drawer) now
+  // always render their labels. The drawer's own ✕ keeps the "Hide navigation" name — the point
+  // here is that the TOP ROW no longer carries one.
+  it("renders both nav rails labelled, with no collapse toggle in the top row", () => {
     renderApp();
-    // The brand now lives in the top navbar; the collapse state shows through the nav labels.
-    // The open desktop rail and the (always-open) mobile drawer both render them initially.
     expect(screen.getAllByText("Analyse").length).toBe(2);
-    // The navbar's hide-navigation toggle (first in DOM order — the navbar precedes the drawer).
-    const hideBtn = screen.getAllByRole("button", { name: /Hide navigation/i })[0];
-    await user.click(hideBtn);
-    // After collapsing, the desktop rail drops its labels; only the mobile drawer's remain.
-    expect(screen.getAllByText("Analyse").length).toBe(1);
+    expect(screen.getAllByRole("button", { name: /Hide navigation/i })).toHaveLength(1);
   });
 });

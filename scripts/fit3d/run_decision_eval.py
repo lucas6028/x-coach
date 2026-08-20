@@ -34,11 +34,15 @@ def main() -> None:
     p.add_argument("--split", default="train")
     p.add_argument("--source", default="smpl3d", choices=["smpl3d", "smpl3d_np"])
     p.add_argument("--subjects", nargs="*", default=None)
+    p.add_argument("--frame-stride", type=int, default=1,
+                   help="subsample the MODEL arm to every Nth frame (GT/2D stay full-rate). "
+                        "Use 15 to put an every-frame model on MeTRAbs/MediaPipe's grid.")
     p.add_argument("--json", type=Path, default=None)
     args = p.parse_args()
 
     result = dec.run(args.pred_root, action=args.action, split=args.split,
-                     source=args.source, subjs=args.subjects, root=ds.DEFAULT_FIT3D_ROOT)
+                     source=args.source, subjs=args.subjects, root=ds.DEFAULT_FIT3D_ROOT,
+                     frame_stride=args.frame_stride)
     if result["n_pairs"] == 0:
         print(f"no predictions found under {args.pred_root} for action={args.action}")
         return

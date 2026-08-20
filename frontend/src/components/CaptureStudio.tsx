@@ -15,6 +15,8 @@ export default function CaptureStudio({
   progress,
   onError,
   movement,
+  tier: controlledTier,
+  initialMode = "upload",
 }: {
   onBlob: (blob: Blob, tier: PoseTier) => void;
   busy: boolean;
@@ -24,13 +26,23 @@ export default function CaptureStudio({
    *  actually being uploaded. Required rather than defaulted: a default is how the hardcoded
    *  "squat" copy survived unnoticed next to a movement selector. */
   movement: string;
+  /** When supplied, the tier is owned upstream (the studio's page header carries the picker in
+   *  the reference design) and the panel's own selector is hidden — two controls for one setting
+   *  is how they drift apart. Omitted, the panel stays self-contained. */
+  tier?: PoseTier;
+  /** Which tab the panel opens on. The seam exists so a link can point at the camera: the
+   *  movement detail page offers "Record live" and "Upload video" as two separate cards, and
+   *  without this both would land on the dropzone. Initial state only — the tabs own it after. */
+  initialMode?: Mode;
 }) {
   const { t } = useI18n();
-  const [mode, setMode] = useState<Mode>("upload");
-  const [tier, setTier] = useState<PoseTier>(() => loadAnalysisTier());
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [ownTier, setOwnTier] = useState<PoseTier>(() => loadAnalysisTier());
+  const controlled = controlledTier !== undefined;
+  const tier = controlledTier ?? ownTier;
 
   const setTierPersist = (t: PoseTier) => {
-    setTier(t);
+    setOwnTier(t);
     saveAnalysisTier(t);
   };
 
@@ -56,8 +68,10 @@ export default function CaptureStudio({
               role="tab"
               aria-selected={mode === m}
               onClick={() => setMode(m)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium ${
-                mode === m ? "bg-primary text-white" : "bg-content/5 text-muted"
+              className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                mode === m
+                  ? "bg-[#232535] text-white"
+                  : "bg-[#f5f6fb] text-[#59648f] hover:text-[#1e2142]"
               }`}
             >
               {t(m === "upload" ? "capture.upload" : "capture.record")}
@@ -65,7 +79,7 @@ export default function CaptureStudio({
           ))}
         </div>
 
-        <ComplexitySelector value={tier} onChange={setTierPersist} />
+        {!controlled && <ComplexitySelector value={tier} onChange={setTierPersist} />}
       </div>
 
       {mode === "upload" ? (

@@ -4,11 +4,15 @@ import App from "./App";
 import Landing from "./landing/Landing";
 import Login from "./pages/Login";
 import History from "./pages/History";
+import MovementDetail from "./pages/MovementDetail";
 import Movements from "./pages/Movements";
+import PlanDetail from "./pages/PlanDetail";
+import Plans from "./pages/Plans";
 import Settings from "./pages/Settings";
 import AdminLayout from "./pages/admin/AdminLayout";
 import AdminLogin from "./pages/admin/AdminLogin";
 import AdminOverview from "./pages/admin/AdminOverview";
+import AdminLine from "./pages/admin/AdminLine";
 import AdminUsers from "./pages/admin/AdminUsers";
 import AdminSettingsLlm from "./pages/admin/AdminSettingsLlm";
 import AdminSettingsRag from "./pages/admin/AdminSettingsRag";
@@ -20,6 +24,7 @@ import RequireAuth from "./components/RequireAuth";
 // Lazily loaded so the ~800 kB MediaPipe bundle only downloads when a player opens a game route.
 const SixSeven = lazy(() => import("./pages/SixSeven"));
 const FruitNinja = lazy(() => import("./pages/FruitNinja"));
+const WebSlinger = lazy(() => import("./pages/WebSlinger"));
 
 // The route table, extracted from main.tsx so WHICH ROUTES ARE PUBLIC is testable rather than
 // being untested configuration. main.tsx still owns bootstrap (createRoot, providers, LIFF init);
@@ -50,6 +55,14 @@ export default function AppRoutes() {
           </Suspense>
         }
       />
+      <Route
+        path="/web-slinger"
+        element={
+          <Suspense fallback={null}>
+            <WebSlinger />
+          </Suspense>
+        }
+      />
       <Route path="/login" element={<Login />} />
       {/* LIFF device check (Phase 0 of the LINE rollout): open inside LINE on a phone. */}
       <Route path="/liff/diag" element={<LiffDiag />} />
@@ -62,6 +75,32 @@ export default function AppRoutes() {
           bouncing to /login — for a menu whose live cards hand off to /app, which is itself
           public. Pinned by src/test/AppRoutes.test.tsx. */}
       <Route path="/movements" element={<Movements />} />
+      {/* PUBLIC for the same reason as the library above: the detail page is the catalog entry
+          for one movement — how it is performed, what it trains, and the knowledge graph's fault
+          list, all of which /api/knowledge/* serves unauthenticated. Its "My records" tab is the
+          only user-specific part, and it asks for a sign-in in place rather than gating the page.
+          The param is the canonical movement name, percent-encoded; an unknown one redirects to
+          the library. Pinned by src/test/AppRoutes.test.tsx. */}
+      <Route path="/movements/:movement" element={<MovementDetail />} />
+      {/* GATED, unlike /movements above. A plan is one user's own data — its name, its exercises
+          and its progress — so both the list and the detail sit behind RequireAuth alongside
+          /history, and the API answers 401 without a session regardless. */}
+      <Route
+        path="/plans"
+        element={
+          <RequireAuth>
+            <Plans />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/plans/:planId"
+        element={
+          <RequireAuth>
+            <PlanDetail />
+          </RequireAuth>
+        }
+      />
       <Route
         path="/history"
         element={
@@ -88,6 +127,7 @@ export default function AppRoutes() {
         }
       >
         <Route index element={<AdminOverview />} />
+        <Route path="line" element={<AdminLine />} />
         <Route path="users" element={<AdminUsers />} />
         <Route path="settings/llm" element={<AdminSettingsLlm />} />
         <Route path="settings/rag" element={<AdminSettingsRag />} />

@@ -239,6 +239,26 @@ between shoulders and hips), so it is marked honestly below.
 - **citation**: Hanen NC, et al. "Biomechanical analysis of conventional and sumo deadlift." Front Bioeng Biotechnol (2025). PMC12148905, DOI 10.3389/fbioe.2025.1597209.
 - **citation_support**: "keeping the barbell closer to the body during the SDL reduces the lever arm stress, thereby decreasing mechanical stress on the lower back"; a more upright posture with reduced trunk inclination is what "facilitated" lower back-loading in the wider-stance pull. Verified in RAG doc.
 
+> **WITHDRAWN — bar drift.** This rule is **withdrawn** (2026-08-01) and is NOT implemented in
+> `src/pose/movements/deadlift.py`, for three reasons:
+>
+> 1. **The citation contains no bar-path measurement.** Hanen PMC12148905 was read in full. Its
+>    only bar-position statement is qualitative — "keeping the barbell closer to the body during
+>    the SDL reduces the lever arm stress." No distance, no threshold, no units. The
+>    `0.5·foot_len` figure above has no source.
+> 2. **The citation explicitly disclaims it.** The paper states: *"Analyzing the bar path would
+>    be valuable to validate this hypothesis."* It did not analyze bar path and says so. A rule
+>    cannot cite a source for a measurement that source declares un-performed.
+> 3. **The mid-foot reference is the construct already forbidden.** The OHP bar-path withdrawal
+>    (above) rejected referencing the bar to mid-foot because it "would require an invented
+>    mid-foot proxy — forbidden by this project's every-threshold-literature-backed premise."
+>    This rule prescribes exactly that construct.
+>
+> **Open spec question:** does the Deadlift rule set want a genuine bar-path fault? It would need
+> (a) a base-of-support reference MediaPipe can resolve and (b) a citation that measures bar
+> displacement with a number. Neither exists today. This is a withdrawal pending a decision, not
+> a silent deletion.
+
 #### Hips Rise Faster Than Shoulders (Stiff-Leg / Segment Split)
 
 - **fault_id**: deadlift_hips_shoot_up
@@ -722,6 +742,18 @@ spread) → eccentric return.**
 | **citation** | Fukunaga T et al. Int J Sports Phys Ther (2022) PMC8975561, DOI 10.26603/001c.33026. |
 | **citation_support** | Fukunaga: peak muscle activity spanned "15.3% to 72.6% of MVC across muscles and exercise conditions," and the diagonal-up (largest-excursion, against-gravity) direction produced the highest trapezius activity — "the diagonal up movement showing the highest shoulder-girdle muscle activity is understandable as the arm is moving against gravity, resulting in higher overall load" — i.e. covering more range against the band drives higher target activation, which a truncated pull loses. |
 
+> **NOTE — direction inversion in this rule's elbow cue, corrected in implementation
+> (2026-08-09).** The `detection_heuristic` above reads "elbow-extension check `elbow_angle >
+> ~150deg` maintained (bent-elbow curl-style cheat = fault)". Read literally, `> 150°` — nearly
+> *straight* arms — is the fault, contradicting the parenthetical in the same sentence. The
+> parenthetical is right: a bent-elbow cheat means a *smaller* elbow angle.
+> `src/pose/movements/band_pull_apart.py` implements **`min_elbow_angle < 150°`**. The number
+> `150` is unchanged and remains FROM THE SPEC; only the comparison direction is corrected.
+> Corroboration beyond the parenthetical: the KG names this fault `Bent Elbows`
+> (`scripts/knowledge/stub_general_movements_v3.py:85`), and Fukunaga's rationale — more range
+> covered against the band drives higher activation — is a range argument that bending the elbows
+> shortens.
+
 #### Loss of scapular retraction
 
 | field | value |
@@ -734,6 +766,28 @@ spread) → eccentric return.**
 | **biomechanical_rationale** | The therapeutic target of the pull-apart is middle/lower-trapezius scapular retraction; if the scapulae never retract, the periscapular retractors are bypassed and the exercise loses its scapular-stabilizer training effect. |
 | **citation** | Fukunaga T et al. Int J Sports Phys Ther (2022) PMC8975561, DOI 10.26603/001c.33026. |
 | **citation_support** | Fukunaga: middle-trapezius activity was significantly driven by the retraction-oriented directions (highest in diagonal-up/horizontal vs diagonal-down), and the exercise is framed around recruiting "periscapular muscles" for "scapular stabilization" — retraction is the mechanism; an arms-only pull removes it. Honest limitation: scapular position itself is not reliably recoverable from monocular front-view pose, hence low observability. |
+
+> **NOTE — implemented as a permanently-silent rule (2026-08-09).** `rule_loss_of_scapular_retraction`
+> is registered in `src/pose/movements/band_pull_apart.py` and always returns `[]`, following
+> `pushup.rule_scapular_winging`. Two independent defects in the heuristic above, either
+> disqualifying:
+>
+> 1. **The fire condition is a null-detection.** It fires when `dist(11,12)` *fails to change*
+>    ("change < 0.01"), so a steady frame, a partially occluded frame, and a genuine non-retraction
+>    are indistinguishable. Every correct rep that holds the shoulders stable would fire it.
+> 2. **The metric is confounded with what it must be independent of.** MediaPipe's shoulder
+>    landmark is a *glenohumeral* point that moves with the humerus, and horizontal abduction is
+>    exactly the humeral motion in question, so `dist(11,12)` cannot attribute a narrowing to
+>    scapular adduction rather than arm position. Root cause: MediaPipe Pose has no scapular
+>    landmarks.
+>
+> Separately, `0.01` carries no citation; Fukunaga supplies no landmark-displacement magnitude.
+>
+> **A NOTE and not a WITHDRAWN blockquote, deliberately.** Fukunaga genuinely backs retraction as the
+> training mechanism, so the fault is real and cited and it is the *sensing* that fails — the
+> `pushup.rule_scapular_winging` case, not the OHP-bar-path / deadlift-bar-drift case. The KG is
+> not the gap either: `Band Pull Apart:Insufficient Scapular Retraction` resolves with a non-empty
+> `causes` bucket. The metric is the gap.
 
 #### Trunk-extension compensation (leaning back)
 
@@ -792,6 +846,30 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 **concentric** (elbow flexion, lifting) → **top** (peak flexion, `elbow_angle`≈40–55°) →
 **eccentric** (controlled lowering) → return to bottom.
 
+> **NOTE (2026-08-09) — two section-wide corrections made at implementation time.** Recorded
+> here so a reader who arrives at the original wording alone cannot silently re-introduce
+> either. Neither changes a threshold or a citation. Implementation:
+> `src/pose/movements/bicep_curl.py`; design spec:
+> `docs/superpowers/specs/2026-08-09-bicep-curl-detector-design.md`.
+>
+> 1. **The `fault_id`s below are unprefixed and ship prefixed `curl_*`.** Every movement after
+>    Squat prefixes, and the collision is not hypothetical: `row_incomplete_rom` and
+>    `bpa_incomplete_rom` both already exist, and `merge_by_fault`, the analyses table and the
+>    frontend's `byFault` map all key on `fault_id` with **no movement qualifier**, so a third
+>    bare `incomplete_rom` would be indistinguishable from either. Shipped ids:
+>    `curl_elbow_drift_forward`, `curl_trunk_swing_momentum`, `curl_incomplete_rom`.
+> 2. **The directional qualifiers are dropped and both metrics are taken unsigned** — "toward
+>    the anterior (wrist) side" in `elbow_drift_forward`, and "backward lean" in
+>    `trunk_swing_momentum`'s second term. Parpa's protocol is "the elbows kept close to the
+>    torso" and "avoiding trunk movements", **neither of which names a direction**, so the
+>    undirected reading is what the citation actually supports and the signed one asserts more
+>    than the source does. Recovering "anterior" would need a facing proxy whose threshold no
+>    cited source supplies — the construct the OHP bar-path and deadlift bar-drift withdrawals
+>    both rejected. Band Pull Apart's `wrist_depth_offset` facing sign does **not** transfer: it
+>    works only because that movement holds the band in front of the torso by definition,
+>    whereas a curl's wrists change depth sign within the rep. The cost is a wider net (a
+>    backward "drag-curl" drift also fires), in the direction the citation supports.
+
 #### Elbow drift forward
 - **fault_id**: `elbow_drift_forward`
 - **fault_name**: Elbow drifts forward (loss of elbow fixation)
@@ -801,6 +879,19 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 - **biomechanical_rationale**: Forward elbow drift converts the curl into partial shoulder flexion, shifting load from biceps brachii to the anterior deltoid and reducing the target-muscle stimulus (performance loss).
 - **citation**: Parpa K et al., *Muscles* (2025), PMC12550948, DOI 10.3390/muscles4040045.
 - **citation_support**: The paper's validated proper-execution protocol states the arms were "fully extended at the sides, with the elbows kept close to the torso throughout the whole movement," with two investigators visually monitoring execution — i.e., the elbow staying fixed at the torso is the defined correct form, so anterior drift is a deviation from it. (Verified — read in RAG doc.)
+
+> **NOTE (2026-08-09) — the second detection cue is UNREACHABLE and is not implemented.** The
+> heuristic above offers "or if elbow x-displacement anterior of the shoulder–hip vertical line
+> exceeds `0.5 × upper_arm_length`". That is **the first cue restated in different units, and
+> strictly weaker**: displacement `= upper_arm_length · sin(lean)`, so the `0.5` threshold is
+> `lean > arcsin(0.5) = 30°` — always satisfied when the angular term's `25°` already is. Every
+> frame it could catch, the angular term has caught. Implementing it would add a metric, a
+> threshold and a branch that can never change a verdict, which is the exact defect
+> `row.rule_momentum_jerk`'s second condition had: a strict subset of its first, and therefore
+> dead code that *read* as coverage. `upper_arm_length` is still emitted as a diagnostic so the
+> equivalence stays checkable, and the arithmetic is pinned by
+> `tests/test_bicep_curl.py::ElbowDriftRuleTest::test_the_displacement_disjunct_is_unreachable`.
+> (The cue would also need the anterior direction the section-wide NOTE above rejects.)
 
 #### Trunk swing / momentum
 - **fault_id**: `trunk_swing_momentum`
@@ -832,12 +923,83 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 - **citation**: Parpa K et al., *Muscles* (2025), PMC12550948, DOI 10.3390/muscles4040045.
 - **citation_support**: The paper notes the curl "involves elbow flexion accompanied by … wrist supination or pronation" and that grip/wrist positioning influences flexor recruitment; a supinated, controlled grip is the prescribed form. Support for wrist *flexion* as a fault is indirect (grip/wrist position matters), and it is not monocular-observable — flagged low/UNVERIFIED for the specific injury magnitude. (Verified that the source discusses wrist/grip influence; the injury-risk magnitude of wrist flexion is UNVERIFIED in this source.)
 
+> **WITHDRAWN — wrist flexion.** This rule is **withdrawn** (2026-08-09) and is NOT implemented
+> in `src/pose/movements/bicep_curl.py`. It presents two failure modes at once — observability
+> `low` on every view, *and* a `citation_support` that already self-reports "the injury-risk
+> magnitude of wrist flexion is UNVERIFIED in this source" — so which treatment it gets is
+> decided by reading the source rather than this paraphrase of it.
+>
+> **Parpa PMC12550948 was read in full. It never discusses wrist flexion.** Every wrist- and
+> grip-related statement in the paper concerns **forearm rotation** (supination / pronation) or
+> **grip type** — a different degree of freedom from flexion/extension:
+>
+> - "It primarily involves elbow flexion accompanied by either dynamic or mostly isometric
+>   shoulder flexion and **wrist supination or pronation**." (line 18)
+> - "biceps brachii and brachioradialis activation were the highest with the **supinated grip**
+>   during the ascending phase" (line 33, citing Coratella 2023)
+> - The protocol prescribes "holding a dumbbell in each hand in a **supinated grip**." (line 75)
+>
+> Nowhere does the paper state that the wrist bending into flexion is a fault, a cheat, or a
+> loading risk. The rule's asserted mechanism ("Wrist flexion recruits wrist flexors and can
+> strain the wrist joint") and its `30°` threshold **appear nowhere in the cited source** — the
+> OHP bar-path (2026-07-25) and deadlift bar-drift (2026-08-01) pattern exactly: a threshold
+> with no provenance attached to a citation that does not measure it.
+>
+> **Withdrawn, not registered-silent, and the distinction is load-bearing.** A
+> registered-but-permanently-silent rule (`pushup.rule_scapular_winging`,
+> `band_pull_apart.rule_loss_of_scapular_retraction`) is this project's way of saying "real,
+> well-cited fault; the sensor cannot see it". Had the citation held, this rule would have
+> shipped silent — the dumbbell does occlude landmarks 19/20 for much of the rep. It does not
+> hold, so the rule is **absent**; a silent stub would assert the wrong diagnosis.
+>
+> **Open spec question:** does the Bicep Curl rule set want a genuine wrist rule? It would need
+> (a) a source that measures wrist *flexion* under curl load with a number, and (b) a
+> hand-landmark reading that survives dumbbell occlusion. Neither exists today. This is a
+> withdrawal pending a decision, not a silent deletion.
+>
+> **The KG node is not the gap.** `Bicep Curl:Wrist Flexion Under Load` resolves with a
+> non-empty `corrections` bucket (`Wrists In Line With Forearms`). The node stays; nothing in
+> the detector points at it.
+
 ---
 
 ### Arm Abduction (standing lateral / shoulder-abduction raise)
 
 Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0°) →
 **concentric** (abduction/raise) → **top** (target ≈90°) → **eccentric** (controlled lower).
+
+> **NOTE (2026-08-09) — three section-wide corrections made at implementation time.** Recorded
+> here so a reader who arrives at the original wording alone cannot silently re-introduce any of
+> them. None changes a threshold or a citation. Implementation:
+> `src/pose/movements/arm_abduction.py`; design spec:
+> `docs/superpowers/specs/2026-08-09-arm-abduction-detector-design.md`.
+>
+> 1. **The `fault_id`s below are unprefixed and ship prefixed `arm_abd_*`.** Every movement after
+>    Squat prefixes, because `merge_by_fault`, the analyses table and the frontend's `byFault` map
+>    all key on `fault_id` with **no movement qualifier**. The prefix is `arm_abd_` rather than
+>    `abduction_` as a deliberate collision guard: Group E's **Leg Abduction** is also coming.
+>    Shipped ids: `arm_abd_shoulder_shrug`, `arm_abd_contralateral_trunk_lean`,
+>    `arm_abd_lr_asymmetry`.
+> 2. **"target ≈90°" above is not a value this pipeline has.** Grepped across `src/pose/` and
+>    `backend/app/`: there is no prescribed target angle, no per-user ROM goal, nothing. The
+>    two datasets for this movement disagree about the height anyway — REHAB24-6 Ex1's median
+>    peak elevation is **130.2°** and Fit3D `side_lateral_raise`'s is **97.1°**, both performed
+>    as instructed. This is why `excessive_elevation_impingement_arc` is withdrawn (below).
+> 3. **LABELED CORRECT/INCORRECT GROUND TRUTH EXISTS FOR THIS MOVEMENT, and it is the first.**
+>    REHAB24-6 `Ex1` **is** arm abduction (`src/rehab24/dataset.py` `EXERCISE_NAMES["1"]`): 178
+>    repetitions, 9 subjects each contributing both classes, **90 correct / 88 incorrect**, 0
+>    flagged mocap-erroneous, with marker-driven 3-D and cached MediaPipe landmarks for all 13
+>    videos. §8.4's standing "no labeled data" caveat therefore does **not** apply here, and the
+>    Deadlift / Row / Band Pull Apart / Bicep Curl docstrings that assert it must not be copied
+>    forward. **Lunge got there first** — REHAB24-6 `Ex5` is lunge and
+>    `notes/lunge-rule-validation.md` is the 174-rep validation actually run against it — so this
+>    is the **second** such movement and the **first whose data exists while the check has not been
+>    run**.
+>    `validated` is still `False` because **nothing has run the check** — and Ex1 is
+>    **unilateral on 178/178 reps** (`exercise_subtype == "right arm"`), a variant this rule set
+>    does not model, which by itself makes `lr_abduction_asymmetry` unvalidatable there in either
+>    direction. The bilateral variant comes from Fit3D `side_lateral_raise` (8 subjects × 5 reps
+>    of mocap 3-D, no correctness label) instead.
 
 #### Shoulder shrug (upper-trap dominance)
 - **fault_id**: `shoulder_shrug_elevation`
@@ -849,6 +1011,57 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **citation**: Mun WL, Jung EY, Lei S, Roh SY, *Medicina* (2025), PMC12029123, DOI 10.3390/medicina61040645.
 - **citation_support**: "Persistent overactivity of the UT can lead to scapular dysfunction (or dyskinesia), such as subacromial impingement or glenohumeral instability," and UT activation "consistently increases as the shoulder abduction angle surpasses 120°" so "care should be taken to avoid the excessive activation of the UT" at higher angles. (Verified — read in RAG doc.)
 
+> **NOTE (2026-08-09) — REGISTERED BUT PERMANENTLY SILENT.** Implemented as
+> `arm_abduction.rule_shoulder_shrug`, which always returns `[]`. Mun genuinely backs the fault,
+> so this is a **sensing** failure, not a citation failure, and it takes the silent treatment
+> (`pushup.rule_scapular_winging`, `band_pull_apart.rule_loss_of_scapular_retraction`) rather
+> than withdrawal. **It is the first silent rule in this project justified by a measurement
+> rather than an argument**, and the measurement has two independent halves:
+>
+> - **The metric collapses during abduction as a matter of anatomy, in 3-D ground truth, on the
+>   BILATERAL variant, with no pose estimator in the path.** On Fit3D `side_lateral_raise` the
+>   within-clip Spearman correlation between the head→shoulder vertical gap and the arm's own
+>   elevation is **−0.699 to −0.954 across all 8 subjects**, the gap travels **27%–94% of its own
+>   baseline**, and the `18%` threshold fires on **34 of 40** reps performed deliberately for a
+>   mocap capture. Both endpoints move the same way — the shoulder joint rises (ρ +0.00 to +0.94)
+>   *and* the head drops (ρ −0.32 to −0.86). The glenohumeral joint rising during abduction is
+>   scapulohumeral rhythm: it is the movement, not a fault. Because it is measured on the
+>   bilateral variant, the confound is **variant-independent** — on a bilateral raise both
+>   shoulders ride their own humerus, so nothing is left to read the shrug against.
+> - **MediaPipe reports the glenohumeral joint, not the acromion**, so the one reading that could
+>   rescue the metric is unavailable. On REHAB24-6 Ex1, as a fraction of its own baseline height
+>   above the mid-hip: the marker **clavicle** travels **1.0%**, the marker **glenohumeral** joint
+>   **13.9%**, and **MediaPipe's landmark 11/12 travels 11.2%**. The fire rates split on the same
+>   line — `18%` fires on **1/178** reps read off the marker clavicle and **172/178 = 96.6%** read
+>   off MediaPipe, with the working-side gap at **ρ = −0.957** against true arm elevation *on
+>   correct reps alone*, against **ρ = +0.068** for the resting arm (the control that makes this a
+>   statement about the arm rather than the head or the framing).
+>
+> **The heuristic's own prescribed mitigation was measured and does not rescue it**: restricting
+> to frames below 90° of elevation (its "early or disproportionate shrug") takes the MediaPipe
+> fire rate only from 96.6% to **49.4%** — half of every rep in a dataset that is half correct.
+>
+> Two further notes on the citation, neither of which changes the treatment but both of which
+> would matter a great deal to anyone who repairs the sensing. (i) **The `18%` carries no
+> provenance**: Mun measures **EMG** during a Pilates Reformer arm-work movement at four
+> abduction angles and supplies no landmark-displacement magnitude in any units. (ii) The
+> citation_support's "consistently increases as the shoulder abduction angle surpasses 120°" is a
+> **loose attribution** — in the source UT was highest at **160°** across all phases (the measured
+> conditions were 0°/90°/135°/160°), and `120°` appears there only as a citation to a different
+> study on elastic-band scapular retraction.
+>
+> This measurement also converts `band_pull_apart.rule_loss_of_scapular_retraction`'s **asserted**
+> premise ("MediaPipe's shoulder landmark is a GLENOHUMERAL point … and it moves with the
+> humerus") into a measured one. Whether the same confound reaches `band_pull_apart
+> .rule_shrugging` — which ships **live** on this construction — is **not** claimed: that
+> movement's excursion is horizontal abduction at roughly fixed elevation, so it plausibly
+> differs in kind. Logged in TODO.md as a check to run, not a defect found.
+>
+> **Open, recorded, not resolved:** a working shrug rule needs shoulder height read *at matched
+> arm elevation*, comparing like with like across the rep rather than against a setup baseline
+> taken at a different arm position. Novel construction, no citation, no validation — not
+> invented here.
+
 #### Excessive elevation through the impingement arc
 - **fault_id**: `excessive_elevation_impingement_arc`
 - **fault_name**: Raising past safe/target ROM (impingement arc)
@@ -858,6 +1071,47 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **biomechanical_rationale**: Between ~70–120° of abduction the subacromial space narrows and the supraspinatus/long-head-biceps tendons and subacromial bursa are compressed (the "painful arc"); repeatedly loading through this arc with inadequate scapular upward rotation risks impingement.
 - **citation**: Creech JA, Busse A, Li D, et al. *Shoulder Impingement Syndrome*, StatPearls (NCBI Bookshelf NBK554518, updated 2026); supported by Mun WL et al., *Medicina* (2025), PMC12029123.
 - **citation_support**: StatPearls: the painful arc occurs "between approximately 70° and 120° of active shoulder abduction," where the subacromial space (normally 1–1.5 cm) "narrows physiologically with abduction," compressing the supraspinatus tendon, long head of biceps, and subacromial–subdeltoid bursa. Mun et al. corroborate elevated UT/impingement risk above 120°. (Verified — fetched StatPearls + read RAG doc.)
+
+> **WITHDRAWN — excessive elevation through the impingement arc.** This rule is **withdrawn**
+> (2026-08-09) and is **NOT implemented** in `src/pose/movements/arm_abduction.py` — absent, not
+> silent. It fails three independent ways, and any one of them would be sufficient.
+>
+> 1. **The citation does not say what the rule says.** StatPearls NBK554518 was re-fetched and
+>    read. It describes the painful arc as a **diagnostic sign**: *"Pain is reproduced between
+>    approximately 70° and 120° of active shoulder abduction, with relative relief beyond 120°,
+>    which is supportive of subacromial pathology."* Asked directly for any statement that raising
+>    the arm through the arc, or above a specific angle, is itself a fault, an error, or a thing
+>    to avoid during exercise, the source yields **nothing**. The arc is where a person who
+>    *already has* subacromial pathology hurts; the rule's rationale reads that sign as a cause,
+>    a step no source read here takes.
+> 2. **The first disjunct is vacuous and is a restatement of another rule.** "Sustained
+>    `arm_elevation_angle` in ~70–120° **with a concurrent shrug**" — measured on REHAB24-6 Ex1's
+>    marker 3-D, **178 of 178 reps enter that band**, spending a median 30% of their frames there.
+>    Passing through 70–120° *is* what an abduction is, so the arc conjunct is always true and the
+>    cue reduces to "`shoulder_shrug_elevation` fired" — which, per the NOTE above, is never. Same
+>    defect as `row.rule_momentum_jerk`'s second condition and the Bicep Curl elbow-displacement
+>    disjunct: a branch that reads as coverage and can never change a verdict.
+> 3. **The second disjunct has no referent.** "`> target + 15°`" needs a prescribed target, and
+>    **this pipeline has none** (grepped across `src/pose/` and `backend/app/`). Fixing 90° would
+>    be an uncited rule-level number, and the two datasets show it cannot be fixed at all: `>105°`
+>    fires on **168/178 = 94.4%** of REHAB24-6 Ex1 reps but **8/40 = 20%** of Fit3D
+>    `side_lateral_raise` reps. A threshold whose fire rate swings ~5× between two datasets of the
+>    same named movement measures which variant was performed, not a fault. And on Ex1 the
+>    direction is wrong too: **correct reps go higher than incorrect ones** (median 132.4° vs
+>    125.2°; AUC that incorrect reps rank high = **0.333**, an inversion).
+>
+> **Withdrawn, not registered-silent, and the distinction is load-bearing.** A silent rule says
+> "real, well-cited fault; the sensor cannot see it". The sensor reads elevation angles perfectly
+> well — MediaPipe's arm elevation tracks the markers at within-rep ρ = +0.995. It is the
+> citation and the arithmetic that fail, so the rule is **absent**; a silent stub would assert the
+> wrong diagnosis.
+>
+> **Open spec question, recorded not resolved.** The KG's own Arm Abduction fault list contains
+> **`Arm Abduction:Incomplete Elevation`** — the *opposite* fault, and the richest of the three
+> nodes (`quality_impacts: Humerus Abduction`; `causes: Limited Shoulder ROM`). Every other
+> movement in this spec got an incomplete-ROM rule; Arm Abduction got "raised too high" instead
+> and now has no ROM rule at all. Filling that gap needs a source that puts a number on
+> insufficient abduction. **No rule was invented to fill it.**
 
 #### Contralateral trunk lean
 - **fault_id**: `contralateral_trunk_lean`
@@ -869,6 +1123,37 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **citation**: Creech JA, Busse A, Li D, et al. *Shoulder Impingement Syndrome*, StatPearls (NCBI Bookshelf NBK554518, updated 2026).
 - **citation_support**: StatPearls attributes impingement in part to "inadequate scapular upward rotation and posterior tilt" — i.e., compensation that fails to control the scapula during elevation, which contralateral trunk lean is a gross form of. The injury mechanism (impingement from poor scapular control during elevation) is verified via StatPearls. The specific frontal-plane trunk-lean substitution during abduction is **UNVERIFIED** in a peer-reviewed source (no read source isolated trunk lateral flexion during abduction; only fitness-coaching sources describe it, which do not qualify as injury-risk support). (Partially verified — injury mechanism verified; trunk-lean-specific EMG/kinematic finding UNVERIFIED.)
 
+> **NOTE (2026-08-09) — SHIPS despite the UNVERIFIED line, and two sub-criteria are dropped.**
+> Implemented as `arm_abduction.rule_contralateral_trunk_lean`, threshold unchanged at 12°.
+>
+> **Why an UNVERIFIED citation line did not withdraw this rule, when it withdrew curl
+> wrist-flexion.** Re-fetching StatPearls NBK554518 confirms the paraphrase — asked for any
+> mention of trunk lean, lateral trunk flexion, side-bending or contralateral compensation during
+> abduction, it yields **nothing**. That is where wrist-flexion started too, and it lands
+> differently for three **measured** reasons: (a) the cue **orders incorrect reps above correct
+> ones** — per-subject median **AUC 0.800** across 9 subjects on REHAB24-6 Ex1's 178 human-labeled
+> reps (pooled 0.647; 0.760 against the rep's own setup baseline), where wrist-flexion had no such
+> measurement and no way to obtain one; (b) observability is `high` on front/rear and **those
+> views are reachable**, where wrist-flexion was `low` on every view; (c) the injury **mechanism**
+> is verified — only the specific frontal-plane substitution finding is not. That is the
+> `lunge_insufficient_depth` shape — real cue, cited cut in the tail — whose settled treatment
+> (`notes/lunge-rule-validation.md` §5.4) is *"Neither threshold moves."*
+>
+> **The threshold's placement, recorded rather than repaired.** 12° fires on **0/178** REHAB24-6
+> Ex1 reps (max lean observed **7.6°**) and **1/40** Fit3D reps (max 14.1°). As shipped this rule
+> will almost never fire, and when it does the lean is gross. Both figures are 3-D ground truth;
+> image-plane obliquity foreshortens a frontal lean, so the projection error runs in the same
+> direction as the threshold placement — a missed fault, never a false one.
+>
+> **Two sub-criteria are dropped, both unimplementable rather than unwanted.** (i) *"away from the
+> raising arm"* — on a **bilateral** raise there is no raising arm, so the qualifier is undefined
+> for the variant this app models, and on the unilateral variant it would need a working-side
+> determination the detector cannot make. The metric is taken **unsigned** (the same construction
+> the Bicep Curl NOTE records): an unsigned departure is what the verified mechanism describes,
+> and the cost is that a lean *toward* the working arm also fires. (ii) *"or if it grows with load
+> across a set"* — this pipeline has no load, and `run_detector` scores one rep at a time with no
+> cross-rep state anywhere. Absent rather than approximated.
+
 #### Left/right asymmetry
 - **fault_id**: `lr_abduction_asymmetry`
 - **fault_name**: Left vs right asymmetry
@@ -879,6 +1164,69 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 - **citation**: Terré M, Solana-Tramunt M, *Healthcare (Basel)* (2025), 13(10):1153, PMC12110944, DOI 10.3390/healthcare13101153.
 - **citation_support**: The paper states "asymmetries between 10% and 15% are often associated with a higher risk of injury and reduced performance," and uses a limb-symmetry scale (asymmetry 0–79%, limit 80–89%, normal/symmetrical 90–100%). (Verified — fetched PMC article.)
 
+> **NOTE (2026-08-09) — SHIPS with the spec's 12°, the second cue is dropped, and the citation's
+> units need stating.** Implemented as `arm_abduction.rule_lr_asymmetry`, scoped to `peak` (the
+> spec's own "top-hold").
+>
+> **The 12° has no provenance in its citation, and the mismatch is a category one, not just a
+> unit one.** Terré & Solana-Tramunt PMC12110944 was re-fetched: it measures **middle- and
+> lower-trapezius EMG symmetry** during bilateral scapular retraction at 45° and 90° of shoulder
+> abduction, and every threshold in it is a **percentage** — "10% and 15%", on a limb-symmetry
+> scale of 0–79 / 80–89 / 90–100. **No angular threshold appears anywhere in the paper.** A 12°
+> difference on a 90° raise is ~13%, inside the cited band — but that correspondence is a
+> **reconstruction, not a provenance**, it silently assumes the 90° target the section-wide NOTE
+> above shows the pipeline does not have, and this spec never states it. Shipped unchanged anyway,
+> following `ohp_asymmetric_press` (cited at 7° of scapular angle / 1.5 cm of lateral shift,
+> shipped as 0.15 of normalized wrist height): the mismatch is written at the constant.
+> Re-expressing the rule as a percentage was considered and **rejected** — changing units changes
+> what fires, which the no-tuning rule covers, and it would still transfer an EMG figure to a
+> kinematic quantity.
+>
+> **The wrist-height disjunct is NOT implemented, and for a reason no previously dropped disjunct
+> had.** "peak wrist heights differ by `> 0.05` normalized units" is **not** redundant with the
+> angular cue the way the Bicep Curl elbow-displacement disjunct was. It is dropped because
+> **`0.05` in raw normalized image units is not a well-defined criterion**: normalized coordinates
+> scale with how much of the frame the subject occupies. Measured across the 43 production pose
+> JSONs under `data/runtime/pose_json` carrying a usable shoulder width, the per-clip median
+> `shoulder_width` runs **0.0591 to 0.4923** — an **8.3× spread** — so 0.05 units is **0.102
+> shoulder-widths** on the widest-framed clip and **0.846** on the narrowest. The same physical
+> asymmetry fires or does not depending on how far the phone was from the lifter. `shoulder_width`
+> is emitted as a diagnostic so this stays checkable; the arithmetic is pinned by
+> `tests/test_arm_abduction.py::AsymmetryRuleTest::test_the_wrist_height_disjunct_is_frame_scale_dependent`.
+> The trailing *"sustained across reps"* is dropped too: no rule in this codebase carries cross-rep
+> state.
+>
+> **This rule is the one the only labeled dataset cannot check, and the reason is a variant
+> mismatch rather than a defect** — see the section-wide NOTE: REHAB24-6 Ex1 is unilateral on
+> 178/178 reps, where the two arms' elevations differ by 64.3–132.2° (median 104.2°), so the
+> threshold is exceeded on every rep of both classes. That **is not a false-positive rate**: a
+> rule reporting "your two arms did completely different things" is correct about a one-armed
+> raise. On the bilateral variant (Fit3D `side_lateral_raise`) the same threshold at the same
+> phase fires on **2/40** reps — median asymmetry at the peak 4.4°, max 16.8°. **No bilateral
+> precondition is implemented**: gating on "both arms are actually raising" needs an elevation
+> floor no cited source supplies.
+
+> **ADDENDUM (2026-08-09) — THIS RULE'S "no view gate, only a discount" RATIONALE IS REFUTED BY A
+> MEASUREMENT TAKEN ON ARM VW, AND THE RULE IS NEVERTHELESS UNCHANGED.** `arm_abduction
+> .rule_lr_asymmetry` ships live on every view because "obliquity foreshortens both arms together,
+> so a real asymmetry reads smaller — a missed fault, never a false one." On REHAB24-6 **Ex2**
+> (arm VW, bilateral, 208 reps), split by camera orientation, MediaPipe's `|L − R|` sits at a
+> median **5.9°** against the markers' 4.6° on `front` clips — where the argument holds — and at
+> **16.0°** against **4.1°** on `half-profile` clips, where the same 12° cut fires on **66 of 99**
+> reps the 3-D truth calls symmetric. **Obliquity does not foreshorten the asymmetry; it
+> fabricates it.** `arm_vw.rule_lr_asymmetry` therefore gates to `{front, rear}`.
+>
+> **It is NOT applied here, and the reason is evidence rather than scope.** The measurement is
+> three inferential steps from this rule's operating conditions: it is on **Ex2, not Ex1** (whose
+> unilateral variant makes this rule's own false-positive rate unmeasurable — see above); on the
+> **`image` 2-D cache** while production runs `angle_degrees(dims=3)`, which the cache cannot
+> reproduce because it stores no image-z; and on **front-hemisphere** obliquity while production
+> is 37/49 `rear_oblique`. Changing a shipped rule's firing behaviour across inferential steps is
+> the same move the no-tuning rule forbids for thresholds. **Logged in TODO.md as a scoped check
+> to run against Arm Abduction's own data**, at which point either this rule gates too or the
+> discount is justified with a measurement instead of an argument. `ohp_asymmetric_press` uses a
+> different metric (normalized wrist height) and inherits the same open question.
+
 ---
 
 ### Arm VW (scapular V-to-W protraction/retraction)
@@ -887,6 +1235,46 @@ Open-chain scapular drill: arms overhead/wide in a **V (Y)** with the scapulae e
 rotated → pull the elbows down and back into a **W** with scapular retraction + depression →
 brief isometric hold → return to V. Rep phases: **V/protraction-elevation** →
 **pull-down/retraction** → **W hold (isometric)** → **return to V**.
+
+> **NOTE (2026-08-09) — four section-wide corrections made at implementation time.** Recorded
+> here so a reader who arrives at the original wording alone cannot silently re-introduce any of
+> them. Implementation: `src/pose/movements/arm_vw.py`; design spec:
+> `docs/superpowers/specs/2026-08-09-arm-vw-detector-design.md`.
+>
+> 1. **The `fault_id`s below are unprefixed and ship prefixed `vw_*`.** Every movement after
+>    Squat prefixes, because `merge_by_fault`, the analyses table and the frontend's `byFault`
+>    map all key on `fault_id` with **no movement qualifier**. Shipped ids:
+>    `vw_incomplete_excursion`, `vw_shrug_substitution`, `vw_loss_of_elevation`,
+>    `vw_lr_asymmetry`.
+> 2. **LABELED CORRECT/INCORRECT GROUND TRUTH EXISTS, AND FOR THE FIRST TIME IT IS THE VARIANT
+>    THE APP MODELS.** REHAB24-6 `Ex2` **is** arm VW (`src/rehab24/dataset.py`
+>    `EXERCISE_NAMES["2"]`): **208 repetitions — the largest labeled set of any non-squat
+>    movement** (Lunge 174, Arm Abduction 178) — **94 correct / 114 incorrect**, 9 subjects each
+>    contributing both classes, 0 flagged mocap-erroneous, marker 3-D and cached MediaPipe
+>    landmarks for all 12 videos. It is **BILATERAL**, established by measurement rather than by
+>    the blank `exercise_subtype` field: per-rep left/right excursion ratio median **0.954** (min
+>    0.791), within-rep r(L,R) elevation median **0.9977** (min 0.9628). Arm Abduction had to
+>    reach for Fit3D because Ex1 was unilateral on 178/178 reps; **nothing here does**.
+>    `validated` is still `False` because **nothing has run the check** — the second movement
+>    carrying that debt. One caveat for anyone using Ex2: **person 8 contributes 2 correct
+>    against 20 incorrect**, so every per-subject AUC below is reported with and without them.
+> 3. **ALL FOUR CITED SOURCES STUDY A DIFFERENT EXERCISE THAN THIS ONE, AND ALL FOUR ARE EMG.**
+>    Jung PMC12734928 is quadruped / single-leg **push-up-plus** and sternum-drop; Abiara
+>    PMC12335237 is prone cobra / wall slide / scapula setting / prone trapezius exercise; Mun
+>    PMC12029123 is a **Pilates Reformer** "arm work" movement; Terré PMC12110944 is bilateral
+>    scapular retraction at 45° and 90°. **None reports a kinematic threshold in any landmark
+>    unit**, so every number in this section is this spec's rather than a source's. That is the
+>    generalised form of the lesson the Arm Abduction impingement-arc withdrawal drew, and it is
+>    now four for four.
+> 4. **The rep signal is `avg_arm_elevation_deg` with polarity `min`** — the inverse of Arm
+>    Abduction's — because the effort peak is the **W**, where elevation is lowest. Measured on
+>    Ex2's 208 annotated reps: median start **140.4°**, median trough **54.7°** at position
+>    **0.508** of the rep, median end 141.1°. `rule_loss_of_elevation` is consequently the first
+>    shipped rule in the project scoped to the 15% `setup` window — the phase-fraction trap that
+>    silenced Bicep Curl's extension term — and it clears at **1.65×** on the reps the rules
+>    actually score (234 segmented over Ex2's 12 videos, **217 complete and analyzed**, 2.20–19.73 s;
+>    `setup` min 9 frames against `min_frames` 6), or **1.25×** on the shortest **partial** rep
+>    (1.67 s), which `select_reps` analyzes when no complete rep exists.
 
 #### Incomplete scapular / arm excursion
 - **fault_id**: `incomplete_scapular_rom`
@@ -898,6 +1286,44 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 - **citation**: Jung EY, Roh SY, Mun WL, *Life* (2025), PMC12734928, DOI 10.3390/life15121840.
 - **citation_support**: The study found the larger-excursion variation (sternum-drop, STD) "elicited higher trapezius activation, especially during large scapular excursions," and that "greater scapular excursion is known to increase muscle activation" (end-range positions were marker-verified). (Verified — read in RAG doc.)
 
+> **NOTE (2026-08-09) — SHIPS on the first disjunct only, and its warrant is weaker than
+> `contralateral_trunk_lean`'s.** Implemented as `arm_vw.rule_incomplete_excursion`, scoped to
+> the whole rep because an excursion is a property of the rep.
+>
+> **The second disjunct is dropped**, for the reason the Arm Abduction spec §6.7 established and
+> pinned: `0.05` in raw normalized image units is not a well-defined criterion, because
+> normalized coordinates scale with how much of the frame the subject occupies. Per-clip median
+> `shoulder_width` across the 43 usable production pose JSONs runs **0.0591–0.4923** — an
+> **8.3× spread** — so `0.05` units is 0.102 shoulder-widths on the widest-framed clip and 0.846
+> on the narrowest. `shoulder_width` is emitted as a diagnostic so this stays checkable.
+>
+> **Where the 40° sits, recorded rather than repaired:** it fires on **0/208** REHAB24-6 Ex2 reps
+> on the marker 3-D, **0/208** on the same reps through MediaPipe, and **0/41** on Fit3D
+> `overhead_trap_raises`. The smallest swing observed anywhere is **47.0°**.
+>
+> **It is NOT logically dominated by `loss_of_elevation`, and the tempting claim that it is would
+> be wrong.** That rule is silent when V ≥ 120 and W ≥ 75; a rep with V = 120 and W = 85 satisfies
+> both and still swings only 35°. So this is not the vacuous-branch defect that killed
+> `row.rule_momentum_jerk`'s second condition, Bicep Curl's elbow-displacement disjunct and the
+> impingement arc's first conjunct — it is a live branch that simply never fires on anything
+> measured.
+>
+> **Say plainly what it ships on.** `arm_abd_contralateral_trunk_lean` shipped past an UNVERIFIED
+> citation because its cue scored a per-subject median AUC of **0.800**. This cue scores **0.452
+> (pooled 0.476)** over Ex2's 9 subjects and **0.494 (pooled 0.502)** over the eight
+> non-degenerate ones — *exactly at chance*. It ships on **semantic correctness** (a sub-40°
+> swing really is an incomplete V-to-W, so firing on one is never wrong) plus a **background-cited
+> mechanism**, and NOT on measured discrimination. The at-chance AUC is evidence about **Ex2's
+> error type** — REHAB24-6 does not record which error each incorrect rep contains — not about
+> the rule.
+>
+> **Attaching an ARM metric to `Arm VW:Insufficient Scapular Retraction` is not the metric
+> substitution this project forbids**, and a reader will trip on it unless it is written down:
+> this section itself declares the rule a proxy ("Use the visible arm-excursion proxy for the
+> (non-observable) scapular travel … True A-P scapular retraction is not directly measured").
+> The forbidden move is shipping metric B under a fault_id whose citation is about metric A
+> *without saying so*.
+
 #### Shrug substitution
 - **fault_id**: `shrug_substitution`
 - **fault_name**: Upper-trap shrug substitution
@@ -907,6 +1333,57 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 - **biomechanical_rationale**: Upper-trap dominance (a high UT/LT and UT/SA activation ratio) is the maladaptive scapular-dyskinesis pattern and defeats the lower-trap/serratus training aim.
 - **citation**: Abiara S et al., *PeerJ* (2025), PMC12335237, DOI 10.7717/peerj.19861; supported by Jung EY et al., *Life* (2025), PMC12734928.
 - **citation_support**: Abiara et al.: "ratios lower than 1.0 for the UT/LT ratio are preferred … although lower than 0.6 are ideal," and shoulder pain is "characterized by increased activation of the upper trapezius and decreased activation of the lower trapezius and serratus anterior." Jung et al.: "excessive UT dominance is linked to scapular dyskinesis," and lower UT/SA ratios reflect "a more favorable stabilization pattern." (Verified — read both RAG docs.)
+
+> **NOTE (2026-08-09) — REGISTERED BUT PERMANENTLY SILENT.** Implemented as
+> `arm_vw.rule_shrug_substitution`, which always returns `[]`. Abiara genuinely backs the fault,
+> so this is a **sensing** failure and takes the silent treatment
+> (`pushup.rule_scapular_winging`, `band_pull_apart.rule_loss_of_scapular_retraction`,
+> `arm_abduction.rule_shoulder_shrug`) rather than withdrawal.
+>
+> **This is the SECOND movement on which the `neck_gap = ear_y − shoulder_y` construction has
+> been measured, and it fails for a NEW reason.** The heuristic's confound mitigation above is
+> structurally sounder than Arm Abduction's — this movement's pull-down runs the arm DOWN, where
+> scapulohumeral rhythm predicts the shoulder should descend — so the rule was **re-measured
+> rather than silenced by inheritance**. On REHAB24-6 Ex2's 208 reps, each candidate "shoulder"
+> taken as height above the mid-hip and the gap referenced to the rep's opening frame:
+>
+> | point | ρ(gap, elevation) over the pull-down | 18% shrink fires | gap travel, % of baseline |
+> |---|---|---|---|
+> | marker **clavicle** (acromion) | med **−0.305** | **0/208** | 1.2% |
+> | marker **glenohumeral** | med **−0.998** | **0/208** | 36.3% |
+> | **MediaPipe** `\|ear − shoulder\|` | med **−0.957** | **0/208** | — |
+>
+> Shoulder-height travel as a fraction of its own baseline: marker clavicle **0.6%**, marker
+> glenohumeral **9.8%** — MediaPipe reports the **glenohumeral joint, not the acromion**, the Arm
+> Abduction finding reproduced under a **reversed** elevation direction, which is what makes it a
+> property of the landmark rather than of that movement. Two independent failures follow:
+> **(a)** the metric is an arm-elevation readout, not a shrug readout (ρ = −0.957); **(b)** the
+> 18% threshold **can never fire on this movement's baseline convention**, because the rep opens
+> at the **V** — the most-shrugged position in the whole movement — so "shrink below baseline" is
+> negative throughout the pull-down and the W hold. **0/208 on all three instruments**, the exact
+> inverse of Arm Abduction's 96.6%, and just as unusable. The cue also carries no label
+> information: pooled AUC **0.484**, per-subject median 0.549.
+>
+> **The 18% carries no citation** (Abiara reports EMG ratios and no landmark displacement in any
+> units), recorded so a future reader who repairs the sensing does not inherit it as cited.
+>
+> **One honesty note that does not change the treatment.** Abiara's Exercise C — "Participants
+> stood against the wall and began with their arm abducted to 90°, their elbows bent to 90°, and
+> their palms facing forward" — is the closest thing in any cited source to the **W position**,
+> and the paper reports its UT/LT ratio as **over 1.0**, concluding "only the Modified Prone Cobra
+> (Exercise B) can be recommended." The cited literature is lukewarm about the exercise this rule
+> set is built around.
+>
+> **What this says about `band_pull_apart.rule_shrugging`, which ships LIVE on this construction:
+> it NARROWS the open item without discharging it.** The gap now measurably tracks arm elevation
+> on two movements whose elevation runs in **opposite** directions, so the confound scales with
+> the *magnitude* of the elevation excursion rather than its sign. Band Pull Apart's excursion is
+> horizontal abduction at roughly fixed elevation, so its confound should be **small** — an
+> argument **for** that rule being sound, not against it. Still not measured on its own data.
+>
+> **Open, recorded, not resolved:** the same requirement Arm Abduction recorded — a working shrug
+> rule needs shoulder height read *at matched arm elevation*, not against a setup baseline taken
+> at a different arm position. Novel construction, no citation, no validation; not invented here.
 
 #### Loss of arm-elevation angle
 - **fault_id**: `loss_of_elevation_angle`
@@ -918,6 +1395,57 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 - **citation**: Mun WL et al., *Medicina* (2025), PMC12029123, DOI 10.3390/medicina61040645; supported by Abiara S et al., *PeerJ* (2025), PMC12335237.
 - **citation_support**: Mun et al.: "the LT activation was the highest at a 135° shoulder abduction angle, with excessively high angles leading to a decrease," and researchers "recommend shoulder abduction near 145°, aligning with the muscle fiber direction, for maximum LT activation." Abiara et al. describe the LT-targeting exercise performed with "arms abducted above 90°, thumbs up." (Verified — read both RAG docs.)
 
+> **NOTE (2026-08-09) — the V disjunct SHIPS; the W disjunct is WITHDRAWN.** Implemented as
+> `arm_vw.rule_loss_of_elevation`, scoped to `setup` — the **opening** V.
+>
+> **The 120° is the low end of a cited OPTIMUM, never a stated fault threshold.** Mun's own
+> finding is 135° (p < 0.001) during a Pilates Reformer arm-work movement at 0/90/135/160°; the
+> 145° and the 120° in the citation_support above are both **Mun citing other studies in its
+> discussion**, and the 120° appears there as another study's LT *optimum*, not as a floor.
+> Reading 120° as a floor is a defensible rendering of "stay in the 120–145° band", but no source
+> states it as a failure threshold. Not moved. Measured, it lands just under the observed
+> distribution — Ex2's median V peak on the markers is **143.8°**, inside the cited optimum — so
+> this is the `lunge_insufficient_depth` shape.
+>
+> **It is the best-discriminating cue measured on this movement**, which is why it ships rather
+> than merely being recorded: ranking Ex2's incorrect reps above its correct ones on the V peak
+> gives pooled **0.596** / per-subject median **0.660** over all 9 subjects, and pooled **0.713**
+> / per-subject median **0.735** over the eight non-degenerate ones. 0.735 is comparable to the
+> 0.800 that carried `arm_abd_contralateral_trunk_lean`.
+>
+> **The shipped fire rate, measured through the REAL pipeline on the windows the rule actually
+> sees.** `run_detector(ARM_VW_DETECTOR, ...)` over Ex2's 12 cached MediaPipe videos — which
+> smooths, segments, trims and phases exactly as production does — fires this rule on **34 of the
+> 217 analyzed reps (15.7%)**: 10/57 on the `front` clips, 24/160 on the `half-profile` ones.
+> **Read over the annotation windows instead, the same rule fires on only 9/208** — `segment_reps`
+> trims the V plateau away, so a segmented window's first 15% sits further down the descent.
+> 15.7% is the shipped number; the 4.3% was measuring a window the rule never sees.
+>
+> **One semantic note on the reading.** "V-phase **peak** < 120°" strictly means the maximum over
+> the V window is below 120; the codebase idiom is a per-frame mask plus
+> `contiguous_true_segments`, which fires on any **sustained run** below 120 — strictly weaker, so
+> it fires more. Over annotation windows the two read 6/208 against 31/208 on the marker 3-D; the
+> shipped reading is the codebase idiom. Also note the **closing** V falls in `eccentric` and is
+> not read, and the rep's global maximum sits near the end on most reps (median argmax position
+> 0.918) — so the rule under-reads the movement's best moment, in the conservative direction.
+>
+> **WITHDRAWN — "or W-phase abduction < 75°".** Absent, not silent, and it fails two ways, either
+> of which would be sufficient. **(i) The 75° appears in no cited source**: Mun measures
+> 0/90/135/160°, Abiara's wall slide begins "abducted to 90°" and its prone exercise is "above
+> 90°", Terré tests 45° and 90°, and no source read describes a *floor* on the W at all.
+> **(ii) The computable quantity puts the entire observed distribution below the cut**:
+> `angle(hip, shoulder, elbow)` is a frontal-plane reading and in the W the elbow travels down
+> **and back**, an A-P component this section itself rates non-observable from a monocular frontal
+> view. Median W elevation **58.4°** on the Ex2 markers (fires **187/208**), **24.6°** through
+> MediaPipe (fires **206/208**), **67.9°** on Fit3D `overhead_trap_raises` (fires **39/41**). A
+> criterion firing on 90–99% of reps in a dataset that is 45% correct is not measuring a fault,
+> and its discrimination confirms it: per-subject AUC 0.360 over 9 subjects, **0.510** over the
+> eight non-degenerate ones — at chance, the apparent inversion being a person-8 artifact.
+>
+> Withdrawn rather than registered-silent because the sensor reads frontal-plane elevation angles
+> perfectly well; it is the **number** that has no source and the **quantity** that does not
+> capture what this section meant by the W. Same treatment as the Arm Abduction impingement arc.
+
 #### Left/right asymmetry
 - **fault_id**: `lr_vw_asymmetry`
 - **fault_name**: Left vs right scapular asymmetry
@@ -927,6 +1455,68 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 - **biomechanical_rationale**: Asymmetric scapular control reflects side-to-side stabilizer imbalance; inter-limb asymmetries of ~10–15% are associated with higher injury risk and reduced performance.
 - **citation**: Terré M, Solana-Tramunt M, *Healthcare (Basel)* (2025), 13(10):1153, PMC12110944, DOI 10.3390/healthcare13101153; scapular-dyskinesis context from Jung EY et al., *Life* (2025), PMC12734928.
 - **citation_support**: Terré & Solana-Tramunt: "asymmetries between 10% and 15% are often associated with a higher risk of injury and reduced performance" (limb-symmetry scale: normal 90–100%). Jung et al. tie unbalanced scapular muscle activation to scapular dyskinesis. (Verified — fetched PMC article + read RAG doc.)
+
+> **NOTE (2026-08-09) — SHIPS with the spec's 12°, and is THE FIRST ASYMMETRY RULE IN THIS
+> PROJECT TO GATE ON VIEW.** Implemented as `arm_vw.rule_lr_asymmetry`, scoped to `setup` ∪
+> `peak` (this section's own "at the V peak and at the W hold"), **gated to `{front, rear}`**.
+>
+> **The 12° has the same non-provenance it has for `lr_abduction_asymmetry`**: Terré measures
+> middle- and lower-trapezius **EMG symmetry** at 45° and 90° of abduction, and every threshold in
+> it is a **percentage**. No angular threshold appears anywhere in the paper. Shipped unchanged,
+> mismatch written at the constant; re-expressing it as a percentage was rejected because changing
+> units changes what fires.
+>
+> **THE GATE, AND THE MEASUREMENT THAT FORCES IT — WHICH ALSO REFUTES THE REASON
+> `lr_abduction_asymmetry` GIVES FOR NOT GATING.** `arm_abduction.rule_lr_asymmetry` ships live on
+> every view on the argument that "obliquity foreshortens both arms together, so a real asymmetry
+> reads smaller — a missed fault, never a false one." Measured on REHAB24-6 Ex2, split by
+> `cam17_orientation`, taking max `|L − R|` over each window against the 12° cut:
+>
+> | cam17 | instrument | V window: median (fires) | W window: median (fires) |
+> |---|---|---|---|
+> | **front** (109) | marker 3-D | 4.6° (3/109) | 6.4° (12/109) |
+> | | **MediaPipe image 2-D** | **5.9° (13/109)** | **7.4° (20/109)** |
+> | | MediaPipe `world` 3-D | 27.0° (107/109) | 27.8° (104/109) |
+> | **half-profile** (99) | marker 3-D | 4.1° (0/99) | 5.8° (5/99) |
+> | | **MediaPipe image 2-D** | **16.0° (66/99)** | **22.2° (88/99)** |
+> | | MediaPipe `world` 3-D | 28.8° (96/99) | 20.4° (86/99) |
+>
+> From a **true frontal** view the difference metric behaves (5.9° against 4.6°) and the
+> common-mode-cancellation argument holds. From an **oblique** view it is **fabricated** (16.0°
+> against 4.1°), and the shipped threshold fires on **66 of 99** reps the 3-D truth calls
+> symmetric. The near arm and the far arm foreshorten by *different* amounts, so obliquity does
+> not shrink the asymmetry — it manufactures one. MediaPipe's own 3-D does not rescue it (`world`
+> is worse on both views), though `world` is a metric hip-centred output and **not** the image-z
+> that `angle_degrees(dims=3)` consumes, so that row is a proxy in both directions.
+>
+> **State the ceiling, because it is severe.** Production is `rear_oblique` 37, `rear` 9,
+> `unknown` 3, `side` 0 over 49 pose JSONs (re-measured 2026-08-09), and `front` is unreachable
+> under `allow_front=False`. So this rule is **live on 9 of 49 clips and silent on the other 40** —
+> the price of not firing falsely on two thirds of them. **What the gate buys and what it does
+> not, measured through the real pipeline:** over Ex2's 217 analyzed reps it fires on **20/217 =
+> 9.2%** (20/57 `front`, 0/160 `half-profile`); forced through as `front` everywhere it fires on
+> **121/217 = 56%**, so the gate suppresses 101 firings — 63% of the oblique reps. **The residual
+> is still high:** 20/57 = **35%** on truly-frontal clips against a marker-3-D exceedance of 3/109
+> and 12/109. The gate removes the asymmetry **obliquity adds**; it does not make the metric agree
+> with 3-D truth. Two inferential steps also sit underneath
+> the gate: Ex2's cameras are front-hemisphere, so the gate excludes the views where fabrication
+> was **measured** and admits one (`rear`) where it was **not**; those 9 clips earn `high` on a
+> geometric argument (a frontal-plane difference reads the same mirrored, and `|L − R|` is
+> sign-invariant), not on a measurement.
+>
+> **`src/pose/movements/arm_abduction.py` is deliberately NOT edited**, for evidence rather than
+> scope — see the annotation on `lr_abduction_asymmetry` above.
+>
+> **Both sub-criteria are dropped.** "`|wrist_y_L − wrist_y_R| > 0.05` (normalized)" is the same
+> frame-scale-dependent criterion as `incomplete_scapular_rom`'s second disjunct (8.3× spread in
+> per-clip median `shoulder_width`). "sustained across reps" needs cross-rep state no rule in this
+> codebase carries.
+>
+> **What Ex2 says about this rule is very little, and it is entitled to say it.** `|L − R|` on the
+> marker 3-D scores per-subject AUC 0.378 (V) and 0.536 (W) — 0.375 / 0.513 without person 8 — and
+> exceeds 12° on 3/208 and 17/208 reps. Ex2's incorrect reps are not asymmetric ones. **Unlike Arm
+> Abduction**, where Ex1's unilateral variant made the rule unvalidatable in either direction, Ex2
+> is bilateral, so this is a real if uninformative reading rather than a variant artifact.
 
 ---
 
@@ -943,6 +1533,65 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
   from monocular front-view pose; the VW heuristics fall back to visible arm-elevation proxies
   and say so.
 
+> **UPDATE (2026-08-09) — how the two UNVERIFIED items above actually resolved at implementation
+> time, and one this section did not anticipate.** Both were re-checked against the sources
+> rather than against this paraphrase, and they resolved in **opposite** directions, which is the
+> point: an "UNVERIFIED" line is a prompt to read the source, not a verdict.
+>
+> - `wrist_flexion_curl` → **WITHDRAWN** (Bicep Curl, above). Parpa never discusses wrist
+>   flexion at all; every wrist statement in it is about forearm rotation or grip.
+> - `contralateral_trunk_lean` → **SHIPS**. StatPearls does contain nothing about trunk lean, but
+>   the cue orders REHAB24-6 Ex1's incorrect reps above its correct ones at a per-subject median
+>   AUC of **0.800**, and the injury mechanism is verified. Real cue, cited cut in the tail.
+> - **Not anticipated here:** `excessive_elevation_impingement_arc` → **WITHDRAWN**, and this
+>   section rated it fully verified. The quote was accurate; the **inference** was not. StatPearls
+>   describes the 70–120° arc as a **diagnostic sign of existing pathology**, never as a fault to
+>   avoid during exercise — so "Verified — fetched StatPearls" was true of the quotation and false
+>   of the rule built on it. The lesson generalises past this movement: verifying that a source
+>   contains a quoted string is not verifying that it supports the claim the quote is attached to.
+>
+> Two further corrections to the ratings above, recorded where a reader will meet them:
+> `shoulder_shrug_elevation` is rated `high` on front/rear here and is **registered permanently
+> silent** — the *view* rating was right and the *metric* is unusable (see its NOTE); and
+> `lr_abduction_asymmetry`'s Terré citation is an **EMG-symmetry** finding, not a kinematic one,
+> so its `12°` has no provenance in the cited source.
+
+> **UPDATE (2026-08-09, second pass) — GROUP D IS COMPLETE, and the Arm VW pass generalised the
+> lesson above rather than adding a new one.** All three Group D detectors now ship
+> (`bicep_curl.py`, `arm_abduction.py`, `arm_vw.py`), 10 of 16 movements.
+>
+> - **The third UNVERIFIED-style resolution.** This section's first bullet says all
+>   citation_support strings "were taken from sources actually read". True of the *strings*, and
+>   the Arm VW pass shows it is not the property that matters: **all four Arm VW sources study a
+>   different exercise than the one they are cited for, and all four are EMG.** Jung PMC12734928
+>   is quadruped / single-leg **push-up-plus**; Abiara PMC12335237 is prone cobra / wall slide /
+>   scapula setting; Mun PMC12029123 is a **Pilates Reformer** arm-work movement; Terré
+>   PMC12110944 is bilateral scapular retraction at 45°/90°. None reports a kinematic threshold in
+>   any landmark unit. Verifying a quotation is not verifying the claim it is attached to — now
+>   demonstrated on the impingement arc (inference), on `wrist_flexion_curl` (absence), and here
+>   on **exercise identity**.
+> - **A source that is lukewarm about its own movement, recorded once.** Abiara's Exercise C (wall
+>   slide, "arm abducted to 90°, elbows bent to 90°") is the nearest thing in any cited source to
+>   the **W position**, and the paper reports its UT/LT ratio as **over 1.0**, concluding "only the
+>   Modified Prone Cobra (Exercise B) can be recommended."
+> - **The third bullet above is confirmed and sharpened.** A-P scapular motion is indeed not
+>   resolvable monocularly — and the price is now measured, not just asserted: the frontal reading
+>   `angle(hip, shoulder, elbow)` puts the W at 58.4° on 3-D markers and **24.6° through
+>   MediaPipe**, which is what withdrew `loss_of_elevation_angle`'s W disjunct.
+> - **One rating correction, and it belongs to Arm Abduction rather than Arm VW.** The
+>   `lr_abduction_asymmetry` NOTE's "no view gate, only a discount" is refuted by an Ex2
+>   measurement (see its ADDENDUM). `lr_vw_asymmetry` gates; `lr_abduction_asymmetry` is unchanged
+>   pending a check on its own data.
+> - **A new structural finding for the framework, not for this movement.** `loss_of_elevation_angle`
+>   is the first shipped rule scoped to the 15% `setup` window, and the Bicep Curl phase-fraction
+>   trap (`phase_fraction · T ≥ min_frames / fps`) **binds** there rather than being dodged. It
+>   clears at 1.65× on analyzed reps and 1.25× on the shortest partial one, and both sides of the
+>   cliff are pinned end-to-end. Any future rule reading a movement's *opening* position inherits
+>   this constraint.
+> - **A method note worth carrying forward.** Fire rates for phase-scoped rules must be measured
+>   on **segmented** windows through `run_detector`, not on a dataset's annotation windows: the two
+>   differ by **3.7×** for `loss_of_elevation_angle` here, because `segment_reps` trims the
+>   plateau the annotations include. This document originally carried the annotation-window figure.
 
 ---
 
@@ -1114,6 +1763,266 @@ Rep phases: **setup (neutral hip)** → **concentric abduction (lift/step leg ou
 
 All citation_support paraphrases/quotes above were taken from the six RAG docs actually read in this session (PMC4519219, PMC9505236, PMC11981018, PMC11048684, PMC12372021, PMC12416692). Two items are honestly down-graded to MODERATE support where the exact clinical cue exceeds the literal wording of the source: the "toes-up external-rotation" component of `abd_hip_flexion_er_substitution`, and the velocity thresholds of `abd_momentum` (the sources support the frontal-plane-neutrality and movement-control principles, respectively, but do not state the specific pose thresholds). No fault rests on an unsupported injury-risk claim.
 
+> **UPDATE (2026-08-09, Sit-up implemented — 11/16) — THREE OF THIS SECTION'S FOUR SIT-UP RULES DO
+> NOT SHIP, AND THE CENTRAL FINDING IS ABOUT THIS GROUP AS A WHOLE, NOT ABOUT SIT-UP.**
+> Design spec: `docs/superpowers/specs/2026-08-09-situp-detector-design.md`. Module:
+> `src/pose/movements/situp.py`. `situp_incomplete_rom` ships; `situp_hip_flexor_dominance` is
+> registered permanently silent; `excessive_speed` and `excessive_rom` are withdrawn.
+>
+> - **GROUP E'S MEASUREMENT CONVENTION IS NOT RECOVERABLE FROM AN IMAGE, AND THAT APPLIES TO ALL
+>   THREE MOVEMENTS.** The convention block above defines trunk-flexion, pelvic-tilt and trunk
+>   lateral-lean against "the floor/horizontal". The image horizontal is not the floor: EgoExo-
+>   Fitness, the only dataset with labeled sit-ups, ships its two near-sagittal views (`exo_l`,
+>   `exo_r`) **rotated a quarter turn with no EXIF orientation tag** (PIL `getexif()` is empty on
+>   all three exo views). Every rule shipped in this project before Sit-up was immune by accident —
+>   they all read joint-relative `angle_degrees(a, b, c)`, invariant under camera roll. Sit-up
+>   re-anchors to the body (hip-angle excursion) deliberately. **Shoulder Bridge and Leg Abduction
+>   must do the same**; their `hip angle`, `pelvic-tilt` and `knee_width/ankle_width` quantities are
+>   already body-relative, but `lumbar_hyperextension_overarch`'s "hip-midpoint y rises above the
+>   shoulder–knee line" proxy is not, and neither is any reading of pelvic tilt "vs horizontal".
+> - **RE-ANCHORING FIXES THE REPRESENTATION, NOT THE ESTIMATOR — MEASURED.** Rotating 300 real
+>   `zOfbr6/exo_l` frames by 90° and re-running MediaPipe moves the same frame's hip angle by a
+>   **median 9.8° (p90 18.6, max 32.5)**, with detection succeeding 300/300 either way. MediaPipe is
+>   not roll-equivariant. That residue is half the shipped 20° threshold, produced by camera roll
+>   alone, and no landmark convention removes it.
+> - **THE `side` RATINGS IN THIS SECTION ARE FICTION, AND THE ESTIMATOR IS NOT MERELY SILENT ON A
+>   SUPINE SUBJECT — IT IS INVERTED.** Three of four Sit-up rules are rated on `side`, which
+>   production has emitted on 0 of 49 clips. Run over the six real sit-up clips in all three
+>   exocentric views: the **near-sagittal** `exo_l`/`exo_r` come back **`rear`** and the **head-on**
+>   `exo_m` comes back **`rear_oblique`**, deterministically, with `side` and `unknown` never
+>   emitted. `view_estimation.py`'s docstring limit 1 already forbids gating a horizontal-movement
+>   rule on these labels; this is the measurement behind it. `situp_incomplete_rom` is accordingly
+>   **the first shipped rule in the project with neither a view gate nor a view discount** — a
+>   discount keyed on a meaningless label is arbitrary, not conservative.
+> - **A FOURTH AND A FIFTH CITATION FAILURE MODE, after inference (impingement arc), absence (curl
+>   wrist flexion) and exercise identity (all four Arm VW sources).**
+>   **(4) SECONDARY SOURCING** — right paper, right exercise, but the paper is quoting someone else.
+>   Both numbers this section draws from Mandroukas PMC9505236 are things he reports from other
+>   literature behind reference markers: "limiting the amount of trunk flexion to 35–40° [ ]" and
+>   "Nachemson [ ] reported increased pressure on the intervertebral disc". His own result is the
+>   EMG finding that RA activity "decreased as the range of motion became greater, more than
+>   35–40°".
+>   **(5) SOURCE-MEASURED NULL ON THE PROPOSED PROXY** — `excessive_speed`'s secondary signal
+>   ("medial-lateral wobble of the shoulder midpoint") *is* Barbado PMC4519219's `SG_ML`, and
+>   Barbado's headline result is that it **did not change significantly with speed**. The quantity
+>   that did rise, `COP_ML`, is force-plate centre of pressure and is not observable from video.
+>   This is the only one of the five that survives checking what a source *says* and falls only to
+>   checking what it *found*. Its `~1.0 s` threshold is separately just the fastest metronome
+>   cadence tested, and its primary signal ("exceeds a per-user baseline") does not exist in this
+>   architecture at all.
+> - **THE FIRST RULE WITHDRAWN BECAUSE ITS KNOWLEDGE-GRAPH SEED WOULD BE SEMANTICALLY INVERTED.**
+>   The graph's four `Sit-up:` fault nodes are the EgoExo TKV criteria — Feet Not Together, Arms Not
+>   Extended Overhead (both dangling), Incomplete Forward Reach, Abdominal Disengagement. There is
+>   no excessive-ROM node and the only ROM-adjacent one means the **opposite**. Band Pull Apart,
+>   Bicep Curl, Arm Abduction and Arm VW all accepted **thin** seeds and Arm VW accepted a **shared**
+>   one; none accepted an **inverted** one.
+> - **THE SPEC AND THE APP MODEL DIFFERENT EXERCISES, and this section is the odd one out.** This
+>   section says curl-up. The knowledge graph, EgoExo-Fitness's canonical guidance ("touch your feet
+>   with your hands", faulted on 28/82 judged actions when not achieved), the frontend's Traditional
+>   Chinese string (**仰臥起坐**, not 捲腹) and the shipped card artwork all say **full sit-up**. Two
+>   of the three non-shipping outcomes turn on that disagreement. It is a product decision, recorded
+>   in TODO.md, not taken here.
+> - **A FOURTH VACUOUS-BRANCH DEFECT, AND THE FIRST CAUGHT BEFORE IMPLEMENTATION.**
+>   `hip_flexor_dominance_anchored`'s heuristic asks that "shoulder–hip–knee remain close to
+>   collinear" *while* "the trunk-thigh (hip) angle closes rapidly" — and this section's own
+>   convention block defines the hip angle AS shoulder→hip→knee. Both clauses name the same
+>   quantity, so the rule can never fire. Same class as `row.rule_momentum_jerk`'s second condition,
+>   Bicep Curl's elbow-displacement disjunct and the impingement arc's first conjunct.
+> - **A NEW REASON FOR `validated=False`, THE THIRD IN THIS REGISTRY.** Not "no labeled data exists"
+>   (Deadlift, Row, Band Pull Apart, Bicep Curl) and not "nobody ran the check" (Arm Abduction, Arm
+>   VW), but **the labeled data that exists describes a different variant**. REHAB24-6 has no sit-up
+>   and Fit3D has no supine action among its 47 activity types, so there was no escape hatch of the
+>   kind Arm Abduction used.
+> - **ONE LIVE RULE IS THE HONEST OUTCOME.** Padding the detector to look comparable to Squat's five
+>   would mean inventing thresholds.
+>
+> **What Group E still has going for it:** Leg Abduction is REHAB24-6 `Ex4` — **210 reps, 120
+> correct / 90 incorrect, 12 videos** — the largest labeled non-squat set after Arm VW's 208 and the
+> only Group E movement with matching-variant ground truth. It should be the best-evidenced detector
+> in this group by a wide margin, and the Sit-up findings about reference frames and view labels
+> apply to it directly.
+
+> **UPDATE (2026-08-09, Shoulder Bridge implemented — 12/16) — ONE OF THIS SECTION'S FOUR
+> SHOULDER BRIDGE RULES SHIPS, AND THE CENTRAL FINDING IS THAT `angle_degrees` IS UNSIGNED.**
+> Design spec: `docs/superpowers/specs/2026-08-09-shoulder-bridge-detector-design.md`. Module:
+> `src/pose/movements/shoulder_bridge.py`. `bridge_incomplete_hip_extension` ships;
+> `bridge_lumbar_hyperextension` is registered permanently silent; `asymmetric_pelvic_drop` and
+> `knee_valgus` are withdrawn.
+>
+> - **`angle_degrees` RETURNS `arccos`, RANGE [0, 180], AND THAT BREAKS TWO OF THESE FOUR RULES AT
+>   ONCE.** `lumbar_hyperextension`'s "peak hip angle > ~190deg" **can never fire** — the FIFTH
+>   vacuous-branch defect in this registry (after `row.rule_momentum_jerk`, Bicep Curl's elbow
+>   disjunct, the impingement arc's first conjunct and `situp_hip_flexor_dominance`), and the second
+>   caught BEFORE implementation. Worse, and NOT anticipated anywhere in this section: the function
+>   is **exactly symmetric about 180deg**, so `incomplete_hip_extension`'s "< 160deg" also fires on
+>   a bridge arched 20deg PAST neutral and reports it as one that never got there. Measured on a
+>   synthetic fixture: +20deg and −20deg from the straight line both read **140.00deg**. The shipped
+>   rule carries that mislabel, stated at its definition site and pinned by a test, because in the
+>   only labeled data the direction it assumes is the direction annotators fault (16/77) and the
+>   other direction is not among the twelve criteria at all.
+> - **THE SIGN THAT WOULD REPAIR BOTH IS NOT RECOVERABLE — TWO CONSTRUCTIONS, BOTH MEASURED, BOTH
+>   REFUTED.** (A) hip vs ANKLE about the shoulder→knee line is provably invariant under rotation
+>   AND mirroring, recovers 120/160/180/200/240 on a synthetic fixture where the unsigned angle
+>   gives 120/160/180/160/120 — and on real footage reads "arched" on **57.0%** and **62.3%** of
+>   frames of repetitions annotators marked correct. (B) hip vs KNEE about the shoulder→ankle line
+>   (the mat, being the two contact points) **disagrees with the subject's own other side** on 21 of
+>   24 sampled frames. Near the straight line, where the rule must decide, both cross products go to
+>   zero and the sign is noise. This is Sit-up's lesson recurring: re-anchoring fixes the
+>   REPRESENTATION, not the ESTIMATOR.
+> - **THE VIEW LABELS ARE NOT MERELY INVERTED ON A SUPINE SUBJECT — THEY ARE UNSTABLE.** Sit-up
+>   measured a deterministic per-camera inversion. Re-measured on a different record and movement:
+>   `rear` three times, `rear_oblique` three times, `side` and `unknown` never — and the SAME
+>   CAMERA disagrees with itself between two clips of the same person in the same room (`exo_l` →
+>   `rear` on one, `rear_oblique` on the other), at confidences from 0.02 to 0.72. So this is the
+>   second shipped rule with neither a view gate nor a view discount.
+> - **THE SHIPPED RULE FIRES ON 5 OF THE 6 REAL CLIP-VIEWS, ALL OF THEM CORRECT REPETITIONS, AND
+>   THE CENSUS SPLITS BY CAMERA GEOMETRY.** On the four near-sagittal clip-views it is silent once
+>   and otherwise fires at 0.02, 0.08, 0.15. On the two AXIAL (head-on, down the body's long axis)
+>   clip-views it fires at **0.95 and 1.00** — because that camera foreshortens the sagittal hip
+>   angle into meaninglessness (median 90deg vs 128–134deg on the sagittal cameras, same
+>   repetitions). The same repetitions read **110.6 to 167.9deg** across three SIMULTANEOUS cameras:
+>   a ~50–58deg spread against the 20deg margin this threshold relies on. That establishes the
+>   MAGNITUDE of the measurement error and NOT a fire rate (n = 2 actions, 1 subject) and NOT a bias
+>   direction — the tempting "MediaPipe under-reads a straight-line bridge by about 20deg" is
+>   consistent with the data and is deliberately not claimed.
+> - **TWO RULES WITHDRAWN ON EXERCISE IDENTITY, WHICH IS NOW THIS PROGRAMME'S MOST COMMON CITATION
+>   FAILURE.** `asymmetric_pelvic_drop`'s citation_support quotes a passage that announces its own
+>   subject in its first words — "**In a Trendelenburg gait** …" — and Escamilla, who studies
+>   UNIPEDAL bridging directly, never mentions pelvic drop at all (checked). `knee_valgus`'s quotes
+>   "**Powers [ ] theorized** …" from Colonna's section on hip dysfunction and knee pathology, whose
+>   surrounding sentences are about ACL injury during LANDING. Neither fault is observed in a bridge
+>   by either bridge source.
+> - **AND `knee_valgus` FAILS INDEPENDENTLY ON MEASUREMENT.** Median `knee_width/ankle_width` across
+>   the six clip-views: **0.726, 0.895, 0.911, 0.927, 1.020, 1.027**, per-clip minimum **0.043**,
+>   against this section's 0.85 cut (squat's shipped one is 0.82). Two of six sit below the cut on
+>   their MEDIAN frame, on repetitions judged correct. Its `|x(25)-x(26)|` form is also not
+>   roll-invariant, and the codebase's own precedent (`pose_feature_extraction.py:296`) already uses
+>   the full 2-D distance — the measurement above used the INVARIANT form, so fixing the form does
+>   not rescue the rule.
+> - **A FOURTH REASON FOR `validated=False`, AND THE FIRST THAT A DOWNLOAD FIXES.** Not "no labeled
+>   data" (Deadlift, Row, Band Pull Apart, Bicep Curl), not "nobody ran the check" (Arm Abduction,
+>   Arm VW), not "the labeled data describes a different variant" (Sit-up), but **the labels exist
+>   and match and the PIXELS are missing**. EgoExo-Fitness has **77 human-judged Shoulder Bridge
+>   actions / 130 annotator records**, guidance identical across all 77 and naming this rule's
+>   endpoint verbatim, and one of its twelve criteria IS this rule ("Progressively raise your body
+>   until your knees, hips, and shoulders align in a straight line", faulted **16/77**). The
+>   `frames_open` archive is missing part `.ac`, so **2 of the 77** are recoverable. This is the most
+>   actionable finding in the movement and is recorded in TODO.md as an action, not a limitation.
+> - **THE GOOD NEWS THIS GROUP HAS NOT HAD: AN EXACT KG SEED AND A DOUBLY-PRIMARY ENDPOINT.**
+>   `Shoulder Bridge:Incomplete Hip Extension` resolves with THREE non-empty buckets (causes: Poor
+>   Hip Extension, Weak Gluteus Maximus; corrections: Squeeze Glutes) — the first seed in the whole
+>   programme that is neither thin, shared, nor inverted. And the endpoint is stated in the OWN
+>   WORDS of both sources with no reference marker: Escamilla's Methods give BOTH ends ("hips flexed
+>   approximately 50deg" → "0deg hip flexion, with the knees, hips, and shoulders approximately in a
+>   straight line"), which no rule in this programme has previously had. What is secondary here is
+>   the RATIONALE, not the definition: Colonna's hip-extension-torque and GM-recruitment sentences
+>   both carry reference markers, so this section's "VERIFIED" is true of the strings and not of
+>   their authorship.
+> - **`only_partial_reps` BITES HARDEST ON THE BEST FOOTAGE.** On the one clip-view with 100%
+>   landmark detection, `segment_reps` found 2 repetitions and marked both partial, so the rule was
+>   handed the entire 16-second clip as a single window. Same gap as the Deadlift setup-baseline
+>   defect: `RunResult.fallback` is not threaded into `RuleContext`, so a rule cannot decline a
+>   window handed to it by the whole-clip path. Recorded, not fixed.
+>
+> **What this leaves for Leg Abduction:** the note above still stands — REHAB24-6 `Ex4` is 210 reps
+> of the matching variant and should make it the best-evidenced detector in Group E. Two findings
+> here transfer directly: `pelvic-tilt vs horizontal` and `trunk lateral-lean` are BOTH specified
+> against the image horizontal and both need re-anchoring, and `abd_insufficient_rom`'s "thigh
+> vector relative to the pelvis midline / vertical" is a mixed case — the pelvis-midline reading is
+> body-relative and survives, the vertical reading does not.
+
+> **UPDATE (2026-08-09, Leg Abduction implemented — 13/16, GROUP E COMPLETE) — ONE OF THIS
+> SECTION'S FOUR LEG ABDUCTION RULES SHIPS, AND FOR THE FIRST TIME IN THIS PROGRAMME THE LABELED
+> DATA DECIDED THE ROSTER RATHER THAN COMMENTING ON IT.**
+> Design spec: `docs/superpowers/specs/2026-08-09-leg-abduction-detector-design.md`. Module:
+> `src/pose/movements/leg_abduction.py`. Validation: `notes/leg-abduction-rule-validation.md`.
+> `abd_pelvic_drop_trunk_lean` ships — **its trunk-lean disjunct only**;
+> `abd_insufficient_rom` is registered permanently silent; `abd_hip_flexion_er_substitution` and
+> `abd_momentum` are withdrawn.
+>
+> - **THE CHECK RAN DURING DESIGN AND HAD AUTHORITY TO CHANGE THE ANSWER, WHICH IS NEW.** REHAB24-6
+>   `Ex4` is standing unilateral hip abduction — 210 human-labeled repetitions, 120 correct / 90
+>   incorrect, 9 subjects, 12 videos, two orthogonal cameras, and the variant matches the app's own
+>   card art (verified by looking at the frames, not by reading the exercise name). Lunge was
+>   checked after the fact and nothing changed. Here the run **silenced a rule**, **settled a
+>   sub-clause**, and **corrected the working-side resolver's construction**. No threshold was
+>   tuned: the shipped cut is this section's own ratio re-expressed by an identity, and the
+>   silenced rule's cut is this section's own number, left where it is.
+> - **THE SUPPORT LIMB IS THE VERTICAL THIS GROUP HAS BEEN MISSING, AND ONLY A STANDING MOVEMENT
+>   HAS ONE.** The note above asked for `pelvic-tilt vs horizontal` and `trunk lateral-lean` to be
+>   re-anchored. `hip_stance → ankle_stance` does it: in a standing unilateral exercise the stance
+>   leg is planted and load-bearing, so it is a body-internal stand-in for gravity. Measured on the
+>   frontal camera the stance limb sits a **median 2.3° from the image vertical (p90 4.5°)**, so
+>   re-anchoring costs essentially nothing on this corpus and buys roll-invariance for production
+>   video. Neither Sit-up nor Shoulder Bridge could take this route — both subjects are lying down.
+> - **THE SIGN IS RECOVERABLE HERE, AND THE RULE IS "DOT PRODUCTS, NOT CROSS PRODUCTS".** Shoulder
+>   Bridge's two refuted sign constructions were both cross products, which are roll-invariant but
+>   ANTI-invariant under mirroring — the sign flips when the subject faces away from the camera,
+>   which monocular pose cannot tell. Every signed quantity here is a projection onto a body axis,
+>   invariant under both, pinned by a test asserting byte-identical detections under a 90° roll AND
+>   under mirroring. Narrow claim, transferable: **prefer a projection onto a body axis; it needs no
+>   argument about mirroring at all.**
+> - **A NEW CITATION FAILURE MODE, THE SIXTH: THE CITATION AND THE MEASUREMENT DISAGREE ABOUT THE
+>   SIGN OF THE FAULT.** This section's shipped rule is a DISJUNCTION of pelvic tilt and trunk lean.
+>   The pelvic disjunct is not implemented, because three sources point two ways: the citation says
+>   pelvic **DROP** (and its sentence opens "…a characteristic Trendelenburg **gait**"), the
+>   knowledge graph has `Leg Abduction:Pelvic Hiking` and matches **zero** nodes for `Pelvic Drop`,
+>   and 210 labeled repetitions separate on **HIKING**. Firing as written would fire on the
+>   direction the data calls correct; firing the observed direction would be a rule with no
+>   citation. Sit-up withdrew a rule for an inverted KG seed; this is the mirror case — graph and
+>   data agree, the citation is the odd one out — resolved the same way. **It is only visible
+>   because the sign is recoverable at all**; on Shoulder Bridge the same question was unanswerable.
+>   And it is NOT free: ρ(trunk lean, pelvic hike) = **0.713**, so a real detection opportunity is
+>   declined.
+> - **STANDING UP DOES NOT FIX THE VIEW ESTIMATOR, AND THAT BREAKS THE REGIME BOUNDARY
+>   `view_estimation.py` CLAIMS.** Limit 1 voids the front/rear/oblique labels for HORIZONTAL
+>   subjects; Sit-up (inverted) and Shoulder Bridge (unstable) both measured failures inside that
+>   regime. This subject is upright and `Ex4` records the true orientation per repetition, so the
+>   labels could finally be checked: `front` → `rear_oblique` **116/116**, `half-profile` → `side`
+>   **92/94**, and a `FRONTAL_OBSERVABLE_VIEWS` label emitted on **0 of 210**. Systematically
+>   inverted, outside the documented regime. The shipped rule's confidence discount is therefore a
+>   CONSTANT here and proves nothing about gating. Logged in TODO.md as an unscoped audit —
+>   `squat.rule_knees_inward` and both `arm_abduction` frontal rules read these labels.
+> - **THE SILENCED RULE HAS THE BEST KG SEED IN THE SECTION AND STILL DOES NOT SHIP.**
+>   `Leg Abduction:Insufficient Abduction Range` resolves with two non-empty buckets, and the
+>   metric is clean. What is missing is a number: no source states a range of motion (this section
+>   admits as much), and this section's practical ~30° cut fires on **39/93 (42%) of repetitions
+>   humans judged CORRECT** against 8/70 (11%) judged incorrect, with the cue's AUC at **0.206
+>   pooled and below chance in all 9 subjects**. Silent rather than moved, because moving it is
+>   fitting a threshold to labels.
+> - **THE TWO RULES WITH NO GRAPH NODE ARE ALSO THE TWO WITHDRAWN ON CITATION GROUNDS** — but that
+>   is the whole of the agreement, and it is weaker than it first looks. This movement has exactly
+>   three `Leg Abduction:` fault nodes. Node-presence predicts the outcome in 2 of the 5 decisions
+>   taken here: the other three all HAVE nodes and are a ship, a permanent silence, and a
+>   not-implemented sub-clause. So the graph is a useful negative filter and **not** a predictor of
+>   which rules survive. Recorded, not offered as a method.
+> - **THE FIRST SIDE RESOLVER IN THE REGISTRY WITH GROUND TRUTH — AND IT CAUGHT A DESIGN ERROR.**
+>   `exercise_subtype` names the working leg on all 210 repetitions. Final: **163 correct, 1 wrong,
+>   11 declined** of the 175 that reached it (accuracy 0.994, coverage 0.937). The FIRST
+>   construction referenced each thigh to the other leg, making both quantities approximately the
+>   angle *between* the legs — it scored **7 correct / 14 wrong / 30 refused**, worse than a coin
+>   flip, and the data is what exposed it.
+> - **A FIFTH REASON FOR `validated=False`, AND THE FIRST THAT IS NOT A GAP.** Not "no labeled
+>   data" (Deadlift, Row, Band Pull Apart, Bicep Curl), not "nobody ran the check" (Arm Abduction,
+>   Arm VW), not "different variant" (Sit-up), not "the pixels are missing" (Shoulder Bridge), but
+>   **the check ran, it changed the roster, and rep-level labels still cannot confirm a FAULT-level
+>   claim.** REHAB24-6 never names which fault occurred.
+> - **THE EIGHT-LANDMARK GATE IS EXPENSIVE AND THE COST IS STATED.** Requiring both ankles for the
+>   support limb — two more than any other Group E module — yields a median validity rate of
+>   **0.600 with p10 0.000**, and **35 of 210 repetitions (17%) end on a `segment_reps` fallback
+>   path**. Those are excluded from every AUC, which are computed over 163/210 and say so.
+> - **THE CAMERA CENSUS GOES THE OTHER WAY FROM SHOULDER BRIDGE'S, WHICH IS THE BENIGN DIRECTION.**
+>   `front` 30 tp / 5 fp / 23 fn; `half-profile` 9 tp / **0 fp** / 28 fn. An oblique camera costs
+>   SENSITIVITY, not precision — a lean projected obliquely reads smaller than it is, so the rule
+>   goes quiet rather than wrong. Shoulder Bridge's axial views produced near-full-severity false
+>   alarms instead.
+>
+> **Group E is complete: Sit-up 1 live, Shoulder Bridge 1 live, Leg Abduction 1 live.** Three
+> movements, twelve spec rules, three shipped. That ratio is the honest one for this group and the
+> reasons are per-rule rather than systemic — although the recurring theme is real: this section's
+> measurement conventions were written against the image frame, and only the movement with a
+> planted limb could recover one.
+
 
 ---
 
@@ -1173,6 +2082,127 @@ Rep phases: **center (braced setup) → rotate to side A (peak) → return throu
 
 ---
 
+> **UPDATE (2026-08-10, Torso Twist implemented — 14/16, GROUP F OPENS) — ONE OF THIS SECTION'S
+> FOUR TORSO TWIST RULES SHIPS, AND THE TWO WITHDRAWALS WERE DECIDED BY EVIDENCE RATHER THAN
+> JUDGEMENT: A PROJECTION MEASUREMENT AGAINST 3-D GROUND TRUTH, AND A SOURCE THAT PRESCRIBES THE
+> BEHAVIOUR ITS OWN RULE FLAGS.**
+> Design spec: `docs/superpowers/specs/2026-08-10-torso-twist-detector-design.md`. Module:
+> `src/pose/movements/torso_twist.py`. Tests: `tests/test_torso_twist.py` (37 cases).
+> `tt_trunk_not_braced` ships — **its brace disjunct only**; `tt_insufficient_rotation_rom` is
+> registered permanently silent; `tt_lumbar_rotation_dominant` and `tt_momentum_over_control` are
+> withdrawn.
+>
+> - **FOUR ARTIFACTS IN THIS PROJECT NAME "TORSO TWIST" AND THEY DESCRIBE FOUR DIFFERENT
+>   EXERCISES.** This section's own rep phases, the RAG doc and the app card art all say **seated
+>   Russian twist**, and that is the contract the module implements. The app's icon
+>   (`MovementIcon.tsx:148`) draws a **standing** figure in both its comment and its strokes — an
+>   asset defect, recorded and not fixed. Fit3D's `standing_ab_twists` is a **standing cross-body
+>   knee-to-elbow twist** (looked at, not inferred from the name). EgoExo-Fitness's 95 judged
+>   `Kneeling Side Torso Twist` actions are, by their own criteria text, a **prone lateral
+>   flexion**. Nothing in this repository films the exercise the app depicts, so `validated=False`
+>   for **Sit-up's** reason — the labeled data describes a different variant — held three times
+>   over, and **not** a sixth distinct reason.
+>
+> - **THE KNOWLEDGE GRAPH'S THREE TORSO TWIST FAULTS ARE SEEDED FROM THE WRONG EXERCISE, AND THE
+>   SEEDING SCRIPT SAYS SO IN ITS OWN WORDS.** `scripts/knowledge/stub_general_movements_v3.py:152`
+>   records this movement's grounding as *"EgoExo-Fitness TKV (Kneeling Side Torso Twist:
+>   pause-at-bottom 23%, lateral-flexion depth 21%, base 13%, abs)"*. That is PRIMARY provenance,
+>   not an inference from node names, and it explains why a graph backing four **axial rotation**
+>   rules contains `Torso Twist:Insufficient Lateral Flexion Depth`. Leg Abduction §7.3 established
+>   that a MISSING node reliably predicts a rule should not exist while a PRESENT node predicts
+>   nothing; this movement adds the sharper case — **a present node can be actively misleading**,
+>   because it faithfully describes a different movement pattern. Sit-up refused an INVERTED seed;
+>   this module refuses a WRONG-AXIS one.
+>
+> - **THIS SECTION'S PROJECTED-WIDTH ROTATION PROXY IS UNFIT, AND IT IS NOW MEASURED RATHER THAN
+>   ARGUED.** The heuristic reads axial rotation as the change in `|x11−x12|` / `|x23−x24|`, i.e.
+>   `width · |cos θ|` — a quantity whose derivative is **zero at the braced centre** and which is
+>   **even in θ**, so it is blind exactly where the rule must discriminate and cannot tell one side
+>   from the other. This section's remedy for the second defect, the left–right x-ordering flip,
+>   requires **>90°** of rotation and the true relative trunk twist measured here peaks at a
+>   **median 44.9° per repetition** (p90 54.1, max 58.8), so the flip never happens.
+>   **Measured with a PERFECT detector** — Fit3D mocap ground truth projected through the real
+>   calibration, 8 subjects × 4 cameras × 45 repetitions of `standing_ab_twists`, so every error is
+>   projection alone: per-frame MAE **20.4°** on the shoulder line and **17.2°** on the hip line
+>   (against a true hip peak of only 19.7°), and on the hip line — the ratio's decisive term — the
+>   proxy is **anti-correlated with the truth on 35% of repetitions**. Carried to the decision the
+>   rule makes, at this section's own 0.6 cut: truth fires 64/180, proxy fires 86/180, **disagreeing
+>   on 30/180 = 16.7%**, of which **26 are the proxy firing where the truth does not**. The rank
+>   correlation is 0.876, so the honest reading is that **the proxy is biased, not noisy** — and the
+>   bias runs toward false positives. Small-angle resolution against a real floor: one degree of
+>   rotation moves the shoulder width by 0.00016 of the image width at 0–15° and 0.00109 at 45–75°,
+>   while MediaPipe's own frame-to-frame width movement over all 130 REHAB24-6 cached-landmark
+>   videos is 0.000323 — **one frame of that is worth ~2.0° near the centre and ~0.30° near the
+>   peak**. Harness: `scripts/fit3d/run_rotation_proxy_fidelity.py --jitter`.
+>   *Variant caveat, stated:* `standing_ab_twists` has a FREE pelvis, so the truth *distribution*
+>   of the ratio does not transfer to a seated twist with the hips pinned. What transfers is the
+>   projection geometry, and no threshold was taken from this corpus.
+>   **This also pays the debt the Row status note left open** — that Fit3D can support a
+>   2-D-cue-vs-3-D-truth fidelity comparison even though it carries no correctness labels.
+>
+> - **A SEVENTH CITATION FAILURE MODE: THE PARAPHRASE INVERTS THE SOURCE'S INSTRUCTION.**
+>   `tt_momentum_over_control` flags repetitions showing "no near-zero-velocity dwell at the
+>   side-peaks (no control pause)", and its `citation_support` claims the RAG doc "warns not to rely
+>   on between-rep momentum". Read in place, the doc says it is *"crucial to **not stop** between
+>   repetitions or else one will lose the effect of working the abdomen"* — an instruction to keep
+>   moving. The rule would fault a user for obeying its own source. This is sharper than Leg
+>   Abduction's citation/observation sign disagreement, because **the contradiction is inside the
+>   quoted document**.
+>
+> - **ALL FOUR RULES REST ON ONE PAPER THAT NEVER MENTIONS THE EXERCISE.** McGill 1991 (PMID
+>   1824571), re-fetched: 25 adults, isometric plus dynamic axial twists at 30 and 60 °/s, EMG +
+>   kinematics + torque. It supports the *mechanism* primarily and in his own words ("stabilization
+>   of the joints during twisting is far more important to the lumbar spine than production of
+>   large levels of axial torque"; obliques 52/55% MVC vs rectus abdominis 22%) and supplies **no
+>   range of motion, no tempo cut, no thoracic-vs-lumbar contribution claim, and no exercise**. Its
+>   30/60 °/s are protocol conditions performed by healthy subjects; adopting either as a fault cut
+>   would convert a condition into a fault. This is a new shading of the exercise-identity mode —
+>   Arm VW's sources were about *adjacent* exercises, whereas McGill is not about an exercise at
+>   all.
+>
+> - **THE THIRD PER-USER-BASELINE WALL, AND IT IS NOW THE MOST COMMON SINGLE BLOCKER.**
+>   `tt_insufficient_rotation_rom` has a working, roll- and mirror-invariant metric and a real
+>   fault, and is silenced only because no source states a range; the obvious repair — "this swing
+>   is shorter than your own usual" — needs cross-clip state this architecture does not have. Same
+>   wall as `situp_excessive_speed` and `abd_momentum`.
+>
+> - **NO VIEW GATE AND NO VIEW DISCOUNT, FOR THE FOURTH TIME, WITH A NEW REASON.** `view_estimation`
+>   limit 1 voids the labels for a HORIZONTAL subject and Leg Abduction measured them systematically
+>   inverted on an UPRIGHT one. A seated twister's trunk is held at ~45°, i.e. **between two regimes
+>   in both of which the labels have been measured wrong**, and no seated-twist footage exists here
+>   to settle it.
+>
+> - **WHAT CAMERA PLACEMENT ALONE COSTS THE SHIPPED RULE, MEASURED.** Four simultaneous Fit3D
+>   cameras, mocap-2D: the **absolute** trunk-thigh angle is robust (cross-camera spread of the
+>   per-rep median **4.5°**, p90 10.6) while the **signed sag the rule scores** — median value only
+>   6.3° on that corpus — has a spread of **5.1°, p90 15.7°**, so a maximum over a window is less
+>   camera-robust than the angle it is built from and its p90 disagreement is the size of the 15°
+>   cut. Caveat that binds hardest: `standing_ab_twists` moves the trunk mostly in FORWARD FLEXION,
+>   the direction this rule does not score, so these figures bound the sag direction only weakly.
+>
+> - **AN UNSIGNED DEVIATION FROM A SETUP BASELINE IS ACTIVELY INVERTED, FOR THE SECOND TIME IN THIS
+>   REGISTRY.** This section says the trunk angle "deviates from baseline by > ~15°", and the first
+>   implementation took that literally. `trunk_thigh_angle_deg` is monotone in sag, so an `abs()`
+>   fires on a twister who TIGHTENED: measured on the shipped path, a subject setting up loose at
+>   95° and tightening to 50° was reported "Braced Torso Lost" at **severity 1.0**. The baseline
+>   makes that the ordinary case rather than an edge one, because `setup` is the frames BEFORE the
+>   subject braces. `pushup_head_drop` records the identical finding in §8 of this document; the
+>   shipped rule is directional, which introduces no new number and fires on a strictly smaller
+>   set. Every fixture ramped in the sag direction, so no green test could have caught it.
+>
+> - **THE SETUP-BASELINE DEFECT, MEASURED AND ATTRIBUTED.** Effective threshold **18.0°** against a
+>   nominal 15.0 (1.20×) through the real `run_detector` — and **none of it is Row's trimming**,
+>   because on the fixture `segment_reps` returns the windows untrimmed; the whole residual is the
+>   3-frame `setup` median already carrying part of the ramp, `15 / (1 − f) = 17.36°`. Stated as a
+>   property of that fixture, not a proof the trimming cannot bite on a swing that does not start
+>   from rest.
+>
+> - **FIRST USER OF `rep_rectify`.** `base.py:55` declared the flag for this movement by name in
+>   RS-SP1 and it had no user until the fourteenth detector. One swing is one repetition, which is
+>   the RAG doc's own definition.
+
+---
+
 ### Jumping Jacks
 
 Rep phases: **closed (feet together, arms at sides) → open (feet spread wide, arms overhead) → landing back to closed**. Impact/landing events occur at each touchdown (both the open-stance touchdown and the return-to-closed touchdown). Landmarks: shoulders 11/12, wrists 15/16, hips 23/24, knees 25/26, ankles 27/28, nose 0.
@@ -1229,6 +2259,137 @@ Rep phases: **closed (feet together, arms at sides) → open (feet spread wide, 
 
 ---
 
+---
+
+> **UPDATE (2026-08-10, Jumping Jacks implemented — 15/16) — NONE OF THIS SECTION'S FIVE JUMPING
+> JACKS RULES SHIPS LIVE, AND THE LABELED DATA DECIDED IT. THIS IS THE FIRST MOVEMENT IN THE
+> PROGRAMME WHOSE DETECTOR IS WRITTEN, TESTED, MEASURED AND DELIBERATELY NOT REGISTERED.**
+> Design spec: `docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md`. Module:
+> `src/pose/movements/jumping_jacks.py`. Tests: `tests/test_jumping_jacks.py` (32 cases).
+> Validation: `notes/jumping-jacks-rule-validation.md`, harness
+> `src/egoexo/jumping_jacks_validation.py` + `scripts/egoexo/run_jumping_jacks_validation.py`
+> (18 cases). `jj_incomplete_leg_rom` and `jj_incomplete_arm_rom` are registered permanently
+> silent; `jj_knee_valgus_landing`, `jj_stiff_landing` and `jj_landing_asymmetry` are withdrawn.
+>
+> - **THE VARIANT FINALLY MATCHES AND THE LABELS JUDGE DIFFERENT FAULTS — A SIXTH REASON FOR
+>   `validated=False`, WHICH THE TORSO TWIST BLOCK ABOVE SAYS "STAYS AT FIVE".** EgoExo-Fitness
+>   carries **121 judged Jumping Jacks actions**, the largest judged class in that dataset, with
+>   per-criterion True/False verification by 2+ annotators — and it is the right exercise. Its
+>   eight criteria and this section's five rules **overlap in exactly one pair**
+>   (`jj_incomplete_leg_rom` ↔ "Perform the jump by opening and closing your feet", the
+>   most-failed criterion at 9.9%). Nothing in the corpus judges valgus, landing stiffness,
+>   overhead reach or asymmetry; nothing in this section models arm tension, back-driven arm
+>   return, calf relaxation or head steadiness. Sit-up's reason does not apply and folding this
+>   into it would be the tidier, wrong answer.
+>
+> - **`jj_incomplete_leg_rom` HAD MORE GOING FOR IT THAN ANY RULE IN GROUP F AND THE DATA STILL
+>   SILENCED IT.** A primary sentence naming the exercise, a KG node grounded in *this* exercise
+>   (the seeding script's "foot split 10%" reproduces from the labels as 9.9%), human
+>   corroboration that the fault is real, and a roll-, mirror-, scale- and obliquity-invariant
+>   metric. Replayed through the real `run_detector` over the 11 reachable judged actions — 31
+>   (action, camera) pairs, 91 scored repetitions, **every action judged correct on that exact
+>   criterion** — this section's 1.3 cut fires on **79.1% of scored repetitions** (90.3% of
+>   pairs) against a median widest stance of **1.163 shoulder widths**. The correct population
+>   sits below the cut. Silenced rather than moved, `abd_insufficient_rom`'s treatment.
+>   **Its upgrade path is a DOWNLOAD, which is new for a silent rule**: 12 of the 121 actions are
+>   judged FAILED on this criterion, so a cut could be read off human judgement — but the missing
+>   `.ac` archive part leaves 11 reachable and all 11 negative.
+>
+> - **`jj_knee_valgus_landing` IS WITHDRAWN BY A ZERO-PARAMETER CONTROL, AND THE DESIGN DOC
+>   CHANGED ITS OWN MIND.** It was drafted shipping this rule: `notes/fit3d_view_dependence_
+>   summary.md` ranks `knee_width_ratio` the **most view-robust cue this project has ever
+>   measured** (MAE 0.02 against the 0.82 cut, r=0.90). That is true and it is about the wrong
+>   thing. In a wide side-straddle the legs splay from a pelvis that does not widen, so a knee
+>   sits partway along the hip→ankle line and its separation is *necessarily* smaller than the
+>   ankles' — with no valgus at all. Replacing both knees with **perfectly straight-limb
+>   positions** and recomputing over 2 353 open-phase frames: the aligned knees fall below 0.82 on
+>   **68.5%** of frames against **79.4%** for the real ones (medians 0.810 vs 0.769) — and the
+>   JOINT counts, because two marginal rates are not a decomposition, are **63.2% fires with a
+>   straight limb too, 16.2% needed real deviation, 5.2% the straight limb would condemn and the
+>   real knees do not**. **Four firings in five need no inward deviation whatsoever.** The rule
+>   reads the movement, not the fault.
+>   Pinned independently of the corpus by `StanceGeometryConfoundTest`, so it does not rest on
+>   EgoExo's 456×256 frames. What would work — knee deviation from its own hip→ankle line — is
+>   recorded and **not built**, because no source states a threshold for it.
+>
+> - **`jj_stiff_landing`'s CITED PAPER'S OWN STIFF CONDITION WOULD NOT FIRE IT.** DeVita & Skelly
+>   (1992, PMID 1548984), re-fetched: a 59 cm drop landing, soft and stiff conditions "averaged
+>   117 and 77 degrees of knee flexion". This section's heuristic flags a knee angle above ~160°,
+>   i.e. **fewer than 20° of bend** — so the very condition the paper measured larger GRFs on
+>   (77° of bend, a knee angle of ~103°) sits nowhere near the cut, and 160 appears in the paper
+>   nowhere. This section's further claim that "the ≥/<90° soft/stiff convention originates here"
+>   is not in the abstract either. Second failure: the 2-D knee angle is measured **view-corrupted
+>   with a systematic +41.2° bias toward 180°** — the direction this rule fires in. The bound is
+>   stated rather than glossed: the bias cannot exceed `180° − θ_true`, so it cannot manufacture a
+>   fault from a fully-extended landing, but it can open a moderately absorbed 140° landing past
+>   the cut, which is **precisely the band the rule must discriminate in**.
+>
+> - **AN EIGHTH DISTINCT CITATION FAILURE MODE: A COUNTER-INDICATION INSIDE THE SUPPORTING
+>   SOURCE.** `jj_incomplete_arm_rom` needs **no threshold at all** — its criterion is a landmark
+>   comparison — and its metric is clean, so neither of the usual reasons for silence applies. It
+>   is silent because `data/rag/docs/jumping_jacks_wiki.txt`, the only source that states its
+>   target ("the hands go overhead"), records four sections later that half-jacks "were created to
+>   prevent rotator cuff injuries, which have been linked to the repetitive movements of the
+>   exercise". Nothing is misquoted — this section noticed it and wrote it into the rule's own
+>   rationale while still proposing the rule. It is a source that cautions against the range of
+>   motion its rule would coach users toward.
+>
+> - **THE KG'S THREE JUMPING JACKS FAULTS ARE SEEDED FROM TWO EXERCISES BLENDED, AND THE BLEND
+>   REPRODUCES TO THE DECIMAL.** `scripts/knowledge/stub_general_movements_v3.py:133` grounds this
+>   movement in "Jumping/Clap Jacks: arm tension 8-27%, foot split 10%". `Clap Jacks` is a
+>   separate EgoExo class of 74 judged actions — "clap your hands while jumping back and forth
+>   with **alternating feet**", no side-straddle. Recomputed per class: arm tension is **8.3%** on
+>   Jumping Jacks and **27.0%** on Clap Jacks, i.e. the two ends of a range spanning two
+>   exercises, while "foot split 10%" is this exercise alone (9.9%). Torso Twist found a node
+>   describing the *wrong* movement; this is the milder cousin — a **blend**, of which the one
+>   correct component is the node the silent ROM rule uses. And the negative filter holds a third
+>   time: the two rules with no node at all are two of the three withdrawn.
+>
+> - **`.ab` HAD NEVER BEEN TRIED, AND IT DOUBLES THE RECOVERABLE EgoExo CORPUS.** Sit-up recorded
+>   that `frames_open`'s `.ac` part is missing and decoded `.aa` alone, reaching 3 complete
+>   records; Shoulder Bridge inherited that set and found only 2 of its 77 matching actions inside
+>   it. `.aa`+`.ab` is **also** a contiguous gzip prefix and decodes roughly twice as far: **6
+>   complete records plus a partial 7th** (`yT4RK3` upgraded from partial to complete), holding 11
+>   judged Jumping Jacks actions with 3 simultaneous exo cameras each. A recipe correction, not a
+>   new capability.
+>
+> - **THE PIPELINE IS THE STRONGEST RESULT IN GROUP F, WHICH IS WHAT ISOLATES THE FAILURE.** On 31
+>   (action, camera) pairs of real footage of the right exercise: median validity **1.000**, **0**
+>   pairs on the whole-clip fallback, **255** repetitions found. The validity gate, the phases, the
+>   landing-window substitution and the segmentation all work; two numbers do not.
+>
+> - **THE FRAMEWORK KNOB RESERVED FOR THIS MOVEMENT BY NAME IS NOT NEEDED BY IT.** `base.py:55`
+>   says `min_rep_seconds` must be lowered for "jumping jacks, high knees". Re-segmenting all 31
+>   pairs at a 0.15 s floor finds **exactly the same 255 repetitions**; the fastest performer holds
+>   1.14 Hz (0.88 s/rep) against a 0.40 s floor, and even the RAG doc's Guinness record (2.27 Hz)
+>   clears it. Measured non-circularly, by differencing two segmentations rather than by reading
+>   the shortest returned window. The comment is left alone because it also names High Knee.
+>
+> - **CAMERA PLACEMENT IS NOT THIS MOVEMENT'S PROBLEM, WHICH IS A FIRST.** Three simultaneous exo
+>   cameras: median cross-camera spread 0.107 shoulder widths on the stance ratio and 0.067 on the
+>   knee ratio, against cut-to-population distances of 0.137 and 0.051. Sit-up had a 20° cut
+>   against a 28.2° spread and Torso Twist a 15° cut against a p90 spread of 15.7°; here the
+>   thresholds are wrong for a reason the cameras cannot explain. (2 of 10 actions would still have
+>   received a different verdict depending on which camera filmed them.)
+>
+> - **NO VIEW GATE AND NO VIEW DISCOUNT, FOR THE FIFTH TIME — AND HERE IT COSTS NOTHING.** Leg
+>   Abduction measured the estimator's labels systematically inverted on an upright subject, and a
+>   jumping jack is the same regime. Unlike the previous four, that is not a limitation here: both
+>   metrics are ratios of two frontal-plane widths, which an oblique camera compresses together, so
+>   the obliquity cancels to first order rather than needing a label.
+>
+> - **THE DETECTOR IS NOT REGISTERED, AND THAT IS THE HONEST STATE.** Registration is what makes a
+>   movement analyzable in the app; with every rule silent or withdrawn it would offer an analysis
+>   that can never report a fault while wearing the Beta tag that says faults are possible.
+>   `registry.py` carries the reason in place of the import. Everything that works is kept, so
+>   waking the movement is a threshold plus one line.
+>
+> - **NO THRESHOLD MOVED.** The 1.3 stays 1.3 in the module and the 0.82 stays in
+>   `squat.rule_knees_inward`. The measured distributions would have made either trivial to fit,
+>   which is exactly why neither was.
+
+---
+
 ### High Knee
 
 Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) → foot strike (stance) → alternate to opposite knee-up**. Single-leg support alternates each stride. Landmarks: nose 0, shoulders 11/12, hips 23/24, knees 25/26, ankles 27/28.
@@ -1282,6 +2443,96 @@ Rep phases (running-drill / march): **drive (rapid hip flexion to peak knee-up) 
 - **biomechanical_rationale**: Persistent side-to-side asymmetry concentrates the injury-associated patterns (pelvic drop, reduced hip flexion) on one limb; contralateral pelvic drop is the strongest injury-associated running variable, so a habitually dropping/under-driving side is the elevated-risk limb.
 - **citation**: Bramah, C. et al. (2018), *Am J Sports Med* 46(12):3023–3031, PMID 30193080 (as above).
 - **citation_support**: VERIFIED (application). Bramah's CPD finding supports singling out the worse side; the asymmetry framing is an application of that result, not a dedicated asymmetry study (stated honestly).
+
+> **IMPLEMENTATION UPDATE (2026-08-10) — sixteenth and last of sixteen. `src/pose/movements/high_knee.py`,
+> design spec `docs/superpowers/specs/2026-08-10-high-knee-detector-design.md`, measurements
+> `notes/high-knee-rule-validation.md`. ONE RULE PERMANENTLY SILENT, FOUR WITHDRAWN, AND THE
+> DETECTOR IS NOT REGISTERED — the second after Jumping Jacks. The programme closes at 16 designed,
+> 14 registered.**
+>
+> - **ZERO OVERLAPPING PAIRS, WHICH IS A FIRST.** EgoExo-Fitness judges 68 High Knee actions of
+>   exactly this exercise on seven criteria, and **not one** of them judges any of the five rules
+>   above. Its two largest faults — cadence (44.1% of actions) and arm rhythm (26.5%) — are
+>   unmodelled here, and "Keep your back straight", the criterion the two trunk rules would model,
+>   is failed by **0 of 68**. Jumping Jacks had one overlapping pair; this has none. `validated`
+>   stays False for Jumping Jacks' sixth reason, not a seventh.
+>
+> - **`hk_insufficient_knee_lift` IS SILENT BECAUSE THIS SECTION SUPPLIES TWO NUMBERS THAT DISAGREE.**
+>   Matijašević's Table 1 scores the **A-skip** at "the thigh ... reaches 45° relative to the ground"
+>   and Table 2 the **B-skip** at "90°". The `biomechanical_rationale` above cites the 45°; the
+>   `detection_heuristic` above implements "the knee at hip height", which is the 90°. Measured over
+>   146 scored repetitions, the implemented cut fires on **100% of every repetition of every action**,
+>   including both actions judged faultless on every criterion by every annotator; observed peak hip
+>   flexion is 40–65°, i.e. real performers land *between* the source's two targets. The cited cut
+>   sorts the corpus **backwards** (0.0% on all three actions whose comments complain about leg
+>   height, 7.1–71.1% on the three that do not). Neither number was moved.
+>
+> - **A NINTH CITATION FAILURE MODE, HALF-NEW.** The prose above — "thigh at least ~45° above
+>   horizontal" — puts the source's number on the wrong side of horizontal (45° to the ground is
+>   *below* horizontal); that is Torso Twist's inverted paraphrase recurring, not new. The new mode
+>   is underneath it: **the source states a graded family of targets and this spec cites one grade
+>   while implementing the other.** Nothing is misquoted; the quote simply does not govern the code.
+>   Four further transfers, all stated in the paper: it scores a *skipping drill*, performed
+>   *travelling on a track*, by participants *excluded for athletics experience*, and A-skip had "a
+>   trivial correlation" with the sprint outcome it was built to predict.
+>
+> - **BOTH TRUNK RULES ARE WITHDRAWN ON THEIR REFERENCE AXIS, NOT ON THEIR THRESHOLD.** A trunk lean
+>   is an angle from the **world vertical**, and this drill has none: Group E established the image
+>   vertical is not the world vertical, and this corpus ships its side cameras rolled 90°. Leg
+>   Abduction's substitute — the support limb — is **8.6–23.6° off the trunk (median 13.1°) during
+>   normal marching**, against thresholds of 10–15° and 15–20°. Part of that is pure anatomy: the
+>   stance foot sits under the hip *joint* while the axis is drawn from the pelvis *midpoint*, ≈6°
+>   on adult proportions, which no performer can remove. And the error runs one way: the 10°
+>   backward cut fires on **69.7% of scored frames** (56–83% on the faultless actions) while the
+>   15° forward cut fires on **0.0%** — `pushup_head_drop`'s finding a third time, now sinking both
+>   signs at once.
+>
+> - **`hk_contralateral_pelvic_drop` IS WITHDRAWN BY A ZERO-PARAMETER CONTROL THE CORPUS SUPPLIES
+>   FREE.** Three exo cameras film the SAME instant, so any disagreement is pure projection. On the
+>   two cameras the view gate admits, median obliquity spreads by **0.97, 2.72, 5.49, 7.90, 8.52
+>   and 13.68°** across the six actions, against this section's "> ~5–8°" threshold — the camera
+>   alone clears the low end on four of six and the high end on two. Frame by frame the two
+>   cameras are **anti-correlated on four of six** (r = −0.48 to +0.12): they disagree about which way the
+>   pelvis is tilting. Not a comment on Bramah, whose association is the strongest result any
+>   citation here carries — a comment on monocular measurability.
+>
+> - **`hk_stride_asymmetry` IS WITHDRAWN FOR `jj_landing_asymmetry`'s THREE REASONS**: no scoped KG
+>   node, a disjunction of two quantities behind one `fault_id` (one of them the quantity just
+>   refuted), and "consistently across reps" being cross-rep state the architecture lacks — here
+>   *structurally*, since one repetition contains one side's drive.
+>
+> - **THE GRAPH'S NEGATIVE FILTER IS PERFECT IN BOTH DIRECTIONS FOR THE FIRST TIME.** The four rules
+>   with no scoped KG node are exactly the four withdrawn; the one rule with a scoped node is
+>   exactly the one kept as silent. And the positive signal still predicts nothing on its own: that
+>   node is DANGLING, and its stated grounding ("knee lift 10%") reproduces from a criterion about
+>   *alternation and speed*. A third variety of misleading-but-present node, after Torso Twist's
+>   wrong movement and Jumping Jacks' blend: **the wrong criterion of the right movement.**
+>
+> - **THE FRAMEWORK KNOB RESERVED FOR THIS MOVEMENT BY NAME IS FINALLY NEEDED — AND ONLY BY IT.**
+>   `base.py:55` names "jumping jacks, high knees"; Jumping Jacks measured that it did not need it.
+>   Here the default 0.4 s floor finds 52 repetitions where a 0.15 s floor finds **150** — it
+>   discards **65.3%** (150 segmented vs 52; fire rates use the 146 SCORED reps instead). Measured non-circularly by differencing two segmentations. The corpus makes
+>   it stronger: 30 of 68 actions are judged *too slow*, and the default still throws away two
+>   repetitions in three. The shipped 0.15 s is half the 0.33 s this framework comment itself
+>   states, not a value fitted to the observed 1.31 Hz.
+>
+> - **SIT-UP'S 90° ROLL IS NOT A SUPINE-FILMING QUIRK.** It recurs on a standing movement, so it is
+>   a property of these cameras. **Every heuristic in this section is written in image y** and none
+>   of them is usable on this corpus; the module's metrics are cosines and ratios between body
+>   vectors, which is the only reason numbers exist. The corollary is a caveat: MediaPipe is not
+>   roll-equivariant, so those landmarks are degraded even where the metrics are well defined.
+>
+> - **THE VIEW GATE IS THE RULE'S OWN.** `anterior_axis_length` separates this corpus's cameras with
+>   **no overlap** (0.156–0.318 side, 0.027–0.044 frontal), so nothing keys on `view_estimation.py`
+>   — measured inverted once (Sit-up) and outside its regime once (Leg Abduction). It also refutes
+>   this section's own "front view is a usable proxy" for knee lift: the frontal camera reports peak
+>   elevations of −0.92 to −0.99 where the side cameras report −0.43 to −0.77 on the same repetition.
+>
+> - **THE MOST PROMISING RULE IS ONE THIS SPEC NEVER WROTE.** Cadence is the corpus's largest fault
+>   by a wide margin, the KG carries `High Knee:Slow Cadence` with a real correction bucket, and
+>   cadence is the one quantity here that is fully roll-, view- and scale-invariant because it is
+>   counted in time rather than measured in space. Recorded, not built: this programme implements
+>   this spec's roster and does not author new rules.
 
 ---
 
@@ -1363,6 +2614,61 @@ These are stated rather than papered over, per the spec's honesty requirement:
 - **Deadlift lumbar flexion** (`deadlift_lumbar_flexion`) — the clinically most important
   deadlift fault — is **low observability**: MediaPipe has no spine landmarks between shoulders
   and hips, so the heuristic is an explicit proxy, not a true rounded-vs-neutral spine measure.
+- **Deadlift lumbar-flexion detection thresholds are UNSOURCED** (2026-08-01). The implemented
+  proxy — projected torso shortening against the rep's own setup baseline while the hips stay
+  stationary — uses `0.95` / `0.85` ratio endpoints and a `0.10` hip-stationary band. No source
+  gives a segment-shortening-to-lumbar-flexion figure; 0.95 was chosen to sit above landmark
+  jitter *without any measurement of what that jitter is*. The constants carry `UNSOURCED` in
+  their names. The fault is cited; the detection is not. Calibrating against a measured jitter
+  floor is the known upgrade path.
+- **Deadlift `hips_shoot_up` ramp endpoints are unsourced** (2026-08-01): neither deadlift RAG
+  document reports a trunk inclination in degrees, so 55°/75° rest on the spec alone. The
+  mechanism and direction are cited; the numbers are not.
+- **Two of three Deadlift rules have no KG node** (2026-08-01) and take the `rag` fallback. The
+  5-node `Deadlift:` stub (9 nodes counting its shared 1-hop neighbours, e.g.
+  `Lumbar Spine Injury`, `Hip Hinge`) was authored independently of this rule catalog and does
+  not agree with it: it carries nodes for two faults the catalog has no rule for (`Hyperextension At
+  Lockout`, `Insufficient Hip Hinge`), lacks nodes for `deadlift_hips_shoot_up` and
+  `deadlift_incomplete_lockout`, and its one exactly-matching fault node (`Bar Drift From Body`)
+  belongs to the rule withdrawn above. Only `Deadlift:Lumbar Flexion` grounds a shipped rule.
+  Near-misses were rejected rather than used: `Insufficient Hip Hinge` describes a
+  knee-dominant pull where `hips_shoot_up` is hip-dominant, and `Hyperextension At Lockout` is
+  the literal opposite of `incomplete_lockout`.
+- **Deadlift and OHP lockout evidence cannot distinguish "not measured" from "fully flexed"**
+  (2026-08-01). When one axis is entirely unmeasurable across a flagged segment,
+  `deadlift_incomplete_lockout` reports `peak_hip_angle_deg` / `peak_knee_angle_deg` as **0.0**,
+  following `overhead_press.py`'s established `round(x, 2) if np.isfinite(x) else 0.0`
+  convention. 0.0° is a physically meaningful angle — a maximally flexed joint — so a reader of
+  the evidence cannot tell a missing measurement from a catastrophic one. The fallback exists
+  because a bare NaN survives `dataclasses.asdict()` into a postgrest write with
+  `allow_nan=False`, whose `ValueError` this codebase documents as silently swallowed, dropping
+  the analysis from the user's history entirely. Choosing a misleading number over a vanished
+  analysis is the lesser evil, not a good outcome; a `None`-with-explicit-reason evidence shape
+  would fix both movements at once and is not attempted here.
+- **Setup-relative rules are silently corrupted on `run_detector`'s whole-clip fallback**
+  (2026-08-01). `run_detector` falls back to analyzing the clip as one unit on
+  `segmentation_disabled`, `no_reps_detected` or `only_partial_reps`
+  (`src/pose/movements/base.py:159`), phasing the whole clip in one pass (`:182`) and running
+  every rule over it (`:214`). Deadlift's `deadlift_assign_phases` labels the first 10% of
+  whatever it is handed `setup` **positionally**, without inspecting the signal — so on a
+  fallback run `setup` is the first 10% of the *clip*, which may be the lifter standing around
+  before walking up to the bar, and `setup_baseline` returns a **standing** torso.
+  `rule_hips_shoot_up` is the casualty: with a ~7° baseline instead of ~60°, its
+  `torso_pitch_deg > baseline` clause is satisfied by every loaded frame and contributes
+  nothing, so the rule degenerates to its bare 55° absolute gate — losing exactly the
+  discriminator the deadlift design spec's §4.1 says it exists for, and firing on a clean rep.
+  Reproduced with `DEADLIFT_DETECTOR` unmodified on a trimmed clip yielding
+  `fallback=only_partial_reps`: severity 0.2821 with `setup_torso_pitch_deg: 6.84` on a rep
+  whose trunk pitch decreased monotonically. `rule_lumbar_flexion` escapes the same corrupted
+  baseline only incidentally, because its `_hips_still` term happens to reject travelling hips.
+  **The user gets no signal this happened**: `RunResult.fallback` *is* carried in the API
+  payload (`src/pose/pose_rule_detector.py:688`) but is rendered **nowhere** in `frontend/src`,
+  so a whole-clip analysis is presented exactly like a per-rep one. The same fallback path is
+  shared by squat and push-up, whose setup/rest-relative baselines were not tested for this.
+  **Not fixed here**: threading `fallback` into `RuleContext` so setup-relative rules can
+  abstain is a framework change touching all three movements at once, and a plausibility gate on
+  the baseline would introduce exactly the unsourced threshold the deadlift module forbids.
+  Threading `fallback` is the known upgrade path and is **not** attempted.
 - **Push-up scapular winging** (`pushup_scapular_winging`) is real and cited but **observability
   none** from monocular pose (no scapular landmarks); listed for completeness, not detection.
 - **Band-pull-apart / row loss of scapular retraction** is **low observability** — scapular
@@ -1381,6 +2687,32 @@ These are stated rather than papered over, per the spec's honesty requirement:
 - **Contralateral pelvic drop** (high knee, lunge) is a strong *injury-association* signal
   (Bramah 2018); it is **not** asserted as a direct readout of hip-abductor weakness, which is
   contested (McCarney 2020).
+- **`rounded_thoracolumbar_spine` (Row) is not implementable from this document's own detection
+  model, and was not implemented.** Its `detection_heuristic` offers **three** constructions,
+  and none of them measures spinal curvature. The "three-point angle at mid-spine" places its
+  middle point at `0.5·(shoulder_mid + hip_mid)`, which is by construction the midpoint of the
+  segment joining the other two, so the angle is exactly 180° on every frame — a constant. The
+  sag alternative measures the distance from `shoulder_mid` to a line of which `shoulder_mid` is
+  an endpoint, which is identically zero — also a constant. The third, "alternatively track
+  shoulder→hip line vs a straight setup reference," is **not** degenerate — it is perfectly
+  computable and nonzero. `row_torso_rising`'s own metric,
+  `trunk_angle_from_horizontal_deg = arctan2(|dy|, |dx|)` between hip_mid and shoulder_mid, is a
+  pure angle — invariant to whole-body translation and to camera-distance scaling — so neither
+  confound applies here. The construction is rejected on narrower grounds: it is
+  `row_torso_rising`'s own signal (that same pitch, compared against the same setup baseline),
+  relabeled as spinal shape, which would attach this rule's citation (Saeterbakken PMID
+  26134664, an EMG magnitude result) to a quantity that citation says nothing about. All three
+  constructions fail for the same root cause: MediaPipe Pose (§3)
+  has no thoracic or lumbar landmark, so no point exists between the shoulders and the hips, and
+  nothing between them can be measured — two of the three routes collapse to constants and the
+  third measures a different quantity than the one the rule names. Found during the Row
+  implementation (2026-08-01, `docs/superpowers/specs/2026-08-01-row-detector-design.md` §3).
+  Row therefore ships **four** rules, not five. Two further monocular substitutes were
+  considered and rejected — trunk-length foreshortening and ear-drop relative to the trunk line
+  — because both are confounded by camera distance and by the hinge angle, and neither is what
+  this rule's citation supports; either would need its own `fault_id` and an explicitly-invented
+  threshold. The KG target `Row:Trunk Flexion` exists and is non-empty, so the gap is the
+  metric, not the knowledge.
 
 **View-estimation orientation limits (2026-07-25, added when `body_axis_extent` made body-extent
 measurement orientation-aware; see `src/pose/view_estimation.py` module docstring for the
@@ -1615,3 +2947,428 @@ and `"Limited Shoulder Elevation"` do resolve. There is no near-miss node to re-
 (the closest OHP-scoped nodes are `Near Lockout`, `Thoracolumbar Extension`,
 `Elbow Extensor Torque`), so this needs KG content work, not a string tweak. Those three faults
 currently reach the chat layer with citations but no retrieved grounding.
+
+**Status (2026-07-30) — Lunge detector registered.** `src/pose/movements/lunge.py` is now
+assembled as `LUNGE_DETECTOR` and registered under `"Lunge"`, reachable from
+`scripts/pose/run_pose_rule_detection.py --movement "Lunge"`. All **4 of 4** Lunge rules are
+present and can fire: `rule_knee_past_toes`, `rule_knee_valgus`, `rule_insufficient_depth`,
+`rule_pelvic_drop`. No Lunge fault is permanently silent by design, unlike push-up's
+`rule_scapular_winging`.
+
+- **The lead-leg substitution, and why it lives in the RULES, not `lunge_compute_raw`.** This
+  spec's Lunge entries define the lead leg as "the more flexed / more anterior foot". The
+  `more anterior` half is exactly the axis that collapses in a frontal view, where two of the
+  four rules live, so the implementation (`resolve_lead_side`) uses the more-flexed half only,
+  evaluated at a window's bottom frame. It cannot live in `lunge_compute_raw`: `run_detector`
+  calls `compute_raw` over the whole clip before `segment_reps`, so at metric time there is no
+  rep boundary and therefore no bottom frame to resolve "which leg is loaded THIS rep" against.
+  A per-frame heuristic would flicker through `setup`/`recovery`, where both knees sit near
+  extension within landmark noise of each other, corrupting every lead-relative metric and
+  `centered_median`'s smoothing across the swap. `lunge_compute_raw` therefore emits every
+  side-specific metric for BOTH legs (`left_*`/`right_*`), and `resolve_lead_side` chooses
+  between them only once a per-rep window exists.
+- **The two rule-level numbers, both labeled as such in-code, neither from this spec:**
+  `LEAD_SIDE_MIN_SEPARATION_DEG = 5.0` (the minimum left/right knee-angle gap at the bottom
+  before a lead leg is claimed — this spec names no such floor, and the constant can only
+  *silence*: an unresolved lead side emits nothing rather than a guessed, mis-attributed one)
+  and `LUNGE_ACTIVE_PHASES = {descent, bottom, ascent}` (this spec scopes only
+  `lunge_knee_past_toes` to phases; applying the same set to the other rules follows the squat
+  detector's `ACTIVE_PHASES` precedent rather than a spec requirement — cost: a fault visible
+  only during `setup`/`recovery` is missed). Every other threshold and severity ramp in the four
+  rules is this spec's own number, verbatim (re-confirmed by Step 1's audit below).
+- **`KNEE_FORWARD_MILD`/`KNEE_FORWARD_SEVERE` reuse.** `rule_knee_past_toes`'s fire/ramp
+  (0.10 → 0.30) is worded identically to the Squat entry's, so the implementation imports
+  Squat's existing constants from `src/pose/pose_rule_detector.py` rather than re-typing the
+  literals, so the two movements cannot drift apart independently.
+- **`rule_pelvic_drop`'s split-stance foreshortening bias, documented not corrected.** In a
+  frontal view of a split stance the L-hip→R-hip vector is rotated in the transverse plane, so
+  its image projection shortens and `atan2(dy, |dx|)` *inflates* the apparent tilt — the deeper
+  the lunge, the worse. The expected failure mode is therefore **false positives on deep,
+  correctly-performed reps**, not silence. Correcting it needs a depth estimate this pipeline
+  does not have, so Phase 2 reads specificity on correct reps first for exactly this reason.
+- **`rule_knee_valgus`'s known contamination, the mirror-image bias.** Obliquely, anterior knee
+  travel and medial knee travel project onto the same perpendicular axis, so a deep,
+  perfectly-tracked lunge can read as valgus in every view this pipeline reaches (`front`,
+  which would separate the two cleanly, is never emitted downstream). Pinned by
+  `test_anterior_knee_travel_contaminates_the_valgus_proxy` in `tests/test_lunge.py`. Phase 2
+  checks whether firing tracks step depth rather than correctness.
+- **Task 3's depth-scope correction.** The brief's example KG candidate for insufficient depth,
+  "Excessive Knee Flexion", resolves to a real node but the wrong one — its only edge is
+  `INCREASES_RISK_OF → Achilles Tendon Injury`, the wrong fault direction (this spec's own
+  `citation_support` describes *reduced* flexion marking impaired function). `LUNGE_DEPTH_KG_QUERY`
+  is `"Decreased Knee Flexion"` instead, the node whose edges (`CAUSED_BY ← Weak Quadriceps`,
+  `INCREASES_RISK_OF → ACL Injury`) match the cited sentence.
+- **Step 1 audit, re-run for this status entry, not assumed:** `resolve_nodes` against
+  `data/kg/sports_kg_v3.graphml` confirms all four `*_KG_QUERY` constants still resolve to
+  exactly one `Lunge:`-scoped node apiece (`Knee Anterior To Toes`, `Knee Valgus`,
+  `Decreased Knee Flexion`, `Trendelenburg Posture`) — no drift since Task 3. Every
+  `citation`/`citation_support` string in `src/pose/movements/lunge.py` was extracted
+  programmatically from a live-fired `PoseRuleDetection` (not read by eye) and confirmed to be
+  a byte-exact substring of this spec's text for all four rules. **No fault is left without a
+  resolving KG node** — unlike OHP's three-of-five gap above, Lunge has no open KG item.
+  `tests/test_kg_query_resolution.py::test_every_kg_query_resolves` ran locally (the graph is
+  present in this checkout) and passed, corroborating the audit independently of it.
+- **A test-infrastructure fix, generalized rather than special-cased.** Unlike squat/push-up/OHP,
+  which pass `kg_query=` as an inline string literal at each `build_detection` call,
+  `lunge.py` passes it as a reference to a module-level constant
+  (`kg_query=LUNGE_PAST_TOES_KG_QUERY`, etc.) — deliberate, so the Step 0 provenance comment
+  attached to each constant stays a single source of truth instead of being re-typed at every
+  call site. `tests/test_kg_query_resolution.py`'s AST-based `_kg_queries` scanner only
+  recognized literal `ast.Constant` values, so it read zero queries out of `lunge.py` and its
+  own `test_queries_were_actually_found` gate failed. Fixed by teaching the scanner to also
+  resolve `ast.Name` references against the module's top-level string-constant assignments,
+  which generalizes the helper for any future module rather than adding a lunge-shaped
+  exception to it.
+- **Product-surface consequence of registration — read, not assumed.** `backend/app/config.py`'s
+  `DEFAULT_ANALYSIS_MOVEMENT` is unchanged, still `"Squat"` (its own comment already calls it
+  "the FALLBACK movement, not a pin"). But unlike when the Push-up status block above was
+  written, the frontend's `ANALYZABLE_MOVEMENTS` constant this spec used to name **no longer
+  exists** — `frontend/src/lib/movements.ts` now derives which movements are analyzable
+  entirely from `GET /api/movements`, which in turn is generated live from
+  `src/pose/movements/registry.py` (`backend/app/routers/movements.py`'s own docstring states
+  this as the design: *"registering a fourth detector surfaces it in the UI with no backend or
+  frontend edit"*). Confirmed by reading `frontend/src/App.tsx`: it reads `?movement=` from the
+  URL, validates it against the fetched catalog, and passes the resolved name — not a hardcoded
+  `"Squat"` — to the analyze call. So registering `LUNGE_DETECTOR` here makes Lunge appear in
+  `GET /api/movements`, makes its `/movements` menu card clickable instead of inert "Soon", and
+  makes it genuinely analyzable end-to-end through `/api/analyze` and `/api/analyze/pose` for any
+  visitor of the public `/app` demo. This is **not** a defect introduced by this task and this
+  task does not add code to suppress it (that would be new production policy against an explicit
+  "do not change" instruction, and the router's documented design is to auto-surface every
+  registered detector). The mitigating fact: it surfaces with `validated=False`, so the frontend
+  renders it with a Beta tag — the same signal Push-up and Overhead Press already carry, which,
+  by the same mechanism, are *also* already live in the product today despite the "CLI-only"
+  framing of their own status blocks above (written before the `ANALYZABLE_MOVEMENTS` frontend
+  refactor). `tests/test_movements_endpoint.py`'s two exhaustive-list assertions were updated to
+  include Lunge/Beta accordingly; nothing was added to gate it out.
+- **The Task 1 view-gate finding — PENDING, stated as such, not answered either way.**
+  `lunge_knee_past_toes` is hard-gated on a confidently-classified `side` view
+  (`SIDE_VIEW_CONF_THRESHOLD`), mirroring squat's `rule_knees_forward`. Whether a true sagittal
+  Lunge clip is actually classified `side` by `estimate_view_for_pose` in production is an open
+  question Task 1 (REHAB24-6 Ex5 pose extraction + view-gate reconnaissance) was measuring at the
+  time this detector was registered, and Task 1 had **not completed** — extraction for the 18 Ex5
+  clips was still running. What is known so far: across the 45 real pose JSONs already in this
+  repository, the view estimator emitted `side` exactly once, and that single verdict was a
+  fabricated degenerate case since removed. Whether the gate ever opens on real sagittal footage
+  is therefore **being measured, not settled** — this status block does not assert an answer in
+  either direction, and Task 7/8's validation work is what will.
+- **All four Lunge thresholds are spec-derived and UNVALIDATED against labeled data at this
+  point.** `tests/test_lunge.py` proves geometry, sign conventions and the fault-attribution
+  contract (including the alternating-lead multi-rep regression the Phase 2 harness structurally
+  cannot see, since that harness feeds one rep per clip), not real-world fault detection accuracy.
+  Phase 2 (REHAB24-6 Ex5) is what changes that; flipping `validated` to `True` is a separate,
+  evidence-backed decision made after Phase 2 produces numbers, not part of this task.
+
+**Status (2026-07-30) — Lunge validated against REHAB24-6 Ex5. This is the FIRST movement in
+this repository ever checked against human-labeled ground truth, and it closes §8.4 for Lunge
+only.** All four rules were replayed over **174 labeled repetitions** (8 subjects, 96 incorrect
+/ 78 correct, two orthogonal cameras) via `scripts/rehab24/validate_lunge_rules.py`. Full
+numbers, method and caveats: **`notes/lunge-rule-validation.md`**. Read that before quoting any
+figure from here.
+
+**What the labels can and cannot support.** REHAB24-6 says a rep was correct or incorrect and
+**never names the fault**, so a rule firing on an incorrect rep is not evidence it found that
+rep's error. Everything below measures whether a rule's signal **carries information about rep
+correctness** — not per-fault precision. Headline statistics are **per-subject** (median and
+range across the 7 of 8 subjects that carry both classes; person 3 has 21 incorrect reps and
+zero correct ones); pooled figures are secondary and **no p-value is computed on pooled reps**.
+Whatever separates here is validated **on this dataset** — a lab recording with fixed cameras,
+controlled lighting and instructed errors.
+
+**No threshold or severity ramp was changed in response to any of it, and
+`LUNGE_DETECTOR.validated` stays `False`.** Tuning a cited number to a measured metric would
+make its citation a false provenance claim; flipping the flag is a product claim about "checked
+against labeled ground truth" and is the user's decision with these numbers in hand.
+
+- **The lead-side substitution is what failed validation, ahead of any threshold — and it bounds
+  all four rules,** since every one of them reads `f"{lead}_..."`. `resolve_lead_side` agrees
+  with `exercise_subtype` on **96/154 = 0.623** of resolved cam17 reps and **72/152 = 0.474** of
+  cam18 reps (**below chance**), leaving 11.5%/12.6% unresolved. The failure is in the *premise*
+  it substitutes for this spec's "the more flexed / **more anterior** foot" definition (the
+  anterior axis collapses in a frontal view, so only the more-flexed half is used): the labeled
+  lead knee is the more flexed knee at the rep's bottom on only **101/169 = 59.8%** (cam17) and
+  **77/161 = 47.8%** (cam18) of reps, measured over the **full labeled window** with
+  `segment_reps` and smoothing out of the picture. On the reps it gets wrong the left-right
+  separation is a median 19.4°/25.4°, far outside the 5° band
+  `LEAD_SIDE_MIN_SEPARATION_DEG` refuses on, so that guard cannot catch it. The guard is also
+  quieter than the unresolved rate implies: decomposed by `lead_unresolved_reason`, only
+  **15/174 = 8.6%** (cam17) and **9/174 = 5.2%** (cam18) of reps are the 5° guard proper; the
+  rest is missing data (no valid frame carrying a finite `min_knee_angle`: 5 and 13; a bottom
+  frame with a non-finite knee angle: 0 and 0).
+  **But the failure is one of MEASUREMENT before it is one of anatomy, and the writeup is
+  deliberately narrower than "more flexed does not identify a lunge's lead leg".** Three controls
+  say so: the two SIMULTANEOUS cameras disagree about which knee is more flexed on **33%** of
+  reps — that is measurement error, not anatomy; the two
+  premise rates disagree by 12 points across those same views; and recomputing the identical
+  angle in the image plane alone, dropping MediaPipe's pseudo-depth `z`, swings cam17 from
+  **59.8% to 17.2%** while moving cam18 the other way. (Both controls are reported on two frame
+  populations — the `segment_reps`-re-cut scored window and the full labeled window. Same
+  geometry, different frame, and the harness computes both: the scored-window variants read
+  **58/156 = 37.2%** and **24/169 = 14.2%**. The **full-window figures are the quoted ones
+  because they are segmentation-independent**, which is the property this argument must not
+  borrow from the harness's own windowing; every conclusion holds on both populations.) The
+  supported claim is therefore **"the more-flexed-knee cue, as this pipeline measures it, does
+  not identify the labeled lead leg from either view available here"** — which still fully
+  condemns `resolve_lead_side` as shipped and still bounds all four rules. **The distinction
+  drives the fix: this data cannot separate "the premise is wrong" from "the premise is
+  unrecoverable from this projection", so the indicated repair is a DEPTH-ROBUST lead cue before
+  a different cue.** §7's risk register predicted the outcome explicitly; it materialized.
+  **Recorded, not patched** — a replacement cue is a detector change with its own validation.
+- **`lunge_knee_past_toes` — the cue is informative; the rule as shipped cannot reach it.** On
+  the 88 genuinely sagittal cam18 reps, the shipped rule's metric **inverts**: per-subject median
+  AUC **0.171** (correct reps ordered *above* incorrect). Reading the same metric off the leg
+  `exercise_subtype` names, on the same frames, gives per-subject median **0.833** (0.725 over
+  all 174) — and **0.171 vs 0.850 restricted to the 80 reps BOTH lead choices score**, so the
+  contrast is not a denominator artifact. (Every AUC in the writeup carries its rep count; the
+  two columns lose different reps to an unresolved lead side.) The `half-profile` stratum's
+  production 0.850 is not a counter-example: its lead-oracle figure is 0.845, i.e. the lead
+  choice barely matters there, so the wrong-leg penalty that inverts the sagittal reps is not
+  levied on it. The gate is not the problem: the estimator returns `side` on all 88, matching Phase
+  0's 88/88, and the production and oracle passes are byte-identical here because neither yields
+  `side` off that stratum.
+- **`lunge_knee_valgus` — weak, MEDIAN-above-chance separation, and the least
+  lead-side-sensitive of the four. Not a validation.** Per-subject median AUC **0.590** (0.629
+  excluding the 40 level-2/3 extra-person reps; 0.620 under the lead-oracle) — but the seven
+  per-subject values are 0.263, 0.374, 0.486, 0.590, 0.629, 0.810, 0.852, so **only 4 of 7
+  subjects are above 0.5**, one inverts substantially, and **no null was tested** (this harness
+  computes no permutation null, CI or significance test, and p-values are declined on these reps
+  for independence reasons). The claim is "the median is above chance on 4 of 7 subjects", not
+  that chance has been excluded. The predicted step-depth contamination is **present but weaker
+  than predicted**: Spearman ρ = **−0.325** between the valgus proxy and bottom-phase lead-knee
+  angle within the *correct* reps only (vs −0.211 on incorrect) — the predicted sign and shape,
+  but a weak association, so step depth explains part of the firing, not most of it. On the 86
+  `half-profile` reps the rule fires on **83%** of them (threshold at percentile 6.3), so that
+  stratum's sensitivity 0.915 is trivial and the **fire rate is the primary read**.
+- **`lunge_insufficient_depth` — not exercised by this dataset, and its apparent signal is a
+  selection artifact.** It fires **6 times in 174 reps** (threshold 100° sits at percentile 84.5
+  of the observed distribution — `rank_auc`'s documented "informative cue, cited cut in the tail"
+  case, and the cut does not move). The sagittal stratum's apparent 0.792 per-subject AUC
+  **collapses to 0.320 under the lead-oracle** (0.792 vs 0.300 at matched n=80): `resolve_lead_side` picks the *more flexed* knee
+  by construction, so "the maximum angle of the selected knee" is a biased statistic of the pair,
+  not a measurement of the lead leg. Read off the labeled leg the metric is at or below chance
+  (0.390 overall). Not evidence the rule is wrong — evidence the fault is absent from, or
+  invisible in, REHAB24-6's instructed errors.
+- **`lunge_pelvic_drop` — barely exercised, and §6.5's predicted failure mode is NOT refuted.**
+  It fires **10 times in 174 reps** (4 tp / 6 fp) and under the lead-oracle sits at **0.467 —
+  chance**, so per the plan's own rule, near-zero firing on **both** classes means "not exercised
+  by this dataset", **not** "the rule works". On the risk §6.5 raised (false positives on deep
+  correct reps from split-stance foreshortening), the reassuring-looking numbers are artifacts
+  and must not be used to retire it: the half-profile stratum's **1.000 specificity is vacuous**
+  — the rule fired zero times there because the view mislabel below gated it off on all 39
+  correct reps, and a specificity for a silenced rule measures nothing — while the overall
+  **0.923 counts 54 of its 78 correct reps as true negatives on reps where the rule was
+  structurally silent** (37 view-gated OR 18 could-not-fire, overlapping on 1 — union 54, not
+  55). On the **24 correct reps where the rule could actually act it false-fired on 6:
+  specificity 0.750, a 25% false-positive rate**, which is the shape §6.5 predicted rather than
+  its refutation. Excluding the 40 level-2/3 extra-person reps moves that conditional specificity
+  to 0.895 and the per-subject median AUC to 0.679, so person-locking is not the cause. The
+  threshold sits at percentile 54.4 of the observed distribution (64.3 front / 45.6
+  half-profile). **The §6.5 risk stays OPEN**: 6 false fires give no power to confirm the
+  foreshortening mechanism specifically.
+- **The one real production-vs-oracle gap is a GATE failure, and it qualifies Phase 0's
+  headline.** `lunge_pelvic_drop` fires 10 in production and 41 in the oracle pass, because the
+  view estimator labels **84 of 86 cam17 `half-profile` reps as `side`**, and the rule correctly
+  returns `[]` on `side`. The *label* is what is wrong. So the `side` gate has good sensitivity
+  (88/88 on genuinely sagittal cam18 reps, per `notes/lunge-view-reconnaissance.md`) and **poor
+  specificity** — it also emits `side` on clearly non-sagittal frontal-camera reps. The same
+  mislabeling silently downgrades `lunge_knee_valgus` there (`side` ∉ `ALIGNMENT_OBSERVABLE_VIEWS`
+  → observability `medium`, confidence ×0.65) without changing whether it fires. No gate,
+  threshold or confidence floor was changed in response.
+- **Every contingency figure above is quoted with its structural silence, because the raw tables
+  are misleading without it.** A rep can be unable to fire because its **view gate** was shut, its
+  masked phase was shorter than `min_frames` (6 at 30 fps), or its lead side was unresolved —
+  and `contingency` counts every such rep as a true or false NEGATIVE, deflating sensitivity and
+  inflating specificity invisibly. **The categories OVERLAP and must never be added** — every
+  count below is a union, with its components and their overlap given so a reader's own
+  arithmetic reconciles. Production, out of 174 reps each: `lunge_knee_past_toes` **98
+  non-actionable** (86 view-gated OR 32 could-not-fire, overlapping on 20) leaving 76;
+  `lunge_insufficient_depth` **48** (none view-gated; 26 of them windows whose `bottom` phase is
+  shorter than the floor) leaving 126; `lunge_knee_valgus` **32** (none view-gated) leaving 142;
+  `lunge_pelvic_drop` **111** (84 view-gated OR 33 could-not-fire, overlapping on 6) leaving 63.
+  So "6 fires in 174" for depth and "10 in 174" for pelvic drop are partly statements about
+  window length and view labeling, not only about which errors the dataset contains. The
+  conditional tables restricted to the reps where each rule could act are in
+  `notes/lunge-rule-validation.md` §4 and do not rescue either rule.
+- **Two measurement conditions that cap every number above.** (1) **Frame validity**:
+  `lunge_compute_raw`'s all-or-nothing landmark gate leaves only **74.0%** of cam17 frames and
+  **58.4%** of cam18 frames carrying any metrics — the sagittal camera is worse, exactly as
+  `pushup.py`'s equivalent note predicts. (2) **The lunge plan's §4.2 isolation claim is false as
+  implemented**: it says ground-truth rep boundaries mean `segment_reps` is bypassed entirely, but
+  `run_detector` segments whatever it is handed, and it re-cut the labeled window on **152 of 174**
+  cam17 reps and **91 of 174** cam18 reps. Continuous scores are computed over exactly the frames
+  the rules saw, so score support matches rule support, and the lead-side finding was reproduced
+  independently over the full labeled windows — but the isolation the spec promised was not
+  achieved. Forcing it needs `replace(LUNGE_DETECTOR, rep_signal=None)`; not done here.
+
+**Status (2026-08-01):** **Deadlift** implemented in `src/pose/movements/deadlift.py` and
+registered as the 5th of 16 — `deadlift_hips_shoot_up`, `deadlift_incomplete_lockout`,
+`deadlift_lumbar_flexion`. `deadlift_bar_drift` is WITHDRAWN (see the boxed note in §Deadlift).
+**Thresholds are spec-derived and UNVALIDATED**: no labeled deadlift data exists in this
+repository, so unlike Lunge there is no validation pass to defer to, and §8.4 remains
+unsatisfied for this movement. Deviations from the heuristics written above, deliberate and
+documented in-code:
+
+- `deadlift_hips_shoot_up` — the spec's "Δ(hip_y) rises faster than Δ(shoulder_y)" is
+  **implemented as a trunk-pitch test**, not a two-landmark differential. The differential was
+  checked numerically first and is algebraically identical to a pitch change: since
+  `shoulder_y − hip_y = −torso_len·cos(pitch)`, a rigid torso gives
+  `hip_lead_ratio ≡ cos(pitch₀) − cos(pitch_t)` exactly. It depends only on pitch and says
+  nothing about hip travel, so writing it as a differential would falsely imply independent
+  corroboration. The spec's own "i.e." equating the two phrasings is correct.
+- Phase cutoffs are **percentiles of each rep's own hip-angle excursion**, not absolute angles.
+  `deadlift_incomplete_lockout` scores the `lockout` phase and the fault *is* failing to reach
+  extension, so an absolute cutoff would delete the phase on exactly the reps the rule exists
+  to catch.
+- `deadlift_lumbar_flexion` is **hard-gated** to sagittal views while the other two rules
+  **degrade** off-view. The asymmetry is deliberate: an angle magnitude under-reads head-on
+  (failure mode = silence), whereas the torso-shortening proxy is corrupted by trunk pitch
+  head-on (failure mode = a false positive). Gate where a wrong claim is possible, discount
+  where only a missed one is — the OHP `ohp_forward_head` precedent.
+- `deadlift_incomplete_lockout` scores **both** the hip and knee ramps unconditionally and takes
+  the worse, rather than selecting a ramp by which reading is finite — the mis-attribution bug
+  §8's 2026-07-25 block records against `ohp_incomplete_lockout`. Because
+  `severity == max(hip_sev, knee_sev)`, the reported `driver` axis cannot disagree with the
+  reported severity. Its per-axis aggregate is guarded for the all-NaN case
+  (`overhead_press.py`'s shape), which is reachable here precisely because the firing test ORs
+  two independently finite-checked clauses.
+- `deadlift_incomplete_lockout` scores the rep's **PEAK extension** (`nanmax` per axis), not a
+  contiguous run of individually-failing frames — **corrected 2026-08-01 after the whole-branch
+  review found the frame-window version emitting a false positive.** Because `lockout` is a
+  *rank* cutoff (the 75th percentile of the rep's own hip-angle excursion, see the bullet
+  above), a rep that spends under 25% of its frames above 165° gets a `lockout` band reaching
+  *below* 165°, and a per-frame `< 165` mask fired on it. Measured on the segmented production
+  path: a rep peaking at **178°** reported "incomplete lockout, minimum hip angle 148.5°" at
+  severity 0.66 / observability "high". Peak-scoring introduces **no new number** (same 165/140
+  ramp, different aggregate), matches the spec's own "at the top phase … at rep end" phrasing,
+  and matches `ohp_incomplete_lockout`, which has always aggregated with `nanmax` before
+  scoring. The percentile phase is deliberately unchanged — it is what guarantees a
+  shallow-finishing rep still has a `lockout` phase to score. **General lesson: a percentile
+  phase boundary and an absolute per-frame threshold inside that phase do not compose.** Squat,
+  lunge and push-up should be checked for the same pairing.
+
+**Status (2026-08-01) — Row detector registered.**
+
+- **Row — IMPLEMENTED 2026-08-01, UNVALIDATED.** Four of five rules
+  (`row_torso_rising`, `row_incomplete_rom`, `row_momentum_jerk`, `row_asymmetric_pull`);
+  the fifth is recorded in §7 as a spec defect. `validated=False`: REHAB24-6 contains no row.
+  Fit3D **does** contain row video (`barbell_row`, `barbell_dead_row`, `one_arm_row` in
+  `data/Fit3D/fit3d_info.json`, 3D mocap ground truth under `train/*/joints3d_25/` and rep
+  boundaries in `rep_ann.json`, across all 8 train subjects) — but, unlike REHAB24-6, it
+  carries no binary correct/incorrect label, so it cannot support the fire-rate/AUC-against-
+  correctness validation §8.4 means and the Lunge pass above ran. What Fit3D's 3D truth
+  *can* support — the 2D-cue-vs-3D-truth fidelity comparison this project has already run
+  elsewhere (`notes/fit3d_2d_vs_3d_summary.md` and related) — is possible for Row and simply
+  was **not done in this pass**; it is future work, not blocked on absent data. (Caveat: Fit3D's
+  rig is 4 cameras, all oblique, with no true side view, which bears on any Row rule needing a
+  lateral component.) So §8.4's "validate thresholds against labeled data per movement" is
+  **not** satisfied for Row — REHAB24-6 has no row at all, and Fit3D's row data has 3D truth but
+  no correctness labels — and closing it needs either labeled row video or a fidelity-style pass
+  against Fit3D, neither of which is blocked on nonexistent data. All four severity ramps are
+  rule-level display curves (the Row section states none), and `row_momentum_jerk`'s
+  self-normalizing 3×-median threshold is expected to over-fire. **A fifth limitation is
+  measured, and now derived, not just observed:** `row_torso_rising`'s effective fire threshold
+  is inflated by setup-baseline contamination, because on the **segmented** path `segment_reps`
+  trims the rep window to the excursion and leaves a 2-frame `setup` slice, of which one frame
+  is clean and the other is already loaded on an abrupt setup→peak transition. The median of two
+  values is their mean, so the baseline lands exactly halfway between the true resting angle and
+  the loaded peak value, and the measured rise (`peak − baseline`) is exactly **half** the true
+  rise: for a true rise `R`, `peak − baseline = (base + R) − (base + R/2) = R/2`, so the 15° fire
+  threshold requires `R > 30°` of real fault — **exactly 2×, derived from the trimming
+  mechanism, not an empirical curiosity** — and this is invariant to how many extension frames
+  precede the rep because `segment_reps` trims them off either way (measured at both 8 and 20
+  setup frames; 40 was not tested and is not claimed). Measured end-to-end through
+  `run_detector`, sweeping the true rise in 0.5° steps: an abrupt setup→peak transition fires at
+  **30.5°** (the smallest step past the derived 30° boundary, 2.03×, matching the algebra above);
+  a realistic 6-frame concentric ramp relaxes it to **19.5°** (1.30×) and a 3-frame ramp to
+  **20.5°** (1.37×) — smaller than the abrupt case because a ramp spreads the loaded value across
+  more of the setup slice instead of concentrating it in one frame.
+
+  **The inflation applies to the segmented path only.** On the whole-clip fallback
+  (`no_reps_detected` / `only_partial_reps` / `segmentation_disabled`) there is no window
+  trimming — `setup` is the clip's first 15% by position, not by excursion — and the effective
+  threshold measures at **15.5°**, the nominal 15° (the extra 0.5° is the sweep's step size, not
+  inflation). The counterintuitive consequence: **the same clip can have a stricter effective
+  threshold when rep segmentation *succeeds* than when it *fails*** — a torso-rising fault a
+  lifter actually committed can go undetected specifically because the pipeline segmented their
+  rep correctly. Direction is always toward MISSED faults, never false ones.
+
+---
+
+**Status (2026-08-09) — Arm Abduction registered, and §8.4 changes meaning for the first time.**
+
+- **Arm Abduction — IMPLEMENTED 2026-08-09, UNVALIDATED.** `src/pose/movements/arm_abduction.py`,
+  ninth of sixteen. **Two rules live** (`arm_abd_contralateral_trunk_lean`,
+  `arm_abd_lr_asymmetry`), **one registered permanently silent** (`arm_abd_shoulder_shrug`), **one
+  withdrawn** (`excessive_elevation_impingement_arc`). Each treatment is argued at its own rule
+  above; design spec `docs/superpowers/specs/2026-08-09-arm-abduction-detector-design.md`.
+
+- **§8.4 — "validate thresholds against labeled data per movement" — is now BLOCKED ON WORK
+  RATHER THAN ON DATA, for the first time outside Squat and Lunge.** REHAB24-6 `Ex1` **is** arm
+  abduction: **178 repetitions, 9 subjects, 90 correct / 88 incorrect**, marker 3-D and cached
+  MediaPipe landmarks for all 13 videos. Every detector status note since OHP has said "no labeled
+  data exists"; for this movement that is simply false, and the accurate statement is **nothing has
+  run the check**. What running it looks like is `notes/lunge-rule-validation.md`.
+
+- **Three things bound that future check in advance, and they are worth reading before it is
+  scoped.** (i) Ex1 is **unilateral on 178/178 reps**, a variant this rule set does not model, so
+  `arm_abd_lr_asymmetry` is unvalidatable there in either direction. (ii) `arm_abd_shoulder_shrug`
+  is silent, so there is nothing to validate. (iii) `arm_abd_contralateral_trunk_lean` is the one
+  rule Ex1 can genuinely speak to, and its cue already scores a **per-subject median AUC of 0.800**
+  on the marker 3-D while the shipped 12° threshold fires on **0/178** — i.e. the check would
+  measure a real cue against a cut sitting past the end of the observed distribution.
+
+- **`validated=False`**, and the Beta tag stands. No threshold moved to produce any number above.
+
+
+---
+
+**Status (2026-08-10) — Torso Twist registered, 14/16, and Group F opens.**
+
+- **Torso Twist — IMPLEMENTED 2026-08-10, UNVALIDATED.** `src/pose/movements/torso_twist.py`,
+  fourteenth of sixteen. **One rule live** (`tt_trunk_not_braced`, its brace disjunct only),
+  **one registered permanently silent** (`tt_insufficient_rotation_rom`), **two withdrawn**
+  (`tt_lumbar_rotation_dominant`, `tt_momentum_over_control`). Each treatment is argued at the
+  Group F update block above; design spec
+  `docs/superpowers/specs/2026-08-10-torso-twist-detector-design.md`; 37 tests in
+  `tests/test_torso_twist.py`.
+
+- **§8.4 is BLOCKED ON DATA HERE, and it is worth being precise about which kind of gap that is.**
+  Three corpora contain something called a torso twist and each contains a different exercise:
+  REHAB24-6 has none at all, Fit3D's `standing_ab_twists` is a standing cross-body knee-to-elbow
+  twist, and EgoExo-Fitness's **95 judged `Kneeling Side Torso Twist` actions** — the richest
+  labelling this programme has met, per-criterion True/False rather than binary correctness — are
+  a prone **lateral flexion**. So this is not Arm Abduction's "nobody ran the check" and not
+  Shoulder Bridge's "the pixels are missing": the labels exist, they are good, and they are about
+  other movements. Closing §8.4 for Torso Twist needs footage of a **seated Russian twist**, which
+  no dataset in this repository supplies.
+
+- **What DID run, and what it is allowed to conclude.** Fit3D's twist data was used for a
+  **sensing-fidelity** pass — mocap 3-D ground truth projected through the real per-camera
+  calibration, i.e. a *perfect detector*, measuring how much true axial rotation survives into
+  this section's 2-D proxy. It ships as `src/fit3d/rotation_proxy_fidelity.py` +
+  `scripts/fit3d/run_rotation_proxy_fidelity.py`, with its pure helpers unit-tested above the
+  corpus banner, so every number quoted above is re-runnable — the Row residual recorded earlier
+  in this section is exactly the failure of not doing that. That is **projection geometry**,
+  which is about cameras and transfers
+  across the variant mismatch; it withdrew `tt_lumbar_rotation_dominant` (16.7% decision
+  disagreement at the section's own cut, 26 of 30 flips being false positives) and quantified the
+  shipped rule's camera sensitivity. **No threshold was taken from that corpus**, because a
+  threshold is about the exercise and does not transfer. This is also the first payment on the
+  fidelity-comparison debt the Row status note recorded above as "future work, not blocked on
+  absent data".
+
+- **A defect in this document is recorded rather than silently worked around.**
+  `tt_momentum_over_control`'s `citation_support` paraphrases the RAG doc as warning against
+  between-rep momentum; the doc instructs the opposite ("it is crucial to **not stop** between
+  repetitions"). The rule as written would fault a user for following its own source. Seventh
+  distinct citation failure mode, and the first in which the contradiction sits inside the quoted
+  document.
+
+- **An app asset defect is recorded rather than fixed.**
+  `frontend/src/components/movements/MovementIcon.tsx:148` draws a standing figure — comment and
+  strokes both — for a movement whose card art, RAG doc and rep phases here are all seated.
+  Changing it is a frontend change on a movement this branch is not about.
+
+- **`validated=False`**, and the Beta tag stands. It is **Sit-up's** reason (the labeled data
+  describes a different variant), not a sixth one; the count of distinct reasons stays at five.
+  No threshold moved to produce any number above.

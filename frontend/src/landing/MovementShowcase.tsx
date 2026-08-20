@@ -39,12 +39,12 @@ export default function MovementShowcase() {
   }, [active, paused, reduce]);
 
   return (
-    <section className={`${SECTION} border-t border-white/10 py-16 sm:py-24`}>
+    <section className={`${SECTION} border-t border-border-dark py-16 sm:py-24`}>
       <Reveal>
-        <h2 className="max-w-2xl font-display text-3xl font-bold tracking-tight text-zinc-50 md:text-4xl">
+        <h2 className="max-w-2xl font-display text-3xl font-bold tracking-tight text-content md:text-4xl">
           {t("landing.showcase.title")}
         </h2>
-        <p className="mt-4 max-w-xl text-zinc-400">{t("landing.showcase.sub")}</p>
+        <p className="mt-4 max-w-xl text-muted">{t("landing.showcase.sub")}</p>
       </Reveal>
 
       <div className="mt-12 grid grid-cols-1 items-center gap-8 lg:grid-cols-12 lg:gap-10">
@@ -75,31 +75,27 @@ export default function MovementShowcase() {
                     onMouseEnter={() => setPaused(true)}
                     onMouseLeave={() => setPaused(false)}
                     aria-pressed={isActive}
-                    className={`relative w-full overflow-hidden rounded-xl border p-4 text-left transition-colors ${
+                    className={`relative w-full overflow-hidden rounded-xl border p-4 text-left shadow-card transition-all ${
                       isActive
-                        ? "border-[#16b8a8]/40 bg-gradient-to-br from-[#16b8a8]/[0.12] to-transparent"
-                        : "border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
+                        ? "border-primary/35 bg-gradient-to-br from-[#f3f0ff] to-surface"
+                        : "border-border-dark bg-surface hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-card-hover"
                     }`}
                   >
                     <div className="flex items-center gap-3.5">
                       <span
                         className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${
                           isActive
-                            ? "border-[#3ee07a]/30 bg-[#3ee07a]/10 text-[#3ee07a]"
-                            : "border-white/10 bg-[#15191b] text-zinc-400"
+                            ? "border-[#ece8ff] bg-[#f3f0ff] text-primary"
+                            : "border-border-dark bg-[#f5f6fb] text-faint"
                         }`}
                       >
                         <Ic size={20} weight="duotone" />
                       </span>
                       <div className="min-w-0">
-                        <p
-                          className={`font-display text-base font-semibold ${
-                            isActive ? "text-zinc-50" : "text-zinc-200"
-                          }`}
-                        >
+                        <p className="font-display text-base font-semibold text-content">
                           {t(`landing.showcase.${c.id}.name`)}
                         </p>
-                        <p className="mt-0.5 truncate text-[13px] text-zinc-400">
+                        <p className="mt-0.5 truncate text-[13px] text-muted">
                           {t(`landing.showcase.${c.id}.note`)}
                         </p>
                       </div>
@@ -110,7 +106,7 @@ export default function MovementShowcase() {
                       <motion.span
                         key={active}
                         aria-hidden
-                        className="absolute bottom-0 left-0 h-0.5 origin-left bg-gradient-to-r from-[#5ffb6f] to-[#16b8a8]"
+                        className="absolute bottom-0 left-0 h-0.5 origin-left bg-gradient-to-r from-[#c4b5fd] to-[#7b61ff]"
                         style={{ width: "100%" }}
                         initial={{ scaleX: 0 }}
                         animate={{ scaleX: 1 }}

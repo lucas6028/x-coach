@@ -29,6 +29,16 @@ _DEFAULT_TESTS = [
     "tests/test_backend_line_auth.py",
     "tests/test_backend_line_webhook.py",
     "tests/test_backend_admin_line.py",
+    "tests/test_storage.py",
+    "tests/test_upload_staging.py",
+    "tests/test_upload_urls.py",
+    "tests/test_delete_reaping.py",
+    "tests/test_upload_limits.py",
+    # Training plans. Both files are needed: the router suite drives backend/app/routers/plans.py
+    # end to end and the store suite covers backend/app/services/plans.py, and leaving either out
+    # silently drops a measured module to ~40% and sinks the whole gate.
+    "tests/test_plans_api.py",
+    "tests/test_plans_store.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

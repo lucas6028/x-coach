@@ -10,6 +10,12 @@ from pathlib import Path
 
 import numpy as np
 
+from src.video.classification_metrics import (  # noqa: F401 - re-exported for existing callers/tests
+    compute_metrics,
+    find_best_threshold,
+    sigmoid,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LABEL_MODES = ("combined", "knees_forward", "knees_inward")
 THRESHOLD_KINDS = (
@@ -102,8 +108,7 @@ class FeatureDataset(Dataset):
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         sample = self.samples[index]
-        with np.load(sample.feature_path, allow_pickle=False) as data:
-            feature = data["video_feature"].astype(np.float32)
+        feature = load_video_feature(sample.feature_path)
         if self.normalization is not None:
             feature = self.normalization.apply(feature)
         return torch.from_numpy(feature), torch.tensor(sample.label, dtype=torch.float32)
@@ -123,15 +128,38 @@ class VideoFeatureClassifier(nn.Module):
         return self.network(x).squeeze(-1)
 
 
+#: Stem -> path index per feature dir. Globbing once per sample id walks the whole
+#: tree each time, which is O(ids x files): ~25 s per call on a 2144-sample dir, and
+#: a LOSO fold calls this three times. Building one index per dir makes it one walk.
+_DIR_INDEX_CACHE: dict[Path, dict[str, Path]] = {}
+
+
+def feature_path_index(feature_dir: Path) -> dict[str, Path]:
+    """Map sample id -> feature path for one dir, built once and memoized.
+
+    Ties are broken by sorted path order. The previous per-id ``rglob`` took whatever
+    the directory walk yielded first, which is not deterministic across platforms;
+    duplicates are a defect the feature audit fails on regardless.
+    """
+    index = _DIR_INDEX_CACHE.get(feature_dir)
+    if index is None:
+        index = {}
+        for path in sorted(feature_dir.rglob("*.npz")):
+            index.setdefault(path.stem, path)
+        _DIR_INDEX_CACHE[feature_dir] = index
+    return index
+
+
 def build_samples(feature_dir: Path, video_ids: list[str], labels: dict[str, int]) -> list[Sample]:
     samples: list[Sample] = []
     missing: list[str] = []
+    index = feature_path_index(feature_dir)
     for video_id in video_ids:
-        candidates = list(feature_dir.rglob(f"{video_id}.npz"))
-        if not candidates:
+        path = index.get(video_id)
+        if path is None:
             missing.append(video_id)
             continue
-        samples.append(Sample(video_id=video_id, feature_path=candidates[0], label=labels[video_id]))
+        samples.append(Sample(video_id=video_id, feature_path=path, label=labels[video_id]))
 
     if missing:
         preview = ", ".join(missing[:10])
@@ -156,9 +184,33 @@ def make_loader(
     )
 
 
+#: Feature vectors keyed by path. Reading an ``.npz`` costs ~2.6 ms, almost all of it
+#: zip-container overhead rather than decompression, and ``FeatureDataset`` re-reads
+#: every sample on every epoch -- ~34k reads per LOSO fold, which dominates runtime.
+#: A repetition vector is 768 float32 (3 KB), so a whole feature dir is ~6.6 MB.
+#: Values are unchanged by caching; only the number of disk reads differs.
+_FEATURE_CACHE: dict[Path, np.ndarray] = {}
+
+
 def load_video_feature(path: Path) -> np.ndarray:
-    with np.load(path, allow_pickle=False) as data:
-        return data["video_feature"].astype(np.float32)
+    """Load one repetition vector, memoized by path.
+
+    Returns a copy: ``FeatureDataset`` hands the array to ``torch.from_numpy``, which
+    shares memory, so returning the cached array itself would expose it to in-place
+    modification by any downstream consumer.
+    """
+    cached = _FEATURE_CACHE.get(path)
+    if cached is None:
+        with np.load(path, allow_pickle=False) as data:
+            cached = data["video_feature"].astype(np.float32)
+        _FEATURE_CACHE[path] = cached
+    return cached.copy()
+
+
+def clear_feature_cache() -> None:
+    """Drop memoized features and dir indexes (for tests, or if files change on disk)."""
+    _FEATURE_CACHE.clear()
+    _DIR_INDEX_CACHE.clear()
 
 
 def compute_feature_normalization(samples: list[Sample], epsilon: float = 1e-6) -> FeatureNormalization:
@@ -193,78 +245,6 @@ def set_seed(seed: int) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def sigmoid(logits: np.ndarray) -> np.ndarray:
-    return 1.0 / (1.0 + np.exp(-logits))
-
-
-def compute_metrics(probabilities: np.ndarray, labels: np.ndarray, threshold: float = 0.5) -> dict[str, float]:
-    if probabilities.size == 0:
-        return {
-            "threshold": float(threshold),
-            "accuracy": 0.0,
-            "precision": 0.0,
-            "recall": 0.0,
-            "f1": 0.0,
-            "tp": 0.0,
-            "fp": 0.0,
-            "tn": 0.0,
-            "fn": 0.0,
-            "specificity": 0.0,
-            "false_positive_rate": 0.0,
-            "balanced_accuracy": 0.0,
-            "negative_precision": 0.0,
-            "negative_recall": 0.0,
-            "negative_f1": 0.0,
-            "macro_f1": 0.0,
-            "youden_j": 0.0,
-        }
-
-    preds = (probabilities >= threshold).astype(np.int32)
-    labels = labels.astype(np.int32)
-
-    tp = int(((preds == 1) & (labels == 1)).sum())
-    fp = int(((preds == 1) & (labels == 0)).sum())
-    tn = int(((preds == 0) & (labels == 0)).sum())
-    fn = int(((preds == 0) & (labels == 1)).sum())
-
-    accuracy = float((preds == labels).mean())
-    precision = tp / (tp + fp) if tp + fp else 0.0
-    recall = tp / (tp + fn) if tp + fn else 0.0
-    f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    specificity = tn / (tn + fp) if tn + fp else 0.0
-    false_positive_rate = fp / (fp + tn) if fp + tn else 0.0
-    balanced_accuracy = (recall + specificity) / 2
-    negative_precision = tn / (tn + fn) if tn + fn else 0.0
-    negative_recall = specificity
-    negative_f1 = (
-        2 * negative_precision * negative_recall / (negative_precision + negative_recall)
-        if negative_precision + negative_recall
-        else 0.0
-    )
-    macro_f1 = (f1 + negative_f1) / 2
-    youden_j = recall + specificity - 1
-
-    return {
-        "threshold": float(threshold),
-        "accuracy": accuracy,
-        "precision": float(precision),
-        "recall": float(recall),
-        "f1": float(f1),
-        "tp": float(tp),
-        "fp": float(fp),
-        "tn": float(tn),
-        "fn": float(fn),
-        "specificity": float(specificity),
-        "false_positive_rate": float(false_positive_rate),
-        "balanced_accuracy": float(balanced_accuracy),
-        "negative_precision": float(negative_precision),
-        "negative_recall": float(negative_recall),
-        "negative_f1": float(negative_f1),
-        "macro_f1": float(macro_f1),
-        "youden_j": float(youden_j),
-    }
-
-
 def collect_predictions(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
     logits_list: list[np.ndarray] = []
@@ -293,34 +273,6 @@ def collect_sample_predictions(
     probabilities, labels = collect_predictions(model, loader, device)
     video_ids = [sample.video_id for sample in samples]
     return video_ids, probabilities, labels
-
-
-def find_best_threshold(
-    probabilities: np.ndarray,
-    labels: np.ndarray,
-    objective: str,
-) -> tuple[float, dict[str, float]]:
-    if probabilities.size == 0:
-        return 0.5, compute_metrics(probabilities, labels, threshold=0.5)
-
-    candidate_thresholds = np.unique(
-        np.concatenate(
-            [
-                np.array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], dtype=np.float32),
-                probabilities.astype(np.float32),
-            ]
-        )
-    )
-
-    best_threshold = 0.5
-    best_metrics = compute_metrics(probabilities, labels, threshold=0.5)
-    for threshold in candidate_thresholds.tolist():
-        metrics = compute_metrics(probabilities, labels, threshold=float(threshold))
-        if metrics[objective] > best_metrics[objective]:
-            best_threshold = float(threshold)
-            best_metrics = metrics
-
-    return best_threshold, best_metrics
 
 
 def baseline_metrics(labels: np.ndarray, positive: bool) -> dict[str, float]:
