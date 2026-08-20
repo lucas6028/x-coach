@@ -216,7 +216,25 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
 
     valid_ratio = quality.get("valid_frame_ratio")
     measured = isinstance(valid_ratio, (int, float)) and valid_ratio > 0
-    if isinstance(valid_ratio, (int, float)):
+    # RS-SP2: under per-rep extraction, `valid_frame_ratio`'s denominator stays whole-clip on
+    # purpose (SP1's compatibility rule -- see pose_rule_detector.py), so it legitimately falls to
+    # ~30% on a perfectly healthy analysis. Told to the model verbatim, that reads as a tracking
+    # problem and gets relayed to the user as one -- the same defect MetricsCards.tsx was changed
+    # to fix, on a higher-stakes surface (prose the user reads as coaching, not a HUD number).
+    # When the payload says how much was actually extracted, report the ratio of THAT span instead,
+    # phrased so the model cannot mistake it for whole-clip coverage. Pre-SP2 stored analyses (and
+    # CLI output) carry no `extracted_frames`, so they fall through to the original whole-clip line
+    # unchanged -- this must not alter how they read.
+    extracted_frames = quality.get("extracted_frames")
+    valid_frames = quality.get("valid_frames")
+    if (
+        isinstance(extracted_frames, (int, float))
+        and extracted_frames > 0
+        and isinstance(valid_frames, (int, float))
+    ):
+        extracted_ratio = valid_frames / extracted_frames
+        lines.append(f"- Measurable frames: {extracted_ratio:.0%} of the extracted spans")
+    elif isinstance(valid_ratio, (int, float)):
         lines.append(f"- Measurable frames: {valid_ratio:.0%} of the clip")
 
     faults = context.get("faults") or []

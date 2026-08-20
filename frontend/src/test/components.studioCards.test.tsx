@@ -97,6 +97,40 @@ describe("KeyMetricsCard", () => {
     expect(screen.queryByText("valgus angle")).toBeNull();
     expect(screen.getByText("Side")).toBeInTheDocument(); // camera view
   });
+
+  // Ported from the deleted MetricsCards suite: the RS-SP2 denominator moved into this card (and
+  // into lib/quality.ts's `validFrameStat`) when the muse-spark redesign removed that component.
+  it("counts valid frames against the frames that were EXTRACTED, not the whole clip", () => {
+    // Under RS-SP2 only the scored reps carry landmarks, so a whole-clip denominator would show
+    // "30%" for a deliberately partial extraction and read as bad tracking.
+    const analysis = {
+      ...mockAnalysis,
+      quality: {
+        ...mockAnalysis.quality,
+        total_frames: 900,
+        valid_frames: 260,
+        extracted_frames: 270,
+        extracted_frame_ratio: 0.3,
+        valid_frame_ratio: 0.289,
+      },
+    };
+    const { container } = renderWithProviders(<KeyMetricsCard analysis={analysis} />);
+    expect(screen.getByText("96%")).toBeInTheDocument();
+    expect(screen.getByText("260 / 270 extracted")).toBeInTheDocument();
+    // The BAR has to agree with the number: a 96% figure over a 29% bar is a card contradicting
+    // itself, and only the styling carries that — hence the width assertion.
+    const bars = container.querySelectorAll(".grid > div .h-full");
+    expect((bars[1] as HTMLElement).style.width).toBe("96%");
+  });
+
+  it("falls back to the whole-clip denominator for analyses with no extracted_frames", () => {
+    renderWithProviders(<KeyMetricsCard analysis={mockAnalysis} />);
+    // mockAnalysis has no extracted_frames — old stored analyses and CLI output look like this.
+    expect(
+      screen.getByText(`${Math.round((mockAnalysis.quality.valid_frame_ratio ?? 0) * 100)}%`)
+    ).toBeInTheDocument();
+    expect(screen.getByText("276/300 frames")).toBeInTheDocument();
+  });
 });
 
 describe("TipsCard", () => {

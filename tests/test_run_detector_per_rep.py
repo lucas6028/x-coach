@@ -4,7 +4,8 @@ import math
 import unittest
 
 from src.pose.movements import registry
-from src.pose.movements.base import REST_PHASE, run_detector
+from src.pose.movements.base import REST_PHASE, RepPlan, run_detector
+from src.pose.rep_segmentation import RepWindow
 from tests.test_pose_rule_detector import frame
 
 
@@ -217,6 +218,32 @@ class RunDetectorPerRepTests(unittest.TestCase):
             with self.subTest(fault=detection.fault_id):
                 self.assertEqual(detection.rep_count, len(detection.occurred_reps))
                 self.assertIn(detection.rep_index, detection.occurred_reps)
+
+
+    def test_a_rep_plan_fallback_forces_analyzed_empty_even_if_the_plan_says_otherwise(self) -> None:
+        """Defence in depth for a caller that bypasses the HTTP validator entirely.
+
+        `backend/app/routers/analyze.py`'s `_validate_reps` already rejects a client `reps`
+        payload that pairs a `fallback` string with an `analyzed=True` segment -- see its
+        `AnalyzePoseRepsValidationTests::test_rejects_an_analyzed_segment_alongside_any_fallback`.
+        But `run_detector` is also called directly, by the CLI and by tests, which do not go
+        through that validator. A `RepPlan` with `fallback` set already forces whole-clip PHASE
+        assignment (`segmented = []` above) -- if `analyzed` were still honoured from the plan,
+        rules would score `core[rep.start:rep.end+1]` slices per-rep against phases that were
+        never assigned at that granularity, which is exactly the mis-phasing this whole line of
+        work exists to eliminate. This test exists so that guard survives even if the HTTP-layer
+        validator is later relaxed or removed: `run_detector` must not trust `rep_plan.analyzed`
+        when `rep_plan.fallback` is set, regardless of what the caller supplied.
+        """
+        window = RepWindow(index=1, start=0, end=29, partial=False)
+        plan = RepPlan(reps=(window,), analyzed=(window,), fallback="segmentation_disabled")
+        result = run_detector(
+            registry.get_detector("Squat"), squat_reps(3), 30.0, "rear", 0.8, rep_plan=plan
+        )
+        self.assertEqual(result.analyzed, [])
+        # Scoring took the whole-clip path (the `else` branch, `rule(core, ctx)`), not the
+        # per-rep slice path -- the same shape as the existing fallback tests above.
+        self.assertTrue(result.detections, "a fallback plan must still be analyzed, not read as clean")
 
 
 if __name__ == "__main__":

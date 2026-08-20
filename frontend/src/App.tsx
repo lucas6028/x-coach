@@ -13,6 +13,7 @@ import PreviousSessionsCard from "./components/studio/PreviousSessionsCard";
 import TipsCard from "./components/studio/TipsCard";
 import { captureThumbnail } from "./lib/thumbnail";
 import { loadAnalysisTier, saveAnalysisTier, type PoseTier } from "./lib/poseTier";
+import { DEFAULT_MAX_REPS } from "./lib/repSpans";
 import { movementLabel, useI18n } from "./lib/i18n";
 import { useIsMobile } from "./lib/useIsMobile";
 import { useLiffContext } from "./lib/liffContext";
@@ -167,8 +168,9 @@ export default function App() {
     [t]
   );
 
-  // Client-side capture path: extraction happens in-browser (extractPoseFromBlob), then the pose
-  // JSON + original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
+  // Client-side capture path: extraction happens in-browser (extractPoseWithReps — the two-pass
+  // RS-SP2 extractor, which also plans which reps to analyze), then the pose JSON + rep plan +
+  // original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
   const runPoseAnalysis = useCallback(async (blob: Blob, chosenTier: PoseTier) => {
     setLoading(true);
     setError("");
@@ -176,14 +178,16 @@ export default function App() {
     setStatusMsg(t("app.analysing"));
     try {
       // MediaPipe is a cold path: defer its WASM graph until the user explicitly supplies video.
-      const { extractPoseFromBlob } = await import("./lib/poseExtract");
-      const pose = await extractPoseFromBlob(blob, chosenTier);
+      const { extractPoseWithReps } = await import("./lib/poseExtract");
+      const { pose, reps } = await extractPoseWithReps(
+        blob, chosenTier, canonicalMovement, DEFAULT_MAX_REPS
+      );
       // Captured from the same blob the browser just decoded for MediaPipe, so it costs one
       // extra seek. Resolves to null on any failure — a missing thumbnail never blocks analysis.
       const thumbnail = await captureThumbnail(blob);
       // The user's selected movement, not a hardcoded "Squat". `analyzePose` has taken a movement
       // since the client-capture path landed; this is the caller that finally supplies a real one.
-      const data = await api.analyzePose(canonicalMovement, pose, blob, thumbnail);
+      const data = await api.analyzePose(canonicalMovement, pose, blob, thumbnail, reps);
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;

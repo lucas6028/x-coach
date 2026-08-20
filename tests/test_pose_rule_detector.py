@@ -14,6 +14,7 @@ from src.pose.pose_rule_detector import (
     FrameMetrics,
     PoseRuleRequest,
     compute_frame_metrics,
+    detect_pose_rules_from_payload,
     detect_rule_segments,
     json_safe_view_payload,
     raw_frame_metrics,
@@ -34,12 +35,13 @@ def frame(
     ankle_y: float = 0.90,
     toe_offset: float = 0.12,
     frame_index: int = 0,
+    hip_visibility: float = 1.0,
 ) -> dict[str, object]:
     landmarks = [landmark(0.0, 0.0, visibility=0.0) for _ in range(LANDMARK_COUNT)]
     landmarks[11] = landmark(0.35, 0.25)
     landmarks[12] = landmark(0.65, 0.25)
-    landmarks[23] = landmark(0.35, hip_y)
-    landmarks[24] = landmark(0.65, hip_y)
+    landmarks[23] = landmark(0.35, hip_y, visibility=hip_visibility)
+    landmarks[24] = landmark(0.65, hip_y, visibility=hip_visibility)
     landmarks[25] = landmark(left_knee_x, knee_y)
     landmarks[26] = landmark(right_knee_x, knee_y)
     landmarks[27] = landmark(0.30, ankle_y)
@@ -296,6 +298,61 @@ class MaxRepsCliForwardingTests(unittest.TestCase):
         with mock.patch.object(pose_rule_detector, "build_requests", return_value=[fake_request]):
             batch_calls = self._run_main(["run_pose_rule_detection.py", "--no-retrieval"])
         self.assertEqual(batch_calls[0]["max_reps"], 3)
+
+
+class SparsePayloadQualityTest(unittest.TestCase):
+    """RS-SP2 sends a full-length frame list with null landmarks outside the extracted spans."""
+
+    def _payload(self, extracted: range, total: int = 60) -> dict:
+        frames = []
+        for i in range(total):
+            frames.append(frame(frame_index=i) if i in extracted else
+                          {"frame_index": i, "landmarks": None, "world_landmarks": None})
+        return {"metadata": {"fps": 30, "width": 640, "height": 480, "total_frames": total},
+                "frames": frames}
+
+    def test_reports_how_many_frames_were_extracted(self) -> None:
+        result = detect_pose_rules_from_payload(self._payload(range(20, 40)), movement="Squat")
+        quality = result["quality"]
+        self.assertEqual(quality["extracted_frames"], 20)
+        self.assertAlmostEqual(quality["extracted_frame_ratio"], 20 / 60, places=4)
+
+    def test_existing_denominators_stay_whole_clip(self) -> None:
+        """SP1 §5: quality is a compatibility surface for analysis.py, the frontend and
+        perception_to_graph.py. Adding fields is safe; changing these is not."""
+        result = detect_pose_rules_from_payload(self._payload(range(20, 40)), movement="Squat")
+        self.assertEqual(result["quality"]["total_frames"], 60)
+        self.assertEqual(len(result["frame_metrics"]), 60)
+
+    def test_a_dense_clip_reports_every_frame_extracted(self) -> None:
+        result = detect_pose_rules_from_payload(self._payload(range(60)), movement="Squat")
+        self.assertEqual(result["quality"]["extracted_frames"], 60)
+        self.assertAlmostEqual(result["quality"]["extracted_frame_ratio"], 1.0, places=4)
+
+    def test_extracted_frames_and_valid_frames_are_not_the_same_count(self) -> None:
+        """Every 'extracted' frame in `_payload` (and in the two tests above) is built by `frame()`
+        at its fully-visible defaults, so `extracted_frames == valid_frames` in all three cases --
+        a regression computing `extracted_frames = len(valid_frames)` would pass every one of them.
+        This is the field the whole honesty story (MetricsCards, chat.py's 'Measurable frames'
+        line) now rests on, so it needs one case where the two counts genuinely differ.
+
+        Frame 25 carries landmarks (so it is EXTRACTED: `frames[i].get("landmarks")` is truthy) but
+        its hip visibility is below `VISIBILITY_THRESHOLD`, so `raw_frame_metrics` marks it INVALID
+        -- extracted without being valid, which `frame()`'s all-visible default never produces."""
+        extracted = range(20, 40)
+        frames = [
+            frame(frame_index=i, hip_visibility=0.3) if i == 25
+            else frame(frame_index=i) if i in extracted
+            else {"frame_index": i, "landmarks": None, "world_landmarks": None}
+            for i in range(60)
+        ]
+        payload = {"metadata": {"fps": 30, "width": 640, "height": 480, "total_frames": 60},
+                   "frames": frames}
+        result = detect_pose_rules_from_payload(payload, movement="Squat")
+        quality = result["quality"]
+        self.assertEqual(quality["extracted_frames"], 20)
+        self.assertEqual(quality["valid_frames"], 19)
+        self.assertGreater(quality["extracted_frames"], quality["valid_frames"])
 
 
 if __name__ == "__main__":

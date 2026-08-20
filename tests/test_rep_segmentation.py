@@ -268,6 +268,38 @@ class SegmentRepsTests(unittest.TestCase):
         signal[40] = float("nan")
         self.assertEqual(len(segment_reps(signal, fps=30.0)), 2)
 
+    def test_band_overrides_the_slices_own_percentiles(self) -> None:
+        """`band`, when given, REPLACES the percentile-derived `(low, high)` rather than
+        adjusting them -- RS-SP2 needs this because a span refined around one repetition is too
+        narrow a sample to re-derive the hysteresis band from (measured: 92.9% exact vs. 98.6%
+        when the whole clip's range is handed in instead; see `segment_reps`'s docstring).
+
+        A pure sine rep (no idle) turns out NOT to discriminate here: `_climb_backward` reaches
+        index 0 regardless of where `enter`/`exit_` sit, because nothing in a monotonic descent
+        stops the climb early. This signal adds a 20-frame idle preamble specifically so there
+        IS something to climb past: `own`'s in-range `exit_` is crossed at the real top of the
+        rep (frame 20), so `_climb_backward` stops there, at the preamble's plateau boundary.
+        `wide`'s `exit_` (221) exceeds every value in the signal (max 170), so no crossing
+        exists at all and `_excursion_bounds` falls back to `start = 0` unconditionally --
+        cutting straight through the preamble. If `band` were silently ignored, both calls
+        would use the SAME percentile-derived bounds and return the SAME window.
+        """
+        signal = [170.0] * 20 + sine_reps(1, frames_per_rep=60)
+        own = segment_reps(signal, fps=30.0)
+        wide = segment_reps(signal, fps=30.0, band=(0.0, 340.0))
+        self.assertEqual(len(own), 1)
+        self.assertEqual(own[0].start, 20)  # the real top of the rep, preamble excluded
+        self.assertFalse(own[0].partial)
+        self.assertEqual(len(wide), 1)
+        self.assertEqual(wide[0].start, 0)  # no in-range exit_ crossing -> falls back to the clip start
+        self.assertTrue(wide[0].partial)
+
+    def test_a_degenerate_band_yields_no_reps_rather_than_dividing_by_zero(self) -> None:
+        # low == high collapses `span` to zero, the same degenerate case percentile-derived
+        # bounds already guard against -- an explicit band must be checked identically.
+        signal = sine_reps(1, frames_per_rep=60)
+        self.assertEqual(segment_reps(signal, fps=30.0, band=(5.0, 5.0)), [])
+
     def test_rejects_unknown_polarity_and_rep_start(self) -> None:
         with self.assertRaises(ValueError):
             segment_reps(sine_reps(1), fps=30.0, polarity="sideways")

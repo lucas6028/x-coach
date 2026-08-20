@@ -42,6 +42,33 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
           className="absolute top-1/2 h-[6px] -translate-y-1/2 rounded-full bg-[#8b7bff]"
           style={{ width: pct(currentTime) }}
         />
+        {/* Spans that carry no pose data because RS-SP2 never extracted them. NEUTRAL, never a
+            warning colour: they are not a problem, they are unexamined — and an empty timeline
+            must not read as "these reps were fine".
+            The stripe colour rides `--c-hatch` (index.css). The bar now sits inside the video
+            card's DARK control pill, so the hatch is light-on-dark; the variable holds that one
+            value since the redesign left a single (light) palette. Inline `style` (not a Tailwind
+            arbitrary value) so the gradient can reference the CSS var. Geometry matches the fault
+            markers below — same 6px height, same vertical centring — so an unexamined span reads
+            as part of the same bar rather than floating above it. */}
+        {(analysis.reps?.segments ?? [])
+          .filter((s) => !s.analyzed)
+          .map((s) => (
+            <div
+              key={`un-${s.index}`}
+              data-testid="unanalyzed-span"
+              title={t("timeline.unanalyzed")}
+              className="absolute top-1/2 h-[6px] -translate-y-1/2 rounded-full bg-white/25"
+              style={{
+                left: pct(s.start_time),
+                width: `${Math.max(1.5, ((s.end_time - s.start_time) / dur) * 100)}%`,
+                backgroundImage:
+                  "repeating-linear-gradient(45deg, transparent, transparent 3px, " +
+                  "var(--c-hatch) 3px, var(--c-hatch) 6px)",
+              }}
+            />
+          ))}
+        {/* fault segments */}
         {analysis.detections.map((d, i) => (
           <div
             key={i}
@@ -63,6 +90,21 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
           style={{ left: pct(currentTime) }}
         />
       </div>
+      {/* How much of the clip the verdict actually covers. The legend it used to sit beside is
+          gone with the standalone strip (see the header comment), but this line is not decoration:
+          without it a three-rep verdict on a five-rep clip reads as a verdict on all five. */}
+      {analysis.reps && (
+        <span className="shrink-0 text-[10px] font-medium tabular-nums text-white/70">
+          {analysis.reps.fallback
+            ? t("timeline.wholeClip")
+            : t("timeline.repsSummary", {
+                detected: analysis.reps.detected,
+                // Separator is translated data (see `timeline.repsListSeparator`), not a
+                // hardcoded character here — a full-width "、" reads wrong inside English text.
+                list: analysis.reps.analyzed.join(t("timeline.repsListSeparator")),
+              })}
+        </span>
+      )}
     </div>
   );
 }

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { assertPoseAnalysisDuration, landmarksToFrame, MAX_POSE_ANALYSIS_DURATION_SECONDS } from "../lib/poseExtract";
+import {
+  assertPoseAnalysisDuration, landmarksToFrame, MAX_POSE_ANALYSIS_DURATION_SECONDS, planReps,
+} from "../lib/poseExtract";
+import { COARSE_STRIDE } from "../lib/repSpans";
 import { resolveDuration } from "../lib/mediaDuration";
 
 const lm = (n: number) => Array.from({ length: n }, (_, i) => ({ x: i / 100, y: i / 50, z: 0.1, visibility: 0.9 }));
@@ -180,5 +183,64 @@ describe("resolveDuration", () => {
     await vi.advanceTimersByTimeAsync(1000);
     await assertion;
     expect(timedOut.listenerCount).toBe(0);
+  });
+});
+
+function coarseRepSignal(count: number, period: number): number[] {
+  return Array.from({ length: count * period }, (_, i) =>
+    115 + 55 * Math.cos((2 * Math.PI * (i % period)) / period));
+}
+
+describe("planReps", () => {
+  const LAST = 5 * 30 * COARSE_STRIDE - 1; // five 30-sample coarse reps on the canonical grid
+
+  it("marks the first / middle / last of five reps as analyzed", () => {
+    const { plan } = planReps(coarseRepSignal(5, 30), 3, LAST, "Squat");
+    expect(plan.fallback).toBeNull();
+    expect(plan.segments).toHaveLength(5);
+    expect(plan.segments.filter((s) => s.analyzed).map((s) => s.index)).toEqual([1, 3, 5]);
+  });
+
+  it("returns spans only for the analyzed reps", () => {
+    const { spans } = planReps(coarseRepSignal(5, 30), 3, LAST, "Squat");
+    expect(spans.length).toBeGreaterThan(0);
+    expect(spans.length).toBeLessThanOrEqual(3);
+  });
+
+  it("reports frame_index, not coarse positions", () => {
+    const { plan } = planReps(coarseRepSignal(5, 30), 3, LAST, "Squat");
+    // Rep 2 of 5 cannot start before frame 30 if each rep is 90 canonical frames long.
+    expect(plan.segments[1].start_frame).toBeGreaterThanOrEqual(COARSE_STRIDE * 20);
+  });
+
+  it("falls back to the whole clip when nothing segments", () => {
+    const { plan, spans } = planReps(new Array(150).fill(5), 3, LAST, "Squat");
+    expect(plan.fallback).toBe("no_reps_detected");
+    expect(plan.segments).toEqual([]);
+    expect(spans).toEqual([{ start: 0, end: LAST }]);
+  });
+
+  it("falls back for a movement with no browser-side signal", () => {
+    const { plan, spans } = planReps(coarseRepSignal(5, 30), 3, LAST, "Deadlift");
+    expect(plan.fallback).toBe("segmentation_disabled");
+    expect(spans).toEqual([{ start: 0, end: LAST }]);
+  });
+
+  it("falls back when every rep is partial", () => {
+    // A clip that STARTS at the bottom and only rises: the single window has no crossing to climb
+    // from on its left, so it is partial. Verified against Python — segment_reps returns exactly
+    // one window with partial=True — so this asserts unconditionally.
+    const rising = Array.from({ length: 30 }, (_, i) =>
+      115 - 55 * Math.cos((2 * Math.PI * i) / 60));
+    const { plan, spans } = planReps(rising, 3, 89, "Squat");
+    expect(plan.fallback).toBe("only_partial_reps");
+    expect(plan.segments).toEqual([]);
+    expect(spans).toEqual([{ start: 0, end: 89 }]);
+  });
+
+  it("NEVER returns an empty span list — a fallback still extracts everything", () => {
+    for (const signal of [new Array(150).fill(5), coarseRepSignal(5, 30)]) {
+      expect(planReps(signal, 3, LAST, "Squat").spans.length).toBeGreaterThan(0);
+    }
   });
 });

@@ -1095,7 +1095,11 @@ export function spanForRep(
   coarseSignal: number[], rep: RepWindow, lastFrameIndex: number
 ): FrameSpan {
   const valleyFrame = valleyPosition(coarseSignal, rep) * COARSE_STRIDE;
-  const coarseHalf = Math.ceil(((rep.end - rep.start + 1) * COARSE_STRIDE) / 2);
+  // floor, not ceil: the 98.6% coverage figure REP_PADDING_FRAMES is set from was measured with
+  // Python's `(end - start + 1) * STRIDE // 2`, and tests/test_coarse_segmentation_corpus.py
+  // re-measures it the same way. A one-frame difference is immaterial next to a 24-frame pad, but
+  // the constant's justification is only reproducible if both sides compute the span identically.
+  const coarseHalf = Math.floor(((rep.end - rep.start + 1) * COARSE_STRIDE) / 2);
   const half = coarseHalf + REP_PADDING_FRAMES;
   return {
     start: Math.max(0, valleyFrame - half),
@@ -1454,13 +1458,15 @@ describe("planReps", () => {
   });
 
   it("falls back when every rep is partial", () => {
-    // Half a rep: descends and never returns, so the single window is partial.
-    const halfRep = coarseRepSignal(1, 60).slice(0, 30);
-    const { plan, spans } = planReps(halfRep, 3, 89, "Squat");
-    if (plan.segments.length > 0) {
-      expect(plan.fallback).toBe("only_partial_reps");
-      expect(spans).toEqual([{ start: 0, end: 89 }]);
-    }
+    // A clip that STARTS at the bottom and only rises: the single window has no crossing to climb
+    // from on its left, so it is partial. Verified against Python — segment_reps returns exactly
+    // one window with partial=True — so this asserts unconditionally.
+    const rising = Array.from({ length: 30 }, (_, i) =>
+      115 - 55 * Math.cos((2 * Math.PI * i) / 60));
+    const { plan, spans } = planReps(rising, 3, 89, "Squat");
+    expect(plan.fallback).toBe("only_partial_reps");
+    expect(plan.segments).toEqual([]);
+    expect(spans).toEqual([{ start: 0, end: 89 }]);
   });
 
   it("NEVER returns an empty span list — a fallback still extracts everything", () => {
@@ -1482,8 +1488,8 @@ cwd = `frontend/`，執行：`yarn test src/test/lib.poseExtract.test.ts`
 import { TS_REP_SIGNALS, centeredMedian, type SignalLandmark } from "./repSignal";
 import { segmentReps, selectReps } from "./repSegmentation";
 import {
-  COARSE_SMOOTH_WINDOW, COARSE_STRIDE, CANONICAL_FPS, frameIndexAt, mergeSpans, refineWindow,
-  spanForRep, spanFrameIndices, valleyPosition, type FrameSpan, type Refinement,
+  COARSE_SMOOTH_WINDOW, COARSE_STRIDE, CANONICAL_FPS, coarseBand, frameIndexAt, mergeSpans,
+  refineWindow, spanForRep, spanFrameIndices, valleyPosition, type FrameSpan, type Refinement,
 } from "./repSpans";
 
 export type RepsFallback =
@@ -1546,11 +1552,24 @@ export function planReps(
   return { plan: { max_reps: maxReps, fallback: null, segments }, spans };
 }
 
-/** Replace each analyzed segment's coarse boundary with the one the dense signal gives (§2.1.1). */
+/**
+ * Replace each analyzed segment's coarse boundary with the one the dense signal gives (§2.1.1).
+ *
+ * `coarseSignal` is here for its BAND, not its samples: a span holds about one repetition's worth
+ * of samples, and percentiles taken over that narrow a slice shift the hysteresis band and move
+ * the boundary with it. Measured on 46 clips — per-span percentiles refine 92.9% of reps exactly
+ * (p95 15.3 frames, max 46); the same spans given the coarse pass's whole-clip range refine 98.6%
+ * exactly (p95 0, max 1). The coarse pass covers the whole clip, which is why that range exists to
+ * be handed over at all.
+ */
 export function refineSegments(
-  plan: RepsPlan, spans: FrameSpan[], denseSignal: (number | undefined)[], lastFrameIndex: number
+  plan: RepsPlan, spans: FrameSpan[], denseSignal: (number | undefined)[],
+  lastFrameIndex: number, coarseSignal: number[]
 ): RepsPlan {
   if (plan.fallback !== null) return plan;
+  // Squat's defaults; a movement with rep knobs would pass its own, and coarseBand orients
+  // internally so the band lands in the same space segmentReps compares against.
+  const band = coarseBand(coarseSignal);
   const segments = plan.segments.map((segment) => {
     if (!segment.analyzed) return segment;
     const coarse = { start: segment.start_frame, end: segment.end_frame };
@@ -1558,7 +1577,7 @@ export function refineSegments(
       ?? spans.find((s) => s.start <= coarse.end && coarse.start <= s.end);
     if (!span) return segment;
     const { start, end, refined } =
-      refineWindow(denseSignal, span, coarse, CANONICAL_FPS, lastFrameIndex);
+      refineWindow(denseSignal, span, coarse, CANONICAL_FPS, lastFrameIndex, band);
     return { ...segment, start_frame: start, end_frame: end, refined };
   });
   return { ...plan, segments };
@@ -1676,7 +1695,7 @@ export async function extractPoseWithReps(
         },
         frames,
       },
-      reps: refineSegments(plan, spans, denseSignal, lastFrameIndex),
+      reps: refineSegments(plan, spans, denseSignal, lastFrameIndex, coarseSignal),
     };
   } finally {
     coarseLandmarker.close();
@@ -2503,36 +2522,145 @@ git commit -m "feat(ui): show which spans of a clip were never examined"
 **T2 已在寫 spec 時完成**（§2.8，46 clips / 70 reps，`REP_PADDING_FRAMES = 24`）。這個 Task 收尾
 剩下的兩項，並把結果寫進 `notes/`。
 
+**T1 用 golden file 而不是跨語言執行**：Python 產生「真實 landmarks → 期望角度」的檔案，vitest
+讀它比對。這樣不需要 node 跑 TS，而且比對變成**常設測試**，不是一次性腳本——`repSignal.ts` 之後
+任何改動都會被擋下。
+
 **Files:**
-- Create: `scripts/pose/compare_ts_rep_signal.py`
+- Create: `scripts/pose/capture_rep_signal_golden.py`
+- Create: `tests/fixtures/rep_signal_golden.json`（由上面的腳本產生，**要進版控**：只有幾十幀，
+  且沒有它 vitest 那側就沒有 ground truth）
+- Create: `frontend/src/test/lib.repSignal.golden.test.ts`
 - Create: `notes/rep_segmentation_sp2_measurements.md`
 
 **Interfaces:**
-- Consumes: Task 2/3 的 TS 模組（以 `node` 執行）、Python 的 `compute_raw`
-- Produces: 無（量測產出）
+- Consumes: Task 2 的 `avgKneeAngle`；Python 的 `raw_frame_metrics`
+- Produces: `tests/fixtures/rep_signal_golden.json`
 
-- [ ] **Step 1: 寫比對腳本**
+- [ ] **Step 1: 寫 golden file 產生腳本**
 
-`scripts/pose/compare_ts_rep_signal.py`：讀一支真實 pose JSON，用 Python 算
-`avg_knee_angle`，同時把 landmarks 丟給 `node --experimental-strip-types` 執行的一小段 TS
-（`import { avgKneeAngle } from "frontend/src/lib/repSignal.ts"`），逐幀比對並印出最大絕對差。
+`scripts/pose/capture_rep_signal_golden.py`：
 
-- [ ] **Step 2: 跑 T1**
+```python
+"""Freeze real landmarks and the angle Python computes from them, for the TypeScript port to match.
 
-`.venv\Scripts\python.exe scripts/pose/compare_ts_rep_signal.py data/runtime/pose_json/<某支>.json`
-預期：最大絕對差 < 1e-6（浮點級）。**若差異更大，是移植有 bug，回 Task 2 修，不要調容差。**
+RS-SP2 recomputes the squat rep signal in the browser, and the backend then TRUSTS the rep windows
+that signal produces -- so a divergence between the two implementations would never surface on its
+own (spec §2.3, §2.7). tests/fixtures/rep_segmentation_cases.json pins signal->windows; this file
+pins landmarks->signal, which is the other half and the one nothing else covers.
 
-- [ ] **Step 3: 跑 T3（真機或桌機瀏覽器）**
+Regenerate only when the Python formula deliberately changes:
+    .venv\\Scripts\\python.exe scripts/pose/capture_rep_signal_golden.py <pose.json>
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+
+from src.pose.pose_rule_detector import raw_frame_metrics  # noqa: E402
+
+OUTPUT = REPO_ROOT / "tests" / "fixtures" / "rep_signal_golden.json"
+# Enough frames to cover a full rep's range of angles without bloating the repo.
+STRIDE = 3
+MAX_FRAMES = 60
+
+
+def main(source: Path) -> None:
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    fps = float((payload.get("metadata") or {}).get("fps", 30.0) or 30.0)
+    cases = []
+    for frame in payload.get("frames", [])[::STRIDE][:MAX_FRAMES]:
+        metrics = raw_frame_metrics(frame, fps)
+        angle = metrics.get("avg_knee_angle")
+        cases.append({
+            "landmarks": frame.get("landmarks"),
+            # null encodes "no measurable angle" -- JSON has no NaN, and the TS side asserts
+            # Number.isNaN for these rather than an equality that would silently pass on undefined.
+            "avg_knee_angle": None if angle is None or not math.isfinite(angle) else float(angle),
+        })
+    OUTPUT.write_text(json.dumps({"source": source.name, "cases": cases}), encoding="utf-8")
+    print(f"wrote {len(cases)} cases from {source.name} to {OUTPUT}")
+
+
+if __name__ == "__main__":
+    main(Path(sys.argv[1]))
+```
+
+- [ ] **Step 2: 產生 golden file**
+
+`.venv\Scripts\python.exe scripts/pose/capture_rep_signal_golden.py data/runtime/pose_json/<某支>.json`
+
+挑一支**有完整深蹲**的（角度範圍夠寬）。確認輸出的 `avg_knee_angle` 不是清一色 `null`。
+
+- [ ] **Step 3: 寫 vitest 比對（T1 本體）**
+
+`frontend/src/test/lib.repSignal.golden.test.ts`：
+
+```ts
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, it, expect } from "vitest";
+import { avgKneeAngle, type SignalLandmark } from "../lib/repSignal";
+
+// Ground truth generated by scripts/pose/capture_rep_signal_golden.py from a REAL clip. The shared
+// segmentation fixture pins signal->windows; this pins landmarks->signal, and nothing else does.
+//
+// NOT `new URL("../../../tests/...", import.meta.url)` — Vite 6's asset plugin statically rewrites
+// that form into an http://.../@fs/... URL, which readFileSync rejects. Resolve from the test
+// file's own directory instead, so the path stays independent of where vitest was launched from.
+// (Same reason and same shape as lib.repSegmentation.test.ts.)
+const FIXTURE = resolve(
+  dirname(fileURLToPath(import.meta.url)), "../../../tests/fixtures/rep_signal_golden.json"
+);
+const golden = JSON.parse(readFileSync(FIXTURE, "utf-8")) as {
+  source: string;
+  cases: { landmarks: SignalLandmark[] | null; avg_knee_angle: number | null }[];
+};
+
+describe("avgKneeAngle matches Python on real landmarks", () => {
+  it("has a golden file with measurable frames in it", () => {
+    expect(golden.cases.length).toBeGreaterThan(0);
+    expect(golden.cases.some((c) => c.avg_knee_angle !== null)).toBe(true);
+  });
+
+  it("agrees to floating-point precision on every frame", () => {
+    for (const [i, testCase] of golden.cases.entries()) {
+      const got = avgKneeAngle(testCase.landmarks);
+      if (testCase.avg_knee_angle === null) {
+        expect(Number.isNaN(got), `frame ${i} should be unmeasurable`).toBe(true);
+      } else {
+        // A real port difference (2-D instead of 3-D, a different visibility gate) shows up far
+        // above this; anything at 1e-6 is float32-vs-float64 in the Python side's arithmetic.
+        expect(Math.abs(got - testCase.avg_knee_angle), `frame ${i}`).toBeLessThan(1e-6);
+      }
+    }
+  });
+});
+```
+
+- [ ] **Step 4: 跑 T1**
+
+cwd = `frontend/`，執行：`yarn test src/test/lib.repSignal.golden.test.ts`
+預期：PASS。**若不過，是 Task 2 的移植有 bug，回去修，不要放寬容差。**
+
+- [ ] **Step 5: 跑 T3（真機或桌機瀏覽器）**
 
 用 `yarn dev` 開起來，錄一段 ~30 秒 5 下的深蹲，在 devtools console 量：
 (a) 粗掃牆鐘時間、(b) 密集牆鐘時間、(c) 兩次模型載入時間、(d) SP2 之前的總時間（切到 main 對照）。
 
-- [ ] **Step 4: 記錄結果**
+- [ ] **Step 6: 記錄結果**
 
 `notes/rep_segmentation_sp2_measurements.md` 寫下 T1、T2（引用 §2.8）、T3 的數字，
 以及 T3 對「要不要接即時 landmarks」（spec §2.4）的結論。**如實記錄，包含整體沒有變快的情況。**
 
-- [ ] **Step 5: 跑完整驗證**
+- [ ] **Step 7: 跑完整驗證**
 
 ```
 .venv\Scripts\python.exe -m pytest tests/
@@ -2540,11 +2668,12 @@ git commit -m "feat(ui): show which spans of a clip were never examined"
 ```
 cwd = `frontend/`：`yarn test:coverage` 然後 `yarn build`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add scripts/pose/compare_ts_rep_signal.py notes/rep_segmentation_sp2_measurements.md
-git commit -m "test(pose): verify the TS rep signal matches Python and record SP2 timings"
+git add scripts/pose/capture_rep_signal_golden.py tests/fixtures/rep_signal_golden.json \
+        frontend/src/test/lib.repSignal.golden.test.ts notes/rep_segmentation_sp2_measurements.md
+git commit -m "test(pose): pin the TS rep signal against Python on real landmarks"
 ```
 
 ---
@@ -2576,3 +2705,160 @@ git commit -m "test(pose): verify the TS rep signal matches Python and record SP
   註解互相引用。
 
 **沒有涵蓋且刻意如此**：spec §2.4 的即時 landmarks 重用（延後，由 Task 12 的 T3 數字決定）。
+
+---
+
+## Task 5b：精修改用粗掃導出的全片 band
+
+**Spec:** §2.1.1（已更新）
+
+**為什麼有這個 task**：Task 5 的語料測試在修好保真度之後**紅了**——精修完全命中從 95.7% 掉到
+92.9%、p95 從 0 變成 15.3 幀、max 46 幀。原因是每個 span 各自從自己的樣本導出百分位帶，樣本一窄
+帶就偏。實測比較（46 clips / 70 reps）：
+
+| 精修的 band 來源 | 完全命中 | p95 | max |
+|---|---|---|---|
+| 每個 span 自己導出（現況） | 92.9% | 15.3 幀 | 46 幀 |
+| **粗掃訊號的全片 band** | **98.6%** | **0.0** | **1 幀** |
+
+粗掃訊號涵蓋整支片子，所以它的百分位在正式路徑上拿得到。
+
+**Files:**
+- Modify: `frontend/src/lib/repSegmentation.ts`（`SegmentOptions` 加 `band`）
+- Modify: `frontend/src/lib/repSpans.ts`（`refineWindow` 收 band 並傳下去；`coarseBand` 新函式）
+- Modify: `src/pose/rep_segmentation.py`（`segment_reps` 加對應的選填參數，兩邊維持一致）
+- Modify: `tests/test_coarse_segmentation_corpus.py`（用新 band、門檻改成實測值）
+- Test: `frontend/src/test/lib.repSegmentation.test.ts`、`frontend/src/test/lib.repSpans.test.ts`
+
+**Interfaces:**
+- Produces:
+  - TS `SegmentOptions` 增加 `band?: { low: number; high: number }`
+  - TS `coarseBand(coarseSignal: number[]): { low: number; high: number } | null`
+  - TS `refineWindow(denseSignal, span, coarse, fps, lastFrameIndex, band)`
+  - Python `segment_reps(..., band: tuple[float, float] | None = None)`
+
+- [ ] **Step 1: 先寫失敗的測試（TS）**
+
+`frontend/src/test/lib.repSegmentation.test.ts` 附加：
+
+```ts
+describe("segmentReps with an externally supplied band", () => {
+  it("uses the given range instead of the slice's own percentiles", () => {
+    // Same slice, two bands. A slice whose own dynamic range is narrow gets a DIFFERENT
+    // hysteresis band than one told the whole clip's range — that difference is the entire
+    // reason this parameter exists (spec §2.1.1).
+    const slice = Array.from({ length: 60 }, (_, i) => 115 + 55 * Math.cos((2 * Math.PI * i) / 60));
+    const own = segmentReps(slice, { fps: 30 });
+    const wide = segmentReps(slice, { fps: 30, band: { low: 0, high: 340 } });
+    expect(own).toHaveLength(1);
+    // A band twice as wide puts `enter` far above anything in the slice, so every sample is
+    // "deep" and the excursion spans the whole slice.
+    expect(wide[0].start).toBeLessThanOrEqual(own[0].start);
+  });
+
+  it("ignores a degenerate band rather than dividing by a zero span", () => {
+    const slice = Array.from({ length: 60 }, (_, i) => 115 + 55 * Math.cos((2 * Math.PI * i) / 60));
+    expect(segmentReps(slice, { fps: 30, band: { low: 5, high: 5 } })).toEqual([]);
+  });
+});
+```
+
+`frontend/src/test/lib.repSpans.test.ts` 附加：
+
+```ts
+describe("coarseBand", () => {
+  it("returns the coarse signal's 5th/95th percentiles", () => {
+    // The whole-clip range, computed from the pass that DOES cover the whole clip.
+    const band = coarseBand([1, 2, 3, 4]);
+    expect(band).not.toBeNull();
+    expect(band!.low).toBeCloseTo(1.15, 6);   // numpy: np.percentile([1,2,3,4], 5)
+    expect(band!.high).toBeCloseTo(3.85, 6);  // numpy: np.percentile([1,2,3,4], 95)
+  });
+
+  it("returns null when the signal has no finite samples", () => {
+    expect(coarseBand([NaN, NaN])).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: 跑測試確認失敗**
+
+cwd = `frontend/`：`yarn test src/test/lib.repSegmentation.test.ts src/test/lib.repSpans.test.ts`
+預期：FAIL（`band` 不是有效選項、`coarseBand` 未匯出）
+
+- [ ] **Step 3: TS 實作**
+
+`repSegmentation.ts`：`SegmentOptions` 加 `band?: { low: number; high: number }`，並把 `segmentReps`
+裡導出 `low`/`high` 的三行改成：
+
+```ts
+  // The band may be supplied by the caller. RS-SP2 refines a rep's boundary inside a padded span,
+  // and a span's OWN percentiles are computed over one repetition's worth of samples -- narrow
+  // enough that the hysteresis band shifts and the boundary moves with it. Measured on 46 real
+  // clips: per-span percentiles refine 92.9% of reps exactly (p95 15.3 frames, max 46), while the
+  // same spans given the whole clip's range refine 98.6% exactly (p95 0, max 1). The caller has a
+  // whole-clip range available because the coarse pass covers the whole clip. See the SP2 spec
+  // §2.1.1, and `coarseBand` in repSpans.ts.
+  const low = options.band ? options.band.low : percentile(finite, PERCENTILE_LOW);
+  const high = options.band ? options.band.high : percentile(finite, PERCENTILE_HIGH);
+  const span = high - low;
+  if (span <= 0) return [];
+```
+
+（`finite.length < 2 * minFrames` 的提前返回維持不變——它量的是樣本數，與 band 無關。）
+
+`repSpans.ts`：新增
+
+```ts
+/** The whole-clip dynamic range, taken from the pass that covers the whole clip (spec §2.1.1). */
+export function coarseBand(coarseSignal: number[]): { low: number; high: number } | null {
+  const finite = coarseSignal.filter(Number.isFinite).sort((a, b) => a - b);
+  if (finite.length === 0) return null;
+  return { low: percentileOf(finite, PERCENTILE_LOW), high: percentileOf(finite, PERCENTILE_HIGH) };
+}
+```
+
+`percentileOf` 與 `PERCENTILE_LOW/HIGH` 從 `repSegmentation.ts` 匯入——**不要複製一份插值實作**，
+numpy 的線性插值語意只能有一個來源。若 `percentile` 目前不是 exported，把它 export 出來。
+
+`refineWindow` 的簽名尾端加 `band: { low: number; high: number } | null`，並把內部呼叫改成
+`segmentReps(centeredMedian(slice, DENSE_SMOOTH_WINDOW), { fps, band: band ?? undefined })`。
+
+`refineSegments`（`poseExtract.ts`，Task 6 尚未寫）之後會負責算一次 `coarseBand` 並傳進來；
+本 task 只要讓介面就位並更新既有呼叫端。
+
+- [ ] **Step 4: Python 同步**
+
+`src/pose/rep_segmentation.py` 的 `segment_reps` 加 `band: tuple[float, float] | None = None`，
+在算 `low`/`high` 的地方改成用它（有傳就用，沒傳就走百分位），並在 docstring 記下與 TS 相同的理由
+與那組實測數字。**不要改任何既有預設行為**——`tests/test_rep_segmentation.py` 與共用 fixture
+必須逐位元不變。
+
+- [ ] **Step 5: 更新語料測試**
+
+`tests/test_coarse_segmentation_corpus.py`：
+- 精修時傳入從**粗掃訊號**算出的 band（`np.percentile(finite_coarse, 5/95)`，`_oriented` 之後）
+- 門檻改成新的實測值：`MIN_REFINED_EXACT = 0.98`、`MAX_REFINED_P95 = 0.0`
+- 在該測試的 docstring 記下「per-span band 會掉到 92.9%/p95 15.3」這個被取代的數字，以及為什麼
+  不接受它（`assign_phases` 的前 15% setup 切片會落在下降段中間）
+
+- [ ] **Step 6: 更新 `repSpans.ts` 的常數註解**
+
+`REP_PADDING_FRAMES` 與 `refineWindow` 的註解目前引用已被取代的 95.7%/p95-0。改成新數字，
+並說明 band 的來源。
+
+- [ ] **Step 7: 全部驗證**
+
+```
+.venv\Scripts\python.exe -m pytest tests/
+```
+cwd = `frontend/`：`yarn test` 然後 `yarn build`
+預期：全綠，含語料測試的五個斷言。
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add frontend/src/lib/repSegmentation.ts frontend/src/lib/repSpans.ts \
+        src/pose/rep_segmentation.py tests/test_coarse_segmentation_corpus.py frontend/src/test/
+git commit -m "fix(pose): refine rep boundaries against the whole-clip band"
+```

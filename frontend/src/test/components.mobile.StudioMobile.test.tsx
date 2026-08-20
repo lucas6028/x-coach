@@ -288,6 +288,51 @@ describe("MobileVideoCard — the stage", () => {
     expect(onSeek).toHaveBeenCalledWith(1.0);
   });
 
+  // The phone draws its own scrub bar instead of mounting Timeline, so RS-SP2's two honesty
+  // surfaces had to be ported here rather than inherited. Without them a verdict computed on 3 of
+  // 5 reps reads, on a phone, as a verdict on all 5.
+  it("hatches the reps it never analyzed and says which ones it did", () => {
+    const analysis = {
+      ...mockAnalysis,
+      reps: {
+        detected: 3,
+        analyzed: [1, 3],
+        max_reps: 3,
+        fallback: null,
+        segments: [
+          { index: 1, start_frame: 0, end_frame: 29, start_time: 0, end_time: 1, analyzed: true, partial: false },
+          { index: 2, start_frame: 30, end_frame: 59, start_time: 1, end_time: 2, analyzed: false, partial: false },
+          { index: 3, start_frame: 60, end_frame: 89, start_time: 2, end_time: 3, analyzed: true, partial: false },
+        ],
+      },
+    };
+    renderStudio(analysis as Analysis);
+    expect(screen.getAllByTestId("unanalyzed-span")).toHaveLength(1);
+    expect(screen.getByText(/3 reps found, analyzed #1, 3/)).toBeInTheDocument();
+  });
+
+  it("says the whole clip was analyzed on a segmentation fallback, and nothing at all without reps", () => {
+    const fallback = {
+      ...mockAnalysis,
+      reps: {
+        detected: 1, analyzed: [], max_reps: 3, fallback: "only_partial_reps",
+        segments: [
+          { index: 1, start_frame: 0, end_frame: 89, start_time: 0, end_time: 3, analyzed: true, partial: true },
+        ],
+      },
+    };
+    renderStudio(fallback as Analysis);
+    expect(screen.queryAllByTestId("unanalyzed-span")).toHaveLength(0);
+    expect(screen.getByText("Whole clip analyzed")).toBeInTheDocument();
+  });
+
+  it("shows no rep summary for an analysis that carries no `reps` field", () => {
+    renderStudio();
+    expect(screen.queryAllByTestId("unanalyzed-span")).toHaveLength(0);
+    expect(screen.queryByText(/reps found/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Whole clip analyzed")).not.toBeInTheDocument();
+  });
+
   it("seeks when the track itself is clicked", () => {
     const { onSeek } = renderStudio();
     const track = document.querySelector("[title='Knee Valgus']")!.parentElement!;
