@@ -1,693 +1,88 @@
 # TODO
 
-> **2026-08-08 全面盤點**：對照 repo 實際程式碼與已合併 PR 逐項核實（前次盤點 2026-07-07，
-> 之間 549 個 commit）。每個被翻成 ✅ 的項目都附 commit / PR / 路徑作為證據。
->
-> 現況摘要：
->
-> - **規則偵測器 10/16 動作**：squat、push-up、overhead press、lunge、deadlift、row、
->   band pull apart、bicep curl、arm abduction、arm VW（`src/pose/movements/`，registry 驅動；
->   `/api/movements` 由 registry 導出，新增偵測器不需改前端）。PR #47 #48 #51 #53 #54。
->   **Group D（Bicep Curl / Arm Abduction / Arm VW）於 2026-08-09 完成。**
-> - **逐 rep 偵測已上線**（`src/pose/rep_segmentation.py`，PR #49）；RS-SP2「只密集抽取
->   要評分的 rep」仍在 **PR #50（未合併）**。
-> - **chat 已升級為 tool-calling 迴圈**（PR #57）：`get_analysis` / `kg_query` / `rag_search`
->   ＋ SSE tool 事件 ＋ tool trace 落庫。**Critic-lite 仍未做**。
-> - **物件儲存上線**（PR #55，Cloudflare R2 + presigned 直傳）。
-> - **LINE 全線上線**：Login/LIFF（#37 #43）、訓練摘要 bot（#41）、admin 診斷面板（#45 #46）。
-> - **前端全面改版**（#58 #59 #60 #62）：studio、側邊 rail、My Records、動作圖書館、新 X mark。
-> - **仍未動**：contrastive learning、VideoMAE↔pose fusion、非同步佇列（Celery/Redis）、
->   Critic-lite、temporal localization（VideoMAE 路線）。
->
-> 總路線圖見文末「Pipeline 與 Agent Harness 路線圖」，
-> 設計細節見 `docs/ai-coach-pipeline-and-agent-harness.md`。
+> 2026-08-20 精簡版。只留現況與未完成項；細節見 `notes/`、`docs/`、各 PR。
+> 前次完整盤點：2026-08-08（git history 可查）。
 
-## 目標定義
+## 現況（已完成，不再列）
 
-- [x] 明確定義目前 `Squat` 任務主軸為（`研究計畫.md` Phase 1 已載明）：
-  - `error detection`
-  - `error classification`
-  - `temporal localization`
-  - `contrastive representation learning`
-- [ ] 避免將目前資料描述成完整 `AQA score regression`（計畫書措辭需再檢查一輪）
-- [x] 將計畫書中的敘述微調為（`研究計畫.md` 已含）：
-  - 使用預訓練 `VideoMAE V2` 作為時空特徵提取器
-  - 搭配對比學習強化正常動作與錯誤動作的表徵可分性
-  - 融合 `MediaPipe` 幾何特徵提升可解釋性
+- **規則偵測器 16/16 動作設計完成、14 個註冊上線**（`src/pose/movements/`，registry 驅動；
+  Jumping Jacks / High Knee 刻意不註冊——零條 live 規則）。全部 `validated=False`（Beta）。
+- **逐 rep 偵測**（PR #49）、**tool-calling chat**（PR #57）、**R2 物件儲存**（PR #55）、
+  **LINE Login/LIFF/bot/admin 面板**（#37 #41 #43 #45 #46）、**訓練菜單**（PR #80）、
+  **Docker + Azure Container Apps 上線**（PR #82）、**前端改版**（#58–#60 #62 #83 #84）。
+- **研究線已結案**：Fit3D 深度瓶頸系列＋三個盲點否證、模型融合否證、相機擺位掃描、
+  VideoMAE Stage A（pooling 修正後 0.657，通過）/ Stage B（retention 失敗、fusion 無增益，
+  不進 Stage C）/ REHAB24 framing 三臂（「差的是人不是框」）。
+- Squat 資料集規模、標註格式、baseline 指標（VideoMAE-only、pose-only）皆已在 `notes/` 記錄。
 
-> ⚠️ **2026-07-29 論文範圍決策尚未回寫到本節與下方「模型設計 / 實驗設計」**：
-> 已決定寫**一篇**論文（非碩論），主軸是「可解釋性強迫使用可引用的固定閾值 ⇒ MPJPE 不是對的
-> 目標」，統合 Fit3D 與 Fitness-AQA 兩條線。這會重新界定下面 Stage 2/4 與實驗設計的優先序，
-> 但屬於**計畫改寫**而非狀態更新，故此處只留標記，待決定後再改。
-> 角度整理在 `paper` 分支的 `notes/paper_angles.md`（commit `a9f27386`，尚未進 main）。
+## 論文
 
-## 資料集現況整理
+- [ ] 2026-07-29 決定：**一篇**論文，主軸「可解釋性強迫使用可引用固定閾值 ⇒ MPJPE 不是對的目標」，
+  統合 Fit3D 與 Fitness-AQA；E5 是唯一缺口（`notes/paper_angles.md`）。
+- [ ] 文件層：寫明資料集可做/不可做（非完整 AQA regression、`knees_inward` 不平衡、標註粒度不一）。
 
-> `notes/dataset-summary.md` 是跨資料集的質性 survey（含 EgoExo-Fitness 標註量表）；
-> 下列 Squat 數字目前只零星出現在實驗筆記中
-> （例如 `notes/rtmpose_result_analysis_and_backend_comparison.md` 記了 `n=1623`），
-> 尚未正式整理成一份資料集規格文件。
+## 研究支線（未開始，優先序依論文決定）
 
-- [x] 確認已可直接使用的標註與切分：
-  - `data/Squat/Labeled_Dataset/Splits/train_keys.json`
-  - `data/Squat/Labeled_Dataset/Splits/val_keys.json`
-  - `data/Squat/Labeled_Dataset/Splits/test_keys.json`
-- [x] 記錄目前資料規模：
-  - `Labeled_Dataset/videos`: 1739 支影片
-  - split union: 1623 支有正式 train/val/test key
-  - `Unlabeled_Dataset/videos`: 4970 支影片
-- [x] 記錄標註類型：
-  - `error_knees_forward.json`: 影片 key 對應錯誤時間區段
-  - `error_knees_inward.json`: 影片 key 對應錯誤時間區段
-  - `labels_shallow_depth.json`: 片段/局部 label
-- [x] 記錄標註格式：
-  - `[video_id]: [error_start_time, error_end_time]`
-  - 無錯誤時為空陣列
-- [x] 記錄影片基本特性：
-  - 多數影片約 `30 FPS`
-  - 長度約 `3 秒`
-  - 解析度約 `480x600`
+- [ ] Contrastive learning（Stage 2）：repo 內無任何實作。
+- [ ] VideoMAE ↔ pose 特徵融合（late fusion / concat+MLP）；Stage B 結果已降低其價值。
+- [ ] VideoMAE temporal localization（segment IoU / frame-level P/R）。
+- [ ] 特徵空間視覺化（t-SNE / UMAP）。
+- [ ] 即時模式：nlf_s 系列實驗（Exp 1–3）與 CPU 蒸餾學生，全部未開始。
+- [ ] Fitness-AQA 淺蹲下游測試程式仍在 `feat/fitness-aqa-squat-depth`，決定合併或留研究分支。
 
-## 資料可行性結論
+## 規則偵測器：待驗證與已知缺陷
 
-- [ ] 在文件中明確寫出：
-  - 目前資料集可以進行訓練、驗證、測試
-  - 可做 `VideoMAE V2` 特徵提取
-  - 可做自監督 / 弱監督對比學習
-  - 可做監督式錯誤辨識與片段定位
-- [ ] 在文件中補充限制：
-  - 沒有完整連續品質分數
-  - 不適合直接做傳統 `AQA regression`
-  - 類別不平衡，特別是 `knees_inward`
-  - 標註粒度不完全一致
+驗證（標註資料在手、沒人跑）：
+- [ ] **Arm Abduction** ← REHAB24-6 Ex1（178 下，單手變體；只有 trunk-lean 規則講得上話，出貨 12° 門檻 0/178 觸發）。
+- [ ] **Arm VW** ← REHAB24-6 Ex2（208 下，雙手；只有 `vw_loss_of_elevation` 有訊號，AUC 0.735）。
+- [ ] **Shoulder Bridge** ← EgoExo-Fitness 77 個評分 action；缺 `frames_open` 的 `.ac` 分割（實際 21 parts / ~66 GB）。
+- [ ] 把 `validated` 變成「有標註集＋回歸腳本」；golden-set 回歸進 CI（Lunge Ex5 腳本已有）。
 
-## 模型設計
+框架層缺陷（刻意不在規則內修）：
+- [ ] **靜止片段會以滿分 fire 所有 incomplete-ROM 規則**：`segment_reps` 百分位閾值是 scale-free，
+  0.4° 抖動切成 3 rep。修法二選一：noise floor，或把 `fallback` 接進 `RuleContext`。
+  `tests/test_situp.py::test_a_motionless_clip_fires_this_rule_at_full_severity` 釘住，修好會轉紅。
+- [ ] **`angle_degrees` 無號、對 180° 對稱**：>180° 的規則永遠不 fire，<160° 規則會對「拱過頭」反向提示。
+  兩種補號法在真實影片都失敗。待盤點 registry 內依賴角度方向的規則。
+- [ ] **`view_estimation.py` 在站姿受試者也系統性反轉**（Leg Abduction 以 Ex4 `cam17_orientation` 實測）。
+  待盤點所有 gate/discount 在 view 標籤上的規則（至少 squat `knees_inward`、arm_abduction 兩條 frontal）。
+- [ ] `arm_abd_lr_asymmetry` / `ohp_asymmetric_press` 是否需 view gate（Ex2 證明斜角**製造**不對稱，arm_vw 已 gate）。
+- [ ] `band_pull_apart.rule_shrugging` 的 shoulder-ear gap confound 未在自己資料量過（方向上應較小）。
+- [ ] citation 與資料方向相反的 `Pelvic Drop` 類規則，其餘動作待查。
+- [ ] Bicep Curl ROM 門檻貼邊（1/40、0/40）、伸展判定受 rep trimming 影響——只記錄不調（no-threshold-tuning）。
 
-> `src/video/` 自 2026-07-07 起 **0 個 commit**——VideoMAE 這條線自上次盤點後沒有推進。
+## KG 缺口（改 `scripts/knowledge/stub_general_movements_v3.py`，graphml gitignore ⇒ 重生成是部署步驟）
 
-### Stage 1: VideoMAE V2 特徵提取 — ✅ 大致完成（research，見 `notes/videomae_classifier_experiment_summary.md`）
+- [ ] Band Pull Apart `Bent Elbows` 無連結、`trunk_extension_compensation` 無節點。
+- [ ] Bicep Curl `Elbow Drift Forward` 無連結。
+- [ ] Arm Abduction / Arm VW 無 asymmetry 節點（現用泛用 `Muscle Imbalance`，刻意保留薄卡片）。
+- [ ] **Sit-up：圖講完整仰臥起坐、spec 講捲腹**，交集為零——要先決定 app 出哪一種。
+- [ ] Shoulder Bridge `No Segmental Spinal Articulation` dangling；`Pelvic Drop` 無節點。
 
-- [x] 決定使用預訓練 `VideoMAE V2` 作為 backbone
-- [x] 決定先採用：
-  - frozen backbone（特徵提取路線，見 `src/video/`）
-- [ ] 決定 clip 長度（`16` vs `32 frames`）— 實驗設定需回寫成正式決策
-- [x] 決定特徵輸出方式：CLS token（rehab24 分支同款）
+## 系統 / 產品
 
-### Stage 2: Contrastive Learning — ⏸ 未開始（2026-08-08 複查：`src/` 與 `scripts/` 全 repo 無 `contrastive` / `InfoNCE` 實作）
-
-- [ ] 使用 `Unlabeled_Dataset/videos` 做 domain adaptation
-- [ ] 設計正樣本對：
-  - 同一影片不同 temporal crop
-  - 同一影片不同 augmentation
-- [ ] 設計負樣本對：
-  - 不同影片 clip
-  - 不同錯誤型態 clip
-- [ ] 評估 loss 選項：
-  - `InfoNCE`
-  - `Supervised Contrastive Loss`
-  - `classification loss + contrastive loss`
-
-### Stage 3: Supervised Downstream Task — ✅ 完成（video-level，`src/video/video_level_error_classification.py`）
-
-- [x] 建立影片級 / clip 級任務：
-  - `knees_forward`
-  - `knees_inward`
-  - `shallow_depth`
-- [x] 決定任務形式：binary classification（video-level；temporal localization 未做，見 Stage 3.5）
-- [x] 建立 classification head
-- [x] 建立 threshold tuning 流程（`find_best_threshold()` 在 val set 上掃描，非固定 0.5）
-- [ ] Stage 3.5：temporal localization —— VideoMAE 路線仍無 segment IoU / frame-level 定位；
-  時間定位目前只靠規則偵測器，且自 PR #49 起是 **per-rep** 而非整支影片一次判定
-  （`src/pose/rep_segmentation.py`）
-
-### Stage 4: Pose / Geometry Fusion — 🔶 一半（pose-only baseline 已做，VideoMAE↔pose fusion 未跑）
-
-- [x] 保留 `MediaPipe` 或 pose estimation 模組（production 規則偵測器即是）
-- [x] 計算幾何特徵（規則偵測器已算）：
-  - 膝角
-  - 髖角
-  - 軀幹傾角
-  - 膝蓋與腳尖相對偏移
-- [ ] 設計融合方式（`notes/pose_only_classifier_experiment_summary.md` 明列為 next step，未執行）：
-  - late fusion
-  - feature concatenation + MLP
-- [x] 將幾何特徵用於可解釋輸出與結果驗證（FaultCard 的 evidence 欄位）
-- [x] **（相鄰但不同的問題）3D pose 模型之間的 cue-level 融合已被否證**：
-  `notes/model_fusion_gate_results.md` — 直接平均多個姿態模型的 cue 會失敗（誤差相關 0.55–0.78，
-  表面「增益」其實是 bias 互抵）。**這不推翻上面的 VideoMAE＋pose 特徵融合**（不同層級、
-  不同模態），該項仍為未執行。
-
-## 即時性規劃 — ⏸ 未開始（設計文件 §2.4 已納入「即時 webcam 模式」為遠期項）
-
-> 2026-08-08 複查：`scripts/`、`notes/`、`src/` 沒有任何 `nlf_s`（S backbone）實驗產物，
-> Exp 1–3 三項全部未開始。唯一相關的既有結果是瀏覽器端 MediaPipe 擷取
-> （PR #44、#56：client-side pose capture + 推論最佳化），走的是完全不同的路。
-
-- [ ] 明確區分兩種系統模式：
-  - 離線分析模式
-  - 準即時回饋模式
-- [ ] 在文件中說明 `VideoMAE` 不適合逐幀超低延遲即時回饋
-- [ ] 若要做準即時，考慮：
-  - 小型 backbone
-  - 較短 clip
-  - 較低解析度
-  - sliding window inference
-- [ ] 系統角色分工：
-  - `MediaPipe` 負責即時幾何警示
-  - `VideoMAE` 負責高品質時空判斷
-- [ ] Exp 1(先做,最便宜,無相依):nlf_s_multi 過現有 Fit3D 框架 + 在這台機器上實測 CPU latency。回答「深度恢復在 S backbone 下還在不在、CPU 多快」。⚠️ 版本對齊:你們跑的是 v0.2.0 nlf_l_multi,配對就用 v0.2.0 nlf_s_multi(v0.2.2 修了 detect_smpl_batched 的 translation/2D 投影 bug,S-vs-L delta 要同版本才公平)。
-- [ ] Exp 2(延遲槓桿):nlf_s_crop + 便宜 box(MediaPipe 偵測/每 N 幀追蹤),量 CPU latency 與 Fit3D 上的準確度保留。
-- [ ] Exp 3(1–2 有前景才做):接一個非 NLF 的輕量架構(ROMP 或 HybrIK)當第二點交叉驗證,寫 adapter 到同 npz。
-- [ ] 訓一個 CPU 學生(輸入 MediaPipe 2D+world 或裁切影像,目標 NLF depth),直接把「NLF 的深度恢復」蒸餾進一個 CPU 模型——這比找現成輕量模型更精準命中「便宜地拿回 NLF 深度」。列為 stretch,因為工程量較大。
-
-## 如何辨識 VideoMAE 的結果
-
-- [x] 明確區分 `VideoMAE` 原始輸出是特徵向量，不是人類可讀文字
-- [x] 決定下游辨識方式：接 classification head（已實作）
-- [ ] 滑動視窗做時間片段辨識（未做，同 Stage 3.5）
-- [x] 建立輸出格式（由規則 pipeline 產出，VideoMAE 路線尚未接入）：
-  - 錯誤類型
-  - 發生時間點
-  - 信心分數
-  - 對應建議
-- [ ] 加入特徵空間視覺化（未做）：
-  - `t-SNE`
-  - `UMAP`
-
-## 驗證指標
-
-### 影片級二元分類 — ✅ 已在 baseline 實驗回報
-
-- [x] 計算：
-  - `Accuracy = (TP + TN) / (TP + TN + FP + FN)`
-  - `Precision = TP / (TP + FP)`
-  - `Recall = TP / (TP + FN)`
-  - `F1 = 2 * Precision * Recall / (Precision + Recall)`
-
-### 規則偵測器的標註驗證 — 🔶 起步（2026-08-08 新增：這一節原本不存在）
-
-- [x] 第一個對照人工標註驗證的偵測器：**Lunge**（PR #51，
-  `notes/lunge-rule-validation.md`）——REHAB24-6 `Ex5`，174 個人工標註 rep、8 位受試者、
-  兩台正交攝影機。這是本 repo **第一個**被真實標註檢驗過的偵測器。
-  - 結果：出貨用的 lead-leg cue **在三維下就是錯的**（不只是投影損失）；
-    規格書自己定義的另一半替代量測從單目 2D 拿到 0.959/0.894。
-  - 注意：**沒有任何閾值因此被調整**，`LUNGE_DETECTOR.validated` 仍為 `False`。
-- [ ] Squat / Overhead Press / Push-up / Deadlift / Row / Band Pull Apart / Bicep Curl / Arm
-  Abduction / Arm VW 九個偵測器仍是「spec-derived、UNVALIDATED」，前端以 Beta tag 標示
-  （`/api/movements` 的 `validated` 欄位）
-- [ ] **Arm Abduction 的標註驗證：第一次「有資料、只是還沒跑」**（2026-08-09 記錄）。
-  REHAB24-6 `Ex1` 就是 arm abduction：**178 下、9 位受試者（每位都同時有正反例）、
-  90 correct / 88 incorrect**，0 筆標記 mocap 有誤，13 支影片的 marker 3D 與 MediaPipe
-  landmark cache（`data/REHAB24-6/processed/mediapipe_landmarks_cache/`）都在。從 OHP 之後
-  每個偵測器都寫著「沒有標註資料」，對這個動作那句話是錯的，正確說法是**沒有人跑過**。
-  要跑的樣子見 `notes/lunge-rule-validation.md`。三個先驗限制，排範圍前先讀：
-  (i) Ex1 **178/178 都是單手**（`exercise_subtype = right arm`），是這套規則沒有模型化的變體，
-  所以 `arm_abd_lr_asymmetry` 在那裡**兩個方向都驗不了**；
-  (ii) `arm_abd_shoulder_shrug` 恆為 silent，沒有東西可驗；
-  (iii) `arm_abd_contralateral_trunk_lean` 是唯一 Ex1 真的講得上話的規則，而它的 cue 在
-  marker 3D 上已經拿到 **per-subject median AUC 0.800**，出貨的 12° 門檻卻是 **0/178** 觸發
-  ——驗證會量到「真 cue vs 落在分佈尾巴外的切點」。
-- [ ] **Arm VW 的標註驗證：第一次「資料就是 app 模型化的那個變體」**（2026-08-09 記錄）。
-  REHAB24-6 `Ex2` 就是 arm VW：**208 下——非深蹲類動作裡最大的一組標註**（Lunge 174、
-  Arm Abduction 178）、9 位受試者（每位都同時有正反例）、**94 correct / 114 incorrect**，
-  0 筆標記 mocap 有誤，12 支影片的 marker 3D 與 MediaPipe landmark cache 都在。
-  而且**是雙手動作**——不是從空白的 `exercise_subtype` 推的，是量出來的：每下左右
-  excursion 比值中位數 **0.954**（最小 0.791）、within-rep r(L,R) 中位數 **0.9977**。
-  Arm Abduction 因為 Ex1 是單手才得去借 Fit3D，這裡不需要。三個先驗限制：
-  (i) `vw_shrug_substitution` 恆為 silent，沒有東西可驗；
-  (ii) `vw_incomplete_excursion` 與 `vw_lr_asymmetry` 對 Ex2 的標註都在**隨機水準**
-  （per-subject 0.494 與 0.375–0.513）——這是關於 **Ex2 的錯誤型態**的證據，不是關於規則的；
-  (iii) `vw_loss_of_elevation` 是唯一 Ex2 講得清楚的規則，去掉退化的 person 8（2 correct /
-  20 incorrect）後 per-subject AUC **0.735**，而出貨門檻在 3D 上觸發 31/208、經估測器 9/208。
-- [ ] **檢查 `arm_abd_lr_asymmetry`（與 `ohp_asymmetric_press`）是否該加 view gate**
-  （2026-08-09 開，未跑）。`arm_abduction.rule_lr_asymmetry` 不 gate 的理由寫成「斜角會把兩隻手
-  一起壓縮，所以真實不對稱只會讀小——只會漏報不會誤報」。在 **Ex2**（arm VW、雙手、208 下）
-  上按攝影機朝向拆開量，這個理由**被推翻**：`front` 片段 MediaPipe 的 `|L−R|` 中位數 **5.9°**
-  對 marker 的 4.6°（理由成立），`half-profile` 片段是 **16.0°** 對 **4.1°**，同一個 12° 切點在
-  3D 判定為對稱的 99 下裡觸發 **66 下**。斜角不是壓縮不對稱，是**製造**不對稱。
-  `arm_vw.rule_lr_asymmetry` 因此 gate 到 `{front, rear}`（代價：production 49 支裡只活 9 支）。
-  **`arm_abduction.py` 刻意沒動**，因為量測離那條規則的運作條件有三步推論：資料是 Ex2 不是 Ex1
-  （Ex1 單手，那條規則的誤報率在那裡量不到）、是 `image` 2D cache 而 production 走
-  `angle_degrees(dims=3)`（cache 沒有 image-z）、是前半球斜角而 production 是 37/49 `rear_oblique`。
-  要跑的是：拿 Arm Abduction 自己的資料量一次，然後決定 gate 或用量測而非論證來支持折扣。
-- [ ] 把 `validated` 從「人工判斷」變成「有標註集撐腰」：每個動作至少一組標註資料 + 回歸腳本
-
-### 多類別 / 多標籤
-
-- [ ] 回報：
-  - `Accuracy`
-  - `Macro F1`
-  - `Weighted F1`
-- [ ] 若為多標籤任務，優先觀察：
-  - per-class F1
-  - `micro F1`
-  - `macro F1`
-
-### 時間片段定位 — ⏸ 未開始（VideoMAE 路線）
-
-- [ ] 若做 temporal localization，計算：
-  - `segment IoU`
-  - frame-level `Precision / Recall / F1`
-  - 視情況加入 `mAP@IoU`
-
-### 類別不平衡處理
-
-- [ ] 不只看 `Accuracy`
-- [ ] 對 `knees_inward` 額外回報：
-  - `Precision`
-  - `Recall`
-  - `F1`
-  - `PR-AUC` 或 `ROC-AUC`
-- [x] 在 validation set 上調整 threshold，而不是固定 `0.5`
-
-## 實驗設計
-
-- [ ] 設計 baseline：
-  - [x] only `VideoMAE`（`notes/videomae_classifier_experiment_summary.md`）
-  - [x] only pose / geometry（`notes/pose_only_classifier_experiment_summary.md`，已互相對照）
-  - [ ] `VideoMAE + contrastive`
-  - [ ] `VideoMAE + pose`
-  - [ ] `VideoMAE + pose + contrastive`
-- [ ] 設計 ablation study：
-  - 是否使用 unlabeled pretraining
-  - 是否使用 supervised contrastive loss
-  - 不同 clip 長度
-  - 不同 fusion 方法
-- [ ] 規劃最終 test set 僅用於最後一次評估
-
-### 已完成的其他實驗線（2026-08-08 新增：這些原本在本文件裡沒有位置）
-
-> 全部是「深度瓶頸」主線的延伸，成果都在 `notes/`。
-
-- [x] Fit3D 深度瓶頸系列：view-dependence、depth recovery、decision fidelity、
-  model comparison、2D-vs-3D 分解、sparse-depth（`notes/fit3d_*_summary.md`，PR #15）
-- [x] Fit3D「盲點」系列（皆為否證結果）：axial rotation、bar geometry、uncertainty
-  （`notes/fit3d_{axial_rotation,bar_geometry,uncertainty}_summary.md`）
-- [x] 模型融合閘門實驗（`notes/model_fusion_plan.md` + `notes/model_fusion_gate_results.md`，
-  `src/fit3d/model_fusion.py`，34 tests）
-- [x] 相機擺位掃描（`notes/camera-placement-hypothesis.md`）：13 個 Fit3D 動作的虛擬相機方位掃描；
-  **oblique 不是最準的**，sagittal 在 sagittal cue 上 13/13 全勝，oblique 只是雙平面折衷（11/13），
-  代價是 +0.03–0.10 的判決翻轉率
-- [ ] Fitness-AQA 淺蹲下游測試（深度通道 **冗餘**，偵測器品質才是主導）——
-  程式在 **`feat/fitness-aqa-squat-depth` 分支，尚未進 main**
-  （`src/fitness_aqa/`、`scripts/fitness_aqa/`）：決定要合併還是留在研究分支
-
-## 最終成果形式 — ✅ v1 完成（規則式；VideoMAE 版尚未接入 app）
-
-- [x] 完成一個可輸入深蹲影片的模型（規則偵測器 5 faults + KG/RAG）
-- [x] 輸出內容至少包含：
-  - 錯誤類型
-  - 錯誤發生時間區段
-  - 信心分數
-  - 結構化回饋
-- [x] 規劃 demo 介面（Studio 已上線，並於 PR #58/#59/#60 全面改版）：
-  - 左側影片 / 骨架顯示
-  - 時間軸錯誤標記
-  - 右側顯示觀察 / 原因 / 建議
-- [x] 結合 RAG 產出（FaultCard cause→risk→fix 因果階梯 + grounded chat）：
-  - 觀察
-  - 生物力學原因
-  - 可執行糾正建議
-
-## 建議先做的最小可行版本
-
-- [x] 第一步先完成 `Squat` 的 `knees_inward` 二元分類
-- [x] 第二步加入 `knees_forward`
-- [x] 第三步加入 `shallow_depth`
-- [ ] 第四步加入 contrastive learning
-- [ ] 第五步加入 pose fusion
-- [x] 第六步再考慮 RAG 與教練式文字回饋（GraphRAG + SSE chat + followup chips 已上線，
-  並於 PR #57 升級為 tool-calling）
-
-## 系統與部署：使用者登入 + 歷史紀錄
-
-> 把現有 demo（`backend/` FastAPI + `frontend/` React）做成多使用者、能保存影片與分析歷史的服務。
-> 分階段推進：先止血，再加功能，最後規模化。
-
-### P0：止血（同步阻塞）— ✅ 已完成 2026-06-19
-
-- [x] `/api/analyze` 由同步阻塞改為非阻塞：阻塞 pipeline 丟到 worker thread（`run_in_threadpool`），event loop 不再被單一分析卡死
-- [x] `asyncio.Semaphore` 限制同時分析數，避免併發上傳打爆 CPU/RAM
-- [x] 新增 `MAX_CONCURRENT_ANALYSES` 環境變數（`config.py`，預設 2，per-process）
-- [x] 排隊前 `del data` 釋放影片 buffer，避免 semaphore 變成記憶體放大器
-- [x] `analysis.py` 延後載入 `src.pose`（MediaPipe/torch）→ web 啟動不載 ML、API 層可在無 ML 環境測試
-- [x] 新增 `tests/test_analyze_endpoint.py`（契約不變 / 跑在 worker thread / 併發有上限）；本機 6 passed
-
-### P1：核心功能（登入 + 歷史地基）— ✅ 大致完成（Supabase 路線）
-
-- [x] 認證選型並落地：**Supabase Auth**（取代自管 fastapi-users）
-  - [x] 追加 **LINE Login + LIFF** 第二條登入路徑（PR #37、#43）
-  - [ ] ~~access JWT + refresh token 放 httpOnly cookie~~ → 現況為 supabase-js 預設 localStorage（`frontend/src/lib/supabase.ts`）；換 httpOnly cookie 需自訂 storage，列為後續強化
-- [x] PostgreSQL schema（Supabase migration，取代 Alembic）：
-  - [x] `users`（Supabase auth 內建）
-  - [x] `videos`（`storage_key`、`status`，upsert on user_id+video_id）
-  - [x] `analyses`（`result JSONB` 整包 + 提升 `view_type`/`fault_count`/`movement` 為欄位）
-  - [x] `conversations`（chat 訊息 JSONB + followups + **tool records**，計畫外新增）
-- [x] 分析結果落地：`/api/analyze` 算完寫入 DB（登入者 best-effort persist）
-- [x] 前端：React Router + Auth context + 受保護路由 +「我的紀錄」（History 頁，
-  PR #59 重建為 My Records，含手機版 funnel 篩選、單筆刪除）
-- [ ] 前端資料層改用 TanStack Query（未採用；現況 supabase-js + 自製 fetch，運作正常，視痛點再決定）
-- [x] 設定改用 pydantic-settings + env（`backend/app/settings.py`）
-- [x] **（計畫外）admin console**：使用者監看、runtime settings 覆寫層、LINE 診斷面板
-  （PR #35、#45、#46；`backend/app/routers/admin.py`、`frontend/src/pages/admin/`）
-
-### P2：非同步化 + 儲存 — 🔶 一半（儲存做完，佇列還沒）
-
-- [x] 物件儲存（Cloudflare R2）：原始影片、pose JSON、縮圖（PR #55，`backend/app/services/storage.py`）
-- [x] presigned URL 直傳：影片不經過 FastAPI（解掉 `await file.read()` 整支進 RAM）
-- [ ] Celery + Redis 佇列：上傳→回 job id→worker 處理→輪詢/SSE 取結果
-  （`config.py:41` 與 `routers/analyze.py:24` 都還標著「P0 stop-gap until the Celery/Redis
-  worker queue lands」——semaphore 仍是目前唯一的背壓機制）
-- [ ] job 狀態機：queued/processing/done/failed、重試退避、dead-letter、timeout
-  （`store.py` 目前只寫死 `status: "done"`）
-- [ ] 去重：影片 hash，同人同片回快取、不重算（backend 無任何 video hash）
-
-### P3：規模化 + 維運 — 🔶 起步
-
-- [ ] 拆 web / worker 部署（Docker；先 Railway/Render/Fly.io，之後 ECS/GKE）
-  → **containerise 的第一步在 PR #61（`feat/docker`）未合併**，main 上還沒有任何 Dockerfile
-- [ ] GPU 用 serverless（Modal/Replicate/RunPod，可縮到 0），VideoMAE / direct-3D 在此跑
-- [ ] worker 依佇列長度自動擴縮（KEDA）；CPU/GPU 分池
-- [ ] CDN + 簽名 URL 提供影片（R2 presigned 已有，CDN 未接）
-- [ ] DB 連線池（PgBouncer）、`(user_id, created_at)` 索引、必要時讀副本
-- [ ] 每人 rate limit + 上傳配額
-- [ ] 可觀測性：結構化 log、Sentry、佇列/延遲/GPU 指標、health/readiness probe
-- [ ] 加入 Pub/Sub, 處理高流量
-
-### 橫切議題（越早處理越省事）
-
-- [ ] 隱私 / 個資（PDPA・GDPR）：影片屬敏感個資 — 靜態加密、每筆綁 `user_id`、簽名 URL、
-  刪帳號連物件儲存一起清、log 不記影片內容/URL
-  （帳號刪除仍是 stub：`frontend/src/components/settings/AccountPane.tsx:92` 只有一列 UI，
-  後端沒有對應端點）
-- [ ] 檔案驗證：驗真實 MIME/codec（別只信副檔名）、限大小/長度、ffmpeg 正規化方向與格式
-- [x] 可重現性（一半）：每筆分析已存 `pipeline_version`（`backend/app/services/store.py`）
-  - [ ] 補存當時規則閾值 snapshot（detector 閾值可調，`analysis.py` 目前不存 threshold）
-- [x] 儲存抽象層（dev 用本機、prod 用 R2/S3）— PR #55 的 `services/storage.py`
-  - [ ] repo-root / `sys.path` 耦合本身仍未重構
+- [ ] **非同步佇列**（Celery/Redis；job 狀態機、重試、timeout）——semaphore 仍是唯一背壓。
+- [ ] 影片 hash 去重。
+- [ ] Critic-lite：回答送出前 grounding 檢查（FAIL → 重生成 → 降級 FaultCard）；之後 grounding score 入庫。
+- [ ] `compare_analyses` / `list_user_history` 工具＋進步追蹤。
+- [ ] Drill library + `make_drill_plan`（fault → KG `CORRECTED_BY`）；菜單 LLM 客製化。
+- [ ] 動作識別分類器自動選 rule pack（目前 studio 下拉手選）。
+- [ ] 拍攝指引：把「sagittal 13/13 勝、oblique 是折衷」變成 app 內依動作的角度提示。
+- [ ] 深度 cue 的 direct-3D 非同步重分析（研究證據齊，產品端零行）。
+- [ ] RAG 換神經 embedding；VideoMAE 分類器接入 app。
+- [ ] 前端：`FAULT_LANDMARKS`（`frontend/src/lib/pose.ts`）只涵蓋 squat 5 個 fault，其餘偵測器不 highlight；
+  i18n 仍有 ~9 條 squat 專屬文案；landing showcase 過度宣稱。
+- [ ] 橫切：帳號刪除端點（前端是 stub）、檔案 MIME/codec 驗證、規則閾值 snapshot 入庫、
+  rate limit / 配額、可觀測性（Sentry、probe）、httpOnly cookie session、TanStack Query（視痛點）。
 
 ## Demo
 
 - [ ] Line ChatBot — 剩下 LLM 對話
 - [ ] QR Code demo, real time interaction
 - [ ] 語音回饋（composer 已預留 UI 槽位，功能未做）
-- [x] **（計畫外）互動 mini-games**：`/games` hub、`/67` 手勢計數、`/ninja` Fruit Ninja
-  （PR #27、#29、#30），皆用瀏覽器端 MediaPipe，含每局熱量估算
+- [x] 互動 mini-games：`/games` hub、`/67` 手勢計數、`/ninja` Fruit Ninja（PR #27 #29 #30）
   - [ ] 其餘 game 分支（Pose Duel #26、Meme Blaster #25、Pose Match Rush #24）仍未合併
-- [ ] 動作偵測、分類（= 多動作 movement ID，見路線圖 P2）
-- [x] LLM follow up questions (options)（followup chips 已上線，pinned 快速模型）
-- [ ] 健身菜單客製化，可用 LLM 進行修改（= 路線圖 P2 的 `make_drill_plan` 工具）
+- [ ] 動作偵測、分類（= 多動作 movement ID，見上方「系統 / 產品」）
+- [x] LLM follow up questions (options)（followup chips 已上線）
+- [ ] 健身菜單客製化，可用 LLM 進行修改（= `make_drill_plan` 工具）
 - [ ] 新增運動科學、運動力學及 mocap 相關知識筆記的頁面
-
-## Pipeline 與 Agent Harness 路線圖（2026-07-06 設計，詳見 `docs/ai-coach-pipeline-and-agent-harness.md`）
-
-> 產品主線改依此路線推進；上面各節屬研究支線或被此路線圖涵蓋。
-
-### P0：地基 — 🔶 兩項完成，佇列未動
-
-- [x] KG 切換 `squat_kg_v2` → `sports_kg_v3` + movement-aware 檢索參數
-  （`config.py` 指向 v3；`movement` 參數貫穿 services/router；
-  `/api/knowledge/graph?movement=` + `/api/knowledge/faults?movement=`；commit `23d1089f` + `3ea1f1fd`）
-  - ⚠️ 修正前次盤點的錯誤敘述：commit `835afbf2` 的 **Explore 頁與 MovementSelector 已被移除**
-    （commit `9058abe9`，使用者指定）。現況是扁平的 `/movements` 動作圖書館頁
-    （`frontend/src/pages/Movements.tsx`，PR #60 依 exercise_library 參考稿重建），
-    **app 內沒有 KG 瀏覽器**；`api.movementFaults` 與後端 faults 端點保留。
-- [x] Rep 切分 + per-rep metrics — `src/pose/rep_segmentation.py`（PR #49）：
-  以單一 1-D 訊號 + 遲滯門檻切 rep，規則逐 rep 執行（預設 3 rep 取首/中/末）
-  - [ ] RS-SP2（粗掃找 rep → 只對選中的 rep 密集量測，客戶端擁有 rep 邊界）仍在 **PR #50 未合併**
-  - [ ] frame_metrics 保留策略仍未定案（建議存 per-rep 摘要）
-- [ ] 非同步分析佇列（= 上方系統 P2 的 Celery/Redis 項）
-
-### P1：Agent 最小可用 — 🔶 四項中三項完成
-
-- [x] chat 升級為 tool-calling 迴圈（PR #57）：OpenRouter function calling，
-  三個工具 `get_analysis` / `kg_query` / `rag_search`，`backend/app/services/chat.py`
-  含 bounded loop、串流 tool-call 重組、與「檢索到的知識是參考資料、不是對這支影片的觀察」
-  的誠實性規則
-- [ ] Critic-lite：回答送出前做 grounding 檢查（FAIL → 重生成一次 → 降級為 FaultCard 模板直出）
-  — **仍未實作**（`frontend/src/lib/grounding.ts` 是送出前組 grounding blob 的建構器，
-  不是回答後的查核器；`chat.py` 內無 critic）
-- [x] SSE 加 tool 事件，前端顯示工具狀態（`frontend/src/components/ToolRunList.tsx`、
-  CoachTray 具名狀態列、pending dots、來源折疊為可點擊計數）
-- [x] 工具呼叫 trace 存進 conversations JSONB（可重播、可稽核；含 per-tool sources）
-
-### P2：多動作 + 記憶 — 🔶 偵測器 10/16，其餘未動
-
-- [x] **多動作規則偵測器（原「Lunge rule pack」已被更大的工程取代）**：
-  registry 驅動的 per-movement 偵測器，端到端接進 web app（PR #47、#48、#51、#53、#54）
-  - 已上線 10 個：`squat`、`pushup`、`overhead_press`、`lunge`、`deadlift`、`row`、
-    `band_pull_apart`、`bicep_curl`、`arm_abduction`、`arm_vw`（`src/pose/movements/`；
-    `GET /api/movements` 直接由 registry 導出，新增一個偵測器不需改前端）
-  - 皆帶 Beta tag（`validated=False`），唯一有標註驗證的是 Lunge（見上方「規則偵測器的標註驗證」）
-  - 部分規則被**證明無法實作**並明白記錄（Row 第 5 條、Deadlift 撤回一條、
-    Band Pull Apart 的 scapular retraction 條恆為 silent、Bicep Curl 撤回 wrist flexion、
-    Arm Abduction 撤回 impingement arc 且 shoulder shrug 恆為 silent、
-    Arm VW 撤回 loss_of_elevation 的 W 分支且 shrug substitution 恆為 silent）
-  - [ ] 其餘 3 個動作的 rule pack 未做（Group F：torso twist、jumping jacks、high knee；
-    Group A、Group E：無）
-    ※ Shoulder Bridge 已於 2026-08-09 完成（12/16）：1 條 live、1 條永久 silent、2 條撤回。
-    ※ Leg Abduction 已於 2026-08-09 完成（13/16），**Group E 收尾**：1 條 live、1 條永久
-    silent、2 條撤回，另有 1 個 sub-clause 不實作。**這是整個計畫裡第一次「標註資料有權改變
-    規則名冊、而且真的改了」**——REHAB24-6 `Ex4` 就是站姿單腿外展、210 個人工標註 rep、
-    9 位受試者、變體與 app 完全相符，驗證跑在設計階段而非事後，直接讓
-    `rule_insufficient_abduction_rom` 永久 silent。沒有任何門檻被調去迎合標註。
-    見 `docs/superpowers/specs/2026-08-09-leg-abduction-detector-design.md`、
-    `notes/leg-abduction-rule-validation.md`。
-- [ ] **下載 `frames_open.tar.gz.ac`，跑 Shoulder Bridge 的 77 動作驗證**（2026-08-09 開）。
-  這是整個 16 動作計畫裡**第一個 `validated=False` 的原因是「檔案沒下載完」而不是研究缺口**的動作。
-  EgoExo-Fitness 有 **77 個人工評分的 Shoulder Bridge action、130 筆標註記錄**，
-  canonical guidance 77 個全部逐字相同，且**逐字寫出**這條規則的終點
-  （「until your knees and hips are raised in a straight line with the shoulders」）；
-  十二條 technical-keypoint 準則裡有一條**就是這條規則**
-  （「Progressively raise your body until your knees, hips, and shoulders align in a straight
-  line」，77 個裡有 **16 個被判 False**）。變體也對得上——沒有 Sit-up 那種「圖與 spec 講不同動作」
-  的問題。**缺的只有像素**：`frames_open` 分成 3 GiB 一份下載，`.ac` 那份沒有，
-  所以 77 個裡只有 **2 個**（`z8RAua_action_4`、`z8RAua_action_11`）落在解得開的 record 裡。
-  補完 `.ac` 之後，這會是繼 Squat 之後**第二個真正有標註驗證的動作**，
-  而且驗的是規則本身的準則、不是代理指標。見
-  `docs/superpowers/specs/2026-08-09-shoulder-bridge-detector-design.md` §2。
-- [ ] **view estimator 在「站姿」受試者上也是系統性反的，不只是躺姿**（2026-08-09 由 Leg
-  Abduction 實測，影響範圍未盤點）。`src/pose/view_estimation.py` 的 module docstring limit 1
-  只把 front/rear/oblique 標籤的失效範圍歸給**水平**受試者，Sit-up（實測「反的」）與
-  Shoulder Bridge（實測「不穩定」）都落在那個範圍內，所以兩者都只是把 view 邏輯關掉。
-  Leg Abduction 是 Group E 第一個**站著**的動作，limit 1 不適用，而且 REHAB24-6 `Ex4`
-  **每個 rep 都記錄了 `cam17_orientation`**，因此可以第一次拿 ground truth 直接對。結果是
-  **系統性反轉**：正面攝影機被判成 oblique、斜側攝影機被判成 sagittal，而且整個 corpus
-  幾乎**吐不出任何一個 `FRONTAL_OBSERVABLE_VIEWS` 標籤**。兩個後果：
-  (1) 出貨規則的 0.65 confidence discount 在這個 corpus 上是**常數**，不區分任何東西，
-  所以這次跑出來的數字**不能當成 view gating 有效的證據**；
-  (2) limit 1 的敘述**低估了失效範圍**——問題不是「受試者躺著」。
-  尚未做的事：盤點還有哪些 shipped 規則 gate 或 discount 在這些標籤上（`squat`
-  的 `rule_knees_inward`、`arm_abduction` 的兩條 frontal 規則至少要查），以及
-  Ex1/Ex2/Ex5 的同類對照。見
-  `docs/superpowers/specs/2026-08-09-leg-abduction-detector-design.md` §1.3。
-- [ ] **citation 與實測資料對「同一個 fault 的方向」講反了**（2026-08-09 由 Leg Abduction 發現，
-  本計畫新的失敗模式）。parent spec 的 `abd_pelvic_drop_trunk_lean` 是兩個 disjunct 的
-  or：骨盆傾斜 + 軀幹側傾。骨盆那一半**沒有實作**，因為三個來源指向兩個相反方向——
-  citation 說的是骨盆**掉下去**（Trendelenburg，而且那句話的主詞是 gait），knowledge graph
-  只有 `Leg Abduction:Pelvic Hiking`（`Pelvic Drop` 連一個節點都 match 不到），
-  210 個標註 rep 分得開的方向是**抬起來**。照 spec 寫會對「資料說是正確執行」的方向 fire；
-  照實測方向寫則是一條**完全沒有 citation** 的規則。Sit-up 曾因 KG seed 語意反轉而撤回一條，
-  這是它的鏡像案例（KG 與資料一致、citation 才是異數），處理方式相同：不出貨。
-  這個問題**只有在號數可還原時才看得見**——Shoulder Bridge 同樣的問題當時無法回答。
-  尚未做的事：其餘 movement 的 `Pelvic Drop` 類規則是否也有同樣的方向錯置。
-- [ ] **`angle_degrees` 是無號的，這件事會靜默地反轉規則語意**（2026-08-09 由 Shoulder Bridge
-  發現，影響範圍未盤點）。`src/pose/geometry.py:73` 回傳 `degrees(arccos(...))`，值域 [0, 180]，
-  且**對 180° 完全對稱**：實測合成 fixture，離直線 +20° 與 −20° 都讀成 **140.00°**。
-  兩個後果：(1) parent spec 的 `bridge_lumbar_hyperextension`「> ~190°」**永遠不可能 fire**
-  （本 registry 第五個 vacuous branch，第二個在實作前就抓到）；
-  (2) 出貨的 `bridge_incomplete_hip_extension`「< 160°」**會對「拱過頭」的橋 fire**，
-  然後告訴使用者「抬高一點」——**方向正好相反的提示**。
-  試過兩種 body-relative 補號方法，**兩種都在真實影片上實測失敗**：
-  以踝關節為參考在合成 fixture 上完全正確（旋轉/鏡射不變，還原 120/160/180/200/240），
-  但真實片段上有 **57.0% 與 62.3%** 的 frame 被判成「拱起」，而那些是標註者判定**正確**的 rep；
-  以肩–踝連線當地面則**左右兩側自己互相矛盾**（24 個抽樣 frame 裡有 21 個左右號相反）。
-  靠近直線時兩個外積都趨近 0，號就是雜訊。**沒有在規則內修**，因為任何修法都是發明數字。
-  待辦：盤點 registry 裡還有哪些規則的語意依賴「角度可以超過 180°」或「角度的方向」。
-  現況由 `tests/test_shoulder_bridge.py::MetricConflationTest` 釘住。見
-  `docs/superpowers/specs/2026-08-09-shoulder-bridge-detector-design.md` §3、§4。
-- [ ] `compare_analyses` / `list_user_history` 工具 + 進步追蹤（跨分析記憶）
-- [ ] Drill library + `make_drill_plan` 工具（fault → KG `CORRECTED_BY` → 矯正課表）
-- [ ] 動作識別（movement ID）輕量分類器，自動載入對應 rule pack
-  （目前仍由使用者在 studio 下拉選單指定動作）
-- [x] 各個動作，相機擺放最適合的位置、角度 — `notes/camera-placement-hypothesis.md`：
-  虛擬相機方位掃描（13 個 Fit3D 動作）。結論：**oblique 不是最準的**；
-  sagittal 在 sagittal cue 上 13/13 全勝，oblique 只是雙平面折衷（11/13），代價 +0.03–0.10 判決翻轉
-  - [ ] 把這個結論變成產品面的拍攝指引（app 內拍攝提示目前沒有依動作給角度建議）
-- [ ] **（待多動作偵測器補齊後）全面泛化「分析流程」文案**：前端仍多處把流程說成深蹲專屬。
-  前次盤點的「~26 處」是 PR #58/#59/#60 改版**前**的數字，**已作廢**。
-  2026-08-08 人工判讀（非 grep 計數）`frontend/src/lib/i18n.tsx`，需要改的英文字串約 **9 條**：
-  `chat.intro`、`tier.lite.hint`、`landing.hero.sub`、`landing.cta.title`、`landing.showcase.sub`、
-  `auth` 登入說明、`history.emptyHint`、`history.startCta`、Fruit Ninja 說明中的
-  「x-coach's squat analysis」。（`landing.showcase.squat.*` 與範例教練語句中的 goblet squat
-  屬合理保留，不算。）另有硬字串散在 `App.tsx`、`UploadDropzone.tsx`、`CaptureStudio.tsx`、
-  `StudioMobile.tsx`、`DemoIntro.tsx`、`history/HistoryStats.tsx` 等，尚未逐一清點。
-  注意 `landing.hero.sub` 目前寫「squat, push-up or overhead-press」——偵測器已到 8 個，
-  這句本身也過期了。
-  使用者 2026-07-17 指定：未來採「完全泛化」而非加註解（en + zhHant 皆需更新；
-  品牌／landing 文案已於 commit `4d64e659` 泛化為 multi-exercise）。
-- [ ] **（待多動作分析上線後）修正 landing showcase 過度宣稱**：
-  `landing.showcase.sub`（「reads the rest of the library, on real footage」）與
-  `landing.showcase.title`（「One pipeline, the whole movement library.」）仍在
-  （`frontend/src/lib/i18n.tsx`、`frontend/src/landing/MovementShowcase.tsx`），
-  但 showcase 的 push-up/high-knee/sit-up clip 只有 MediaPipe pose tracking、無 fault 偵測。
-  偵測器已到 8 個，落差比原本小但仍存在（16 個動作的知識庫 vs 8 個動作的分析）。
-- [ ] 許多動作的錯誤需要脊椎及其他 MediaPipe 無法定義的點，思考其他解決方法。
-- [ ] **骨架疊圖只會 highlight squat 的 5 個 fault**：`frontend/src/lib/pose.ts:55` 的
-  `FAULT_LANDMARKS` 只有 `knees_inward` / `knees_forward` / `shallow_depth` /
-  `excessive_forward_lean` / `heel_rise`，其餘 8 個偵測器（OHP、push-up、lunge、deadlift、
-  row、band pull apart、bicep curl、arm abduction）的 fault_id 都查不到、`SkeletonOverlay` 與
-  `FaultChips` 因此不 highlight 任何關節。這是既有落差、非任一動作引入，但每多一個偵測器
-  就多欠一組 entry，2026-08-09 首次正式記錄。
-- [ ] 許多錯誤沒有對應到 Knowledge Graph 的節點。
-  - Band Pull Apart 具體案例（2026-08-09）：`Bent Elbows` 節點存在但 connectivity 0
-    （沒有 cause / risk / correction），`trunk_extension_compensation` 則完全沒有對應節點。
-    兩者都是 `scripts/knowledge/stub_general_movements_v3.py:80-87` 的一行修正，
-    但 graphml 已 gitignore，重新產生屬部署步驟。
-  - Bicep Curl 具體案例（2026-08-09）：`Elbow Drift Forward` 節點存在但 connectivity 0
-    （只有 `HAS_FAULT` 反向邊，沒有 cause / risk / correction），所以
-    `curl_elbow_drift_forward` 的 KG 卡片是空的。另外兩條規則沒問題
-    （`Using Momentum` → `Forward Momentum`，`Incomplete Range Of Motion` → `Range Of Motion`）。
-    修正是 `scripts/knowledge/stub_general_movements_v3.py:71-78` 的一行（該節點的 list 是 `[]`），
-    同樣因 graphml gitignore 而屬部署步驟。
-    **刻意沒有改指向共用的 `Range Of Motion` 節點**——它 bucket 很滿，但 `corrections` 是
-    「Wrapping Surface Adjustment」，對這個動作沒有意義；語意正確的薄卡片勝過語意錯誤的厚卡片
-    （與 Band Pull Apart 當時的判斷一致）。
-  - Arm Abduction 具體案例（2026-08-09）：圖上**完全沒有 Arm Abduction 的 asymmetry fault 節點**。
-    `Asymmetry` / `Left Right Asymmetry` 都落到共用的 `Symmetry` QualityDimension（inbound edge
-    全是 Squat 與 Overhead Press），`Muscle Imbalance` 在 `movement="Arm Abduction"` 下只回傳
-    bucket 全空的泛用節點（同一個 query 在 `movement="Overhead Press"` 下還會多回一個帶內容的
-    OHP-scoped fault，所以 `ohp_asymmetric_press` 用得起來）。仍保留 `Muscle Imbalance`——
-    語意正確的薄卡片勝過語意錯誤的厚卡片。另兩條規則沒問題（`Shoulder Shrug` →
-    `Arm Abduction:Compensatory Shoulder Shrug` → `Shoulder Depression`；`Trunk Lean Compensation`
-    → `Arm Abduction:Trunk Lean Compensation` → `No Compensatory Trunk Movement`）。
-    另外記一筆：圖上第三個 Arm Abduction fault 是 **`Incomplete Elevation`**（bucket 最滿的一個），
-    但 parent spec 對這個動作根本沒有 incomplete-ROM 規則——每個其他動作都有。要補需要一個
-    對「抬不夠高」給出數字的來源，**沒有為了填洞而發明規則**。
-  - Arm VW 具體案例（2026-08-09）：同樣**沒有 Arm VW 的 asymmetry fault 節點**，
-    `Muscle Imbalance` 一樣只回傳 bucket 全空的泛用節點——與 Arm Abduction 相同處理，保留。
-    另兩條規則的 seed 是活的（`Insufficient Scapular Retraction` →
-    `Arm VW:Insufficient Scapular Retraction` → `causes: Limited Scapular Retraction`；
-    `Shoulder Shrug` → `Arm VW:Compensatory Shoulder Shrug` → `Shoulder Depression`）。
-    **`vw_incomplete_excursion` 與 `vw_loss_of_elevation` 刻意共用同一個 seed**：圖上 Arm VW
-    只有三個 fault 節點，沒有 incomplete-elevation 的，而「擺幅不足」與「V 抬不夠高」在圖的
-    詞彙裡是同一件事；兩條規則仍靠 fault_id / fault_name / citation / evidence 區分。
-    再記一筆**與 Arm Abduction 方向相反的洞**：圖上有 **`Arm VW:Trunk Lean Compensation`**，
-    但 parent spec 對這個動作**沒有** trunk-lean 規則。兩個動作、兩個沒用到的節點、方向相反。
-  - Sit-up 具體案例（2026-08-09）：這是**至今最嚴重的一次**，因為問題不是「節點薄」或「節點缺」，
-    而是**圖與 parent spec 在講兩個不同的動作**。圖上四個 `Sit-up:` fault 節點
-    （`Feet Not Together`、`Arms Not Extended Overhead`、`Incomplete Forward Reach`、
-    `Abdominal Disengagement`）全部來自 EgoExo-Fitness 的 TKV 條目，描述的是**完整仰臥起坐**；
-    parent spec 四條規則描述的是**捲腹 curl-up**。交集為零。
-    後果：`situp_excessive_rom`（「起得太高、超過捲腹範圍」）**沒有任何語意正確的 seed**——
-    圖上唯一沾到 ROM 的 `Sit-up:Incomplete Forward Reach` 意思正好**相反**（起得不夠高），
-    而泛用 `Range Of Motion` 依舊是那個 `corrections = Wrapping Surface Adjustment` 的節點。
-    這是本專案第一次因為 **seed 語意相反**（而非薄或缺）而**撤掉**一條規則。
-    `Feet Not Together` 與 `Arms Not Extended Overhead` 兩個節點 connectivity 為 0（dangling）。
-    出貨的 `situp_incomplete_rom` seed 是活的但薄（`Sit-up:Incomplete Forward Reach` →
-    `quality_impacts: Range Of Motion`），且語意**方向一致**，故保留。
-    真正該做的不是補節點，而是先決定**app 到底要出哪一種仰臥起坐**——
-    i18n 的 `movement.Sit-up` 繁中已經是「仰臥起坐」（不是「捲腹」）、卡片插圖也是完整仰臥起坐，
-    所以除了 parent spec 以外的每一個既有成品都指向完整版。見
-    `docs/superpowers/specs/2026-08-09-situp-detector-design.md` §10。
-  - Shoulder Bridge 具體案例（2026-08-09）：**第一次是好消息**。
-    `Shoulder Bridge:Incomplete Hip Extension` 有**三個非空 bucket**
-    （causes: `Poor Hip Extension`、`Weak Gluteus Maximus`；corrections: `Squeeze Glutes`），
-    是整個 16 動作計畫裡**第一個既不薄、也不共用、也不相反**的 seed，
-    而且它帶的矯正提示正好就是兩篇來源說這個終點在練的東西。
-    另外兩個 `Shoulder Bridge:` 節點仍有問題：`No Segmental Spinal Articulation` 是 dangling、
-    `Loss Of Core Engagement` 只有一個 `quality_impacts`。
-    而 `Pelvic Drop` 在 movement=`Shoulder Bridge` 下**連一個節點都 match 不到**
-    （不是薄、不是相反，是完全沒有），這是撤掉 `asymmetric_pelvic_drop` 的四個理由之一。
-- [ ] **每一條「整下 rep 行程不足」的規則在完全靜止的片段上都會 fire，且是滿分**
-  （2026-08-09 由 review 發現、實測重現，非測試抓到；影響整個 registry，不是單一動作）。
-  `segment_reps` 的 hysteresis 是**對訊號自身百分位**取閾值，故 scale-free——這正是「很淺的一下
-  仍能被切成 rep 並送進規則」的原因，但同一性質也讓 **0.4° 的抖動被切成 3 個 rep**。
-  實測（真正的 `run_detector`，60 frames、hip angle 抖動 0.4°）：`fallback=None`、`reps=3`、
-  `situp_incomplete_rom` 以 `severity=1.0 / confidence=1.0 / observability=high` 觸發，
-  evidence 寫著 excursion 0.74°。**同一個探針打在已合併的 `arm_vw.rule_incomplete_excursion`
-  上結果相同**（3 reps、severity 1.0）；`band_pull_apart` 只是因為 fixture 訊號是位元級常數才逃過，
-  真實影片不會如此。
-  可達性：註冊即上線，而 Sit-up 的 validity gate 只要肩/髖/膝，幾乎任何上傳都滿足；
-  `wasMeasured()` 抓不到（frame 確實「有量到」，與 squat-analysed-as-OHP 同一類）。
-  **Sit-up 受害最深**——它只有一條 live 規則，所以誤判就是全部的判定，還會被 `chat.py` 拿去餵教練。
-  **刻意不在規則內修**：任何 in-rule guard 都是一個「最小 excursion 下限」，
-  也就是沒有來源、也沒有量測依據的發明數字。正解是 framework 層二選一——
-  `segment_reps` 加 noise floor，或把 `RunResult.fallback` 接進 `RuleContext`
-  （後者本來就是 Deadlift setup-baseline 缺陷記錄下來的升級路徑）。
-  現況已由 `tests/test_situp.py::test_a_motionless_clip_fires_this_rule_at_full_severity` 釘住，
-  修好之後那個測試會轉紅，那正是預期的訊號。見
-  `docs/superpowers/specs/2026-08-09-situp-detector-design.md` §8.5。
-- [ ] **檢查 `band_pull_apart.rule_shrugging` 是否也吃到同一個 confound**（2026-08-09 開，未跑）：
-  Arm Abduction 量到 `neck_gap = ear_y - shoulder_y` 在手臂外展時會因**解剖學**而塌陷——
-  Fit3D `side_lateral_raise` 的 3D ground truth 上，gap 與手臂仰角的 within-clip Spearman 是
-  8 位受試者全數 **−0.699 ~ −0.954**，spec 的 18% 門檻在 40 下裡觸發 34 下；而 MediaPipe 的
-  shoulder landmark 追的是 **glenohumeral**（相對 baseline 位移 11.2%）而非 acromion
-  （marker clavicle 只有 1.0%），所以 18% 在 REHAB24-6 Ex1 上 MediaPipe 觸發 172/178、
-  marker clavicle 只觸發 1/178。`bpa_shrugging` **是活的**且用同一套 shoulder-ear gap 構造，
-  但那個動作的 excursion 是「仰角大致固定下的水平外展」，confound 可能本質不同，
-  **這裡不宣稱**——要量過才知道。順帶：這個量測也把
-  `band_pull_apart.rule_loss_of_scapular_retraction` docstring 裡「MediaPipe 的 shoulder 是
-  glenohumeral 點、會跟著肱骨動」從斷言變成量測。
-  **2026-08-09 更新（Arm VW 之後）：這一項被「縮小」但沒有「結案」。** 在 REHAB24-6 Ex2 上
-  同一套構造再量一次，仰角方向相反（下拉而非上舉），gap 對仰角的 within-rep Spearman 仍是
-  MediaPipe **−0.957**、marker glenohumeral **−0.998**、marker clavicle 只有 −0.305；
-  shoulder 高度相對 baseline 的位移是 clavicle 0.6%、glenohumeral 9.8%。所以 confound 隨
-  **仰角行程的大小**放大，而不是隨方向。Band Pull Apart 的行程是仰角大致固定，
-  confound 理應**小**——這是**支持** `bpa_shrugging` 的論據，不是反對它——但仍未在它自己的
-  資料上量過。
-- [ ] `src/pose/rep_segmentation.py` 的 `DEFAULT_MIN_REP_SECONDS = 0.4`（30fps 下 12 幀）對
-  Band Pull Apart 若真實 clip 每下快於 0.4 秒，整段會被丟成雜訊、退回 whole-clip fallback——
-  與 High Knee 需要 `min_rep_seconds` override 是同一類問題。2026-08-09 已用 Fit3D 的
-  `rep_ann.json`（`s03/s04/s05/s07/s08`，共 25 下，50fps 經 ffprobe verified）量到真實節奏
-  1.78–2.92 秒/下，是門檻的 4.45–7.3 倍，方向上不太可能觸發——但只有 5 位受試者且是配合 mocap
-  的刻意動作，不能代表真實使用者可能更快更隨便的執行，仍是未證實的殘餘風險，因此不加
-  override（沒有可引用的節奏數字可調）。
-  Bicep Curl 同樣量過（2026-08-09）：Fit3D `rep_ann.json` 8 位受試者共 40 下、50fps 經
-  ffprobe verified，1.92–3.68 秒/下（平均 2.54），是門檻的 4.8–9.2 倍，所以也不加 override。
-  殘餘風險與上面同一條（受試者是配合 mocap 的刻意動作），不因 n 變大而消失。
-  Arm Abduction 是**第一個有兩組獨立節奏量測**的動作（2026-08-09）：Fit3D
-  `side_lateral_raise` 8 位受試者 40 下、50fps 為 1.40–4.96 秒/下，REHAB24-6 Ex1 的 178 下、
-  30fps 為 2.77–10.53 秒/下，最緊的一下仍是門檻的 3.5 倍，同樣不加 override。
-  更緊的那個限制（Bicep Curl 發現的 phase-fraction × `min_frames` 交互作用）在這個動作是
-  **靠設計避開的**：兩條活規則都不掛在 `setup` 上——`peak` 佔 30% 而非 15%，需求是每下 ≥ 0.667 秒
-  而不是 1.333 秒，對 1.40 秒的最短真實 rep 還有 2.1 倍餘裕。由
-  `tests/test_arm_abduction.py::EndToEndSegmentationTest::test_the_peak_window_survives_rep_trimming`
-  在**裁切後**釘住（fixture 刻意含兩下之間的手臂放下 hold，也就是造成裁切的那段）。
-- [ ] **Bicep Curl 的兩個 ROM 門檻貼著真實 rep 分佈的邊緣**（2026-08-09 記錄，未調整）：
-  用 Fit3D `joints3d_25` 的 3D mocap ground truth 量 40 下 `dumbbell_biceps_curls`，
-  spec 的「伸展不足 `max(elbow_angle) < 150°`」有 **1/40** 會觸發（149.7°），
-  「屈曲不足 `min(elbow_angle) > 60°`」有 **0/40**（最差 59.0°）——兩端都在 1° 以內。
-  Fit3D 沒有 correctness label，所以無法判定那一下究竟是不是真的做短了，因此**只記錄不調整**
-  （no-threshold-tuning）。另外投影誤差方向不對稱：伸展那一項偏向「多觸發」，屈曲那一項偏向
-  「漏掉」，細節寫在 `rule_incomplete_rom` 的 docstring 與設計文件 §2。
-- [ ] **Bicep Curl 的「伸展不足」判定很脆弱**（2026-08-09 量測記錄，未修）：`setup` 是 rep window
-  的前 15%，而 `contiguous_true_segments` 需要 `min_frames = max(3, ceil(0.20*fps))` 連續幀，
-  推導出**每下至少 1.333 秒**才可能觸發（fps ≥ 15 時與 fps 無關）——比
-  `DEFAULT_MIN_REP_SECONDS`（0.4 秒）緊得多，真實最快的一下（1.92 秒）只有 1.44 倍餘裕。
-  更麻煩的是 `segment_reps` 會把 window 裁到訊號的 excursion：受試者若在兩下之間停在手臂伸直的
-  位置，那段 hold 會被裁掉，`setup` 反而落在動作中段。實測一個每下 63 幀、含 hold 的 fixture：
-  window 只剩 37 幀、`setup` 只有 5 幀（差 1 幀）、涵蓋的角度是 84–110° 而非真正的 130° 底部，
-  結果整條規則靜默。**所以這一項會不會觸發取決於 rep 的形狀，不只是長度**（平滑 excursion 在
-  1.92 / 2.54 秒都會觸發，所以是脆弱而非死掉）。沒有修：15% 與 `min_frames` 都是共用的框架常數，
-  沒有可引用的依據為單一動作調整；失效方向是漏報而非誤報。
-  由 `tests/test_bicep_curl.py::PhaseWindowWidthTest` 與
-  `test_rep_trimming_can_silence_the_extension_term` 釘住。
-  這其實是 `_setup_baseline` docstring 已記載的 trimming 問題最尖銳的形式，
-  對其他 baseline 類規則只是「量到的變化偏小」，對這一條卻是「量錯位置後直接靜默」。
-
-### P3：感知升級 — ⏸ 未開始（但研究面已備妥依據）
-
-- [ ] 深度類 cue 的 direct-3D 路由（NLF 類模型，GPU；先做「深入分析」按鈕的非同步重分析）
-  — 研究面證據已齊（Fit3D 深度恢復、decision fidelity、sparse-depth 三份 notes），
-  但**產品端一行都還沒接**
-- [ ] RAG 換神經 embedding（hash-BoW → sentence-transformer 類本地模型，介面不變）
-- [ ] VideoMAE 融合分類器接入 app（補規則抓不到的「順不順」缺陷）
-
-### 評估迴路（隨 P1 起步）— ⏸ 未開始
-
-- [ ] golden-set 規則回歸（已標註影片，CI 跑 rule pack diff）
-  — 素材已有一份：Lunge 用的 REHAB24-6 `Ex5` 174 rep（`scripts/rehab24/validate_lunge_rules.py`），
-  但尚未進 CI
-- [ ] RAGAS-style faithfulness 離線抽樣評估
-- [ ] Critic grounding score 線上入庫（前提是 Critic-lite 先做出來）
