@@ -5,30 +5,36 @@
 // arm V-W, so keying to them means borrowing something adjacent -- a bed for the bridge, a wind
 // glyph for a torso twist -- and an icon that shows the wrong thing is worse than none.
 //
-// DRAWING RULES, so the sixteen read as one set:
+// TWO KINDS OF GLYPH live here, and the set reads as two visual languages until that stops:
+//
+//  * FILLED SILHOUETTES (`fill`) -- twelve of the sixteen, traced from supplied pictograms rather
+//    than drawn here. Asked for by name, one movement at a time; not oversights, so do not "fix"
+//    them back into strokes. They are visibly heavier marks than the stroked four at 13-18px, and
+//    they ignore the waist-up rule below, their sources having come with legs.
+//  * STROKED STICK FIGURES (`strokes`) -- Row, Arm Abduction, Arm VW and Torso Twist, the four
+//    with no silhouette art yet. The drawing rules are theirs.
+//
+// Both kinds share the 24x24 frame and the `<circle>` head.
+//
+// DRAWING RULES for the stroked four:
 //  * 24x24 frame, ground at y=20-22, figure roughly 18 units tall.
 //  * Filled head, everything else a 1.7-wide round-capped stroke. At 18px on screen a limb is
 //    about two pixels wide, so each figure gets the fewest strokes that still name the movement:
-//    one arm and one leg for anything seen from the side, both when the two differ (a lunge, a
-//    high knee) or when the movement is the symmetry (a jumping jack).
+//    one arm and one leg for anything seen from the side, both when the two differ or when the
+//    movement is the symmetry.
 //  * The arm movements are drawn from the waist up. Legs that do nothing cost a third of the
 //    frame's height, and shrink the part that carries the meaning.
-//  * Equipment is drawn: a bar with plates, a dumbbell, the band's slack curve. It is often the
-//    fastest thing to recognise at this size.
+//  * Equipment is drawn -- what is left of it is Row's dumbbell. It is often the fastest thing to
+//    recognise at this size.
 //
-// EXCEPTIONS to the stroke rule: Squat, Lunge, Deadlift, Push-up, Overhead Press, Bicep Curl and
-// Sit-up are filled silhouettes (`fill`), traced from supplied pictograms rather than drawn here.
-// Deliberate departures asked for by name, not oversights -- do not "fix" them back into strokes.
-// They bend the waist-up rule too, and they are visibly heavier marks than their stroked
-// neighbours at 13-18px; both are the cost of using the supplied art.
-//
-// The trace, for whoever adds the next one: threshold the source at gray < 200, take the contour
-// TREE (not just the outer one -- these sources have holes, and separate pieces wherever a white
-// keyline cuts through), and pull out the one near-perfect disc as the head, which stays a
-// `<circle>`. Simplify each contour with approxPolyDP, smooth to cubics, emit them as subpaths of
-// one `d`, and fit into this frame. Never ship the source PNG as an `<img>` instead: those files
-// are RGB with no alpha, so they render as a white box over the card's gradient, and their violet
-// is baked in -- `dim` works only through `currentColor`.
+// THE TRACE, for whoever adds the next silhouette: threshold the source at gray < 200, take the
+// contour TREE (not just the outer one -- these sources have holes, and separate pieces wherever
+// a white keyline cuts through), and pull out the one near-perfect disc as the head, which stays
+// the `<circle>`. Discard contours under ~20 square pixels first -- antialiasing leaves specks
+// that a trace reads as holes. Simplify each contour with approxPolyDP, smooth to cubics, emit
+// them as subpaths of one `d`, and fit into this frame. Never ship the source PNG as an `<img>`
+// instead: those files are RGB with no alpha, so they render as a white box over the card's
+// gradient, and their violet is baked in -- `dim` works only through `currentColor`.
 
 interface Glyph {
   /** Head centre. */
@@ -71,24 +77,24 @@ export const GLYPHS: Record<string, Glyph> = {
     head: [12.4, 6],
     fill: "M13.58 16.83C13.38 17.59 13.99 20.58 14.25 21.44C14.51 22.3 14.78 21.91 15.12 21.98C15.46 22.05 16.06 21.97 16.29 21.87C16.52 21.76 16.59 21.64 16.51 21.37C16.44 21.1 16.02 21.01 15.84 20.25C15.66 19.5 15.81 17.42 15.44 16.85C15.06 16.28 13.78 16.06 13.58 16.83ZM10 16.83C9.88 16.06 8.87 16.76 8.56 16.83C8.26 16.89 8.3 16.62 8.16 17.21C8.02 17.79 7.89 19.63 7.71 20.32C7.53 21.01 7.13 21.07 7.06 21.33C6.99 21.59 7.06 21.78 7.31 21.89C7.55 21.99 8.21 22.03 8.54 21.96C8.87 21.88 9.04 22.29 9.28 21.44C9.52 20.59 10.11 17.6 10 16.83ZM21.31 15.73C21.21 15.74 21.23 15.61 21.22 15.8C21.2 15.98 21.12 16.65 21.22 16.83C21.31 17.01 21.67 16.9 21.8 16.87C21.93 16.84 21.97 16.8 22 16.65C22.03 16.5 22.03 16.12 22 15.98C21.97 15.83 21.91 15.79 21.8 15.75C21.68 15.71 21.4 15.72 21.31 15.73ZM2.13 15.8C2 15.84 2.01 15.88 2 16.04C1.99 16.2 2.03 16.62 2.07 16.76C2.1 16.9 2.1 16.86 2.22 16.87C2.34 16.89 2.69 17.03 2.78 16.85C2.88 16.67 2.89 15.95 2.78 15.77C2.68 15.6 2.27 15.75 2.13 15.8ZM3.08 14.12C2.98 14.91 2.95 17.51 3.05 18.33C3.15 19.14 3.33 18.94 3.68 19C4.03 19.05 4.89 19.07 5.16 18.66C5.42 18.26 4.99 16.93 5.27 16.58C5.55 16.23 6.52 16.51 6.86 16.58C7.2 16.65 7.08 17.01 7.33 17.01C7.58 17.01 6.98 16.65 8.36 16.58C9.75 16.51 14.36 16.51 15.64 16.58C16.92 16.65 15.55 17.01 16.06 17.01C16.58 17.01 18.24 16.27 18.73 16.58C19.22 16.89 18.72 18.44 19 18.84C19.28 19.24 20.09 19.06 20.41 18.98C20.73 18.89 20.88 19.2 20.95 18.35C21.01 17.5 21.12 14.65 20.81 13.87C20.5 13.09 19.43 13.29 19.09 13.65C18.75 14 19.07 15.62 18.75 16.02C18.44 16.42 17.68 17.19 17.18 16.06C16.68 14.94 16.12 10.59 15.75 9.28C15.39 7.96 15.3 8.45 14.99 8.18C14.68 7.92 14.38 7.68 13.91 7.69C13.45 7.69 12.81 8.21 12.19 8.2C11.57 8.2 10.75 7.63 10.17 7.67C9.6 7.7 9.09 8.13 8.76 8.43C8.44 8.72 8.55 8.16 8.23 9.44C7.9 10.71 7.31 14.97 6.82 16.06C6.32 17.16 5.56 16.42 5.25 16.02C4.93 15.62 5.18 14.06 4.91 13.65C4.64 13.24 3.94 13.48 3.63 13.56C3.33 13.63 3.17 13.32 3.08 14.12ZM9.7 10.22C9.75 10.2 8.72 14.22 8.56 15.15C8.41 16.08 8.52 15.69 8.79 15.8C9.05 15.9 9.79 16.12 10.13 15.8C10.47 15.47 10.56 14.15 10.8 13.83C11.05 13.5 11.21 13.5 11.61 13.83C12.01 14.15 12.6 15.47 13.2 15.8C13.8 16.12 15.18 16.4 15.21 15.77C15.25 15.15 13.58 12.97 13.42 12.06C13.27 11.14 13.89 9.76 14.27 10.29C14.65 10.82 15.51 14.27 15.71 15.24C15.9 16.2 16.64 15.93 15.44 16.06C14.24 16.2 9.71 16.18 8.52 16.04C7.32 15.91 8.07 16.23 8.27 15.26C8.47 14.29 9.66 10.24 9.7 10.22Z",
   },
-  // Front view: one leg carried out to the side, the other under the hip.
+  // Front view: hands on the hips, one leg carried out to the side, the other under the hip.
+  // Silhouette (see the exception above): one subpath, 41 anchors. The triangles between each arm
+  // and the torso look enclosed but are not -- hand and hip stop just short of meeting in the
+  // source, so they trace as open notches, not holes.
   "Leg Abduction": {
-    head: [11.5, 4],
-    strokes: [
-      "M11.5 6.1 L11.5 13",
-      "M11.5 7.6 L8.6 11",
-      "M11.5 7.6 L14.2 10.6",
-      "M11.5 13 L10.6 17.4 L10.2 22",
-      "M11.5 13 L16.6 16.8 L20.6 20.4",
-    ],
+    head: [15.1, 4.1],
+    headR: 1.49,
+    fill: "M13.88 5.86C13.33 5.92 13.44 5.86 13.02 6.22C12.6 6.57 11.69 7.6 11.38 7.97C11.07 8.34 11.19 8.26 11.16 8.43C11.13 8.6 11.03 8.6 11.22 8.99C11.41 9.38 12.03 10.45 12.3 10.77C12.57 11.1 12.72 10.96 12.86 10.95C13 10.94 13.1 10.83 13.16 10.73C13.22 10.64 13.35 10.71 13.24 10.37C13.13 10.03 12.49 9.07 12.48 8.67C12.47 8.27 13.06 7.65 13.2 7.97C13.34 8.29 13.36 10.06 13.32 10.59C13.28 11.13 13.62 10.84 12.96 11.19C12.3 11.54 10.49 12.16 9.36 12.67C8.24 13.18 6.88 14.02 6.21 14.25C5.53 14.48 5.51 13.99 5.31 14.05C5.1 14.11 4.97 14.35 4.99 14.61C5 14.87 5.22 15.4 5.39 15.61C5.55 15.81 5.65 15.91 5.99 15.83C6.33 15.74 6.8 15.35 7.42 15.09C8.05 14.82 8.64 14.59 9.74 14.25C10.85 13.91 13.27 13.22 14.06 13.03C14.84 12.84 14.36 13.04 14.46 13.09C14.55 13.14 14.59 11.92 14.62 13.33C14.64 14.74 14.55 20.1 14.6 21.54C14.65 22.98 14.7 21.9 14.92 21.98C15.14 22.06 15.68 22.07 15.92 22C16.15 21.93 16.33 21.74 16.32 21.54C16.31 21.34 15.79 22.18 15.86 20.78C15.92 19.38 16.51 15.27 16.7 13.15C16.88 11.02 16.79 8.78 16.95 8.03C17.12 7.29 17.68 8.26 17.67 8.65C17.66 9.04 17 10.02 16.89 10.37C16.79 10.73 16.94 10.69 17.01 10.79C17.08 10.89 17.17 10.98 17.31 10.97C17.46 10.96 17.62 11.05 17.87 10.75C18.13 10.45 18.66 9.52 18.85 9.15C19.04 8.79 19.02 8.75 19.01 8.55C19 8.36 19.15 8.41 18.79 7.99C18.44 7.57 17.31 6.39 16.89 6.04C16.48 5.68 16.82 5.89 16.32 5.86C15.81 5.83 14.43 5.8 13.88 5.86Z",
   },
-  // Supine, hips driven up: shoulders and feet down, thigh level, shin vertical.
+  // Supine, hips driven up: head and shoulders on the floor at one end, feet at the other, the
+  // body a ramp between them. Silhouette (see the exception above): two subpaths, the smaller
+  // being the far shin, which the source's white keyline cuts off from the rest. At 2.7:1 this is
+  // the flattest figure in the set, so like Push-up it is fitted across -- 20 units -- and centred
+  // vertically; standing it on a ground line would leave two thirds of the frame empty above it.
   "Shoulder Bridge": {
-    head: [3.6, 18.4],
-    strokes: [
-      "M5.6 18.2 L12.6 13 L18 13 L18.4 20",
-      "M2.5 20.8 L21.5 20.8",
-    ],
+    head: [3.8, 13.9],
+    headR: 1.79,
+    fill: "M16.99 11.31C17.04 12.01 17.79 14.59 18.03 15.32C18.26 16.06 18.24 15.63 18.42 15.7C18.6 15.77 19.21 16.48 19.1 15.72C18.99 14.96 18.1 11.86 17.74 11.12C17.39 10.39 16.94 10.61 16.99 11.31ZM22 15.31C22.01 15.12 21.96 14.82 21.76 14.63C21.55 14.44 21.14 15.07 20.78 14.16C20.41 13.24 19.85 10.06 19.59 9.13C19.33 8.2 19.37 8.7 19.21 8.56C19.05 8.42 19.5 8.16 18.63 8.28C17.76 8.4 15.74 8.77 13.98 9.28C12.22 9.79 9.2 10.93 8.06 11.35C6.93 11.77 7.44 11.64 7.18 11.82C6.92 12 6.66 12.25 6.48 12.44C6.3 12.64 6.22 12.75 6.11 12.99C6 13.23 5.83 13.56 5.82 13.89C5.81 14.23 5.93 14.72 6.05 14.98C6.17 15.25 6.38 15.37 6.54 15.49C6.7 15.61 5.7 15.66 7.01 15.7C8.32 15.74 13.1 15.75 14.37 15.72C15.65 15.69 14.6 15.61 14.66 15.51C14.72 15.41 14.79 15.26 14.73 15.14C14.67 15.01 15.51 14.93 14.32 14.74C13.13 14.55 8.64 14.12 7.59 13.97C6.55 13.82 7.66 13.83 8.05 13.84C8.43 13.85 9.38 14.15 9.93 14.02C10.48 13.9 10.67 13.31 11.34 13.08C12.02 12.86 13.44 12.8 13.98 12.67C14.51 12.54 14.38 12.47 14.56 12.31C14.74 12.15 14.5 11.97 15.05 11.73C15.6 11.48 17.16 10.19 17.86 10.82C18.55 11.45 18.95 14.7 19.23 15.51C19.52 16.33 19.16 15.68 19.57 15.72C19.98 15.75 21.31 15.79 21.72 15.72C22.12 15.65 21.99 15.49 22 15.31Z",
   },
 
   // ── Upper body ────────────────────────────────────────────────────────────
@@ -129,14 +135,18 @@ export const GLYPHS: Record<string, Glyph> = {
     headR: 1.78,
     fill: "M6.31 6.32C6.14 6.59 5.93 7.74 5.98 8.06C6.03 8.39 6.42 8.34 6.61 8.27C6.8 8.21 6.89 7.29 7.11 7.68C7.33 8.07 7.61 10.09 7.94 10.59C8.27 11.1 8.75 10.86 9.09 10.69C9.42 10.52 9.81 9.27 9.95 9.58C10.09 9.88 10.13 10.53 9.93 12.53C9.73 14.53 8.78 20.02 8.74 21.6C8.71 23.18 9.44 22.03 9.72 22C10 21.97 10.09 22.78 10.43 21.42C10.77 20.07 11.48 15.14 11.75 13.85C12.03 12.56 11.77 12.42 12.08 13.68C12.38 14.95 13.23 20.06 13.57 21.44C13.91 22.82 13.87 21.89 14.11 21.96C14.35 22.03 14.78 22.04 14.99 21.87C15.2 21.7 15.53 22.5 15.37 20.95C15.22 19.4 14.29 14.46 14.07 12.57C13.85 10.68 13.9 9.9 14.05 9.6C14.2 9.29 14.65 10.55 14.97 10.73C15.29 10.9 15.67 11.16 15.99 10.65C16.31 10.14 16.66 8.06 16.89 7.66C17.12 7.26 17.2 8.21 17.39 8.27C17.58 8.34 17.95 8.35 18.02 8.04C18.09 7.73 17.95 6.69 17.79 6.41C17.63 6.14 17.21 6.25 17.08 6.38C16.95 6.5 17.2 7.09 17.02 7.18C16.84 7.28 16.31 6.9 16.01 6.95C15.7 7 15.36 7.51 15.18 7.47C15.01 7.43 15.11 6.82 14.95 6.72C14.8 6.62 14.33 6.56 14.26 6.87C14.19 7.19 14.4 8.34 14.55 8.62C14.7 8.9 15.01 8.7 15.16 8.58C15.31 8.46 15.44 7.79 15.45 7.89C15.46 7.99 15.43 9.06 15.24 9.18C15.05 9.29 14.5 8.95 14.3 8.6C14.1 8.25 14.16 7.38 14.05 7.07C13.94 6.75 14.23 6.8 13.65 6.72C13.07 6.65 11.2 6.57 10.58 6.63C9.96 6.68 10.1 6.72 9.95 7.07C9.8 7.41 9.86 8.33 9.66 8.68C9.46 9.03 8.95 9.31 8.76 9.18C8.57 9.04 8.54 7.99 8.55 7.89C8.56 7.79 8.66 8.44 8.82 8.56C8.97 8.68 9.34 8.89 9.49 8.6C9.64 8.31 9.79 7.15 9.72 6.84C9.65 6.52 9.21 6.62 9.07 6.72C8.92 6.83 9.02 7.43 8.84 7.47C8.66 7.51 8.27 6.99 7.99 6.95C7.71 6.91 7.32 7.31 7.15 7.22C6.98 7.13 7.12 6.58 6.98 6.43C6.84 6.28 6.47 6.05 6.31 6.32Z",
   },
-  // Waist up: arms straight out at shoulder height, the band slack across the chest.
+  // Front view at the end of the pull: arms straight out at shoulder height, the band taut
+  // between the two handles. Silhouette (see the exception above): two subpaths, the second being
+  // the sliver of white between the band and the arms above it -- a hole, and the only thing
+  // separating band from body, since they meet at the handles. Full body, not waist up, for the
+  // reason given on Overhead Press.
+  //
+  // The source carries three 3-pixel antialiasing specks that a contour trace reads as holes.
+  // Anything under ~20 square pixels is noise; drop it before building the path.
   "Band Pull Apart": {
-    head: [12, 5],
-    strokes: [
-      "M12 7.1 L12 17.5",
-      "M3.6 11 L12 9.6 L20.4 11",
-      "M3.6 11 Q12 15.4 20.4 11",
-    ],
+    head: [12, 4.4],
+    headR: 1.76,
+    fill: "M4.27 6.8C4.08 6.93 3.86 7.29 3.78 7.46C3.69 7.64 3.72 7.69 3.76 7.83C3.8 7.98 3.88 8.23 3.99 8.36C4.11 8.49 4.22 8.62 4.44 8.63C4.66 8.64 4.81 8.42 5.34 8.42C5.86 8.41 6.85 8.58 7.57 8.59C8.3 8.6 9.29 8.17 9.69 8.48C10.1 8.78 9.97 9.81 10.02 10.4C10.08 10.99 10.25 10.35 10.01 12.02C9.76 13.68 8.91 18.87 8.55 20.4C8.18 21.94 7.93 20.97 7.83 21.2C7.72 21.44 7.85 21.67 7.92 21.81C8 21.94 8.09 21.98 8.29 22C8.5 22.02 8.87 22 9.15 21.9C9.43 21.8 9.52 22.73 9.95 21.4C10.38 20.06 11.39 15.18 11.74 13.91C12.08 12.63 11.92 13.74 12.01 13.75C12.1 13.76 11.95 12.68 12.28 13.94C12.62 15.21 13.61 20 14.01 21.32C14.42 22.64 14.47 21.75 14.71 21.86C14.96 21.98 15.26 22 15.47 22C15.69 22 15.9 21.98 16.02 21.86C16.14 21.74 16.29 21.54 16.19 21.28C16.1 21.02 15.8 21.84 15.43 20.33C15.07 18.81 14.26 13.84 14.01 12.17C13.77 10.51 13.94 10.92 13.98 10.32C14.01 9.73 13.43 8.91 14.21 8.59C14.99 8.28 17.85 8.41 18.66 8.42C19.48 8.42 18.91 8.6 19.07 8.63C19.24 8.66 19.48 8.67 19.64 8.61C19.8 8.56 19.95 8.44 20.05 8.3C20.15 8.17 20.27 8.02 20.24 7.8C20.21 7.57 20.05 7.14 19.89 6.96C19.73 6.77 19.47 6.71 19.31 6.69C19.15 6.66 19.04 6.74 18.94 6.82C18.84 6.91 19.08 7.14 18.7 7.19C18.32 7.25 17.67 7.28 16.66 7.15C15.65 7.03 13.71 6.56 12.67 6.45C11.63 6.35 11.15 6.43 10.41 6.53C9.68 6.63 9.11 6.93 8.25 7.04C7.4 7.15 5.86 7.24 5.3 7.19C4.74 7.14 5.06 6.79 4.89 6.73C4.72 6.66 4.45 6.68 4.27 6.8ZM4.81 8.28C4.78 8.28 5.01 8.03 5.04 7.87C5.08 7.72 4.98 7.41 5 7.37C5.03 7.33 2.88 7.59 5.18 7.64C7.48 7.69 16.5 7.69 18.8 7.64C21.1 7.59 18.97 7.33 19 7.37C19.02 7.41 18.92 7.74 18.96 7.89C18.99 8.05 19.22 8.29 19.19 8.28C19.16 8.28 21.13 7.94 18.8 7.87C16.47 7.81 7.53 7.81 5.2 7.87C2.87 7.94 4.84 8.28 4.81 8.28Z",
   },
   // Waist up: arms raised out and up on a diagonal.
   "Arm Abduction": {
@@ -171,26 +181,22 @@ export const GLYPHS: Record<string, Glyph> = {
   },
 
   // ── Full body ─────────────────────────────────────────────────────────────
-  // Mid-jump: arms overhead and out, feet wide.
+  // Mid-jump: arms overhead and out, feet wide. Silhouette (see the exception above): one subpath,
+  // 41 anchors. The only symmetric figure in the set, so both arms and both legs are drawn --
+  // the symmetry IS the movement, the same reason the stroked version drew all four.
   "Jumping Jacks": {
-    head: [12, 4],
-    strokes: [
-      "M12 6.1 L12 13",
-      "M4.6 3.6 L12 8 L19.4 3.6",
-      "M12 13 L7 21",
-      "M12 13 L17 21",
-    ],
+    head: [12, 5.2],
+    headR: 1.89,
+    fill: "M6.72 2.72C6.58 2.83 6.37 3.01 6.35 3.3C6.33 3.58 6.37 3.88 6.58 4.42C6.8 4.96 7.14 5.77 7.63 6.55C8.12 7.34 9.17 8.22 9.55 9.15C9.93 10.08 9.86 11.47 9.9 12.12C9.94 12.76 10.28 11.74 9.8 13.03C9.32 14.31 7.58 18.51 6.99 19.81C6.4 21.11 6.35 20.56 6.23 20.86C6.11 21.16 6.2 21.43 6.27 21.61C6.34 21.8 6.52 21.9 6.66 21.96C6.8 22.03 6.85 22.07 7.09 22C7.32 21.93 7.37 22.65 8.08 21.52C8.78 20.38 10.72 16.33 11.33 15.2C11.94 14.06 11.6 14.79 11.72 14.69C11.84 14.59 11.9 14.5 12.07 14.6C12.24 14.7 12.09 14.15 12.73 15.29C13.36 16.44 15.24 20.35 15.89 21.46C16.54 22.57 16.35 21.87 16.62 21.94C16.89 22.01 17.3 21.97 17.49 21.88C17.69 21.8 17.76 21.58 17.8 21.42C17.85 21.25 17.91 21.15 17.79 20.9C17.66 20.64 17.6 21.06 17.05 19.89C16.5 18.71 14.96 15.06 14.47 13.86C13.99 12.66 14.2 13.09 14.14 12.68C14.08 12.27 14.07 11.98 14.12 11.4C14.17 10.82 13.99 10.13 14.43 9.21C14.87 8.29 16.23 6.77 16.76 5.89C17.28 5.02 17.44 4.46 17.57 3.98C17.7 3.49 17.65 3.2 17.55 2.97C17.46 2.74 17.19 2.64 17.01 2.6C16.83 2.56 16.72 2.3 16.45 2.72C16.17 3.13 15.74 4.41 15.36 5.08C14.98 5.75 14.52 6.35 14.16 6.75C13.8 7.15 13.58 7.33 13.19 7.48C12.8 7.64 12.22 7.67 11.84 7.68C11.45 7.68 11.19 7.63 10.9 7.52C10.62 7.41 10.48 7.41 10.11 7.02C9.74 6.63 9.1 5.87 8.7 5.18C8.3 4.49 7.96 3.3 7.71 2.87C7.46 2.44 7.35 2.63 7.18 2.6C7.02 2.57 6.86 2.6 6.72 2.72Z",
   },
-  // One knee above hip height, opposite arm up.
+  // Mid-stride, seen from the side: one knee driven above hip height, the opposite arm forward.
+  // Silhouette (see the exception above): one subpath, 45 anchors. At 9 units across it is the
+  // narrowest figure in the set, which is the pose, not a fitting mistake -- everything is stacked
+  // front to back, so there is nothing to fill the frame's width with.
   "High Knee": {
-    head: [10.6, 4],
-    strokes: [
-      "M10.6 6.1 L10.6 12.6",
-      "M10.6 7.6 L14.6 5.4 L15.8 2.4",
-      "M10.6 7.6 L7.2 10.6",
-      "M10.6 12.6 L9.8 17 L9.4 22",
-      "M10.6 12.6 L15.8 10.4 L19 14",
-    ],
+    head: [12.5, 4.2],
+    headR: 1.63,
+    fill: "M13.19 5.96C12.94 5.94 12.66 5.99 12.43 6.09C12.21 6.2 12.06 6.2 11.83 6.59C11.6 6.97 11.44 8.34 11.04 8.42C10.63 8.5 9.75 7.28 9.39 7.06C9.03 6.83 9.03 6.99 8.88 7.06C8.74 7.13 8.55 7.32 8.51 7.49C8.46 7.66 8.28 7.69 8.64 8.08C9 8.47 10.27 9.49 10.68 9.82C11.09 10.14 10.92 10.02 11.09 10.02C11.26 10.02 11.6 9.71 11.7 9.82C11.8 9.92 12.2 10.6 11.7 10.65C11.19 10.69 9.27 10.12 8.66 10.08C8.05 10.04 8.17 10.25 8.03 10.4C7.89 10.55 7.77 10.23 7.83 10.99C7.88 11.75 8.38 14.21 8.34 14.97C8.29 15.74 7.68 15.41 7.54 15.58C7.4 15.74 7.47 15.85 7.5 15.97C7.54 16.09 7.62 16.23 7.73 16.3C7.84 16.36 7.85 16.41 8.15 16.37C8.45 16.33 9.23 16.18 9.53 16.07C9.82 15.96 9.9 16.38 9.92 15.73C9.94 15.08 9.35 12.64 9.64 12.18C9.93 11.71 11.36 12.23 11.64 12.93C11.92 13.63 11.24 15.11 11.34 16.39C11.43 17.67 12.21 19.85 12.21 20.62C12.2 21.4 11.49 20.88 11.3 21.04C11.12 21.19 11.1 21.41 11.09 21.55C11.09 21.69 11.17 21.79 11.26 21.87C11.36 21.94 11.3 21.98 11.66 22C12.02 22.02 13.06 22.02 13.42 21.98C13.77 21.94 13.69 21.86 13.78 21.77C13.86 21.69 14.02 22.4 13.93 21.45C13.83 20.5 13.12 17.64 13.19 16.07C13.26 14.5 14.16 13.35 14.36 12.04C14.56 10.74 14.25 8.78 14.38 8.23C14.51 7.68 15.11 8.42 15.14 8.74C15.16 9.06 14.6 9.83 14.51 10.14C14.42 10.44 14.53 10.46 14.61 10.57C14.68 10.69 14.78 10.83 14.95 10.84C15.12 10.85 15.37 10.97 15.63 10.63C15.89 10.28 16.38 9.15 16.51 8.76C16.65 8.36 16.52 8.4 16.46 8.25C16.4 8.1 16.58 8.21 16.16 7.87C15.73 7.53 14.4 6.53 13.91 6.21C13.41 5.89 13.44 5.98 13.19 5.96Z",
   },
 };
 
