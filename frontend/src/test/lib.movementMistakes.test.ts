@@ -68,10 +68,11 @@ describe("the authored common mistakes", () => {
   });
 
   it("points every declared illustration at a file that exists", () => {
-    // Thirty-four pairs declared and forty-six still to come, so this runs against a moving
-    // target: a typo'd or not-yet-exported pair fails here rather than rendering as two broken
-    // images in the middle of the page. It reads public/ off disk, so it also fails if a WebP is
-    // deleted without its `art(...)` call going with it.
+    // Forty pairs, which is every fault the fourteen registered detectors report and every
+    // filename public/movements/mistakes/README.md lists — the set is complete, so from here
+    // this guards against loss rather than against absence. A typo'd or re-exported pair fails
+    // here rather than rendering as two broken images in the middle of the page, and because it
+    // reads public/ off disk it also fails if a WebP goes without its `art(...)` call going too.
     for (const [movement, m] of ALL) {
       if (!m.art) continue;
       for (const path of [m.art.wrong, m.art.correct]) {

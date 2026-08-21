@@ -32,6 +32,9 @@ here:
   * PUT BACK what the knock-out cuts adrift, which on these sheets is the white socks and, with
     them, the shoes: they are the page's tone exactly and they are open to the page at the ankle,
     so no threshold can keep them and the shoe ends up floating below the leg. See _reattached.
+  * TAKE OFF the panel some sheets arrive already wearing -- a drawn frame, a white fill and a
+    corner badge, which is MistakePanel rendered into the art. See _card_chrome, and note that it
+    runs before the knock-out rather than after: breaching the frame is what lets the fill go.
   * FIT BOTH HALVES INTO ONE BOX: shared rows, and a shared width centred on each half's own ink.
     The pair is the whole point of the picture, and `object-contain` scales each panel
     independently: crop each half to its own ink and the wider one is rendered SMALLER, so the same
@@ -110,6 +113,14 @@ SHEETS: dict[str, str] = {
     "bicep-curl-swinging-the-body.png": "curl-trunk-swing-momentum",
     "bicep-curl-half-reps.png": "curl-incomplete-rom",
     "torso-twist-losing-the-braced-torso.png": "tt-trunk-not-braced",
+    # Two movements author the same title, "One arm lagging behind", so here the sheet's movement
+    # prefix is the only thing separating them -- exactly what this table is for.
+    "arm-abduction-leaning-away-from-the-raising-arm.png": "arm-abd-contralateral-trunk-lean",
+    "arm-abduction-one-arm-lagging-behind.png": "arm-abd-lr-asymmetry",
+    "arm-VW-too-little-travel-between-V-and-W.png": "vw-incomplete-excursion",
+    "arm-VW-V-position-too-low.png": "vw-loss-of-elevation",
+    "arm-VW-one-arm-lagging-behind.png": "vw-lr-asymmetry",
+    "sit-up-shoulder-blades-never-leaving-the-mat.png": "situp-incomplete-rom",
 }
 
 # A gap narrower than this between the two figures is not something to split on.
@@ -156,6 +167,42 @@ SEAM_RADIUS = 25
 # And how many such pixels make a half "annotated". The finished halves carry 267-1538 of their own
 # colour; this is the floor below which a scatter of resampled edge pixels would pass for an arrow.
 MIN_MARK_PIXELS = 100
+# What marks out the panel chrome a sheet has drawn for ITSELF -- see _card_chrome. A frame is a
+# mark-coloured outline whose box covers a whole panel; measured on the four carded sheets it
+# covers 45-46% of the sheet at a fill of 0.006-0.009, while the largest bounding box any real
+# annotation manages is 8% of the sheet (a red arc) and the fullest is a solid badge. Nothing sits
+# between the two, and the frame test needs BOTH -- long dashed guides are thin but narrow.
+FRAME_COVERAGE = 0.25
+FRAME_FILL = 0.05
+# And the badge sitting in a frame's corner: a filled disc, near enough square, measured 79x78 to
+# 83x84 at a fill of 0.65-0.69 -- the shortfall from a circle's 0.785 being the white glyph it
+# carries. Sought only inside a frame's corner, and only on a sheet that HAS a frame.
+BADGE_FILL = 0.5
+BADGE_ASPECT = 1.3
+BADGE_MIN_PIXELS = 1000
+BADGE_CORNER = 0.2
+# Chrome is grown by this much before it is flooded, to take its antialiasing with it. The edge
+# pixels where a frame fades into its white fill are too pale to pass the mark test and too
+# coloured to pass the neutral one, so without this the frame and badge go and leave a ghost of
+# themselves -- a pale rounded outline and a faint disc, which is most of what was wrong with
+# shipping the card in the first place.
+CHROME_HALO = 3
+# How far either side of a frame's rectangle to sweep for the rest of it. A frame does not
+# necessarily arrive in one piece: on the V-position sheet the left edge is a one-pixel rule at
+# x=22 while the rounded corners it should join start at x=27, so it labels separately and its box
+# is far too small to be read as a frame on its own. Left behind it draws a pale rule down the edge
+# of the panel. Every real annotation on these sheets keeps well clear of the frame, so sweeping
+# the perimeter costs nothing and does not depend on the outline being connected.
+FRAME_BAND = 14
+
+# How much of a finished panel may be opaque before it is a PLATE rather than a drawing. The
+# knock-out only removes background it can reach from the border, and a sheet that draws its own
+# card -- a coloured frame with a white fill -- encloses that fill, so none of it goes and the
+# panel ships as a rounded rectangle sitting on a tinted panel that already exists. Measured over
+# 40 panels the split is not close: every bare-figure panel is 32-51% opaque and every carded one
+# is 94.6-95.8%.
+OPAQUE_CEILING = 0.70
+
 # How far the correct half's green has to outrun the wrong half's. See split_sheet for why the
 # orientation is decided on GREEN and only corroborated by red.
 MARK_MARGIN = 3
@@ -254,6 +301,83 @@ def _gutter(sheet_rgb: Image.Image, band: tuple[int, int]) -> int:
     return int((longest[0] + longest[-1] + 1) // 2)
 
 
+def _card_chrome(pixels: np.ndarray) -> np.ndarray:
+    """Mask of the panel chrome a sheet has drawn for itself: a card frame, and its badge.
+
+    Four of the sheets arrive already wearing the thing they are about to be put inside -- each
+    panel a rounded frame in the tone colour, a white fill, and a corner badge -- and both halves
+    of that are a problem. The badge duplicates the one MistakePanel draws at `left-2.5 top-2.5`,
+    so the card would carry two. And the white fill is SEALED by the frame, so the knock-out cannot
+    reach it from the border and the panel ships 95% opaque, a rounded rectangle laid on a tinted
+    panel that already exists.
+
+    Which is why this returns a mask rather than painting anything out: fold it into the background
+    BEFORE the flood and the fill needs no special handling at all. Breaching the frame is enough
+    -- the fill is then continuous with the page and goes the way every other background goes.
+
+    Only ever active on a sheet that has a frame. A bare sheet yields nothing here, so the badge
+    rule -- which is otherwise just "a solid coloured blob in a corner" -- can never reach for an
+    annotation that happens to sit high and left on a sheet that was drawn correctly.
+    """
+    marks = _marks(pixels, 0) | _marks(pixels, 1)
+    labels, count = ndimage.label(marks, structure=np.ones((3, 3)))
+    if count == 0:
+        return np.zeros(marks.shape, dtype=bool)
+
+    windows = ndimage.find_objects(labels)
+    chrome = np.zeros(marks.shape, dtype=bool)
+    frames: list[tuple[slice, slice]] = []
+    for index, window in enumerate(windows, start=1):
+        rows, cols = window
+        height, width = rows.stop - rows.start, cols.stop - cols.start
+        drawn = int((labels[window] == index).sum())
+        if height * width >= marks.size * FRAME_COVERAGE and drawn <= height * width * FRAME_FILL:
+            chrome |= labels == index
+            frames.append(window)
+    if not frames:
+        return np.zeros(marks.shape, dtype=bool)
+
+    for index, window in enumerate(windows, start=1):
+        rows, cols = window
+        height, width = rows.stop - rows.start, cols.stop - cols.start
+        drawn = int((labels[window] == index).sum())
+        if drawn < BADGE_MIN_PIXELS or drawn < height * width * BADGE_FILL:
+            continue
+        if not 1 / BADGE_ASPECT <= width / height <= BADGE_ASPECT:
+            continue
+        if any(_in_corner(window, frame) for frame in frames):
+            chrome |= labels == index
+
+    # Then everything else drawn along a frame's rectangle, connected to it or not (see FRAME_BAND).
+    # Not only the marks: where a frame's rounded corner fades out it leaves a wash -- measured
+    # (249,188,187) -- that is too pale to be a mark and too tinted to be neutral, so it belongs to
+    # neither rule and survives both as a pink smear in the corner of the panel. Light-but-tinted
+    # is what chrome fading out looks like, and nothing in the drawing looks like it: skin, kit,
+    # hair and shoes are all darker than GREY_FLOOR, and an annotation is saturated, not pale.
+    bands = pixels[..., :3]
+    washed = (bands.min(axis=2) >= GREY_FLOOR) & (bands.max(axis=2) - bands.min(axis=2) > GREY_TOLERANCE)
+    for rows, cols in frames:
+        band = np.zeros(marks.shape, dtype=bool)
+        band[max(rows.start - FRAME_BAND, 0) : rows.stop + FRAME_BAND,
+             max(cols.start - FRAME_BAND, 0) : cols.stop + FRAME_BAND] = True
+        band[rows.start + FRAME_BAND : max(rows.stop - FRAME_BAND, rows.start + FRAME_BAND),
+             cols.start + FRAME_BAND : max(cols.stop - FRAME_BAND, cols.start + FRAME_BAND)] = False
+        chrome |= (marks | washed) & band
+
+    return ndimage.binary_dilation(chrome, np.ones((3, 3)), iterations=CHROME_HALO)
+
+
+def _in_corner(window: tuple[slice, slice], frame: tuple[slice, slice]) -> bool:
+    """Whether `window` sits in one of `frame`'s corners."""
+    rows, cols = window
+    frame_rows, frame_cols = frame
+    reach_y = (frame_rows.stop - frame_rows.start) * BADGE_CORNER
+    reach_x = (frame_cols.stop - frame_cols.start) * BADGE_CORNER
+    near_y = min(abs(rows.start - frame_rows.start), abs(rows.stop - frame_rows.stop)) <= reach_y
+    near_x = min(abs(cols.start - frame_cols.start), abs(cols.stop - frame_cols.stop)) <= reach_x
+    return near_y and near_x
+
+
 def _knocked_out(panel: Image.Image) -> Image.Image:
     """One half with the page, the card plate and the ground shadow gone, the drawing kept.
 
@@ -282,6 +406,7 @@ def _knocked_out(panel: Image.Image) -> Image.Image:
     lightest = pixels.max(axis=2)
     darkest = pixels.min(axis=2)
     background = (lightest - darkest <= GREY_TOLERANCE) & (darkest >= GREY_FLOOR)
+    background |= _card_chrome(pixels)
 
     labels, _ = ndimage.label(background)
     edge = np.concatenate([labels[0, :], labels[-1, :], labels[:, 0], labels[:, -1]])
@@ -472,6 +597,18 @@ def split_sheet(sheet: Path, slug: str, preview: bool) -> None:
     #
     # Red is kept as a presence check only -- a wrong half with no red marks at all is a sheet that
     # is not annotated the way this expects, whatever else is true of it.
+    for tone, art in cut.items():
+        opaque = float((np.asarray(art.split()[3]) > 0).mean())
+        if opaque > OPAQUE_CEILING:
+            raise SystemExit(
+                f"{sheet.name}: the {tone} panel came out {opaque:.0%} opaque, so the knock-out "
+                f"did not find the background. The usual cause is a sheet that draws its own card "
+                f"-- a coloured frame around a white fill -- which encloses the fill so it cannot "
+                f"be reached from the border. Art in that style also arrives with its own X / "
+                f"check badge, which the page already draws, so the fix is a sheet of the bare "
+                f"figure on a plain ground rather than anything here"
+            )
+
     red_wrong = _mark_pixels(cut["wrong"], 0)
     green_wrong = _mark_pixels(cut["wrong"], 1)
     green_correct = _mark_pixels(cut["correct"], 1)
@@ -504,12 +641,24 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # One unusable sheet does not stop the other thirty-nine: a refusal is reported and the run
+    # carries on, so a batch always lands everything it can and names what it could not.
+    refused: list[str] = []
     for name, slug in SHEETS.items():
         sheet = MISTAKES_DIR / name
         if not sheet.exists():
             print(f"skipped {name}: not in {MISTAKES_DIR.relative_to(REPO_ROOT)} (sources are gitignored)")
             continue
-        split_sheet(sheet, slug, args.preview)
+        try:
+            split_sheet(sheet, slug, args.preview)
+        except SystemExit as refusal:
+            print(f"REFUSED {refusal}")
+            refused.append(name)
+
+    if refused:
+        raise SystemExit(
+            f"{len(refused)} sheet(s) refused, listed above: " + ", ".join(refused)
+        )
 
 
 if __name__ == "__main__":

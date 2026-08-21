@@ -6,10 +6,10 @@ import { api } from "../api";
 
 // The UNillustrated card, which no squat fault takes any more. All five now declare a wrong/correct
 // pair, so `mistake.art &&` and MistakePanel's `src ?` branch are only ever taken one way on the
-// movement every other test renders — and the placeholder is not dead code. It is what three of
-// the fourteen movements still show, what any movement shows while its sheets arrive one at a
-// time, and what any newly registered fault shows on its first day. This file mocks the art back
-// OFF one entry so both halves of that branch stay exercised.
+// movement every other test renders — and every OTHER movement is drawn too now, so nothing in
+// the app takes the undrawn branch at all. That makes this file the only thing holding it: it is
+// what a newly registered fault shows on its first day, and what every card here showed until the
+// art arrived. Mocking the art back OFF one entry keeps both halves of the branch exercised.
 //
 // It ran the other way round until the art landed: it used to mock art ONTO an entry so the
 // illustrated branch was covered before any file existed. Same purpose, opposite direction.

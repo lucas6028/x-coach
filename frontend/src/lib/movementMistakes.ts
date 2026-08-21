@@ -915,7 +915,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "只抬到不需要側傾的高度。",
           "背靠牆做這個動作。",
         ],
-      }
+      },
+      art("arm_abd_contralateral_trunk_lean")
     ),
     mistake(
       "arm_abd_lr_asymmetry",
@@ -939,7 +940,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "對著鏡子做，或錄影下來檢查。",
           "以比較慢的那一手決定節奏。",
         ],
-      }
+      },
+      art("arm_abd_lr_asymmetry")
     ),
   ],
 
@@ -966,7 +968,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "手肘要確實往下、往後收成 W。",
           "放慢速度，讓行程是刻意做出來的。",
         ],
-      }
+      },
+      art("vw_incomplete_excursion")
     ),
     mistake(
       "vw_loss_of_elevation",
@@ -990,7 +993,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "肋骨往下收，讓行程來自肩膀而不是腰。",
           "做不到位置時，先檢查過頭活動度。",
         ],
-      }
+      },
+      art("vw_loss_of_elevation")
     ),
     mistake(
       "vw_lr_asymmetry",
@@ -1014,7 +1018,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "從正面錄影，比較兩側。",
           "以比較慢的那一側決定節奏。",
         ],
-      }
+      },
+      art("vw_lr_asymmetry")
     ),
   ],
 
@@ -1041,7 +1046,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "一節一節脊椎慢慢捲起來。",
           "放慢下放，讓腹肌而不是慣性在做功。",
         ],
-      }
+      },
+      art("situp_incomplete_rom")
     ),
   ],
 

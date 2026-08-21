@@ -11,6 +11,12 @@ so dropping the files in changes what is inside the slot and reflows nothing aro
    and roughly square, and the image is `object-contain`, so anything portrait-ish works — match
    the framing across a movement's set rather than across the whole directory.
 
+   The drawing wanted is the FIGURE AND ITS ANNOTATIONS ON A PLAIN GROUND, because the page draws
+   the panel, its tint and its ✗ / ✓ badge around the image already. Art that arrives wearing its
+   own card is stripped of it rather than refused — see _card_chrome — but bare art asks less of
+   the script. If a panel still comes out more than 70% opaque it is refused, on the grounds that
+   the background was not found and the panel would ship as a rectangle.
+
    Art that arrives as ONE two-panel sheet (wrong left, correct right) does not get cut by hand:
    drop the PNG here, add its `<sheet>.png -> <fault-slug>` line to `SHEETS` in
    `scripts/prep_mistake_art.py`, and run
