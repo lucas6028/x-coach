@@ -138,7 +138,7 @@ yarn test
 yarn test:coverage
 ```
 
-## 8. LINE Messaging API bot(聊天室查訓練摘要)
+## 8. LINE Messaging API bot(聊天室查訓練摘要 + LLM 對話)
 
 > 硬前提:Messaging API channel 必須建在**與 LINE Login channel 相同的 Provider** 底下。
 > LINE 的 user ID 是每個 provider 一組,同 provider 下的 channel 共用同一個值 —— 這是 bot
@@ -158,6 +158,22 @@ yarn test:coverage
    ⚠️ 不可選「連結(URI/LIFF)」—— 那不會觸發 webhook,也就拿不到 `replyToken`。
 7. `.env` 的 `LINE_LIFF_ID` 填既有 LIFF app id(可留空,只是回覆訊息會少一個連結)。
 8. 在 Supabase SQL editor 執行 `db/migrations/20260720000000_line_training_summary.sql`。
+9. **LLM 對話(選配)**:`.env` 有 `LLM_API_KEY`(與網頁版 `/api/chat` 同一把、同一個
+   provider / model 設定)時,聊天室裡**非關鍵字**的文字都會交給 LLM 教練回答
+   (`services/line_bot.chat_reply_for`);沒有金鑰則退回「傳「摘要」」的說明訊息。
+   - 回答以該用戶的訓練摘要(同一支 RPC)做 grounding,只允許引用摘要裡的事實;
+     一般健身知識可答,但要標明是通則而非影片量測結果。
+   - 多輪記憶是**行程內、每個聊天室最近 8 則、30 分鐘 TTL**,不落 DB、不需 migration;
+     重啟後端即清空。**已知限制:** 記憶綁在單一行程,backend 若放大到多個 replica
+     (`infra/main.bicep` 允許到 3)且 ingress 無 session affinity,追問可能落到另一個
+     replica 而失去上文 —— 要跨 replica 就得把歷史搬進 Supabase,demo 階段刻意不做。
+   - 聊天室以 **群組 / 多人聊天室 / 1:1** 為單位:群組裡只回一般知識,**不會**讀取或
+     說出任何成員的個人訓練摘要(在群組傳「摘要」也只會被請去私訊);同一聊天室的訊息依序處理(追問一定看得到上一句),
+     不同聊天室並行。關鍵字 `help` / `幫助` / `說明` / `?` 回說明訊息,不進 LLM。
+   - Webhook 收到後**先回 200 再背景處理**;LLM 預算 25 秒牆鐘 + 10 秒 chunk 間停滯、
+     RPC 8 秒、輸出上限 700 tokens(reply token 約 1 分鐘失效),等待期間 1:1 聊天會顯示
+     「輸入中」動畫;失敗回「教練暫時離線」。LINE 重送(redelivery)的事件以
+     `webhookEventId` 去重,10 分鐘內同一事件不重跑。對話內容會送到 LLM provider,與網頁版相同。
 
 ### 手動驗證
 
@@ -166,6 +182,9 @@ yarn test:coverage
 - 用 **anon** key 呼叫同一支函式:應被 Postgres 拒絕(permission denied)。
 - 沒登入過 x-coach 的 LINE 帳號敲 bot:得到引導登入的訊息,且 Supabase 的
   `auth.users` **沒有**多出任何一列。
+- (有 `LLM_API_KEY` 時)敲「膝蓋內夾怎麼改善?」:先出現「輸入中」動畫,接著是純文字
+  (無 Markdown 符號)的繁中回答;再敲「那第二點呢?」應接得上上一句。
+  敲「我最近練得怎樣?」:回答裡的次數 / 最常見問題要與「摘要」一致,不得多出摘要沒有的數字。
 
 ## 9. LIFF App Shell(LINE App 內的分頁式介面,2026-07-20)
 

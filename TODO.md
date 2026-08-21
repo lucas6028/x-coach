@@ -77,7 +77,7 @@
 
 ## Demo
 
-- [ ] Line ChatBot — 剩下 LLM 對話
+- [x] Line ChatBot — LLM 對話(2026-08-21:非關鍵字訊息交給 LLM,摘要 grounding,行程內 30 分鐘多輪記憶;見 `docs/line-login-liff-setup.md` §8)
 - [ ] QR Code demo, real time interaction
 - [ ] 語音回饋（composer 已預留 UI 槽位，功能未做）
 - [x] 互動 mini-games：`/games` hub、`/67` 手勢計數、`/ninja` Fruit Ninja（PR #27 #29 #30）
