@@ -7,21 +7,21 @@
 //
 // TWO KINDS OF GLYPH live here, and the set reads as two visual languages until that stops:
 //
-//  * FILLED SILHOUETTES (`fill`) -- twelve of the sixteen, traced from supplied pictograms rather
+//  * FILLED SILHOUETTES (`fill`) -- fifteen of the sixteen, traced from supplied pictograms rather
 //    than drawn here. Asked for by name, one movement at a time; not oversights, so do not "fix"
-//    them back into strokes. They are visibly heavier marks than the stroked four at 13-18px, and
-//    they ignore the waist-up rule below, their sources having come with legs.
-//  * STROKED STICK FIGURES (`strokes`) -- Row, Arm Abduction, Arm VW and Torso Twist, the four
-//    with no silhouette art yet. The drawing rules are theirs.
+//    them back into strokes. They are heavier marks than a stroked figure at 13-18px, and they
+//    ignore the waist-up rule below, their sources having come with legs.
+//  * A STROKED STICK FIGURE (`strokes`) -- Row, alone now, still waiting on silhouette art. The
+//    drawing rules are its. Keep the `strokes` branch until Row is converted; after that both it
+//    and these rules are dead, and the whole file collapses to one shape.
 //
 // Both kinds share the 24x24 frame and the `<circle>` head.
 //
-// DRAWING RULES for the stroked four:
+// DRAWING RULES for the last stroked figure:
 //  * 24x24 frame, ground at y=20-22, figure roughly 18 units tall.
 //  * Filled head, everything else a 1.7-wide round-capped stroke. At 18px on screen a limb is
-//    about two pixels wide, so each figure gets the fewest strokes that still name the movement:
-//    one arm and one leg for anything seen from the side, both when the two differ or when the
-//    movement is the symmetry.
+//    about two pixels wide, so a figure gets the fewest strokes that still name the movement:
+//    one arm and one leg for anything seen from the side.
 //  * The arm movements are drawn from the waist up. Legs that do nothing cost a third of the
 //    frame's height, and shrink the part that carries the meaning.
 //  * Equipment is drawn -- what is left of it is Row's dumbbell. It is often the fastest thing to
@@ -148,15 +148,22 @@ export const GLYPHS: Record<string, Glyph> = {
     headR: 1.76,
     fill: "M4.27 6.8C4.08 6.93 3.86 7.29 3.78 7.46C3.69 7.64 3.72 7.69 3.76 7.83C3.8 7.98 3.88 8.23 3.99 8.36C4.11 8.49 4.22 8.62 4.44 8.63C4.66 8.64 4.81 8.42 5.34 8.42C5.86 8.41 6.85 8.58 7.57 8.59C8.3 8.6 9.29 8.17 9.69 8.48C10.1 8.78 9.97 9.81 10.02 10.4C10.08 10.99 10.25 10.35 10.01 12.02C9.76 13.68 8.91 18.87 8.55 20.4C8.18 21.94 7.93 20.97 7.83 21.2C7.72 21.44 7.85 21.67 7.92 21.81C8 21.94 8.09 21.98 8.29 22C8.5 22.02 8.87 22 9.15 21.9C9.43 21.8 9.52 22.73 9.95 21.4C10.38 20.06 11.39 15.18 11.74 13.91C12.08 12.63 11.92 13.74 12.01 13.75C12.1 13.76 11.95 12.68 12.28 13.94C12.62 15.21 13.61 20 14.01 21.32C14.42 22.64 14.47 21.75 14.71 21.86C14.96 21.98 15.26 22 15.47 22C15.69 22 15.9 21.98 16.02 21.86C16.14 21.74 16.29 21.54 16.19 21.28C16.1 21.02 15.8 21.84 15.43 20.33C15.07 18.81 14.26 13.84 14.01 12.17C13.77 10.51 13.94 10.92 13.98 10.32C14.01 9.73 13.43 8.91 14.21 8.59C14.99 8.28 17.85 8.41 18.66 8.42C19.48 8.42 18.91 8.6 19.07 8.63C19.24 8.66 19.48 8.67 19.64 8.61C19.8 8.56 19.95 8.44 20.05 8.3C20.15 8.17 20.27 8.02 20.24 7.8C20.21 7.57 20.05 7.14 19.89 6.96C19.73 6.77 19.47 6.71 19.31 6.69C19.15 6.66 19.04 6.74 18.94 6.82C18.84 6.91 19.08 7.14 18.7 7.19C18.32 7.25 17.67 7.28 16.66 7.15C15.65 7.03 13.71 6.56 12.67 6.45C11.63 6.35 11.15 6.43 10.41 6.53C9.68 6.63 9.11 6.93 8.25 7.04C7.4 7.15 5.86 7.24 5.3 7.19C4.74 7.14 5.06 6.79 4.89 6.73C4.72 6.66 4.45 6.68 4.27 6.8ZM4.81 8.28C4.78 8.28 5.01 8.03 5.04 7.87C5.08 7.72 4.98 7.41 5 7.37C5.03 7.33 2.88 7.59 5.18 7.64C7.48 7.69 16.5 7.69 18.8 7.64C21.1 7.59 18.97 7.33 19 7.37C19.02 7.41 18.92 7.74 18.96 7.89C18.99 8.05 19.22 8.29 19.19 8.28C19.16 8.28 21.13 7.94 18.8 7.87C16.47 7.81 7.53 7.81 5.2 7.87C2.87 7.94 4.84 8.28 4.81 8.28Z",
   },
-  // Waist up: arms raised out and up on a diagonal.
+  // Front view at the top: both arms straight out at shoulder height. Silhouette (see the
+  // exception above): one subpath, 22 anchors -- the fewest of any silhouette, this being little
+  // more than a cross. Full body, not waist up, for the reason given on Overhead Press.
   "Arm Abduction": {
-    head: [12, 5],
-    strokes: ["M12 7.1 L12 17.5", "M4.4 5.6 L12 9.8 L19.6 5.6"],
+    head: [12, 4.4],
+    headR: 1.77,
+    fill: "M4.37 6.75C2.68 6.91 4.05 7.25 4.08 7.47C4.11 7.68 3.6 7.89 4.55 8.04C5.5 8.18 8.89 6.12 9.78 8.34C10.67 10.56 9.84 19.12 9.9 21.36C9.96 23.59 10.02 21.67 10.14 21.77C10.27 21.88 10.45 21.99 10.65 22C10.86 22.01 11.18 21.95 11.36 21.85C11.53 21.74 11.63 22.75 11.7 21.37C11.77 20 11.7 14.9 11.77 13.59C11.84 12.27 12.03 12.19 12.11 13.47C12.2 14.76 12.21 19.93 12.27 21.3C12.32 22.67 12.36 21.59 12.45 21.7C12.55 21.8 12.61 21.91 12.81 21.94C13.02 21.97 13.49 21.97 13.71 21.87C13.92 21.76 14.02 23.55 14.1 21.3C14.19 19.05 13.32 10.59 14.2 8.38C15.08 6.17 18.44 8.19 19.39 8.06C20.34 7.93 19.81 7.79 19.88 7.6C19.95 7.42 19.89 7.1 19.81 6.94C19.72 6.78 20.3 6.7 19.37 6.64C18.44 6.57 16.7 6.5 14.2 6.52C11.7 6.54 6.05 6.59 4.37 6.75Z",
   },
-  // Waist up: the W of the V-W drill — upper arms out, elbows bent, forearms up.
+  // The W of the V-W drill: upper arms out, elbows bent, forearms up. Silhouette (see the
+  // exception above): one subpath, 34 anchors, most of them in the two bent arms -- the bend is
+  // the whole difference between this and Arm Abduction. Full body, not waist up, for the reason
+  // given on Overhead Press.
   "Arm VW": {
-    head: [12, 5],
-    strokes: ["M12 7.1 L12 17.5", "M5.6 5 L8.2 11 L12 9.6 L15.8 11 L18.4 5"],
+    head: [12, 4.4],
+    headR: 1.85,
+    fill: "M5.8 3.85C5.66 3.9 5.52 4.01 5.45 4.13C5.38 4.26 5.2 3.78 5.37 4.59C5.54 5.41 6.15 8.22 6.46 9.01C6.77 9.79 6.65 9.35 7.23 9.29C7.8 9.23 9.43 8.1 9.88 8.66C10.34 9.22 10 10.52 9.97 12.65C9.93 14.78 9.65 19.92 9.66 21.46C9.67 22.99 9.88 21.79 10.03 21.88C10.17 21.97 10.37 22.01 10.53 22C10.69 21.99 10.84 21.95 10.97 21.84C11.1 21.73 11.18 22.63 11.32 21.34C11.45 20.04 11.68 15.31 11.8 14.08C11.92 12.86 11.9 12.77 12.04 13.98C12.18 15.19 12.46 20.02 12.62 21.34C12.79 22.65 12.82 21.78 13.01 21.88C13.2 21.98 13.58 22 13.77 21.96C13.97 21.92 14.08 21.78 14.18 21.66C14.27 21.53 14.36 22.65 14.34 21.21C14.31 19.78 14.05 15.12 14.01 13.04C13.97 10.95 14.06 9.44 14.1 8.7C14.13 7.97 13.77 8.51 14.22 8.6C14.66 8.7 16.21 9.21 16.75 9.29C17.29 9.37 17.16 9.8 17.46 9.09C17.75 8.38 18.34 5.85 18.53 5.04C18.72 4.23 18.66 4.42 18.59 4.21C18.51 4.01 18.26 3.83 18.06 3.81C17.87 3.79 17.71 3.46 17.44 4.09C17.16 4.73 16.96 7.18 16.41 7.62C15.86 8.06 15.22 6.88 14.14 6.73C13.05 6.58 11 6.58 9.9 6.73C8.81 6.88 8.13 8.03 7.59 7.62C7.04 7.2 6.86 4.86 6.64 4.23C6.42 3.6 6.4 3.91 6.26 3.85C6.12 3.79 5.93 3.8 5.8 3.85Z",
   },
 
   // ── Core ──────────────────────────────────────────────────────────────────
@@ -169,15 +176,16 @@ export const GLYPHS: Record<string, Glyph> = {
     headR: 2.32,
     fill: "M21.93 11.44C21.71 10.99 20.74 9.99 20.32 9.95C19.9 9.91 19.48 10.86 19.41 11.19C19.34 11.51 20.03 11.73 19.9 11.91C19.77 12.09 19.11 12.23 18.64 12.26C18.16 12.29 17.52 12.22 17.05 12.1C16.59 11.97 16.21 11.8 15.84 11.54C15.47 11.27 14.89 10.73 14.84 10.51C14.78 10.28 15.43 10.48 15.51 10.18C15.59 9.88 15.64 8.91 15.3 8.69C14.96 8.47 13.85 8.75 13.46 8.87C13.07 9 13.04 9.21 12.95 9.41C12.85 9.62 12.67 9.45 12.9 10.11C13.13 10.77 14.4 12.34 14.35 13.38C14.29 14.42 13.41 16.34 12.55 16.37C11.68 16.39 9.88 14.06 9.16 13.54C8.45 13.02 8.58 13.27 8.28 13.24C7.98 13.21 7.67 13.25 7.37 13.38C7.06 13.51 7.32 13.05 6.46 14.03C5.59 15.02 2.92 18.25 2.19 19.28C1.46 20.31 1.96 19.97 2.07 20.22C2.18 20.47 2.44 20.71 2.86 20.78C3.28 20.84 3.76 21.28 4.59 20.59C5.42 19.9 6.67 16.65 7.86 16.62C9.05 16.6 10.89 19.75 11.73 20.45C12.57 21.15 12.4 20.78 12.9 20.8C13.4 20.82 14.1 20.93 14.72 20.59C15.33 20.25 15.9 19.74 16.59 18.75C17.27 17.75 17.98 15.65 18.83 14.64C19.67 13.62 21.13 13.19 21.65 12.66C22.17 12.12 22.15 11.89 21.93 11.44Z",
   },
-  // Standing rotation: both arms carried across to one side, hips square.
+  // SEATED rotation, knees bent and arms folded across -- the stroked version showed a STANDING
+  // twist, so this changes what the icon depicts, not just how it is drawn. The supplied art is
+  // seated; the movement is the same rotation either way.
+  // Silhouette (see the exception above): four subpaths. The source's white keylines cut the far
+  // leg and the upper body off from the hips, and leave the sliver between the folded forearms and
+  // the torso as a hole. Wide and short, so fitted 20 units across, seated on y=22.
   "Torso Twist": {
-    head: [11.5, 4.5],
-    strokes: [
-      "M11.5 6.6 L11.5 14",
-      "M11.5 8.2 L16 10.2 L19.2 9",
-      "M11.5 14 L9.8 20.8",
-      "M11.5 14 L13.4 20.8",
-    ],
+    head: [8, 8.3],
+    headR: 2.14,
+    fill: "M6.16 16.71C6.04 17.16 6.5 19.06 6.71 19.72C6.91 20.38 7.14 20.42 7.4 20.66C7.67 20.89 7.86 21.03 8.29 21.13C8.72 21.23 9.55 21.26 10 21.24C10.46 21.23 10.24 21.57 11.02 21.05C11.81 20.52 13.56 17.95 14.71 18.1C15.86 18.24 17.29 21.24 17.92 21.89C18.55 22.54 18.13 22.04 18.49 22C18.84 21.96 19.7 21.79 20.05 21.65C20.39 21.51 20.47 21.31 20.55 21.15C20.63 20.99 20.58 20.84 20.52 20.7C20.47 20.55 20.5 20.41 20.22 20.29C19.94 20.16 19.59 20.68 18.85 19.94C18.12 19.19 16.48 16.64 15.8 15.82C15.11 14.99 15.14 15.09 14.75 14.99C14.37 14.89 14.17 14.94 13.5 15.21C12.83 15.49 11.22 16.51 10.74 16.64C10.26 16.77 10.99 16.02 10.63 15.99C10.27 15.96 9.1 16.3 8.57 16.47C8.04 16.64 7.85 16.99 7.44 17.03C7.04 17.07 6.29 16.26 6.16 16.71ZM15.15 14.93C15.13 15.14 15.42 15 16.08 15.82C16.73 16.64 18.43 19.17 19.07 19.85C19.71 20.54 19.69 19.86 19.92 19.92C20.14 19.97 20.28 20.04 20.42 20.18C20.56 20.32 20.71 20.56 20.76 20.74C20.81 20.93 20.54 21.26 20.72 21.28C20.9 21.31 21.63 21.03 21.85 20.92C22.06 20.8 22 20.77 22 20.61C22 20.45 21.93 20.12 21.85 19.96C21.76 19.81 21.71 19.76 21.48 19.68C21.25 19.6 21.17 20.29 20.46 19.48C19.75 18.68 17.92 15.68 17.21 14.86C16.49 14.04 16.51 14.55 16.16 14.56C15.82 14.57 15.16 14.72 15.15 14.93ZM13.43 14.17C13.21 13.6 12.38 12.01 12 11.44C11.62 10.86 11.46 10.84 11.18 10.7C10.89 10.56 11.15 10.55 10.26 10.59C9.38 10.63 6.71 10.83 5.86 10.92C5.01 11.01 5.37 11.02 5.17 11.13C4.96 11.24 5.12 10.99 4.62 11.57C4.13 12.14 2.61 13.96 2.17 14.58C1.74 15.21 1.99 15.12 2 15.32C2.01 15.52 2.11 15.65 2.22 15.77C2.33 15.9 1.78 15.88 2.65 16.06C3.53 16.23 6.48 16.8 7.47 16.84C8.45 16.87 7.67 16.53 8.57 16.27C9.47 16.01 12.08 15.51 12.87 15.28C13.66 15.04 13.23 15.05 13.32 14.86C13.42 14.68 13.65 14.74 13.43 14.17ZM11.57 13.8C11.11 13.97 9.05 14.72 8.29 14.86C7.54 15.01 7.37 14.62 7.03 14.67C6.7 14.71 6.81 15.14 6.3 15.12C5.78 15.11 4.22 14.67 3.93 14.58C3.64 14.49 4.26 14.78 4.54 14.58C4.82 14.39 5.38 13.37 5.6 13.41C5.82 13.45 5.75 14.59 5.84 14.84C5.93 15.09 5.98 14.99 6.16 14.93C6.35 14.87 6.61 14.54 6.97 14.49C7.32 14.45 7.7 14.75 8.29 14.67C8.88 14.58 10.14 14.26 10.5 13.97C10.87 13.68 10.4 12.96 10.48 12.93C10.56 12.91 10.82 13.68 11 13.82C11.18 13.97 12.02 13.63 11.57 13.8Z",
   },
 
   // ── Full body ─────────────────────────────────────────────────────────────
