@@ -119,7 +119,8 @@ export default function StudioMobile({
       : t("feedback.notMeasured");
 
   return (
-    <div className="scrollbar-none flex-1 space-y-3 overflow-y-auto px-3 pb-4">
+    // px-4, the same inset every other phone page uses — the shell's <main> has none of its own.
+    <div className="scrollbar-none flex-1 space-y-3 overflow-y-auto px-4 pb-4">
       {/* Analyze | History — the mock's segmented control. Both halves are real destinations. */}
       <div className="glass-control flex rounded-[16px] p-1">
         <span className="flex flex-1 items-center justify-center gap-2 rounded-[12px] bg-white py-2 text-[13px] font-semibold text-primary shadow-sm">

@@ -38,7 +38,7 @@ describe("LiffAppShell — structure", () => {
     const links = screen.getAllByRole("link");
     expect(links).toHaveLength(4);
     links.forEach((l) => expect(bar).toContainElement(l));
-    ["Analyse", "My records", "Games", "Settings"].forEach((label) => {
+    ["Movements", "Plans", "My records", "Games"].forEach((label) => {
       expect(screen.getByRole("link", { name: new RegExp(label, "i") })).toBeInTheDocument();
     });
   });
@@ -108,13 +108,17 @@ describe("LiffAppShell — actions", () => {
 
 describe("LiffAppShell — active tab", () => {
   it.each([
-    ["/app", "Analyse"],
+    ["/movements", "Movements"],
+    // A movement's detail page belongs to the library tab — unlike the desktop rail, which only
+    // lights on the index.
+    ["/movements/Squat", "Movements"],
+    ["/plans", "Plans"],
+    ["/plans/42", "Plans"],
     ["/history", "My records"],
     ["/games", "Games"],
     // The Games tab owns the two game routes as well as the hub, matching the desktop rail.
     ["/67", "Games"],
     ["/ninja", "Games"],
-    ["/settings", "Settings"],
   ])("highlights exactly %s and marks it aria-current", (path, label) => {
     renderAt(path);
     const current = screen.getByRole("link", { current: "page" });
@@ -127,9 +131,10 @@ describe("LiffAppShell — active tab", () => {
     });
   });
 
-  // Movements has no tab. Pinned so the route staying reachable is not mistaken for it being in
-  // the bar.
-  it.each(["/movements"])(
+  // The studio and Settings have no tab: the studio is the raised centre action, Settings sits
+  // behind the header's account menu. Pinned so the routes staying reachable is not mistaken for
+  // them being in the bar.
+  it.each(["/app", "/settings"])(
     "highlights nothing on the tab-less route %s",
     (path) => {
       renderAt(path);

@@ -314,7 +314,9 @@ export default function App() {
           through the whole session — before the upload it says which exercise is being recorded,
           after it confirms the item was ticked off. */}
       {planCtx && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/25 bg-primary/[0.04] px-3 py-2 text-xs">
+        // mx-4 below `lg`: on a phone this renders straight into the shell's unpadded <main>, so
+        // without it the banner runs to both screen edges. Inside the desktop card it needs none.
+        <div className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-primary/25 bg-primary/[0.04] px-3 py-2 text-xs lg:mx-0">
           <ClipboardText size={14} weight="duotone" className="shrink-0 text-primary" />
           <span className="font-medium text-content">
             {t("plans.studioBanner", { plan: planCtx.name, day: planCtx.day })}

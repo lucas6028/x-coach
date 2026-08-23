@@ -5,9 +5,9 @@ import SettingsDialog from "../components/settings/SettingsDialog";
 // The /settings route: the app shell with the settings popup open over it.
 //
 // Settings are a popup everywhere (the account menu opens the same component in place, without
-// touching the URL), but the route survives because things point at it: RequireAuth gates it,
-// AppRoutes.test pins it, and the LINE in-app shell has a bottom tab for it — inside LINE this is
-// the ONLY way to reach the language and theme controls, since there is no navbar there.
+// touching the URL), but the route survives because things point at it: RequireAuth gates it and
+// AppRoutes.test pins it. On a phone there is no Settings tab; the header's account menu opens the
+// same popup, and inside LINE the silent auto-login means that avatar is always present.
 export default function Settings() {
   const navigate = useNavigate();
   const location = useLocation();

@@ -52,8 +52,8 @@ describe("AppLayout — inside the LINE app", () => {
     // rendering is absent, not the accessible name.
     expect(screen.queryByText("New analysis")).not.toBeInTheDocument();
     // The tab bar's four destinations are present.
-    expect(screen.getByRole("link", { name: /Analyse/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Movements/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Games/i })).toBeInTheDocument();
   });
 
   it("drops the web navbar's brand lockup", async () => {

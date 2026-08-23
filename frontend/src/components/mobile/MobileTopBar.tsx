@@ -36,7 +36,10 @@ export default function MobileTopBar({ title, onNewAnalysis }: Props) {
       <button onClick={onNewAnalysis} aria-label={t("nav.newAnalysis")} className={round}>
         <UploadSimple size={18} weight="bold" />
       </button>
-      {/* Only once there is an account behind it; signed out, the tab bar's Settings is the way in. */}
+      {/* Only once there is an account behind it — and it is the only route to settings on a
+          phone, the tab bar having no Settings slot. Signed out there is nothing to configure that
+          isn't behind a session anyway: /settings is gated, and any gated tab (Plans, My records)
+          bounces to the sign-in. */}
       {user && <AccountMenu />}
     </header>
   );

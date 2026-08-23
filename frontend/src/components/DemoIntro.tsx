@@ -56,7 +56,11 @@ export default function DemoIntro({
         initial={reduce ? false : { opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-        className="mx-auto flex min-h-full max-w-5xl flex-col justify-start gap-8 px-1 py-6 sm:gap-12 sm:py-10 lg:flex-row lg:items-center lg:justify-center lg:gap-16"
+        // px-4 below `lg` because that is where the phone shell renders (useIsMobile is the same
+        // 1023px query) and its <main> carries no padding of its own — 16px is what every other
+        // phone page inset uses. From `lg` up this sits inside the shell's already-padded card,
+        // where the old 4px is all that's wanted.
+        className="mx-auto flex min-h-full max-w-5xl flex-col justify-start gap-8 px-4 py-6 sm:gap-12 sm:py-10 lg:flex-row lg:items-center lg:justify-center lg:gap-16 lg:px-1"
       >
         {/* Left: message + actions */}
         <div className="lg:flex-1">

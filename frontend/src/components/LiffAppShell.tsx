@@ -8,10 +8,11 @@ import MobileTopBar from "./mobile/MobileTopBar";
 // the sidebar all go away — inside LINE the user is already signed in silently (see
 // lib/auth's LINE auto-login) and the four destinations below are the whole app.
 //
-// Movements and Admin deliberately have no tab: their routes still resolve, but only via a rich
-// menu entry or a direct link opened outside the app — there is no in-app link to either of them
-// while in-client (Sidebar's links only render in the web shell, see AppLayout). That's fine: the
-// bar is the thumb-reachable primary nav, not a full site map.
+// The studio, Settings and Admin deliberately have no tab: their routes still resolve, but the bar
+// doesn't name them. The studio is the raised centre action instead; Settings lives behind the
+// header's account menu (inside LINE the user is always signed in, so that avatar is always
+// there); Admin is only ever a direct link opened outside the app. That's fine: the bar is the
+// thumb-reachable primary nav, not a full site map.
 //
 // The bar and the header are MobileTabBar / MobileTopBar, shared with the phone web shell — both
 // surfaces are phones, and the design (motion_analysis_mobile.png) is one design.
@@ -21,9 +22,8 @@ interface Props {
   // The same "start a fresh session" action the web sidebar carries on every page (AppLayout
   // already falls back to navigating into the studio off the studio itself — see AppLayout's
   // newAnalysis). Surfaced here in the header because there is no sidebar to hold it, and without
-  // it the studio is a one-shot: once a result is on screen, tapping the Analyse tab is a
-  // same-route Link that doesn't remount or reset it, so there'd be no way to start a second
-  // analysis without leaving LINE entirely.
+  // it the studio is a one-shot: once a result is on screen no tab returns to it, so there'd be
+  // no way to start a second analysis without leaving LINE entirely.
   onNewAnalysis: () => void;
   /** Short page name for the header's centred title. */
   title?: string;
