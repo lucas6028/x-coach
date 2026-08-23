@@ -387,3 +387,156 @@ describe("VideoPanel video source", () => {
     expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/second");
   });
 });
+
+// The streaming path. What separates "the browser downloads the clip" from "the browser fetches
+// the bytes it is about to play" is two attributes and one recovery path; each is asserted here
+// because none of them fails visibly — a regression just makes every page load slow again.
+describe("VideoPanel streaming", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("fetches only metadata until the viewer presses play", () => {
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_a",
+      video_url: "https://signed/source",
+    });
+    // Without this the element defaults to `preload="auto"`, which pulls the whole clip on mount
+    // whether or not it is ever watched.
+    expect(document.querySelector("video")?.getAttribute("preload")).toBe("metadata");
+  });
+
+  it("paints the stored frame as the poster so the lazy stage is not black", () => {
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_a",
+      video_url: "https://signed/source",
+      thumbnail_url: "https://signed/thumb.jpg",
+    });
+    expect(document.querySelector("video")?.getAttribute("poster")).toBe("https://signed/thumb.jpg");
+  });
+
+  it("carries no poster attribute when the upload has no stored frame", () => {
+    // Thumbnail capture is best-effort on the client and its put is best-effort on the server, so
+    // a missing one must leave the attribute off rather than set `poster=""` — which browsers
+    // resolve against the page URL and fetch as an image.
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_a",
+      video_url: "https://signed/source",
+    });
+    expect(document.querySelector("video")?.hasAttribute("poster")).toBe(false);
+  });
+
+  it("re-signs when playback fails, because the URL may have expired before play", async () => {
+    // The failure mode lazy loading introduces: the URL is signed on page load and first USED
+    // when the viewer presses play, which can be past DEFAULT_URL_TTL (an hour).
+    const media = vi.spyOn(api, "uploadMedia").mockResolvedValue({
+      video_url: "https://signed/fresh",
+      thumbnail_url: "https://signed/fresh-thumb.jpg",
+      expires_in: 3600,
+    });
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_a",
+      video_url: "https://signed/expired",
+      // Persisted, so there is a `videos` row the re-sign endpoint can resolve as this caller.
+      analysis_id: "a1",
+    });
+    fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+    await waitFor(() =>
+      expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/fresh")
+    );
+    expect(media).toHaveBeenCalledWith("upload_a");
+  });
+
+  it("gives up re-signing rather than looping on a clip that is simply broken", async () => {
+    // `error` also fires for a deleted object and an undecodable file, and those repeat forever.
+    const media = vi.spyOn(api, "uploadMedia").mockResolvedValue({
+      video_url: "https://signed/still-broken",
+      thumbnail_url: "https://signed/thumb.jpg",
+      expires_in: 3600,
+    });
+    renderPanel({ ...mockAnalysis, source: "upload", video_id: "upload_a" });
+    await waitFor(() => expect(media).toHaveBeenCalledTimes(1));
+    for (let i = 0; i < 6; i += 1) {
+      fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+      // eslint-disable-next-line no-await-in-loop
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+    // The first call is the history replay's own re-sign; the cap allows two recoveries on top.
+    expect(media.mock.calls.length).toBeLessThanOrEqual(3);
+  });
+
+  it("does not try to re-sign a library clip, which carries no signature", async () => {
+    const media = vi.spyOn(api, "uploadMedia");
+    renderPanel({ ...mockAnalysis, source: "library", video_id: "vid_001" });
+    fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(media).not.toHaveBeenCalled();
+    expect(document.querySelector("video")?.getAttribute("src")).toBe("/api/video-file/vid_001");
+  });
+
+  it("does not try to re-sign an anonymous upload, which has no row to resolve", async () => {
+    // `/api/uploads/{id}/url` resolves the storage key through the caller's own JWT, and an
+    // anonymous analysis is deliberately never persisted (no `analysis_id`). Asking would 401 and
+    // the `.catch` would blank a player that is still showing the poster — worse than leaving it.
+    const media = vi.spyOn(api, "uploadMedia");
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_anon",
+      video_url: "https://signed/anon",
+    });
+    fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(media).not.toHaveBeenCalled();
+    expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/anon");
+  });
+
+  it("does not re-sign an upload whose persist failed, where no row exists either", async () => {
+    // `analysis_id: null` means the analysis succeeded but its history row was never written, so
+    // the objects are orphaned. The re-sign endpoint would 404, not 401 — same outcome.
+    const media = vi.spyOn(api, "uploadMedia");
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_a",
+      video_url: "https://signed/orphan",
+      analysis_id: null,
+    });
+    fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(media).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stale URL on screen when a recovery cannot re-sign", async () => {
+    // Blanking `src` is right on a FIRST resolve (it would otherwise be the previous analysis's
+    // clip). On a recovery the element is already showing this clip, so throwing it away costs a
+    // working poster and a rendered timeline to gain nothing — it is unplayable either way.
+    vi.spyOn(api, "uploadMedia").mockRejectedValue(new Error("503"));
+    renderPanel({
+      ...mockAnalysis,
+      source: "upload",
+      video_id: "upload_a",
+      video_url: "https://signed/expired",
+      analysis_id: "a1",
+    });
+    fireEvent.error(document.querySelector("video") as HTMLVideoElement);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.querySelector("video")?.getAttribute("src")).toBe("https://signed/expired");
+  });
+});

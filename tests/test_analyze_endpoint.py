@@ -59,6 +59,7 @@ class AnalyzeEndpointTests(unittest.TestCase):
             prefix="uploads/anon/upload_test",
             video_path=Path("upload_test.mp4"),
             pose_path=Path("pose.json"),
+            source_size=0,
         )
         self.artifacts: list[dict] = []
         self.discarded: list[object] = []
@@ -70,7 +71,9 @@ class AnalyzeEndpointTests(unittest.TestCase):
 
         # Presigning is a storage concern; stub it so these tests stay offline.
         presign = mock.patch.object(
-            analyze_router, "_source_url", side_effect=lambda prefix: f"https://signed/{prefix}"
+            analyze_router,
+            "_playback_urls",
+            side_effect=lambda prefix: (f"https://signed/{prefix}", f"https://signed/{prefix}/thumb.jpg"),
         )
         presign.start()
         self.addCleanup(presign.stop)
@@ -248,6 +251,7 @@ class AnalyzeStorageTests(unittest.TestCase):
             prefix="uploads/anon/upload_test",
             video_path=Path("upload_test.mp4"),
             pose_path=Path("pose.json"),
+            source_size=0,
         )
         self.artifacts: list[dict] = []
         self.discarded: list[object] = []
@@ -270,7 +274,9 @@ class AnalyzeStorageTests(unittest.TestCase):
             }
         )
         presign = mock.patch.object(
-            analyze_router, "_source_url", side_effect=lambda prefix: f"https://signed/{prefix}"
+            analyze_router,
+            "_playback_urls",
+            side_effect=lambda prefix: (f"https://signed/{prefix}", f"https://signed/{prefix}/thumb.jpg"),
         )
         presign.start()
         self.addCleanup(presign.stop)
@@ -446,13 +452,28 @@ class AnalyzeStorageTests(unittest.TestCase):
 
 
 class SourceUrlTests(unittest.TestCase):
-    """Direct coverage of ``_source_url``'s degrade-to-None branch (not exercised by
-    ``AnalyzeStorageTests``, which patches ``_source_url`` out entirely to stay offline)."""
+    """Direct coverage of ``_playback_urls``' degrade-to-None branch (not exercised by
+    ``AnalyzeStorageTests``, which patches ``_playback_urls`` out entirely to stay offline)."""
 
     def test_returns_none_when_signing_fails(self) -> None:
         with mock.patch.object(analyze_router.storage, "get_object_store") as get_store:
             get_store.return_value.presigned_url.side_effect = storage.StorageError("R2 down")
-            self.assertIsNone(analyze_router._source_url("uploads/anon/upload_test"))
+            self.assertEqual(
+                analyze_router._playback_urls("uploads/anon/upload_test"), (None, None)
+            )
+
+    def test_signs_the_source_and_its_poster_frame(self) -> None:
+        """Both URLs, because the player needs the thumbnail as its ``poster``: with the clip
+        loading lazily there is nothing on the stage until the user presses play without it."""
+        with mock.patch.object(analyze_router.storage, "get_object_store") as get_store:
+            get_store.return_value.presigned_url.side_effect = lambda key: f"https://signed/{key}"
+            self.assertEqual(
+                analyze_router._playback_urls("uploads/anon/upload_test"),
+                (
+                    "https://signed/uploads/anon/upload_test/source",
+                    "https://signed/uploads/anon/upload_test/thumb.jpg",
+                ),
+            )
 
 
 if __name__ == "__main__":

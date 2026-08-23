@@ -71,7 +71,14 @@ def get_video_file(video_id: str) -> FileResponse:
     path = library.video_path(video_id)
     if path is None or not path.exists():
         raise HTTPException(status_code=404, detail=f"No video file for '{video_id}'.")
-    return FileResponse(path, media_type="video/mp4")
+    # Starlette's FileResponse answers a Range request with a 206, so the browser fetches only the
+    # bytes around the playhead rather than the whole file. The cache header is what stops a
+    # re-watch from re-fetching them: these are immutable repo assets under a stable id.
+    return FileResponse(
+        path,
+        media_type="video/mp4",
+        headers={"Cache-Control": storage.DEFAULT_CACHE_CONTROL},
+    )
 
 
 @router.get("/uploads/{video_id}/url")
@@ -135,4 +142,6 @@ def get_local_object(key: str) -> FileResponse:
     if found is None:
         raise HTTPException(status_code=404, detail="Not found.")
     path, content_type = found
-    return FileResponse(path, media_type=content_type)
+    return FileResponse(
+        path, media_type=content_type, headers={"Cache-Control": storage.DEFAULT_CACHE_CONTROL}
+    )

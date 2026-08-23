@@ -42,17 +42,23 @@ def _as_mb(value: int) -> int:
     return -(-value // (1024 * 1024))
 
 
-def _source_url(prefix: str) -> str | None:
-    """A short-lived playback URL for the upload's source object, or None if signing failed.
+def _playback_urls(prefix: str) -> tuple[str | None, str | None]:
+    """Short-lived ``(source, thumbnail)`` URLs for the upload, or ``(None, None)`` if signing failed.
+
+    The thumbnail rides along because the player uses it as the ``poster``: with the clip now
+    loading lazily (``preload="metadata"``), the stage would otherwise be black until the user
+    pressed play. Signed unconditionally for the same reason ``_upload_urls`` does — a failed
+    frame capture just 404s and the poster is skipped.
 
     Never raises: the analysis has already been produced by the time this is called, so a
     signing problem degrades playback rather than discarding a completed result.
     """
     try:
-        return storage.get_object_store().presigned_url(f"{prefix}/source")
+        obj = storage.get_object_store()
+        return obj.presigned_url(f"{prefix}/source"), obj.presigned_url(f"{prefix}/thumb.jpg")
     except storage.StorageError:
         logger.exception("Failed to sign a playback URL for %s", prefix)
-        return None
+        return None, None
 
 
 # What a browser may label a captured JPEG frame with. ``image/jpg`` is not the registered type,
@@ -191,11 +197,16 @@ async def _stage_analyze_persist(
         raise HTTPException(
             status_code=503, detail="Storage is unavailable; please try again."
         ) from exc
-    # Captured BEFORE the del: this is the source's contribution to the recorded size, and the
-    # quota is checked against it while the derived artifacts do not exist yet. The recorded
-    # total therefore includes derived bytes the check did not see, so a user can finish
+    # The source's contribution to the recorded size, taken from what was STORED rather than from
+    # ``len(data)``: the streaming remux rewrites the clip on the way in, so the object in the
+    # bucket is not the length of the upload the browser sent. Charging the discarded original
+    # would drift ``videos.size_bytes`` — and therefore the quota — away from the bucket by a
+    # little on every upload, permanently, in whichever direction the remux happened to go.
+    #
+    # The quota was checked against the upload while the derived artifacts did not exist yet, so
+    # the recorded total still includes derived bytes the check did not see: a user can finish
     # marginally over the limit — bounded by one upload, and the next upload is refused.
-    source_size = len(data)
+    source_size = staged.source_size
     del data  # bytes are now stored and staged; don't pin the whole video in RAM while queued.
     derived_size = 0
 
@@ -249,7 +260,9 @@ async def _stage_analyze_persist(
     # AFTER the persist, deliberately: `result` is stored verbatim as JSONB, and a presigned URL
     # written into the history row would already be expired by the time anyone replayed it. The
     # replay path re-signs through GET /api/uploads/{video_id}/url instead.
-    result["video_url"] = await run_in_threadpool(_source_url, staged.prefix)
+    result["video_url"], result["thumbnail_url"] = await run_in_threadpool(
+        _playback_urls, staged.prefix
+    )
     return result
 
 

@@ -165,4 +165,39 @@ describe("Timeline", () => {
     expect(screen.queryByText(/reps found/)).not.toBeInTheDocument();
     expect(screen.queryByText("Whole clip analyzed")).not.toBeInTheDocument();
   });
+
+  // The load-ahead bar. It only means anything now that the clip is fetched in ranges rather than
+  // downloaded whole — it says whether a seek will be instant or will stall.
+  describe("load-ahead bar", () => {
+    it("shows how far ahead of the playhead the bytes reach", () => {
+      renderWithProviders(
+        <Timeline analysis={mockAnalysis} duration={10} currentTime={2} buffered={6} onSeek={vi.fn()} />
+      );
+      expect(screen.getByTestId("buffered-bar")).toHaveStyle({ width: "60%" });
+    });
+
+    it("hides itself once the whole clip is buffered", () => {
+      // A full-width band behind the progress fill reads as a second, broken progress bar.
+      renderWithProviders(
+        <Timeline analysis={mockAnalysis} duration={10} currentTime={2} buffered={10} onSeek={vi.fn()} />
+      );
+      expect(screen.queryByTestId("buffered-bar")).toBeNull();
+    });
+
+    it("hides itself when nothing is buffered ahead of the playhead", () => {
+      renderWithProviders(
+        <Timeline analysis={mockAnalysis} duration={10} currentTime={4} buffered={3} onSeek={vi.fn()} />
+      );
+      expect(screen.queryByTestId("buffered-bar")).toBeNull();
+    });
+
+    it("is absent for a caller that reports no buffer at all", () => {
+      // The prop is optional so a clip whose element never fired `progress` degrades to no bar
+      // rather than to a zero-width artefact.
+      renderWithProviders(
+        <Timeline analysis={mockAnalysis} duration={10} currentTime={0} onSeek={vi.fn()} />
+      );
+      expect(screen.queryByTestId("buffered-bar")).toBeNull();
+    });
+  });
 });

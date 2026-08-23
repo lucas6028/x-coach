@@ -6,6 +6,8 @@ interface Props {
   analysis: Analysis;
   duration: number;
   currentTime: number;
+  /** Seconds the browser holds ahead of the playhead, for the load-ahead bar. */
+  buffered?: number;
   onSeek: (t: number) => void;
 }
 
@@ -16,7 +18,13 @@ interface Props {
 // The legend that used to sit under a standalone timeline strip is gone with the strip itself —
 // the card now carries ONE scrub bar, and a legend inside a 6px control pill would not fit. The
 // markers keep their per-fault `title`, which is what actually named them.
-export default function Timeline({ analysis, duration, currentTime, onSeek }: Props) {
+export default function Timeline({
+  analysis,
+  duration,
+  currentTime,
+  buffered = 0,
+  onSeek,
+}: Props) {
   const { t } = useI18n();
   const dur = duration || analysis.metadata.total_frames / (analysis.metadata.fps || 30) || 1;
   const pct = (t: number) => `${Math.min(100, Math.max(0, (t / dur) * 100))}%`;
@@ -38,6 +46,19 @@ export default function Timeline({ analysis, duration, currentTime, onSeek }: Pr
         title={t("timeline.neutral")}
       >
         <div className="absolute inset-x-0 top-1/2 h-[6px] -translate-y-1/2 overflow-hidden rounded-full bg-white/30" />
+        {/* Load-ahead. The clip is fetched in ranges now rather than downloaded whole, so how far
+            ahead the bytes reach is real information: it is what says a seek two seconds out is
+            instant and one twenty seconds out will pause. Deliberately dimmer than both the track
+            and the progress fill — it sits behind them and must never be mistaken for either.
+            Hidden once it covers the clip, where a full-width band would just read as a second,
+            broken progress bar. */}
+        {buffered > currentTime && buffered < dur && (
+          <div
+            data-testid="buffered-bar"
+            className="absolute top-1/2 h-[6px] -translate-y-1/2 rounded-full bg-white/45"
+            style={{ width: pct(buffered) }}
+          />
+        )}
         <div
           className="absolute top-1/2 h-[6px] -translate-y-1/2 rounded-full bg-[#8b7bff]"
           style={{ width: pct(currentTime) }}

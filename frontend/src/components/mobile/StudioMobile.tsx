@@ -94,7 +94,7 @@ export default function StudioMobile({
 }: Props) {
   const { t } = useI18n();
   const [coachOpen, setCoachOpen] = useState(false);
-  const videoSrc = useVideoSrc(analysis);
+  const videoSource = useVideoSrc(analysis);
   const score = formScore(analysis);
   const byFault = retrievalByFault(analysis.retrievals);
 
@@ -139,7 +139,7 @@ export default function StudioMobile({
       <MobileVideoCard
         analysis={analysis}
         videoRef={videoRef}
-        videoSrc={videoSrc}
+        videoSource={videoSource}
         onTimeUpdate={onTimeUpdate}
         onActiveFault={onActiveFault}
         onSeek={onSeek}

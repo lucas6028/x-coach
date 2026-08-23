@@ -39,6 +39,7 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
             prefix="uploads/anon/upload_test",
             video_path=Path("upload_test.mp4"),
             pose_path=Path("pose.json"),
+            source_size=0,
         )
         self.artifacts: list[dict] = []
         self.discarded: list[object] = []
@@ -55,7 +56,9 @@ class AnalyzePoseEndpointTests(unittest.TestCase):
 
         # Presigning is a storage concern; stub it so these tests stay offline.
         presign = mock.patch.object(
-            analyze_router, "_source_url", side_effect=lambda prefix: f"https://signed/{prefix}"
+            analyze_router,
+            "_playback_urls",
+            side_effect=lambda prefix: (f"https://signed/{prefix}", f"https://signed/{prefix}/thumb.jpg"),
         )
         presign.start()
         self.addCleanup(presign.stop)
@@ -240,6 +243,7 @@ class AnalyzePoseStorageTests(unittest.TestCase):
             prefix="uploads/anon/upload_test",
             video_path=Path("upload_test.mp4"),
             pose_path=Path("pose.json"),
+            source_size=0,
         )
         self.artifacts: list[dict] = []
         self.discarded: list[object] = []
@@ -260,7 +264,9 @@ class AnalyzePoseStorageTests(unittest.TestCase):
             }
         )
         presign = mock.patch.object(
-            analyze_router, "_source_url", side_effect=lambda prefix: f"https://signed/{prefix}"
+            analyze_router,
+            "_playback_urls",
+            side_effect=lambda prefix: (f"https://signed/{prefix}", f"https://signed/{prefix}/thumb.jpg"),
         )
         presign.start()
         self.addCleanup(presign.stop)
@@ -475,6 +481,7 @@ class AnalyzePoseRepsValidationTests(unittest.TestCase):
             prefix="uploads/anon/upload_test",
             video_path=Path("upload_test.mp4"),
             pose_path=Path("pose.json"),
+            source_size=0,
         )
         analysis_service.stage_upload = lambda data, *, suffix=".mp4", owner="anon": self.staged
         analysis_service.store_artifacts = lambda staged, *, thumbnail=None: 0
@@ -487,7 +494,9 @@ class AnalyzePoseRepsValidationTests(unittest.TestCase):
         )
 
         presign = mock.patch.object(
-            analyze_router, "_source_url", side_effect=lambda prefix: f"https://signed/{prefix}"
+            analyze_router,
+            "_playback_urls",
+            side_effect=lambda prefix: (f"https://signed/{prefix}", f"https://signed/{prefix}/thumb.jpg"),
         )
         presign.start()
         self.addCleanup(presign.stop)

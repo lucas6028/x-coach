@@ -32,9 +32,9 @@ export default function VideoPanel({
 }: Props) {
   const { t } = useI18n();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const videoSrc = useVideoSrc(analysis);
+  const { src: videoSrc, poster, recover } = useVideoSrc(analysis);
   // Shared with the phone card (MobileVideoCard) — see lib/useVideoPlayback.
-  const { playing, time, duration, togglePlay, toggleFullscreen } = useVideoPlayback(
+  const { playing, time, duration, buffered, togglePlay, toggleFullscreen } = useVideoPlayback(
     videoRef,
     analysis.video_id,
     onTimeUpdate,
@@ -62,6 +62,16 @@ export default function VideoPanel({
           // Omitted entirely while unresolved: an empty `src` makes the browser re-request the
           // page URL as media and log a decode error.
           {...(videoSrc ? { src: videoSrc } : {})}
+          {...(poster ? { poster } : {})}
+          // The whole point of the streaming path. `metadata` fetches the header — a few KB off
+          // the front of a faststart clip — and then nothing until the user presses play, instead
+          // of the default `auto`, which pulls the entire multi-megabyte file on mount whether or
+          // not it is ever watched. The poster above is what makes that invisible: the stage shows
+          // the athlete immediately rather than the black frame of an unloaded video element.
+          preload="metadata"
+          // Fetching lazily means the URL is used long after it was signed, so it can be past its
+          // hour. `recover` re-signs and swaps it in; see lib/useVideoSrc.
+          onError={recover}
           className="absolute inset-0 h-full w-full object-contain"
           playsInline
           onClick={togglePlay}
@@ -135,7 +145,13 @@ export default function VideoPanel({
           >
             {playing ? <Pause size={14} weight="fill" /> : <Play size={14} weight="fill" />}
           </button>
-          <Timeline analysis={analysis} duration={duration} currentTime={time} onSeek={onSeek} />
+          <Timeline
+            analysis={analysis}
+            duration={duration}
+            currentTime={time}
+            buffered={buffered}
+            onSeek={onSeek}
+          />
         </div>
       </div>
     </div>

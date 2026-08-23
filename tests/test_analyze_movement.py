@@ -56,6 +56,7 @@ def _staged_upload(video_id: str = "vid1", *, owner: str = "anon"):
         prefix=f"uploads/{owner}/{video_id}",
         video_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}.mp4",
         pose_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}_pose.json",
+        source_size=0,
     )
     with patch.object(analysis, "stage_upload", return_value=staged), patch.object(
         analysis, "store_artifacts", return_value=0

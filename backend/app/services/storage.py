@@ -22,6 +22,7 @@ which suffix was used.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
@@ -35,6 +36,16 @@ OBJECTS_DIR = config.RUNTIME_DIR / "objects"
 # How long a presigned playback URL stays valid. One hour: long enough for a coaching session,
 # short enough that a leaked URL is not a durable capability.
 DEFAULT_URL_TTL = 3600
+
+# What R2 replays as ``Cache-Control`` on every stored object. Safe to make this aggressive
+# because keys are WRITE-ONCE: ``upload_prefix`` embeds a fresh uuid per upload, and nothing in
+# the codebase overwrites an existing key — a changed clip is a new video_id. Without it a
+# re-watch, or a scrub back past what the browser dropped, re-fetches ranges over the network.
+#
+# Note the URL query string changes every time the URL is re-signed, which would ordinarily defeat
+# the cache. The browser's MEDIA cache is keyed on the full URL, so the win here is within one
+# signed URL's hour — exactly the window a coaching session spends scrubbing one clip.
+DEFAULT_CACHE_CONTROL = "public, max-age=31536000, immutable"
 
 # Suffixes mimetypes gets wrong or does not know, and the fallback for anything unrecognised.
 # Guessing wrong here means a clip that will not play, so the map is explicit rather than clever.
@@ -95,6 +106,15 @@ class ObjectStore(Protocol):
 
     def delete_prefix(self, prefix: str) -> None: ...
 
+    # ``iter_keys`` / ``get`` exist for MAINTENANCE, not for serving. Nothing on a request path
+    # reads an object back — playback goes through a presigned URL straight to R2, which is the
+    # point of using R2 at all. They are here so an offline job can rewrite objects already in the
+    # bucket (see ``faststart.backfill``); routing a video through the API process would undo the
+    # streaming this whole change set exists to enable.
+    def iter_keys(self, prefix: str) -> Iterator[str]: ...
+
+    def get(self, key: str) -> tuple[bytes, str] | None: ...
+
 
 class LocalObjectStore:
     """Filesystem-backed store for development and tests."""
@@ -121,6 +141,28 @@ class LocalObjectStore:
 
     def delete_prefix(self, prefix: str) -> None:
         shutil.rmtree(self._path(prefix), ignore_errors=True)
+
+    def iter_keys(self, prefix: str) -> Iterator[str]:
+        """Every object key under ``prefix``, in sorted order so a run is reproducible.
+
+        The ``.type`` sidecars this store writes alongside each object are metadata, not objects,
+        and are skipped — yielding them would have a maintenance job try to remux a content-type
+        string.
+        """
+        root = self._path(prefix)
+        if not root.is_dir():
+            return
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.name.endswith(".type"):
+                continue
+            yield path.relative_to(self._root).as_posix()
+
+    def get(self, key: str) -> tuple[bytes, str] | None:
+        found = self.open_object(key)
+        if found is None:
+            return None
+        path, content_type = found
+        return path.read_bytes(), content_type
 
     def open_object(self, key: str) -> tuple[Path, str] | None:
         """Local-only: ``(path, content_type)`` behind ``key``, for the dev serving endpoint."""
@@ -167,7 +209,11 @@ class R2ObjectStore:
         key = _validate_key(key)
         try:
             self._s3().put_object(
-                Bucket=self._bucket, Key=key, Body=data, ContentType=content_type
+                Bucket=self._bucket,
+                Key=key,
+                Body=data,
+                ContentType=content_type,
+                CacheControl=DEFAULT_CACHE_CONTROL,
             )
         except Exception as exc:  # noqa: BLE001 — botocore raises a wide family; callers see one type
             raise StorageError(f"Failed to store object {key!r}.") from exc
@@ -182,6 +228,39 @@ class R2ObjectStore:
             )
         except Exception as exc:  # noqa: BLE001
             raise StorageError(f"Failed to sign a URL for {key!r}.") from exc
+
+    def iter_keys(self, prefix: str) -> Iterator[str]:
+        """Every object key under ``prefix``, paginated so a large bucket is never held at once."""
+        prefix = _validate_key(prefix)
+        try:
+            paginator = self._s3().get_paginator("list_objects_v2")
+            # The trailing slash, for the same reason ``delete_prefix`` needs it: S3 matches on the
+            # raw string, so listing `.../upload_ab` would also return `.../upload_abc`.
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=f"{prefix}/"):
+                for obj in page.get("Contents", []):
+                    yield obj["Key"]
+        except Exception as exc:  # noqa: BLE001
+            raise StorageError(f"Failed to list objects under {prefix!r}.") from exc
+
+    def get(self, key: str) -> tuple[bytes, str] | None:
+        """``(bytes, content_type)``, or ``None`` when the key does not exist.
+
+        A missing key is not an error: a maintenance pass runs against a listing that may have
+        moved under it (a user can delete an analysis mid-run), and treating that race as a
+        failure would abort a job that is behaving correctly.
+        """
+        key = _validate_key(key)
+        try:
+            resp = self._s3().get_object(Bucket=self._bucket, Key=key)
+        except Exception as exc:  # noqa: BLE001 — botocore's NoSuchKey is not importable directly
+            if getattr(exc, "response", {}).get("Error", {}).get("Code") in {
+                "NoSuchKey",
+                "404",
+                "NotFound",
+            }:
+                return None
+            raise StorageError(f"Failed to read object {key!r}.") from exc
+        return resp["Body"].read(), resp.get("ContentType") or _DEFAULT_VIDEO_CONTENT_TYPE
 
     def delete_prefix(self, prefix: str) -> None:
         prefix = _validate_key(prefix)
