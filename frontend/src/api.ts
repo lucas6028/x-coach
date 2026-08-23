@@ -188,6 +188,10 @@ export interface Analysis {
    *  never stored in the history row, where it would already be expired on replay. Replays
    *  re-sign through `api.uploadMedia`. */
   video_url?: string | null;
+  /** The stored frame for that clip, signed on the same terms and for the same reason: it is the
+   *  player's `poster`, so the stage shows the athlete instead of black while the clip is still
+   *  only a URL. Absent whenever `video_url` is. */
+  thumbnail_url?: string | null;
   /** Which detector produced this analysis. Absent on analyses predating per-movement
    *  selection; consumers fall back to "Squat". */
   movement?: string;

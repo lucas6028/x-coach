@@ -6,6 +6,7 @@ hand-rolled fake client so no credentials, network, or boto3 behaviour is requir
 
 from __future__ import annotations
 
+import io
 import tempfile
 import unittest
 from pathlib import Path
@@ -90,6 +91,26 @@ class LocalObjectStoreTests(unittest.TestCase):
         self.store.delete_prefix("uploads/u1/v1")
         self.assertTrue((self.root / "uploads/u1/v10/source").is_file())
 
+    def test_iter_keys_walks_the_prefix_and_hides_the_type_sidecars(self) -> None:
+        """The `.type` files are this store's own metadata, not objects. Yielding them would have
+        the backfill try to remux a content-type string."""
+        self.store.put("uploads/u1/v1/source", b"a", content_type="video/mp4")
+        self.store.put("uploads/u1/v2/source", b"b", content_type="video/mp4")
+        self.assertEqual(
+            list(self.store.iter_keys("uploads")),
+            ["uploads/u1/v1/source", "uploads/u1/v2/source"],
+        )
+
+    def test_iter_keys_is_empty_for_a_prefix_that_does_not_exist(self) -> None:
+        self.assertEqual(list(self.store.iter_keys("uploads/nobody")), [])
+
+    def test_get_returns_the_bytes_and_the_content_type(self) -> None:
+        self.store.put("uploads/u1/v1/source", b"video-bytes", content_type="video/webm")
+        self.assertEqual(self.store.get("uploads/u1/v1/source"), (b"video-bytes", "video/webm"))
+
+    def test_get_returns_none_for_a_missing_key(self) -> None:
+        self.assertIsNone(self.store.get("uploads/u1/v1/nope"))
+
 
 class FakeS3Client:
     """Minimal stand-in for the boto3 S3 client surface ``R2ObjectStore`` touches."""
@@ -103,6 +124,9 @@ class FakeS3Client:
         # Per-key delete failures, which the real API reports in the response body rather than
         # by raising. Empty means every delete succeeded.
         self.delete_errors: list[dict] = []
+        # Backing store and per-key failures for `get_object`.
+        self.objects: dict[str, tuple[bytes, str]] = {}
+        self.get_errors: dict[str, Exception] = {}
 
     def put_object(self, **kwargs):
         if self.raise_on_put:
@@ -128,6 +152,12 @@ class FakeS3Client:
         self.deleted.append(Delete["Objects"])
         return {"Deleted": Delete["Objects"], "Errors": self.delete_errors}
 
+    def get_object(self, *, Bucket, Key):
+        if Key in self.get_errors:
+            raise self.get_errors[Key]
+        body, content_type = self.objects[Key]
+        return {"Body": io.BytesIO(body), "ContentType": content_type}
+
 
 class R2ObjectStoreTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -146,8 +176,16 @@ class R2ObjectStoreTests(unittest.TestCase):
                 "Key": "uploads/u1/v1/source",
                 "Body": b"bytes",
                 "ContentType": "video/mp4",
+                "CacheControl": storage.DEFAULT_CACHE_CONTROL,
             },
         )
+
+    def test_put_marks_objects_immutably_cacheable(self) -> None:
+        """Keys are write-once (a fresh uuid per upload), so the browser may keep the ranges it
+        fetched. Without this every re-watch and every backward scrub re-fetches over the network,
+        which is exactly what the streaming path exists to avoid."""
+        self.store.put("uploads/u1/v1/source", b"bytes", content_type="video/mp4")
+        self.assertIn("immutable", self.fake.puts[0]["CacheControl"])
 
     def test_put_wraps_client_failure_in_storage_error(self) -> None:
         self.fake.raise_on_put = True
@@ -186,6 +224,52 @@ class R2ObjectStoreTests(unittest.TestCase):
         self.fake.delete_errors = [{"Key": "uploads/u1/v1/source", "Code": "AccessDenied"}]
         with self.assertRaises(storage.StorageError):
             self.store.delete_prefix("uploads/u1/v1")
+
+    def test_iter_keys_lists_with_a_trailing_slash_across_pages(self) -> None:
+        """Same trailing-slash rule as `delete_prefix`: without it, listing `.../v1` also returns
+        `.../v10`, and a per-user backfill would silently touch a stranger's clips."""
+        self.fake.pages = [
+            {"Contents": [{"Key": "uploads/u1/v1/source"}]},
+            {"Contents": [{"Key": "uploads/u1/v1/pose.json"}]},
+        ]
+        keys = list(self.store.iter_keys("uploads/u1/v1"))
+        self.assertEqual(keys, ["uploads/u1/v1/source", "uploads/u1/v1/pose.json"])
+        self.assertEqual(self.fake._paginator.kwargs["Prefix"], "uploads/u1/v1/")
+
+    def test_iter_keys_wraps_a_listing_failure_in_storage_error(self) -> None:
+        def boom(name):
+            raise ValueError("no network")
+
+        self.fake.get_paginator = boom
+        with self.assertRaises(storage.StorageError):
+            list(self.store.iter_keys("uploads"))
+
+    def test_get_returns_the_body_and_content_type(self) -> None:
+        self.fake.objects["uploads/u1/v1/source"] = (b"video-bytes", "video/quicktime")
+        self.assertEqual(
+            self.store.get("uploads/u1/v1/source"), (b"video-bytes", "video/quicktime")
+        )
+
+    def test_get_returns_none_for_a_key_deleted_under_the_listing(self) -> None:
+        """A maintenance pass runs against a listing that can move under it — a user deleting an
+        analysis mid-run is correct behaviour, not a failure that should abort the job."""
+        missing = ValueError("gone")
+        missing.response = {"Error": {"Code": "NoSuchKey"}}  # type: ignore[attr-defined]
+        self.fake.get_errors["uploads/u1/v1/source"] = missing
+        self.assertIsNone(self.store.get("uploads/u1/v1/source"))
+
+    def test_get_wraps_a_real_failure_in_storage_error(self) -> None:
+        """Only a missing key is benign. A permissions or network error must not be reported as
+        "this object does not exist", which the backfill would count as a harmless skip."""
+        denied = ValueError("nope")
+        denied.response = {"Error": {"Code": "AccessDenied"}}  # type: ignore[attr-defined]
+        self.fake.get_errors["uploads/u1/v1/source"] = denied
+        with self.assertRaises(storage.StorageError):
+            self.store.get("uploads/u1/v1/source")
+
+    def test_get_falls_back_to_mp4_when_the_object_carries_no_content_type(self) -> None:
+        self.fake.objects["uploads/u1/v1/source"] = (b"x", "")
+        self.assertEqual(self.store.get("uploads/u1/v1/source")[1], "video/mp4")
 
 
 class GetObjectStoreTests(unittest.TestCase):

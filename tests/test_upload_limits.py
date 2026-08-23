@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import io
 import unittest
+from dataclasses import replace
 from unittest import mock
 
 from fastapi import HTTPException
@@ -155,11 +156,19 @@ class _StubbedAnalyzePath(unittest.TestCase):
             prefix="uploads/u1/upload_test",
             video_path=Path("upload_test.mp4"),
             pose_path=Path("pose.json"),
+            source_size=0,
         )
         self.staged_calls: list[int] = []
+        # How many bytes the stub claims to have STORED. Defaults to the upload's own length —
+        # what a no-op remux produces — and a test that cares about the remux changing the length
+        # overrides it. The router reads the recorded size from here, not from the upload, so a
+        # fixed value would quietly decouple these tests from what the quota actually charges.
+        self.stored_size: int | None = None
 
         def _stage(data, *, suffix=".mp4", owner="anon"):
             self.staged_calls.append(len(data))
+            size = len(data) if self.stored_size is None else self.stored_size
+            self.staged = replace(self.staged, source_size=size)
             return self.staged
 
         analysis_service.stage_upload = _stage
@@ -172,7 +181,9 @@ class _StubbedAnalyzePath(unittest.TestCase):
         )
 
         presign = mock.patch.object(
-            analyze_router, "_source_url", side_effect=lambda prefix: f"https://signed/{prefix}"
+            analyze_router,
+            "_playback_urls",
+            side_effect=lambda prefix: (f"https://signed/{prefix}", f"https://signed/{prefix}/thumb.jpg"),
         )
         presign.start()
         self.addCleanup(presign.stop)
@@ -327,6 +338,20 @@ class RecordedSizeTests(_StubbedAnalyzePath):
             ):
                 self._run(b"x" * 1000, user=_User())
         self.assertEqual(seen[0]["size_bytes"], 1000)
+
+    def test_charges_the_remuxed_object_not_the_original_upload(self) -> None:
+        """The streaming remux rewrites the clip on the way in, so the object in the bucket is not
+        the length of the upload. Charging ``len(upload)`` would drift ``videos.size_bytes`` — and
+        with it the quota — away from actual storage on every single upload, permanently."""
+        self.stored_size = 1200  # what the remux wrote; the upload below is 1000 bytes
+        analysis_service.store_artifacts = lambda staged, *, thumbnail=None: 300
+        seen: list[dict] = []
+        with mock.patch.object(store, "get_storage_used", return_value=0):
+            with mock.patch.object(
+                store, "persist_analysis", side_effect=lambda **kw: seen.append(kw) or "a1"
+            ):
+                self._run(b"x" * 1000, user=_User())
+        self.assertEqual(seen[0]["size_bytes"], 1500)
 
 
 class ResponseBodyShapeTests(unittest.TestCase):

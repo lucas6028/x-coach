@@ -5,13 +5,15 @@ import { fmtTime } from "../../lib/format";
 import { faultLabel, useI18n } from "../../lib/i18n";
 import { keyEvidence } from "../../lib/retrieval";
 import { useVideoPlayback } from "../../lib/useVideoPlayback";
+import type { VideoSource } from "../../lib/useVideoSrc";
 import SkeletonOverlay from "../SkeletonOverlay";
 import FaultChips from "./FaultChips";
 
 interface Props {
   analysis: Analysis;
   videoRef: React.RefObject<HTMLVideoElement>;
-  videoSrc: string | null;
+  /** Resolved by the page, not here, because the coach column needs the same resolution. */
+  videoSource: VideoSource;
   onTimeUpdate: (t: number) => void;
   onActiveFault: (faultId: string | null) => void;
   onSeek: (t: number) => void;
@@ -29,14 +31,15 @@ interface Props {
 export default function MobileVideoCard({
   analysis,
   videoRef,
-  videoSrc,
+  videoSource,
   onTimeUpdate,
   onActiveFault,
   onSeek,
 }: Props) {
   const { t } = useI18n();
   const wrapRef = useRef<HTMLDivElement>(null);
-  const { playing, time, duration, togglePlay, toggleFullscreen } = useVideoPlayback(
+  const { src: videoSrc, poster, recover } = videoSource;
+  const { playing, time, duration, buffered, togglePlay, toggleFullscreen } = useVideoPlayback(
     videoRef,
     analysis.video_id,
     onTimeUpdate,
@@ -66,6 +69,11 @@ export default function MobileVideoCard({
         <video
           ref={videoRef}
           {...(videoSrc ? { src: videoSrc } : {})}
+          {...(poster ? { poster } : {})}
+          // Metadata only until the user presses play — this is a phone, on a phone network, and
+          // the default `auto` would pull the whole clip on mount. The poster covers the gap.
+          preload="metadata"
+          onError={recover}
           className="absolute inset-0 h-full w-full object-contain"
           playsInline
           onClick={togglePlay}
@@ -137,6 +145,16 @@ export default function MobileVideoCard({
           </span>
           <div className="group relative h-4 flex-1 cursor-pointer" onClick={scrub}>
             <div className="absolute inset-x-0 top-1/2 h-[5px] -translate-y-1/2 rounded-full bg-white/30" />
+            {/* Load-ahead, matching the desktop scrubber — see Timeline.tsx for why only the
+                range containing the playhead counts. It matters more here: this is the screen
+                most likely to be on a mobile network. */}
+            {buffered > time && buffered < dur && (
+              <div
+                data-testid="buffered-bar"
+                className="absolute top-1/2 h-[5px] -translate-y-1/2 rounded-full bg-white/45"
+                style={{ width: pct(buffered) }}
+              />
+            )}
             <div
               className="absolute top-1/2 h-[5px] -translate-y-1/2 rounded-full bg-[#8b7bff]"
               style={{ width: pct(time) }}

@@ -30,6 +30,10 @@ _DEFAULT_TESTS = [
     "tests/test_backend_line_webhook.py",
     "tests/test_backend_admin_line.py",
     "tests/test_storage.py",
+    # The streaming remux. Its own file, because backend/app/services/faststart.py is mostly
+    # failure paths (no ffmpeg, non-zero exit, timeout, truncated output) that no endpoint suite
+    # reaches — leaving it out drops the module to ~54% and drags the gate down with it.
+    "tests/test_faststart.py",
     "tests/test_upload_staging.py",
     "tests/test_upload_urls.py",
     "tests/test_delete_reaping.py",

@@ -102,6 +102,7 @@ def _staged_upload(video_id: str = "upload_abc", *, owner: str = "anon"):
         prefix=f"uploads/{owner}/{video_id}",
         video_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}.mp4",
         pose_path=Path(tempfile.gettempdir()) / f"_staged_upload_{video_id}" / f"{video_id}_pose.json",
+        source_size=0,
     )
     # ``store._reap_objects`` is patched for the same "no real object-store I/O" reason: the
     # analyze router now reaps the stored source when an analysis fails, and unpatched that

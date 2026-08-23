@@ -61,6 +61,53 @@ class StageUploadTests(unittest.TestCase):
         self.assertEqual(staged.video_path.read_bytes(), b"video-bytes")
         self.assertEqual(staged.video_path.suffix, ".mp4")
 
+    def test_the_clip_is_made_streamable_before_it_is_stored(self) -> None:
+        """The stored object is what the browser later plays, so the remux has to happen on the
+        way IN. Doing it afterwards would mean writing the object twice; skipping it would mean a
+        moov-last phone clip downloads in full before its first frame renders."""
+        with mock.patch.object(
+            analysis.faststart, "optimize_for_streaming", return_value=b"faststarted"
+        ) as optimize:
+            staged = analysis.stage_upload(b"raw", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, staged)
+        optimize.assert_called_once_with(b"raw", ".mp4")
+        self.assertEqual(
+            self.store.open_object(f"{staged.prefix}/source")[0].read_bytes(), b"faststarted"
+        )
+
+    def test_reports_the_size_of_what_was_stored_not_of_what_was_uploaded(self) -> None:
+        """``videos.size_bytes`` is built from this figure and the storage quota is enforced
+        against that column, so it has to describe the OBJECT. The remux changes the length —
+        relocating ``moov`` adds bytes, writing a WebM index adds more — and charging the
+        discarded original would drift the quota away from the bucket on every upload, in
+        whichever direction the remux happened to go."""
+        with mock.patch.object(
+            analysis.faststart, "optimize_for_streaming", return_value=b"a-longer-remuxed-clip"
+        ):
+            staged = analysis.stage_upload(b"raw", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, staged)
+        self.assertEqual(staged.source_size, len(b"a-longer-remuxed-clip"))
+
+    def test_the_reported_size_matches_the_object_actually_written(self) -> None:
+        with mock.patch.object(
+            analysis.faststart, "optimize_for_streaming", return_value=b"remuxed"
+        ):
+            staged = analysis.stage_upload(b"raw-upload-bytes", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, staged)
+        stored = self.store.open_object(f"{staged.prefix}/source")[0].read_bytes()
+        self.assertEqual(staged.source_size, len(stored))
+
+    def test_the_pipeline_analyzes_exactly_the_bytes_that_were_stored(self) -> None:
+        """The detector reports frame indices, and the player scrubs the STORED file. Analyzing
+        the pre-remux original would let those two disagree — silently, since a stream copy keeps
+        the clip playable either way."""
+        with mock.patch.object(
+            analysis.faststart, "optimize_for_streaming", return_value=b"faststarted"
+        ):
+            staged = analysis.stage_upload(b"raw", suffix=".mp4", owner="u1")
+        self.addCleanup(analysis.discard_stage, staged)
+        self.assertEqual(staged.video_path.read_bytes(), b"faststarted")
+
     def test_pose_path_is_in_the_same_temp_dir_and_not_yet_written(self) -> None:
         staged = analysis.stage_upload(b"v", suffix=".mp4", owner="u1")
         self.addCleanup(analysis.discard_stage, staged)

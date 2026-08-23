@@ -18,6 +18,7 @@ export function useVideoPlayback(
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [buffered, setBuffered] = useState(0);
 
   useEffect(() => {
     const v = videoRef.current;
@@ -25,6 +26,21 @@ export function useVideoPlayback(
     const onTime = () => {
       setTime(v.currentTime);
       onTimeUpdate(v.currentTime);
+    };
+    // How far ahead of the playhead the browser actually holds bytes — the pale bar the scrubber
+    // draws behind the progress fill. Only the range CONTAINING the playhead counts: after a seek
+    // the browser keeps the ranges it fetched earlier, and taking the last one would draw a full
+    // buffer over a section that has not been fetched at all.
+    const onProgress = () => {
+      const ranges = v.buffered;
+      let ahead = 0;
+      for (let i = 0; i < ranges.length; i += 1) {
+        if (ranges.start(i) <= v.currentTime && v.currentTime <= ranges.end(i)) {
+          ahead = ranges.end(i);
+          break;
+        }
+      }
+      setBuffered(ahead);
     };
     // A browser-recorded clip is a live-muxed WebM with no Duration element, so the element
     // reports `Infinity` (see lib/mediaDuration.ts). Infinity is truthy, so passing it on would
@@ -35,6 +51,9 @@ export function useVideoPlayback(
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     v.addEventListener("timeupdate", onTime);
+    v.addEventListener("timeupdate", onProgress);
+    v.addEventListener("progress", onProgress);
+    v.addEventListener("seeked", onProgress);
     v.addEventListener("loadedmetadata", onMeta);
     // Chrome learns a live-muxed clip's true length once playback has reached the end; take it
     // when it arrives so the readout stops being the metadata's frames/fps estimate.
@@ -43,6 +62,9 @@ export function useVideoPlayback(
     v.addEventListener("pause", onPause);
     return () => {
       v.removeEventListener("timeupdate", onTime);
+      v.removeEventListener("timeupdate", onProgress);
+      v.removeEventListener("progress", onProgress);
+      v.removeEventListener("seeked", onProgress);
       v.removeEventListener("loadedmetadata", onMeta);
       v.removeEventListener("durationchange", onMeta);
       v.removeEventListener("play", onPlay);
@@ -80,5 +102,5 @@ export function useVideoPlayback(
     else el.requestFullscreen?.().catch(() => undefined);
   };
 
-  return { playing, time, duration, togglePlay, toggleFullscreen };
+  return { playing, time, duration, buffered, togglePlay, toggleFullscreen };
 }

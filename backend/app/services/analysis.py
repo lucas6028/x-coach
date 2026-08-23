@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.app import config
-from backend.app.services import storage
+from backend.app.services import faststart, storage
 
 logger = logging.getLogger(__name__)
 
@@ -214,12 +214,20 @@ class StagedUpload:
     ``prefix`` is the object-store key prefix holding every artifact for this upload, and is what
     ``videos.storage_key`` records. ``video_path`` and ``pose_path`` live in a temp directory that
     ``discard_stage`` removes once the analysis is done — they are scratch space, not storage.
+
+    ``source_size`` is how many bytes the source object ACTUALLY occupies, which is not
+    ``len(the upload)``: the streaming remux rewrites the clip, so the stored file differs in
+    length from what the browser sent (relocating ``moov`` adds a little; writing a WebM ``Cues``
+    index adds more). It is reported here because it feeds ``videos.size_bytes``, and that column
+    is what the per-user storage quota is enforced against — measuring the discarded original
+    would drift the quota away from the bucket a little on every single upload.
     """
 
     video_id: str
     prefix: str
     video_path: Path
     pose_path: Path
+    source_size: int
 
 
 def stage_upload(data: bytes, *, suffix: str, owner: str) -> StagedUpload:
@@ -230,13 +238,23 @@ def stage_upload(data: bytes, *, suffix: str, owner: str) -> StagedUpload:
     storage is down before spending any CPU beats finishing an expensive analysis whose video
     cannot be kept. Callers map ``StorageError`` to a 503.
 
+    The one thing that happens BEFORE the put is the streaming remux (``faststart``), and it does
+    not weaken that: it is a stream copy of a file already in memory, bounded by its own timeout,
+    and it never raises. What the put must come before is the ANALYSIS — the minutes of CPU whose
+    result would be worthless if the clip could not be kept — and it still does. The remux has to
+    precede the put because what gets stored is what the browser later plays; remuxing afterwards
+    would mean writing the object twice.
+
     The temp copy exists because ``process_video`` (OpenCV) and the detector's camera-view
-    estimation both need a real filesystem path — bytes in memory are not enough.
+    estimation both need a real filesystem path — bytes in memory are not enough. It is written
+    from the SAME bytes that were stored, so the frame indices the detector reports address the
+    file the player will scrub, not a discarded original.
 
     ``owner`` is the authenticated user's id, or ``"anon"`` for a demo upload.
     """
     video_id = f"upload_{uuid.uuid4().hex[:12]}"
     prefix = storage.upload_prefix(owner, video_id)
+    data = faststart.optimize_for_streaming(data, suffix)
     storage.get_object_store().put(
         f"{prefix}/source", data, content_type=storage.video_content_type(suffix)
     )
@@ -249,6 +267,7 @@ def stage_upload(data: bytes, *, suffix: str, owner: str) -> StagedUpload:
         prefix=prefix,
         video_path=video_path,
         pose_path=tmp_dir / "pose.json",
+        source_size=len(data),
     )
 
 
