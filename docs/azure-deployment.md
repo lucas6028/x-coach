@@ -218,8 +218,9 @@ SHARE=$(az deployment group show -g $RG -n main \
     --query properties.outputs.dataShareName.value -o tsv)
 KEY=$(az storage account keys list -g $RG -n $STORAGE --query '[0].value' -o tsv)
 
-# 只送 backend 真的會開的那個圖：data/kg/ 另外那八個 .bak / .pre-* / .post-*-raw 是
-# pipeline 的歷史快照，不是執行時的輸入。路徑對應 backend/app/config.py 的 KG_GRAPH_FILE。
+# 只送 backend 真的會開的那個圖：data/kg/ 其餘的 .bak / .pre-* / .post-*-raw 是
+# pipeline 的歷史快照（每跑一支 author_*/reconcile_* 就多一個），不是執行時的輸入。
+# 路徑對應 backend/app/config.py 的 KG_GRAPH_FILE。改完圖要重跑這一行才會進 prod。
 az storage file upload --account-name $STORAGE --account-key $KEY \
     --share-name $SHARE --path kg/sports_kg_v3.graphml --source data/kg/sports_kg_v3.graphml
 

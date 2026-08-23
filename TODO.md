@@ -53,7 +53,17 @@
 
 ## KG 缺口（改 `scripts/knowledge/stub_general_movements_v3.py`，graphml gitignore ⇒ 重生成是部署步驟）
 
-- [ ] Band Pull Apart `Bent Elbows` 無連結、`trunk_extension_compensation` 無節點。
+> 既有圖只靠改 `STUB_SPEC` 補不了（`author_stubs` 遇到已存在的 Action 就整個動作跳過），
+> 要另寫冪等的 `author_*_v3.py` 補丁；重建順序見 `scripts/knowledge/README.md`。
+> 部署＝把本機 `data/kg/sports_kg_v3.graphml` 重新上傳（Azure Files / bind mount），不是重跑。
+
+- [x] Band Pull Apart `Bent Elbows` 無連結、`trunk_extension_compensation` 無節點
+  （2026-08-23，`scripts/knowledge/author_band_pull_apart_kg_v3.py`）。各補一條 `AFFECTS_QUALITY`：
+  `Bent Elbows → Range Of Motion`、新節點 `Trunk Extension Compensation → No Compensatory Trunk
+  Movement`；`BPA_TRUNK_KG_QUERY` 從裸的 shared 節點改指這個 scoped Fault。
+  **刻意不補 cause / risk / cue**：Fukunaga (PMC8975561) 全文沒提手肘，軀幹更是反向說
+  「hip and trunk extension may be beneficial」，補了就是把引用掛到論文沒講的話上。
+  三個空 bucket 由 `tests/test_kg_band_pull_apart.py` 釘住。**尚未部署**（要重傳 graphml）。
 - [ ] Bicep Curl `Elbow Drift Forward` 無連結。
 - [ ] Arm Abduction / Arm VW 無 asymmetry 節點（現用泛用 `Muscle Imbalance`，刻意保留薄卡片）。
 - [ ] **Sit-up：圖講完整仰臥起坐、spec 講捲腹**，交集為零——要先決定 app 出哪一種。
