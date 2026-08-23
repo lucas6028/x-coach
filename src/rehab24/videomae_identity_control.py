@@ -811,72 +811,120 @@ def print_analysis(summary: dict) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def duration_control(
+def shortcut_controls(
     oof_rows: Sequence[dict],
     manifest: dict[str, dict[str, str]],
     seeds: Sequence[int],
     n_permutations: int,
     permutation_seed: int,
 ) -> dict:
-    """Score repetitions by their LENGTH and run the identical within-session statistic.
+    """Zero-parameter scores run through the identical within-session statistic.
 
-    Added after the primary result, and flagged as a plan deviation wherever it is
-    reported. The reason to run it anyway: a repetition's frame range decides which
-    pixels VideoMAE is shown (``sample_clip_starts`` spans exactly that range), so if
-    correct and incorrect repetitions of one recording differ in duration, a model
-    could order them without ever reading the movement -- and this project has already
-    been burned once by exactly that shortcut on Fitness-AQA squats. A control with
-    zero fitted parameters is the cheapest way to price it.
+    EXPLORATORY: added after the primary result and flagged as a plan deviation
+    wherever it is reported. Two channels, both of which can order repetitions inside
+    one recording without any model reading any movement:
 
-    It bounds the shortcut; it does not remove it. See the results note's limits.
+    ``duration``
+        A repetition's frame range decides which pixels VideoMAE is shown
+        (``sample_clip_starts`` spans exactly that range), so a length difference
+        between correct and incorrect repetitions is directly readable. This project
+        has already been burned by that shortcut once, on Fitness-AQA squats.
+
+    ``position``
+        Where the repetition sits in the recording. This one is NOT covered by the
+        plan's §10 limits, which speak only about ordering *within* a repetition. If
+        REHAB24-6's protocol records correct repetitions before erroneous ones, then
+        position is nearly deterministic of the label inside a session, and anything
+        that drifts down a recording -- lighting, camera settle, the subject's
+        standing position, encoder state -- becomes a route to a high AUC.
+
+    ``label_runs`` counts alternations between correct and incorrect down each
+    session's repetition order: 2 runs means the labels are one contiguous block each,
+    which is what a blocked recording protocol looks like.
+
+    These bound the shortcuts. They do not remove them, and a strong ``position``
+    result cannot be undone by any analysis of these same recordings.
     """
     from scipy.stats import spearmanr
 
     scores = repetition_scores(oof_rows, seeds)
     sessions, _ = build_sessions(scores, seeds)
-    durations = {
-        repetition_id(row): int(row["last_frame"]) - int(row["first_frame"]) for row in manifest.values()
-    }
-
-    duration_sessions = [
-        Session(
-            session=session.session,
-            person_id=session.person_id,
-            exercise_id=session.exercise_id,
-            labels=session.labels,
-            avg_rank=midranks(np.asarray([durations[key] for key in session.repetitions], dtype=float)),
-            repetitions=session.repetitions,
-        )
-        for session in sessions
-    ]
-
-    statistic = observed_statistic(duration_sessions)
-    null = permutation_null(duration_sessions, n_permutations, permutation_seed)
-    p_value = float((1 + int(np.sum(null >= statistic["mean"]))) / (n_permutations + 1))
-
-    correlations = [
-        float(spearmanr(session.avg_rank, [durations[key] for key in session.repetitions]).statistic)
-        for session in sessions
-    ]
     model_auc = {session.session: float(session.auc(session.labels)) for session in sessions}
-    duration_auc = {session.session: float(session.auc(session.labels)) for session in duration_sessions}
-    neutral = [name for name, value in duration_auc.items() if abs(value - 0.5) < 0.15]
 
-    return {
-        "note": "exploratory, added after the primary result; not pre-registered",
-        "duration_only": {**statistic, "permutation_p_value": p_value},
-        "spearman_model_rank_vs_duration": {
-            "mean": float(np.mean(correlations)),
-            "median": float(np.median(correlations)),
-            "per_session": dict(zip((s.session for s in sessions), correlations)),
+    features = {
+        "duration": {
+            repetition_id(row): float(int(row["last_frame"]) - int(row["first_frame"])) for row in manifest.values()
         },
-        "model_auc_on_duration_neutral_sessions": {
-            "definition": "sessions whose duration-only AUC lies in [0.35, 0.65]",
-            "n_sessions": len(neutral),
-            "mean_model_auc": float(np.mean([model_auc[name] for name in neutral])),
-        },
-        "per_session_duration_auc": duration_auc,
+        "position": {repetition_id(row): float(row["repetition_number"]) for row in manifest.values()},
     }
+
+    report: dict = {
+        "note": "EXPLORATORY, added after the primary result; not pre-registered",
+        "n_sessions": len(sessions),
+        "controls": {},
+    }
+
+    for name, values in features.items():
+        control_sessions = [
+            Session(
+                session=session.session,
+                person_id=session.person_id,
+                exercise_id=session.exercise_id,
+                labels=session.labels,
+                avg_rank=midranks(np.asarray([values[key] for key in session.repetitions], dtype=float)),
+                repetitions=session.repetitions,
+            )
+            for session in sessions
+        ]
+        statistic = observed_statistic(control_sessions)
+        null = permutation_null(control_sessions, n_permutations, permutation_seed)
+        # Two-sided in spirit: a control that predicts the label BACKWARDS is just as
+        # much a shortcut as one that predicts it forwards, and `position` does exactly
+        # that. Both tails are reported rather than only the pre-registered one.
+        p_greater = float((1 + int(np.sum(null >= statistic["mean"]))) / (n_permutations + 1))
+        p_less = float((1 + int(np.sum(null <= statistic["mean"]))) / (n_permutations + 1))
+        control_auc = {s.session: float(s.auc(s.labels)) for s in control_sessions}
+        correlations = [
+            float(spearmanr(session.avg_rank, [values[key] for key in session.repetitions]).statistic)
+            for session in sessions
+        ]
+        neutral = [key for key, value in control_auc.items() if 0.35 <= value <= 0.65]
+        informative = [key for key in control_auc if key not in neutral]
+        report["controls"][name] = {
+            "subject_macro": statistic,
+            "permutation_p_greater": p_greater,
+            "permutation_p_less": p_less,
+            "distance_from_chance": abs(statistic["mean"] - 0.5),
+            "spearman_model_rank_vs_feature": {
+                "mean": float(np.mean(correlations)),
+                "median": float(np.median(correlations)),
+            },
+            "model_auc_where_control_is_neutral": {
+                "definition": "sessions whose control-only AUC lies in [0.35, 0.65]",
+                "n_sessions": len(neutral),
+                "mean_model_auc": float(np.mean([model_auc[key] for key in neutral])) if neutral else None,
+            },
+            "model_auc_where_control_is_informative": {
+                "n_sessions": len(informative),
+                "mean_model_auc": float(np.mean([model_auc[key] for key in informative])) if informative else None,
+            },
+            "per_session_auc": control_auc,
+        }
+
+    runs = []
+    for session in sessions:
+        order = np.argsort(np.asarray([features["position"][key] for key in session.repetitions], dtype=float))
+        ordered = session.labels[order]
+        runs.append(1 + int(np.sum(ordered[1:] != ordered[:-1])))
+    report["label_runs_per_session"] = {
+        "definition": "alternations between correct and incorrect down the repetition order; 2 = fully blocked",
+        "median": int(np.median(runs)),
+        "min": int(np.min(runs)),
+        "max": int(np.max(runs)),
+        "n_fully_blocked": int(sum(run <= 2 for run in runs)),
+        "n_sessions": len(runs),
+    }
+    return report
 
 
 # --------------------------------------------------------------------------- #
@@ -911,13 +959,13 @@ def build_parser() -> argparse.ArgumentParser:
     analyse.add_argument("--permutation-seed", type=int, default=DEFAULT_PERMUTATION_SEED)
     analyse.add_argument("--bootstrap", type=int, default=DEFAULT_BOOTSTRAP)
 
-    duration = sub.add_parser(
-        "duration-control",
-        help="EXPLORATORY (not pre-registered): repetition length as a zero-parameter score.",
+    shortcuts = sub.add_parser(
+        "shortcut-controls",
+        help="EXPLORATORY (not pre-registered): repetition length and position as zero-parameter scores.",
     )
-    add_common(duration)
-    duration.add_argument("--permutations", type=int, default=DEFAULT_PERMUTATIONS)
-    duration.add_argument("--permutation-seed", type=int, default=DEFAULT_PERMUTATION_SEED)
+    add_common(shortcuts)
+    shortcuts.add_argument("--permutations", type=int, default=DEFAULT_PERMUTATIONS)
+    shortcuts.add_argument("--permutation-seed", type=int, default=DEFAULT_PERMUTATION_SEED)
 
     extract = sub.add_parser("extract-appearance", help="Label-blind canonical-frame appearance-only arm.")
     add_common(extract)
@@ -1026,29 +1074,43 @@ def main(argv: Sequence[str] | None = None) -> None:
         print(f"\nSaved analysis to {args.output_dir}")
         return
 
-    if args.command == "duration-control":
+    if args.command == "shortcut-controls":
         oof_rows = []
         for seed in args.seeds:
             oof_rows.extend(read_oof(oof_path(args.output_dir, seed)))
-        report = duration_control(
+        report = shortcut_controls(
             oof_rows, manifest_index(args.manifest), args.seeds, args.permutations, args.permutation_seed
         )
-        statistic = report["duration_only"]
-        print("\n=== EXPLORATORY zero-parameter control: repetition length only ===")
+        print("\n=== EXPLORATORY zero-parameter shortcut controls (not pre-registered) ===")
+        for name, values in report["controls"].items():
+            statistic = values["subject_macro"]
+            print(
+                f"  {name:<9} within-session AUC {statistic['mean']:.4f}  "
+                f"({statistic['n_subjects_above_chance']}/{statistic['n_subjects']} subjects > 0.5, "
+                f"|AUC-0.5| = {values['distance_from_chance']:.4f})"
+            )
+            print(
+                f"    permutation p: greater {values['permutation_p_greater']:.5f}, "
+                f"less {values['permutation_p_less']:.5f}   "
+                f"Spearman(model rank, {name}) median {values['spearman_model_rank_vs_feature']['median']:+.3f}"
+            )
+            neutral = values["model_auc_where_control_is_neutral"]
+            informative = values["model_auc_where_control_is_informative"]
+            neutral_text = f"{neutral['mean_model_auc']:.4f}" if neutral["mean_model_auc"] is not None else "n/a"
+            informative_text = (
+                f"{informative['mean_model_auc']:.4f}" if informative["mean_model_auc"] is not None else "n/a"
+            )
+            print(
+                f"    model AUC where this control is neutral ({neutral['n_sessions']} sessions): {neutral_text}   "
+                f"informative ({informative['n_sessions']} sessions): {informative_text}"
+            )
+        runs = report["label_runs_per_session"]
         print(
-            f"  mean within-session AUC {statistic['mean']:.4f}  "
-            f"{statistic['n_subjects_above_chance']}/{statistic['n_subjects']} subjects > 0.5  "
-            f"permutation p = {statistic['permutation_p_value']:.5f}"
-        )
-        correlation = report["spearman_model_rank_vs_duration"]
-        print(f"  Spearman(model rank, duration): mean {correlation['mean']:+.3f}, median {correlation['median']:+.3f}")
-        neutral = report["model_auc_on_duration_neutral_sessions"]
-        print(
-            f"  model AUC on the {neutral['n_sessions']} duration-neutral sessions: "
-            f"{neutral['mean_model_auc']:.4f}"
+            f"  label blocking: median {runs['median']} runs per session (min {runs['min']}, max {runs['max']}); "
+            f"{runs['n_fully_blocked']}/{runs['n_sessions']} sessions are one contiguous block per class"
         )
         args.output_dir.mkdir(parents=True, exist_ok=True)
-        path = args.output_dir / "duration_control_summary.json"
+        path = args.output_dir / "shortcut_controls_summary.json"
         with path.open("w", encoding="utf-8") as handle:
             json.dump(report, handle, indent=2, sort_keys=True)
         print(f"\nSaved to {path}")
