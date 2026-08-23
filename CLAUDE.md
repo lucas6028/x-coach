@@ -89,6 +89,18 @@ Project knowledge graph at `graphify-out/` (graph.json + GRAPH_REPORT.md; no wik
 - After modifying code, run `graphify update .` (AST-only, no API cost). Note the graph
   is scoped to the project proper (memory `graphify-graph-scoped`).
 
+## Experiment notes (`notes/`) — mandatory
+
+**Any note written or edited under `notes/` follows
+`.claude/skills/write-experiment-note/SKILL.md`.** Invoke that skill before
+writing — it is the standing convention, not an option: claim-shaped title,
+answer fronted, gates and plan deviations reported, a "what this does NOT support"
+section, `p ≥ 0.05` written as *undetermined* (never "no difference"/"equivalent"),
+and a reproduction tail. A PostToolUse hook (`.claude/settings.json`) lints each
+`notes/*.md` written via the Write/Edit tools and reports back — advisory, never
+blocks. A `sed`/heredoc write through Bash bypasses the hook, so this rule (not the
+hook) is what covers those; run `check_note.py` by hand after one.
+
 ## Agent skills
 
 ### Issue tracker

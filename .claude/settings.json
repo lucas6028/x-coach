@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PROJECT_DIR:-.}/.venv/Scripts/python.exe\" \"${CLAUDE_PROJECT_DIR:-.}/.claude/skills/write-experiment-note/check_note.py\" --hook 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Checking note conventions"
+          }
+        ]
+      }
+    ]
+  }
+}
