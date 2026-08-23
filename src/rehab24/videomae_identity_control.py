@@ -807,6 +807,79 @@ def print_analysis(summary: dict) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# exploratory: zero-parameter duration control (NOT pre-registered)             #
+# --------------------------------------------------------------------------- #
+
+
+def duration_control(
+    oof_rows: Sequence[dict],
+    manifest: dict[str, dict[str, str]],
+    seeds: Sequence[int],
+    n_permutations: int,
+    permutation_seed: int,
+) -> dict:
+    """Score repetitions by their LENGTH and run the identical within-session statistic.
+
+    Added after the primary result, and flagged as a plan deviation wherever it is
+    reported. The reason to run it anyway: a repetition's frame range decides which
+    pixels VideoMAE is shown (``sample_clip_starts`` spans exactly that range), so if
+    correct and incorrect repetitions of one recording differ in duration, a model
+    could order them without ever reading the movement -- and this project has already
+    been burned once by exactly that shortcut on Fitness-AQA squats. A control with
+    zero fitted parameters is the cheapest way to price it.
+
+    It bounds the shortcut; it does not remove it. See the results note's limits.
+    """
+    from scipy.stats import spearmanr
+
+    scores = repetition_scores(oof_rows, seeds)
+    sessions, _ = build_sessions(scores, seeds)
+    durations = {
+        repetition_id(row): int(row["last_frame"]) - int(row["first_frame"]) for row in manifest.values()
+    }
+
+    duration_sessions = [
+        Session(
+            session=session.session,
+            person_id=session.person_id,
+            exercise_id=session.exercise_id,
+            labels=session.labels,
+            avg_rank=midranks(np.asarray([durations[key] for key in session.repetitions], dtype=float)),
+            repetitions=session.repetitions,
+        )
+        for session in sessions
+    ]
+
+    statistic = observed_statistic(duration_sessions)
+    null = permutation_null(duration_sessions, n_permutations, permutation_seed)
+    p_value = float((1 + int(np.sum(null >= statistic["mean"]))) / (n_permutations + 1))
+
+    correlations = [
+        float(spearmanr(session.avg_rank, [durations[key] for key in session.repetitions]).statistic)
+        for session in sessions
+    ]
+    model_auc = {session.session: float(session.auc(session.labels)) for session in sessions}
+    duration_auc = {session.session: float(session.auc(session.labels)) for session in duration_sessions}
+    neutral = [name for name, value in duration_auc.items() if abs(value - 0.5) < 0.15]
+
+    return {
+        "note": "exploratory, added after the primary result; not pre-registered",
+        "duration_only": {**statistic, "permutation_p_value": p_value},
+        "spearman_model_rank_vs_duration": {
+            "mean": float(np.mean(correlations)),
+            "median": float(np.median(correlations)),
+            "per_session": dict(zip((s.session for s in sessions), correlations)),
+        },
+        "model_auc_on_duration_neutral_sessions": {
+            "definition": "sessions whose duration-only AUC lies in [0.35, 0.65]",
+            "n_sessions": len(neutral),
+            "mean_model_auc": float(np.mean([model_auc[name] for name in neutral])),
+        },
+        "per_session_duration_auc": duration_auc,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
 
@@ -837,6 +910,14 @@ def build_parser() -> argparse.ArgumentParser:
     analyse.add_argument("--permutations", type=int, default=DEFAULT_PERMUTATIONS)
     analyse.add_argument("--permutation-seed", type=int, default=DEFAULT_PERMUTATION_SEED)
     analyse.add_argument("--bootstrap", type=int, default=DEFAULT_BOOTSTRAP)
+
+    duration = sub.add_parser(
+        "duration-control",
+        help="EXPLORATORY (not pre-registered): repetition length as a zero-parameter score.",
+    )
+    add_common(duration)
+    duration.add_argument("--permutations", type=int, default=DEFAULT_PERMUTATIONS)
+    duration.add_argument("--permutation-seed", type=int, default=DEFAULT_PERMUTATION_SEED)
 
     extract = sub.add_parser("extract-appearance", help="Label-blind canonical-frame appearance-only arm.")
     add_common(extract)
@@ -943,6 +1024,34 @@ def main(argv: Sequence[str] | None = None) -> None:
             permutation_seed=np.asarray(args.permutation_seed),
         )
         print(f"\nSaved analysis to {args.output_dir}")
+        return
+
+    if args.command == "duration-control":
+        oof_rows = []
+        for seed in args.seeds:
+            oof_rows.extend(read_oof(oof_path(args.output_dir, seed)))
+        report = duration_control(
+            oof_rows, manifest_index(args.manifest), args.seeds, args.permutations, args.permutation_seed
+        )
+        statistic = report["duration_only"]
+        print("\n=== EXPLORATORY zero-parameter control: repetition length only ===")
+        print(
+            f"  mean within-session AUC {statistic['mean']:.4f}  "
+            f"{statistic['n_subjects_above_chance']}/{statistic['n_subjects']} subjects > 0.5  "
+            f"permutation p = {statistic['permutation_p_value']:.5f}"
+        )
+        correlation = report["spearman_model_rank_vs_duration"]
+        print(f"  Spearman(model rank, duration): mean {correlation['mean']:+.3f}, median {correlation['median']:+.3f}")
+        neutral = report["model_auc_on_duration_neutral_sessions"]
+        print(
+            f"  model AUC on the {neutral['n_sessions']} duration-neutral sessions: "
+            f"{neutral['mean_model_auc']:.4f}"
+        )
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        path = args.output_dir / "duration_control_summary.json"
+        with path.open("w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2, sort_keys=True)
+        print(f"\nSaved to {path}")
         return
 
     # The appearance arm lives in its own module; imported lazily so `analyze` never
