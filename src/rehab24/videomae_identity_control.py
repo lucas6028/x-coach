@@ -888,8 +888,14 @@ def shortcut_controls(
             float(spearmanr(session.avg_rank, [values[key] for key in session.repetitions]).statistic)
             for session in sessions
         ]
+        # "informative" means |AUC - 0.5| > 0.15 in EITHER direction, not AUC > 0.65.
+        # For `position` almost every session sits BELOW 0.35 (correct reps come
+        # first), so this split is "nearly all sessions vs the handful left over",
+        # not a strong-vs-weak contrast. Reported for completeness; it carries no
+        # inferential weight and the results note says so.
         neutral = [key for key, value in control_auc.items() if 0.35 <= value <= 0.65]
         informative = [key for key in control_auc if key not in neutral]
+        below = [key for key, value in control_auc.items() if value < 0.35]
         report["controls"][name] = {
             "subject_macro": statistic,
             "permutation_p_greater": p_greater,
@@ -905,7 +911,9 @@ def shortcut_controls(
                 "mean_model_auc": float(np.mean([model_auc[key] for key in neutral])) if neutral else None,
             },
             "model_auc_where_control_is_informative": {
+                "definition": "sessions whose control-only AUC lies OUTSIDE [0.35, 0.65], either direction",
                 "n_sessions": len(informative),
+                "n_sessions_below_0.35": len(below),
                 "mean_model_auc": float(np.mean([model_auc[key] for key in informative])) if informative else None,
             },
             "per_session_auc": control_auc,

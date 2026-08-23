@@ -274,12 +274,18 @@ def run_evaluate(
         big = [f for f in folds if f["n_test"] >= MIN_VAL_SUBJECT_SAMPLES]
         print(f"  bal_acc (9 folds, no P10): {np.mean([f['balanced_accuracy'] for f in big]):.4f}")
 
+    # The baseline is pinned to the identity control's own output dir, NOT to
+    # ``output_dir``. Reading it from a caller-supplied directory would let
+    # `--output-dir <some other arm>` pair the appearance arm against that arm's
+    # folds while still labelling the result `paired_vs_full_frame_letterbox`.
+    baseline_dir = DEFAULT_PROCESSED_ROOT / "videomae_identity_control"
     baseline: dict[int, list[dict]] = {}
     for seed in seeds:
-        path = folds_path(output_dir, seed)
+        path = folds_path(baseline_dir, seed)
         if not path.exists():
             raise SystemExit(f"Missing {path}. Run `predict` first so the pairing uses the audited primary folds.")
-        baseline[seed] = json.load(path.open(encoding="utf-8"))["folds"]
+        payload = json.load(path.open(encoding="utf-8"))
+        baseline[seed] = payload["folds"]
 
     summary: dict = {"seeds": list(seeds), "arms": {}, "paired_vs_full_frame_letterbox": {}}
     for metric in ("balanced_accuracy", "macro_f1", "recall", "specificity"):
