@@ -77,12 +77,17 @@ STUB_SPEC: dict[str, dict] = {
             "Wrist Flexion Under Load": ["Wrists In Line With Forearms"],
         },
     },
+    # The last two entries MIRROR scripts/knowledge/author_band_pull_apart_kg_v3.py, which
+    # applies the same additions to an ALREADY-BUILT graph (author_stubs skips a movement whose
+    # Action node exists, so this dict alone cannot patch one). Change one, change the other;
+    # that script's docstring holds the citation reasoning for both edges.
     "Band Pull Apart": {
         "grounding": "textbook (Fit3D, no fault labels)",
         "faults": {
             "Insufficient Scapular Retraction": ["Limited Scapular Retraction"],
             "Shoulder Shrugging": ["Shoulder Depression", "Weak Scapular Stabilizers"],
-            "Bent Elbows": [],
+            "Bent Elbows": ["Range Of Motion"],
+            "Trunk Extension Compensation": ["No Compensatory Trunk Movement"],
         },
     },
     # ---- REHAB24-6 (binary correctness only -> textbook-authored) ----

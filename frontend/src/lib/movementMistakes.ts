@@ -789,7 +789,7 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
     ),
     mistake(
       "bpa_trunk_extension_compensation",
-      "No Compensatory Trunk Movement",
+      "Trunk Extension Compensation",
       {
         title: "Leaning back to open the band",
         subtitle: "The trunk whips backward instead of the arms opening.",

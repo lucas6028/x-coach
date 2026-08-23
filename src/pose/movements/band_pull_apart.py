@@ -301,22 +301,33 @@ def band_pull_apart_assign_phases(raw: list[dict]) -> list[str]:
 # STEP 0 -- KG QUERY RESOLUTION, recorded before any rule was written. Each string below was
 # checked against data/kg/sports_kg_v3.graphml with `retrieve_graph_context(query,
 # movement="Band Pull Apart")` -- the function PRODUCTION calls, not just `resolve_nodes`.
-# Observed results, not predicted ones:
+# Observed results, not predicted ones. RE-CHECKED 2026-08-23 after the two gaps below were
+# closed by scripts/knowledge/author_band_pull_apart_kg_v3.py:
 #
-#   "Shoulder Shrugging" -> Band Pull Apart:Shoulder Shrugging
+#   "Shoulder Shrugging"            -> Band Pull Apart:Shoulder Shrugging
 #       causes: Weak Scapular Stabilizers | quality_impacts: Shoulder Depression      NON-EMPTY
-#   "Bent Elbows"        -> Band Pull Apart:Bent Elbows
-#       NO buckets -- only the HAS_FAULT backlink                                     THIN
-#   rule 4               -> NO Band-Pull-Apart-scoped node exists at all
-#       "Trunk Extension" / "Loss Of Neutral Body Position" (Row's queries) do not resolve
-#       under this movement's scoping; the shared nodes that do resolve are bare.
+#   "Bent Elbows"                   -> Band Pull Apart:Bent Elbows
+#       quality_impacts: Range Of Motion                                     THIN, BUT EXACT
+#   "Trunk Extension Compensation"  -> Band Pull Apart:Trunk Extension Compensation
+#       quality_impacts: No Compensatory Trunk Movement                      THIN, BUT EXACT
 #
-# The two gaps are recorded rather than masked. Pointing rule 2 at the shared `Range Of Motion`
-# QualityDimension WOULD return a rich bucket set, and was rejected: its `corrections` bucket is
-# "Wrapping Surface Adjustment", meaningless for this movement. A semantically correct thin card
-# beats a semantically wrong full one. Both gaps are one-line fixes in
-# scripts/knowledge/stub_general_movements_v3.py:80-87 and are logged against TODO.md's existing
-# "many faults have no KG node" item.
+# WHAT CHANGED, AND WHAT DID NOT. Until 2026-08-23 `Bent Elbows` carried only its HAS_FAULT
+# backlink and rule 4 had NO Band-Pull-Apart-scoped node at all -- it queried the shared
+# `No Compensatory Trunk Movement` QualityDimension, which resolves but is bare (zero out-edges,
+# and `summarize_seed` filters its inbound Fault edges out of `quality_impacts`), so the card
+# rendered `likely causes: -, injury risks: -, corrective cues: -`. Both are now scoped Fault
+# nodes with one AFFECTS_QUALITY edge each.
+#
+# STILL NO causes / risks / corrections ON EITHER, AND THAT IS THE POINT. Fukunaga never
+# mentions the elbow, and on the trunk the paper runs the other way ("hip and trunk extension
+# may be beneficial") -- so a Cause, Cue or Risk edge would attach this movement's only citation
+# to a claim it does not make. Pointing rule 2 at the shared `Range Of Motion` node as its QUERY
+# would still return a rich bucket set and is still rejected: SEEDING there collects that node's
+# own `CORRECTED_BY -> Wrapping Surface Adjustment`, meaningless here. The AFFECTS_QUALITY edge
+# added instead runs the other way and collects nothing of that hub's at hops=1, which is what
+# every production caller uses. A semantically correct thin card beats a semantically wrong full
+# one. The reasoning per edge, and the hops=2 caveat, live in the author script's docstring;
+# `tests/test_kg_band_pull_apart.py` pins both the resolution and the three deliberate absences.
 BPA_SHRUG_KG_QUERY = "Shoulder Shrugging"
 
 # Imported rather than re-typed, so a change to the shared constant cannot silently skip this
@@ -598,7 +609,12 @@ def rule_incomplete_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
     return detections
 
 
-BPA_TRUNK_KG_QUERY = "No Compensatory Trunk Movement"
+# REPOINTED 2026-08-23 from the bare shared `No Compensatory Trunk Movement` QualityDimension to
+# the scoped Fault node authored by scripts/knowledge/author_band_pull_apart_kg_v3.py. The graph
+# name drops the display name's hyphen and parenthetical -- `fault_name` stays
+# "Trunk-Extension Compensation (Leaning Back)" -- so the two are deliberately not the same
+# string. The shared node is still reached, now as this fault's one `quality_impacts` entry.
+BPA_TRUNK_KG_QUERY = "Trunk Extension Compensation"
 
 # FROM THE SPEC: "Flag if `trunk_lean_backward > 10deg` beyond setup baseline".
 TRUNK_LEAN_MILD_DEG = 10.0
