@@ -236,9 +236,18 @@ body {
 
 /* ── Lumen loader ───────────────────────────────────────────────────────────
    Lumen (the AI coach mascot) waiting states — see components/LumenLoader.tsx.
-   Gold #EC9B0C / glow #FFCF5B / ember #B76A0A are Lumen's fixed identity palette
-   (not theme-driven, so the mascot reads the same on light & dark). Only the text
-   tokens follow the app's theme. Every animation collapses under reduced motion. */
+
+   THE STAGE FOLLOWS THE APP; THE MASCOT DOES NOT. Gold #EC9B0C / glow #FFCF5B / ember #B76A0A are
+   Lumen's own identity palette and stay put — she is the same character wherever she appears. The
+   card she stands on used to be a fixed navy tile, which read as a hole punched in a page whose
+   every other surface is white-on-lavender. It is now the muse-spark card the panels beside it
+   use: white into --ms-violet-soft, hairline --ms-violet-line, the shared card shadow.
+
+   Swapping the ground meant re-tuning everything that was only legible BECAUSE of the navy, which
+   is most of this block. The scan band was cream (invisible on white, so it is violet now), the
+   speed lines were gold (violet), the status line was cream (ink), the dust was pale warm (ink at
+   low alpha). Anything left cream here is a bug, not a choice.
+   Every animation collapses under reduced motion. */
 .lm-scan-wrap {
   display: flex;
   flex-direction: column;
@@ -246,13 +255,16 @@ body {
   gap: 0.75rem;
   padding: 1.75rem 1.5rem 1.5rem;
   border-radius: 1.25rem;
-  /* Fixed navy "stage" (Lumen's night #20223F) in BOTH themes — the cream body and cream light
-     sweep were designed on navy and wash out on the near-white light canvas. Mirrors the app
-     icon's navy tile + faint gold ring, so Lumen reads the same everywhere. */
-  background: radial-gradient(120% 90% at 50% 18%, #2a2c54, #20223f 72%);
-  box-shadow: inset 0 0 0 1px rgba(236, 155, 12, 0.22);
+  /* Clips the speed lines at the card's edge — they travel out past the stage and would otherwise
+     spill onto the page behind it. */
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--ms-card) 0%, var(--ms-violet-soft) 100%);
+  box-shadow: inset 0 0 0 1px var(--ms-violet-line), var(--shadow-card);
 }
 .lm-stage {
+  /* One stride, shared: the sheet, the contact shadow, the dust and the speed lines are all timed
+     off it, and two footfalls at this length is a real jogging cadence (~180 steps/min). */
+  --lm-cycle: 0.68s;
   position: relative;
   width: 200px;
   height: 200px;
@@ -261,27 +273,47 @@ body {
 }
 .lm-glow {
   position: absolute;
-  inset: -6% -6% 8%;
+  inset: -6% -6% 2%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 46%, rgba(255, 207, 91, 0.5), rgba(236, 155, 12, 0.12) 45%, transparent 68%);
+  /* Lumen's own warm halo, at roughly half the strength it needed on navy: the same alpha over
+     white turns the card yellow instead of lighting her. */
+  background: radial-gradient(circle at 50% 46%, rgba(255, 207, 91, 0.32), rgba(236, 155, 12, 0.08) 45%, transparent 68%);
   animation: lm-pulse 2.6s ease-in-out infinite;
 }
-.lm-char {
+/* The run cycle. Lumen is drawn ONCE -- lumen-full.png is a standing pose and there is no sprite
+   sheet -- so the eight frames of the cycle are BUILT from it by scripts/prep_lumen_run_frames.py,
+   which cuts the flame, arms and shoes off the body and re-poses each one per frame. That script's
+   docstring is the record of how; what matters here is that this is frame-by-frame animation of
+   eight different drawings, not one drawing under a transform. A transform is what was here
+   before, and one picture bobbing with its feet welded together reads as a hop -- or, with a lean,
+   as somebody on a board.
+   So there is no motion in the CSS below: every bit of the bob, stride, arm swing and flame sway
+   is in the pixels. All that is left is to step through them, which is one background-position
+   animation with steps(). The frames run left to right, so background-position-x sweeps 0 to -100%
+   -- with background-size at 800%, those are exactly the first and last of the eight. */
+.lm-runner {
   position: relative;
-  width: 86%;
-  height: 86%;
-  background: center / contain no-repeat;
-  filter: drop-shadow(0 12px 18px rgba(0, 0, 0, 0.25));
-  animation: lm-bob 3.4s ease-in-out infinite;
+  /* Over 100% on purpose: the sheet's frames carry padding so a stretched, airborne pose cannot
+     clip, and without this the drawn mascot would sit smaller on the stage than it used to. */
+  width: 108%;
+  height: 108%;
 }
+.lm-char,
 .lm-scan {
   position: absolute;
-  width: 86%;
-  height: 86%;
+  inset: 0;
+  animation: lm-frames var(--lm-cycle) steps(8, jump-none) infinite;
+}
+.lm-char {
+  background: url("/lumen/lumen-run.webp") 0 0 / 800% 100% no-repeat;
+  filter: drop-shadow(0 8px 12px rgba(0, 0, 0, 0.22));
+}
+/* The analysing light band, masked to whichever frame is showing -- same sheet, same size, same
+   step animation, so the sweep stays inside the silhouette as the pose changes. */
+.lm-scan {
   overflow: hidden;
-  -webkit-mask: center / contain no-repeat;
-  mask: center / contain no-repeat;
-  animation: lm-bob 3.4s ease-in-out infinite;
+  -webkit-mask: url("/lumen/lumen-run.webp") 0 0 / 800% 100% no-repeat;
+  mask: url("/lumen/lumen-run.webp") 0 0 / 800% 100% no-repeat;
 }
 .lm-scan::after {
   content: "";
@@ -290,9 +322,59 @@ body {
   right: -10%;
   height: 26%;
   top: -26%;
-  background: linear-gradient(180deg, transparent, rgba(255, 247, 231, 0.9), transparent);
+  /* Violet, not the cream this was on the navy stage: the band has to read against Lumen's own
+     cream body AND against the white card behind her, and only the accent colour does both. */
+  background: linear-gradient(180deg, transparent, rgba(123, 97, 255, 0.55), transparent);
   animation: lm-sweep 2.4s cubic-bezier(0.6, 0, 0.4, 1) infinite;
 }
+/* Contact shadow: on the floor, not on Lumen, and timed to the two footfalls in the sheet (frames
+   0 and 4). On the light card this is just an ordinary soft shadow -- the heavy, near-black value
+   it needed to survive a navy stage reads as a hole punched in white.
+   The painted-on shadow that came with the source art is deleted by the frame script: left in, it
+   lifted and tilted with the body, which is how a board behaves, not a shadow. */
+.lm-shadow {
+  position: absolute;
+  bottom: 13%;
+  width: 30%;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 50%, rgba(30, 33, 66, 0.38), transparent 72%);
+  animation: lm-stomp var(--lm-cycle) ease-in-out infinite;
+}
+/* Speed lines trailing behind, and dust kicked up at each footfall. Garnish now that the stride is
+   real, but they are what place the run somewhere: without them a perfect cycle still reads as
+   running on the spot. Lumen leans left, so "behind" is the right-hand side. */
+.lm-track {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.lm-track i {
+  position: absolute;
+  height: 3px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(123, 97, 255, 0.8), transparent);
+  animation: lm-dash var(--lm-cycle) linear infinite;
+}
+.lm-track i:nth-child(1) { top: 26%; right: 4%; width: 26%; }
+.lm-track i:nth-child(2) { top: 40%; right: 2%; width: 34%; animation-delay: 0.22s; }
+.lm-track i:nth-child(3) { top: 54%; right: 6%; width: 20%; animation-delay: 0.44s; }
+.lm-dust {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.lm-dust i {
+  position: absolute;
+  bottom: 15%;
+  left: 44%;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(30, 33, 66, 0.22), rgba(30, 33, 66, 0) 70%);
+  animation: lm-dust var(--lm-cycle) ease-out infinite;
+}
+.lm-dust i:nth-child(2) { left: 52%; animation-delay: 0.34s; }
 .lm-status {
   position: absolute;
   bottom: -4px;
@@ -301,13 +383,13 @@ body {
   align-items: center;
   font-weight: 700;
   font-size: 0.875rem;
-  color: #fdf7e7; /* cream — reads on the fixed navy stage */
+  color: var(--ms-ink);
 }
 .lm-el i {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #ec9b0c;
+  background: #b76a0a; /* Lumen's ember; the lighter gold is too pale on a white card */
   display: inline-block;
   margin-left: 3px;
   animation: lm-blink 1.4s infinite;
@@ -320,7 +402,7 @@ body {
   text-align: center;
   font-size: 0.8125rem;
   line-height: 1.5;
-  color: rgba(253, 247, 231, 0.72); /* dimmed cream on the navy stage */
+  color: var(--ms-muted);
 }
 
 .lm-dots {
@@ -354,14 +436,38 @@ body {
   object-fit: contain;
 }
 
-@keyframes lm-bob { 0%, 100% { transform: translateY(-3%); } 50% { transform: translateY(3%); } }
+/* Ballistic, not sinusoidal: a hard squash on each contact (0/50/100%) and a stretched float at
+   the top of each stride. Even amplitude either side would read as hovering — the impact frames
+   are what say "foot hit the ground". The lean stays shallow and always forward; deepening it
+   into a held tilt is what made the first cut look like someone riding a board. */
+@keyframes lm-frames {
+  from { background-position: 0 0; -webkit-mask-position: 0 0; mask-position: 0 0; }
+  to { background-position: 100% 0; -webkit-mask-position: 100% 0; mask-position: 100% 0; }
+}
+@keyframes lm-stomp {
+  0%, 50%, 100% { transform: scale(1.1, 1); opacity: 0.5; }
+  25% { transform: scale(0.6, 0.75); opacity: 0.14; }
+  75% { transform: scale(0.68, 0.8); opacity: 0.18; }
+}
+@keyframes lm-dash {
+  0% { transform: translateX(-40%) scaleX(0.5); opacity: 0; }
+  25% { opacity: 0.9; }
+  100% { transform: translateX(150%) scaleX(1.15); opacity: 0; }
+}
+@keyframes lm-dust {
+  0% { transform: translate(0, 0) scale(0.35); opacity: 0; }
+  15% { opacity: 0.6; }
+  100% { transform: translate(36px, -18px) scale(1.7); opacity: 0; }
+}
 @keyframes lm-pulse { 0%, 100% { opacity: 0.55; transform: scale(0.96); } 50% { opacity: 1; transform: scale(1.04); } }
 @keyframes lm-sweep { 0% { top: -26%; } 100% { top: 100%; } }
 @keyframes lm-blink { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
 @keyframes lm-pop { 0%, 100% { transform: scale(0.55); opacity: 0.5; } 50% { transform: scale(1); opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .lm-glow, .lm-char, .lm-scan, .lm-dots b, .lm-el i { animation: none !important; }
+  .lm-glow, .lm-char, .lm-scan, .lm-shadow, .lm-dots b, .lm-el i { animation: none !important; }
+  .lm-dust { display: none; }
+  .lm-track { display: none; }
   .lm-scan::after { opacity: 0; }
   .lm-el { display: none; }
 }

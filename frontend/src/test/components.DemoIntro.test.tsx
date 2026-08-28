@@ -97,6 +97,36 @@ describe("DemoIntro", () => {
     expect(screen.queryByText(/Drop a squat video/i)).not.toBeInTheDocument();
   });
 
+  // The right column stops promising "what comes back" once the analysis is actually running and
+  // shows the movement's own steps + common mistakes instead (WhileYouWait). Pinned here because
+  // the swap is what gives the ~20s wait something to read.
+  it("swaps the 'what comes back' card for the movement guide while loading", () => {
+    renderWithProviders(
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={true} statusMsg="Extracting pose…" error="" {...movementProps} />
+    );
+    expect(screen.getByText("While you wait")).toBeInTheDocument();
+    expect(screen.getByText(/Stand with feet shoulder-width apart/i)).toBeInTheDocument();
+    expect(screen.queryByText("What comes back")).not.toBeInTheDocument();
+  });
+
+  // The catalog-still-loading branch shows the same loader, but the movement is NOT confirmed yet —
+  // naming its steps there could describe a movement the backend will reject.
+  it("keeps the default panel while the movement catalog is still loading", () => {
+    renderWithProviders(
+      <DemoIntro
+        onBlob={vi.fn()}
+        onError={vi.fn()}
+        loading={false}
+        statusMsg=""
+        error=""
+        {...movementProps}
+        movementsLoaded={false}
+      />
+    );
+    expect(screen.getByText("What comes back")).toBeInTheDocument();
+    expect(screen.queryByText("While you wait")).not.toBeInTheDocument();
+  });
+
   it("shows the error panel when error is non-empty", () => {
     renderWithProviders(
       <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={false} statusMsg="" error="Video too short" {...movementProps} />

@@ -4,15 +4,19 @@ import { useI18n } from "../lib/i18n";
 // Lumen — the AI coach's on-brand waiting states. The transparent full-body cutout and head
 // avatar live in /public/lumen/ (see docs/mascot for the source). Styles are in index.css under
 // the "Lumen loader" section (app convention; keeps this a markup-only leaf, no runtime <style>).
-const BODY = "/lumen/lumen-full.png"; // transparent full-body cutout, drives the scan silhouette
+// The run cycle is a sprite sheet, /lumen/lumen-run.webp, built from the one still cutout by
+// scripts/prep_lumen_run_frames.py -- eight re-posed drawings, not one image under a transform.
+// Both the sheet and the head cutout are referenced from index.css and here respectively.
 const HEAD = "/lumen/lumen-head.png"; // transparent head cutout, the chat avatar
 
 // The scan stage cycles these three micro-labels — they mirror the analysis pipeline (read the
 // pose, check it against mechanics, surface the reason) so the wait narrates what Lumen is doing.
 const STEP_KEYS = ["loader.step1", "loader.step2", "loader.step3"] as const;
 
-// "scan" — full 220px stage: Lumen bobbing under a warm glow with a light band sweeping her
-//          silhouette, plus a cycling status line. For the analysis waiting state.
+// "scan" — full 220px stage: Lumen RUNNING under a warm glow, stepped frame by frame through the
+//          sprite sheet, with a contact shadow and dust on each footfall, speed lines trailing
+//          behind, a light band sweeping her silhouette, and a cycling status line. For the
+//          analysis waiting state.
 // "dots"  — three brand-colour dots. For the inline "Lumen is thinking…" chat indicator.
 export function LumenLoader({
   variant = "scan",
@@ -45,11 +49,25 @@ export function LumenLoader({
     <div className="lm-scan-wrap" role="status" aria-label={caption || t("loader.aria")}>
       <div className="lm-stage">
         <div className="lm-glow" />
-        <div className="lm-char" style={{ backgroundImage: `url(${BODY})` }} />
-        <div
-          className="lm-scan"
-          style={{ WebkitMaskImage: `url(${BODY})`, maskImage: `url(${BODY})` }}
-        />
+        {/* Speed lines sweep backwards behind Lumen; purely decorative, so they sit outside the
+            status text and carry no label of their own. */}
+        <div className="lm-track" aria-hidden="true">
+          <i />
+          <i />
+          <i />
+        </div>
+        {/* Body and light sweep step through the SAME sheet on the same timing, so the sweep stays
+            inside whichever pose is showing. Both the sheet and that stepping live in index.css. */}
+        <div className="lm-runner">
+          <div className="lm-char" />
+          <div className="lm-scan" />
+        </div>
+        <div className="lm-shadow" aria-hidden="true" />
+        {/* Two dust puffs, half a cycle apart — one per footfall. */}
+        <div className="lm-dust" aria-hidden="true">
+          <i />
+          <i />
+        </div>
         <div className="lm-status">
           <span>{t(STEP_KEYS[i])}</span>
           <span className="lm-el">

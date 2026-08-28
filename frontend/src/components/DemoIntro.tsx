@@ -4,6 +4,7 @@ import { movementLabel, useI18n } from "../lib/i18n";
 import CaptureStudio from "./CaptureStudio";
 import type { PoseTier } from "../lib/poseTier";
 import { LumenLoader } from "./LumenLoader";
+import WhileYouWait, { hasMovementGuide } from "./WhileYouWait";
 
 interface Props {
   onBlob: (blob: Blob, tier: PoseTier) => void;
@@ -49,6 +50,11 @@ export default function DemoIntro({
 }: Props) {
   const { t } = useI18n();
   const reduce = useReducedMotion();
+  // The guide only replaces the "what comes back" card once an analysis is actually running AND the
+  // catalog has confirmed the movement — see the note on the right column below. Hoisted because
+  // the column's width depends on it too: the guide is a reading panel and gets more room than the
+  // three-line promise it stands in for.
+  const showGuide = loading && movementsLoaded && !movementError && hasMovementGuide(movement);
 
   return (
     <div className="mt-2 flex-1 overflow-y-auto scrollbar-thin">
@@ -111,8 +117,16 @@ export default function DemoIntro({
         </div>
 
         {/* Right: what the demo returns — the reference's tinted icon-header strip over a
-            divided list, lifted by a soft card shadow. */}
-        <div className="lg:w-80 lg:shrink-0">
+            divided list, lifted by a soft card shadow. While an analysis is actually running this
+            column switches to the movement's own steps and common mistakes (WhileYouWait): the
+            promise of what comes back is worth reading before you upload, not during the ~20s wait.
+            The `!movementsLoaded` branch is deliberately NOT included — that runs before the
+            catalog confirms the movement, so movement-specific content there could name the wrong
+            thing. Movements with no authored guide keep the default panel. */}
+        <div className={`lg:shrink-0 ${showGuide ? "lg:w-[26rem]" : "lg:w-80"}`}>
+          {showGuide ? (
+            <WhileYouWait movement={movement} />
+          ) : (
           <div className="glass-panel xc-pop overflow-hidden rounded-[18px]">
             <div className="flex items-center gap-2.5 border-b border-white/70 bg-white/50 px-5 py-4">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#f0eaff] text-primary">
@@ -136,6 +150,7 @@ export default function DemoIntro({
               ))}
             </div>
           </div>
+          )}
         </div>
       </motion.div>
     </div>

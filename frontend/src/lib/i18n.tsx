@@ -228,6 +228,13 @@ const en: Dict = {
   "demo.get3.body": "The retrieval path that links each symptom to its cause.",
   "demo.errorTitle": "That clip did not go through",
 
+  // The panel that replaces "what comes back" while an analysis runs (components/WhileYouWait.tsx).
+  // Only the chrome is here — the steps and mistakes themselves come from lib/movementDetail.ts and
+  // lib/movementMistakes.ts, and the two tab labels are reused from the detail page's own tabs.
+  "wait.title": "While you wait",
+  "wait.sub": "{movement} — the pattern and what usually goes wrong",
+  "wait.full": "Full guide",
+
   // Studio movement selector
   "studio.movement": "Movement",
   "studio.movementUnavailable":
@@ -1307,6 +1314,10 @@ const zhHant: Dict = {
   "demo.get3.title": "知識圖譜",
   "demo.get3.body": "帶你看系統怎麼從動作問題找到可能原因。",
   "demo.errorTitle": "這段影片處理失敗",
+
+  "wait.title": "等待分析的時候",
+  "wait.sub": "{movement}：正確做法，以及常見的錯誤",
+  "wait.full": "完整說明",
 
   // Studio movement selector
   "studio.movement": "動作",

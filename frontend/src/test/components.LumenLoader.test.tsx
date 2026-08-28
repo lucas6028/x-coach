@@ -17,6 +17,27 @@ describe("LumenLoader", () => {
     expect(screen.getByRole("status")).toBeInTheDocument();
   });
 
+  // The waiting mascot RUNS rather than floating. The stride is faked on one still cutout, so the
+  // body and its light sweep must share a single animated wrapper — animating them separately lets
+  // the mask drift off the silhouette. Pinned structurally: that wrapper, the contact shadow and
+  // the speed lines are what the CSS run cycle and the reduced-motion block both target by name.
+  it("runs: body and light sweep share one animated wrapper, with a shadow and speed lines", () => {
+    const { container } = renderWithProviders(<LumenLoader variant="scan" />);
+    const runner = container.querySelector(".lm-runner");
+    expect(runner).not.toBeNull();
+    expect(runner!.querySelector(".lm-char")).not.toBeNull();
+    expect(runner!.querySelector(".lm-scan")).not.toBeNull();
+    expect(container.querySelector(".lm-shadow")).not.toBeNull();
+    expect(container.querySelectorAll(".lm-track i")).toHaveLength(3);
+    // Two dust puffs, one per footfall — the cue that replaced the scrolling ground line, which
+    // read as a board under the feet rather than as running.
+    expect(container.querySelectorAll(".lm-dust i")).toHaveLength(2);
+    // Decorative — the status line already carries the announcement.
+    expect(container.querySelector(".lm-track")).toHaveAttribute("aria-hidden", "true");
+    expect(container.querySelector(".lm-shadow")).toHaveAttribute("aria-hidden", "true");
+    expect(container.querySelector(".lm-dust")).toHaveAttribute("aria-hidden", "true");
+  });
+
   it("renders the dots variant as a status region", () => {
     renderWithProviders(<LumenLoader variant="dots" />);
     expect(screen.getByRole("status")).toBeInTheDocument();
