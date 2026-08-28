@@ -445,3 +445,7 @@ frontend/public/movements/muscles-worked/*.png
 # two-panel PNG is the source, the wrong/correct WebPs are what ships. `--preview` writes its
 # tinted check images beside them (also PNG), and they are working files too, never assets.
 frontend/public/movements/mistakes/*.png
+
+# Scratch output from the asset-prep scripts' --debug flags (contact sheets, per-frame PNGs). The
+# assets themselves are committed; these are only ever there to look at once.
+.tmp/
