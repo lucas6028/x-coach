@@ -1,5 +1,7 @@
 # x-coach
 
+**English** · [繁體中文](README.zh-TW.md)
+
 ![x-coach 深蹲動作分析畫面：左側是導覽列，中間是帶骨架疊圖的影片與偵測到的動作問題，右側是 Lumen 教練依規則與 GraphRAG 給出的解釋。](docs/screenshots/hero-analysis.webp)
 
 *Squat analysis in the web app: skeleton overlay and fault timeline on the video, rule-detected faults with their cited causes and risks, and Lumen's grounded explanation on the right.*
@@ -76,8 +78,9 @@ Command details live with the script directories:
 ## Documentation
 
 - [Running the web app in Docker](docs/docker.md)
-- [Knowledge graph extraction walkthrough](docs/kg_llm_extraction_walkthrough.md)
-- [MediaPipe processing walkthrough](docs/media_pipe_processing_walkthrough.md)
+- [Pipeline and agent harness overview](docs/ai-coach-pipeline-and-agent-harness.md)
+- [Knowledge-graph schema across movements](docs/kg-schema-generalization.md)
+- [Deploying to Azure Container Apps](docs/azure-deployment.md)
 - `notes/` contains experiment summaries and research notes.
 - `tests/` contains executable examples for several core modules.
 
