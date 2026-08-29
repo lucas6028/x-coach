@@ -1,5 +1,9 @@
 # x-coach
 
+![x-coach 深蹲動作分析畫面：左側是導覽列，中間是帶骨架疊圖的影片與偵測到的動作問題，右側是 Lumen 教練依規則與 GraphRAG 給出的解釋。](docs/screenshots/hero-analysis.webp)
+
+*Squat analysis in the web app: skeleton overlay and fault timeline on the video, rule-detected faults with their cited causes and risks, and Lumen's grounded explanation on the right.*
+
 x-coach is an AI coaching research prototype. It analyzes squat form over a 16-movement biomechanics knowledge graph, connecting video perception, rule-based biomechanics checks, lightweight classifiers, and local retrieval over project knowledge so visual signals can be turned into explainable coaching feedback. (Video analysis is squat-only today; the knowledge graph and in-app Explore browser already span all 16 movements.)
 
 ## What This Project Does
