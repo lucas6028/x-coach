@@ -12,7 +12,7 @@ each, and the page must not ship them.
     frontend/public/movements/steps/<movement>-<n>.png      one figure per step, in order
     frontend/public/movements/muscles-worked/<movement>.png  anterior + posterior in one image
 
-Three things the conversion does:
+Four things the conversion does:
 
   * TRIM. The sources sit in a wide margin of near-white; cropping to the ink is most of the
     saving (~900 KB -> ~20 KB for a step figure).
@@ -23,6 +23,8 @@ Three things the conversion does:
     tab, where an opaque plate would render as a visible rectangle.
   * MATCH THE SCALE ACROSS A STEP SET. A movement's step figures are measured and scaled
     TOGETHER, never one at a time -- see prepare_steps for why that is the whole ballgame.
+  * STRIP A BAKED CAPTION off a plate. One source (bicep-curl) arrived with its legend drawn
+    INTO the image, in English -- see _strip_caption for why that has to go.
 
 Usage (from the repo root):
     .venv\\Scripts\\python.exe scripts/prep_movement_detail_art.py
@@ -104,11 +106,50 @@ def _save(image: Image.Image, path: Path) -> None:
     print(f"{path.parent.name}/{path.name} {image.size} {path.stat().st_size // 1024} KB")
 
 
+def _strip_caption(art: Image.Image, path: Path) -> Image.Image:
+    """A plate whose source has a legend drawn into it, cut back to just the bodies.
+
+    WHY: the app names the worked groups itself, in the user's language, in the legend beside the
+    plate. A caption baked into the artwork says the same thing a second time, in English only, on
+    a bilingual page -- and the plan pages STACK several plates on top of each other, where two
+    sets of baked text would print over one another. Only bicep-curl.png arrived with one, but the
+    next hand-supplied source may too, so this is a rule and not a one-off crop.
+
+    HOW, without a magic y-coordinate that would only ever fit one image: after the knockout the
+    caption is separated from the figures by a band of fully transparent rows, and that band is the
+    only interior one any of the sixteen plates has. A run of empty rows is the caption's if it
+
+      * does not start at the top (that run is the trim's own margin),
+      * has something drawn BELOW it (otherwise it is the trim's bottom margin), and
+      * is deeper than that margin -- PAD rows -- which is what separates the gap above a caption
+        from the narrower gaps BETWEEN its lines.
+
+    The cut keeps PAD rows below the feet, so a stripped plate ends with the same margin as the
+    fifteen that never had a caption.
+    """
+    alpha = art.split()[3]
+    width, height = art.size
+    empty = [alpha.crop((0, y, width, y + 1)).getextrema()[1] == 0 for y in range(height)]
+
+    y = 0
+    while y < height:
+        if not empty[y]:
+            y += 1
+            continue
+        start = y
+        while y < height and empty[y]:
+            y += 1
+        if start > 0 and y < height and y - start > PAD:
+            print(f"{path.name}: caption below y={start} stripped")
+            return art.crop((0, 0, width, min(height, start + PAD)))
+    return art
+
+
 def prepare_plates(directory: Path) -> int:
     """One plate per movement, each independent — nothing to keep in step with."""
     sources = sorted(directory.glob("*.png"))
     for source in sources:
-        art = _trim_and_knockout(source)
+        art = _strip_caption(_trim_and_knockout(source), source)
         if art.width > PLATE_WIDTH:
             art = art.resize(
                 (PLATE_WIDTH, round(art.height * PLATE_WIDTH / art.width)), Image.LANCZOS

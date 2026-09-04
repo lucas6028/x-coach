@@ -1,15 +1,14 @@
 import type { PlanItem } from "../../api";
 import { useI18n } from "../../lib/i18n";
-import type { Muscle } from "../../lib/movementDetail";
+import { movementDetail, type Muscle } from "../../lib/movementDetail";
 import { planCoverage } from "../../lib/planMuscles";
-import MuscleMap from "../movements/MuscleMap";
 
 interface Props {
   items: PlanItem[];
   className?: string;
-  /** Drop the mannequins and keep the named groups. For a column too narrow to show two bodies
-   *  side by side at a size where the highlights are readable — under about 320px they are two
-   *  grey smudges, which is worse than not drawing them. */
+  /** Drop the anatomical plate and keep the named groups. For a column too narrow to show the two
+   *  bodies at a size where the highlights are readable — under about 320px they are two grey
+   *  smudges, which is worse than not drawing them. */
   compact?: boolean;
 }
 
@@ -18,6 +17,29 @@ interface Props {
  * worked groups lit, and the groups named beside them. The difference is what feeds it — a whole
  * week's items aggregated by `lib/planMuscles.ts` rather than one movement's authored lists — so a
  * user can see their week's shape without opening sixteen movement pages.
+ *
+ * THE FIGURE IS THE SHIPPED ARTWORK, STACKED — not a drawing of our own. Every catalog movement
+ * already has an anatomical plate under `public/movements/muscles-worked/`, the same plate its
+ * movement detail page shows, and they are all the SAME base body with different muscles tinted.
+ * So the plan's plates layered with `mix-blend-mode: darken` come out as exactly the union of
+ * their highlights on one pair of bodies: a week's coverage drawn by the illustrator rather than
+ * approximated by us, and primary still distinguishable from secondary (deep violet wins over the
+ * pale one, which is the right answer when one movement's supporting group is another's prime
+ * mover).
+ *
+ * WHY `darken` AND NOT `multiply`, which is the usual reflex for stacking artwork: multiply
+ * ACCUMULATES. Every plate draws the whole body, so the grey head and the grey untrained muscles
+ * are multiplied once per layer — measured on a nine-movement week, the figures came out nearly
+ * black. `darken` takes the per-channel minimum, so a grey drawn nine times is still that grey and
+ * only a genuinely tinted muscle darkens. Anything that stacks more than two or three plates has
+ * to use it.
+ *
+ * Two consequences worth knowing before editing:
+ *  - the blend needs an OPAQUE, light backdrop to behave, hence the explicit `bg-surface` on the
+ *    stack, and `isolate` so the blending stops there instead of reaching the card behind it.
+ *  - one plate carries anterior AND posterior, so there is ONE image and no "Anterior"/"Posterior"
+ *    captions left to write; the legend beside it names the groups, which is also why the layers
+ *    carry no alt text of their own.
  *
  * Deliberately static: no transitions, so there is nothing for `useReducedMotion` to turn off.
  *
@@ -30,6 +52,10 @@ interface Props {
 export default function PlanMuscleCoverage({ items, className, compact }: Props) {
   const { t, lang } = useI18n();
   const { primary, secondary, gaps } = planCoverage(items);
+  const plates = planPlates(items);
+  // Nothing to layer is not an empty frame: a legend column laid out as if a figure sat beside it
+  // is a hole in the card, so the figure's absence collapses the row instead.
+  const showFigure = !compact && plates.length > 0;
 
   if (primary.length === 0 && secondary.length === 0) return null;
 
@@ -48,42 +74,42 @@ export default function PlanMuscleCoverage({ items, className, compact }: Props)
           zh-Hant. `compact` is the container signal, passed by the page that owns the layout. */}
       <div
         className={
-          compact ? "mt-3" : "mt-3 flex flex-col items-stretch gap-4 sm:flex-row sm:items-center"
+          showFigure
+            ? // The group is CAPPED and centred rather than spread across the card. Left to grow,
+              // the figure's flex column took ~1600px of a full-width card and centred a 200px
+              // image in it, parking the legend against the far edge with a lake of white between
+              // the two things the reader is meant to compare.
+              "mt-3 mx-auto flex max-w-[600px] flex-col items-stretch gap-6 sm:flex-row sm:items-center"
+            : "mt-3"
         }
       >
-        {!compact && (
-          // Sized down from the movement page's 208px: this card sits under a whole week of day
-          // bands rather than being the point of its own page.
-          <div className="mx-auto flex max-w-[380px] flex-1 items-end justify-evenly">
-            <figure className="text-center">
-              <MuscleMap
-                side="front"
-                primary={primary}
-                secondary={secondary}
-                className="h-[164px] w-auto"
-              />
-              <figcaption className="mt-1.5 text-[11px] font-medium text-muted">
-                {t("detail.anterior")}
-              </figcaption>
-            </figure>
-            <figure className="text-center">
-              <MuscleMap
-                side="back"
-                primary={primary}
-                secondary={secondary}
-                className="h-[164px] w-auto"
-              />
-              <figcaption className="mt-1.5 text-[11px] font-medium text-muted">
-                {t("detail.posterior")}
-              </figcaption>
-            </figure>
+        {showFigure && (
+          <div className="flex shrink-0 justify-center">
+            {/* The box is the plates' own ratio (1000x986), sized down from the movement page's
+                250px because this card sits under a whole week of day bands rather than being the
+                point of its own page. */}
+            <div className="relative isolate aspect-[1000/986] h-[232px] bg-surface">
+              {plates.map(({ movement, plate }) => (
+                <img
+                  key={movement}
+                  src={plate}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                  className="absolute inset-0 h-full w-full object-contain"
+                  style={{ mixBlendMode: "darken" }}
+                />
+              ))}
+            </div>
           </div>
         )}
 
         {/* A stack, the same shape the movement page's legend uses -- one name per line reads at a
             glance where a ragged wrapping flow does not, and a fixed column can never be narrower
             than a label. Compact drops the fixed width and takes the card. */}
-        <div className={compact ? "min-w-0 space-y-4" : "min-w-0 shrink-0 space-y-4 sm:w-[236px]"}>
+        <div
+          className={showFigure ? "min-w-0 flex-1 space-y-4" : "min-w-0 space-y-4"}
+        >
           <MuscleGroupList muscles={primary} tone="primary" />
           <MuscleGroupList muscles={secondary} tone="secondary" />
         </div>
@@ -94,6 +120,22 @@ export default function PlanMuscleCoverage({ items, className, compact }: Props)
       </p>
     </section>
   );
+}
+
+/** The plates to layer: one per DISTINCT movement in the plan, in the order the plan lists them.
+ *  Deduplicated because a week that squats three times would otherwise stack the identical image
+ *  three times — invisible under multiply, but three downloads and three layers to composite. A
+ *  movement outside the catalog, or one whose entry carries no plate, contributes nothing. */
+function planPlates(items: PlanItem[]): { movement: string; plate: string }[] {
+  const seen = new Set<string>();
+  const plates: { movement: string; plate: string }[] = [];
+  for (const { movement } of items) {
+    if (seen.has(movement)) continue;
+    seen.add(movement);
+    const plate = movementDetail(movement)?.plate;
+    if (plate) plates.push({ movement, plate });
+  }
+  return plates;
 }
 
 /** One tone's worth of groups, with the dot treatment the movement detail page's legend uses:
@@ -108,7 +150,9 @@ function MuscleGroupList({ muscles, tone }: { muscles: Muscle[]; tone: "primary"
         <span className={`h-2.5 w-2.5 rounded-full ${dot}`} />
         {t(tone === "primary" ? "detail.primary" : "detail.secondary")}
       </p>
-      <ul className="pl-[18px]">
+      {/* Two columns: a plan lights far more groups than a single movement does, and one name per
+          line turned a fifteen-group week into a column taller than the figure beside it. */}
+      <ul className="grid grid-cols-2 gap-x-3 pl-[18px]">
         {/* `whitespace-nowrap`: a two-word label ("lower back") that wraps leaves its dot alone on
             the line above, which reads as a group with no name. */}
         {muscles.map((m) => (

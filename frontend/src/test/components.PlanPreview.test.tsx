@@ -117,11 +117,36 @@ describe("PlanPreview muscle coverage", () => {
   });
 
   it("drops the body maps but keeps the groups when compact", () => {
-    renderPreview([item(1, "Squat")], true);
+    const { container } = renderPreview([item(1, "Squat")], true);
 
     expect(screen.getByRole("heading", { name: /what this plan trains/i })).toBeInTheDocument();
     expect(screen.getByText("Quadriceps")).toBeInTheDocument();
     expect(screen.queryByText("Anterior")).toBeNull();
     expect(screen.queryByText("Posterior")).toBeNull();
+    // The plate is the thing compact drops; the groups beside it are the thing it keeps.
+    expect(container.querySelectorAll("img").length).toBe(0);
+  });
+
+  it("layers one shipped plate per distinct movement", () => {
+    // Squat twice: the union of two identical images is the one image, so the repeat must not
+    // become a second layer to download and composite.
+    renderPreview([item(1, "Squat"), item(2, "Squat"), item(3, "Push-up")]);
+
+    const card = screen.getByRole("heading", { name: /what this plan trains/i }).closest("section");
+    // `alt=""` makes these presentational, so they have no `img` ROLE to query by -- the legend
+    // beside them is what names the muscles to a screen reader.
+    const layers = Array.from((card as HTMLElement).querySelectorAll("img"));
+    expect(layers.map((img) => img.getAttribute("src"))).toEqual([
+      "/movements/muscles-worked/squat.webp",
+      "/movements/muscles-worked/push-up.webp",
+    ]);
+    for (const layer of layers) {
+      // `darken` (not multiply, which accumulates the grey of every layer) is what makes the
+      // stack read as ONE body with both movements' muscles lit.
+      expect(layer.style.mixBlendMode).toBe("darken");
+      expect(layer.getAttribute("alt")).toBe("");
+      expect(layer.getAttribute("loading")).toBe("lazy");
+      expect(layer.getAttribute("decoding")).toBe("async");
+    }
   });
 });
