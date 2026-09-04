@@ -7,11 +7,13 @@ import AddExerciseForm from "../components/plans/AddExerciseForm";
 import PlanCoach from "../components/plans/PlanCoach";
 import PlanItemRow from "../components/plans/PlanItemRow";
 import { LumenAvatar } from "../components/LumenLoader";
-import { api, type NewPlanItem, type Plan } from "../api";
+import { api, type NewPlanItem, type Plan, type PlanItem } from "../api";
 import { useI18n } from "../lib/i18n";
 import type { AnalyzableMovement } from "../lib/movements";
-import { useIsMobile } from "../lib/useIsMobile";
+import { useIsMobile, useMediaQuery } from "../lib/useIsMobile";
+import PlanMuscleCoverage from "../components/plans/PlanMuscleCoverage";
 import { PLAN_DAYS, currentDay, isAnalyzable, itemsByDay, progressRatio } from "../lib/plans";
+import { dayMuscles } from "../lib/planMuscles";
 
 type Status = "loading" | "ready" | "error";
 
@@ -22,6 +24,14 @@ export default function PlanDetail() {
   const { t, lang } = useI18n();
   const { planId = "" } = useParams();
   const isMobile = useIsMobile();
+  // WHY A SECOND, WIDER BREAKPOINT THAN `useIsMobile`: the coach column is 400px wide, and the
+  // plan beside it needs room for a real exercise row. Below 1280px it does not have it -- at
+  // 1024px the plan column lands at ~232px against the ~241px one row needs, which is the exact
+  // overflow recorded on the day-band comment below: the rows collapse and the "add exercise"
+  // button escapes the band and ends up UNDER the panel, unreachable. So between 1024 and 1279
+  // the coach opens as the same bottom sheet the phone uses -- an overlay borrows no width -- and
+  // only from `xl` does it become a column of the page.
+  const sheetCoach = useMediaQuery("(max-width: 1279px)");
   const [searchParams] = useSearchParams();
 
   // `?coach=1` opens the panel — read ONCE, into the initial state. Kept as an effect it would
@@ -77,16 +87,16 @@ export default function PlanDetail() {
     };
   }, []);
 
-  // The phone sheet is a modal, so Escape dismisses it like every other dialog in the app. The
-  // desktop panel is a column of the page, not an overlay, and deliberately ignores Escape.
+  // The sheet is a modal, so Escape dismisses it like every other dialog in the app. The desktop
+  // panel is a column of the page, not an overlay, and deliberately ignores Escape.
   useEffect(() => {
-    if (!isMobile || !coachOpen) return;
+    if (!sheetCoach || !coachOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setCoachOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [isMobile, coachOpen]);
+  }, [sheetCoach, coachOpen]);
 
   // Splice the changed item into the local copy rather than refetching the plan: a refetch after
   // every tick would reorder nothing and cost a round trip, and it would also blank the day columns
@@ -220,8 +230,9 @@ export default function PlanDetail() {
   const today = currentDay(plan.items);
   const ratio = progressRatio(completed, plan.items.length);
 
-  // One component in two frames: a column beside the plan on a desktop, a sheet over it on a
-  // phone. `onPlan` replaces the page's plan in place — a tool that rewrote the week has already
+  // One component in two frames: a column beside the plan on a wide desktop, a sheet over it
+  // anywhere narrower. Exactly ONE of the two call sites below renders at a time -- two mounted
+  // copies would be two live conversations. `onPlan` replaces the page's plan in place — a tool that rewrote the week has already
   // handed back the whole fresh plan, so a refetch would only blank the bands to learn what we
   // were just told.
   // The sheet IS the card, so the panel inside it drops its own shell — a bordered, rounded,
@@ -240,15 +251,21 @@ export default function PlanDetail() {
     />
   );
 
-  const panelOpen = coachOpen && !isMobile;
+  const panelOpen = coachOpen && !sheetCoach;
 
   // WHY THE EXERCISE GRID NARROWS WITH THE PANEL: `xl:grid-cols-3` is a VIEWPORT query, so it
   // still fires at 1280px once 400px of that viewport belongs to the coach. The arithmetic is the
   // one recorded below — 1152 (max-w-6xl) − 48 (px) − 400 (panel) − 24 (gap) − 32 (band padding)
   // − 16 (two gaps) leaves ~210px a cell against the ~241px a row needs, which is exactly the
   // overflow that killed the seven-column version. Two across at that width gives ~320px.
+  // MEASURED, not guessed: at 1280 (the narrowest width that gets a panel at all) the plan column
+  // renders 483px, so two across is (483 - 32 padding - 8 gap) / 2 = 221px a cell -- under the
+  // 241px floor, and it showed: a zh-Hant screenshot at 1280 truncated the movement name and
+  // broke "3 組 x 12 下" over three lines. Two across needs a 522px column, which arrives at
+  // ~1320px of viewport, so `min-[1360px]` with a little margin. Below that the panel is open and
+  // the exercises simply run ONE across at the column's full width, which is never too narrow.
   const itemGrid = panelOpen
-    ? "mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2"
+    ? "mt-3 grid grid-cols-1 gap-2 min-[1360px]:grid-cols-2"
     : "mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3";
 
   return (
@@ -259,7 +276,7 @@ export default function PlanDetail() {
 
           <div
             className={
-              panelOpen ? "grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]" : undefined
+              panelOpen ? "grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]" : undefined
             }
           >
           <div className="min-w-0">
@@ -369,7 +386,12 @@ export default function PlanDetail() {
                     {items.length === 0 && addingTo !== day && (
                       <span className="shrink-0 text-[11px] text-faint">{t("plans.rest")}</span>
                     )}
-                    <span className="h-px flex-1 bg-border-dark" />
+                    <DayMuscles items={items} />
+                    {/* The connector carries the row's rhythm, so it gets a floor rather than
+                        being the first thing squeezed to nothing: a day whose chips happen to run
+                        long should still read like the day above it, not like a header that lost
+                        its rule. */}
+                    <span className="h-px min-w-6 flex-1 bg-border-dark" />
                     {addingTo !== day && (
                       <button
                         type="button"
@@ -417,12 +439,16 @@ export default function PlanDetail() {
               );
             })}
           </div>
+
+          {/* Below the week, not beside it: it is a summary OF the bands above, and it sits inside
+              the same column so the sticky Lumen panel keeps its own full height. */}
+          <PlanMuscleCoverage items={plan.items} className="mt-3" compact={panelOpen} />
           </div>
 
             {/* Sticky and full-height with its own scroll, like the builder's chat column: a long
                 plan scrolls past a conversation that stays put. */}
             {panelOpen && (
-              <aside className="h-[600px] min-h-0 lg:sticky lg:top-6 lg:h-[min(calc(100vh-14rem),46rem)]">
+              <aside className="h-[600px] min-h-0 xl:sticky xl:top-6 xl:h-[min(calc(100vh-14rem),46rem)]">
                 {renderCoach("h-full")}
               </aside>
             )}
@@ -444,7 +470,7 @@ export default function PlanDetail() {
         </button>
       )}
 
-      {isMobile && coachOpen && (
+      {sheetCoach && coachOpen && (
         <div className="fixed inset-0 z-40 flex flex-col justify-end bg-content/30">
           {/* The backdrop is a dismiss target, not a control: `aria-hidden` keeps it out of the
               accessibility tree, where it would otherwise be a second element named "Close
@@ -496,5 +522,41 @@ export default function PlanDetail() {
         onCancel={() => setConfirming(null)}
       />
     </AppLayout>
+  );
+}
+
+/**
+ * What this day trains, as up to three muted chips on the day's own header line. Three and then a
+ * count: a full session touches eight groups, and naming them all would out-shout the day label and
+ * the add button sharing this row.
+ *
+ * HIDDEN BELOW `sm`: the header is a single non-wrapping row (label / rest / rule / add button) and
+ * at 375px the chips push the button off the card. The coverage summary under the bands carries the
+ * same information on a phone, in a place that has room for it.
+ *
+ * A rest day has no items, so `dayMuscles` is empty and nothing renders.
+ */
+function DayMuscles({ items }: { items: PlanItem[] }) {
+  const { t } = useI18n();
+  const muscles = dayMuscles(items);
+  if (muscles.length === 0) return null;
+  const shown = muscles.slice(0, 3);
+  const overflow = muscles.length - shown.length;
+  return (
+    <ul className="hidden shrink-0 items-center gap-1.5 sm:flex">
+      {shown.map((m) => (
+        <li
+          key={m}
+          className="rounded-full bg-content/[0.05] px-2 py-0.5 text-[10.5px] font-medium text-faint"
+        >
+          {t(`muscle.${m}`)}
+        </li>
+      ))}
+      {overflow > 0 && (
+        <li className="text-[10.5px] font-medium tabular-nums text-faint">
+          {t("plans.muscles.more", { n: overflow })}
+        </li>
+      )}
+    </ul>
   );
 }

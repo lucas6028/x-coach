@@ -2,7 +2,9 @@ import { CalendarBlank, CaretRight, CheckCircle } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import MovementIcon from "../movements/MovementIcon";
 import { movementLabel, useI18n } from "../../lib/i18n";
+import { MuscleSummaryChips } from "./PlanMuscleCoverage";
 import { progressRatio } from "../../lib/plans";
+import { coverageOf } from "../../lib/planMuscles";
 import type { PlanSummary } from "../../api";
 
 interface Props {
@@ -34,6 +36,11 @@ export default function PlanCard({ plan }: Props) {
   // items and the chips would then be the whole card.
   const shown = plan.movements.slice(0, 4);
   const overflow = plan.movements.length - shown.length;
+
+  // The list row carries `movements` (distinct names) and no items, so the card's muscle line is
+  // derived from those names — see `coverageOf` on why that can rank differently from the plan
+  // page, which counts every item.
+  const muscles = coverageOf(plan.movements).primary;
 
   return (
     <Link
@@ -107,6 +114,10 @@ export default function PlanCard({ plan }: Props) {
           </li>
         )}
       </ul>
+
+      {/* The movement pills say which exercises; this says which muscles. Both fit because they
+          read as different things — pills above, plain dotted names below. */}
+      <MuscleSummaryChips muscles={muscles} className="mt-2" />
 
       {plan.started_at && (
         <p className="mt-auto pt-3 text-[11px] tabular-nums text-faint">

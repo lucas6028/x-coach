@@ -8,7 +8,9 @@ import MovementIcon from "../components/movements/MovementIcon";
 import { LumenAvatar } from "../components/LumenLoader";
 import { api, type Plan, type PlanSummary, type PlanTemplate } from "../api";
 import { movementLabel, useI18n } from "../lib/i18n";
+import { MuscleSummaryChips } from "../components/plans/PlanMuscleCoverage";
 import { currentDay, itemsByDay, progressRatio, templateText } from "../lib/plans";
+import { planCoverage } from "../lib/planMuscles";
 
 type Status = "loading" | "ready" | "error";
 
@@ -133,6 +135,11 @@ export default function Plans() {
   // The exercises the current day still asks for. Ticked ones are dropped: the card is a list of
   // what is LEFT, and re-offering finished work is how a "continue" card stops being one.
   const today = detail ? currentDay(detail.items) : null;
+  // Derived from the FETCHED plan only, never from the list row's distinct movement names as a
+  // stop-gap: the two rank differently (see `coverageOf`), so a fallback would render one order and
+  // then visibly reshuffle into another the moment the fetch landed — beside a skeleton that exists
+  // precisely to keep item-derived content off the card until it is real.
+  const resumingMuscles = detail ? planCoverage(detail.items).primary : [];
   const todayItems =
     detail && today !== null
       ? itemsByDay(detail.items)[today - 1].filter((it) => !it.completed_at)
@@ -188,6 +195,8 @@ export default function Plans() {
           }}
         />
       </div>
+
+      <MuscleSummaryChips muscles={resumingMuscles} className="mt-3" />
 
       {detailLoading && <div className="mt-4 h-8 animate-pulse rounded-xl bg-content/[0.05]" />}
 

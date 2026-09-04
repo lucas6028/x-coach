@@ -179,3 +179,24 @@ describe("Plans — handing a template to Lumen", () => {
     );
   });
 });
+
+describe("Plans — what a plan trains", () => {
+  it("names the continue card's top muscle groups once the plan itself arrives", async () => {
+    renderWithProviders(<Plans />);
+    const card = await continueCard();
+    // Two squat items make glutes and quads the most-trained groups; the rest are counted, not
+    // named, so the line stays one line.
+    expect(await within(card).findByText("Glutes")).toBeInTheDocument();
+    expect(within(card).getByText("Quadriceps")).toBeInTheDocument();
+    expect(within(card).getByText("+3")).toBeInTheDocument();
+  });
+
+  it("gives each plan card its own muscle line beside the movement chips", async () => {
+    renderWithProviders(<Plans />);
+    const cardLink = await screen.findByRole("link", { name: /Upper week/ });
+    // The movement chips survive — they answer "which exercises", the line below answers
+    // "which muscles".
+    expect(within(cardLink).getByText("Squat")).toBeInTheDocument();
+    expect(within(cardLink).getByText("Upper back")).toBeInTheDocument();
+  });
+});

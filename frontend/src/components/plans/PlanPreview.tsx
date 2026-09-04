@@ -2,6 +2,7 @@ import type { Plan, PlanItem } from "../../api";
 import { itemsByDay, PLAN_DAYS } from "../../lib/plans";
 import { movementLabel, useI18n } from "../../lib/i18n";
 import MovementIcon from "../movements/MovementIcon";
+import PlanMuscleCoverage from "./PlanMuscleCoverage";
 
 /** One row of the preview: a real day, or a run of consecutive rest days folded into a single line. */
 type Band = { kind: "day"; day: number } | { kind: "rest"; from: number; to: number };
@@ -41,7 +42,7 @@ function bandsFor(days: PlanItem[][]): Band[] {
  * columns broke the detail page at >=1280px (a day column got ~147px against a ~241px row) and the
  * same arithmetic applies here.
  */
-export default function PlanPreview({ plan }: { plan: Plan }) {
+export default function PlanPreview({ plan, compact }: { plan: Plan; compact?: boolean }) {
   const { t } = useI18n();
   const days = itemsByDay(plan.items);
 
@@ -83,7 +84,17 @@ export default function PlanPreview({ plan }: { plan: Plan }) {
             </div>
 
             {items.length > 0 && (
-              <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              <ul
+                className={
+                  // `sm:`/`xl:` ask how wide the WINDOW is, and this list's width comes from its
+                  // container -- in the builder's preview COLUMN two across at a 1024px window is
+                  // two ~100px cells, every movement name an ellipsis. `compact` is the container
+                  // signal the caller passes; without it the preview owns its full width.
+                  compact
+                    ? "mt-3 grid grid-cols-1 gap-2"
+                    : "mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
+                }
+              >
                 {items.map((item) => (
                   <li
                     // `min-w-0` so the row shrinks to its grid cell instead of flooring at its
@@ -108,6 +119,10 @@ export default function PlanPreview({ plan }: { plan: Plan }) {
           </section>
         );
       })}
+
+      {/* Under the week, so it fills in live as Lumen writes the plan. It renders nothing at all
+          while the plan has no exercises, which is also the only state this page opens in. */}
+      <PlanMuscleCoverage items={plan.items} compact={compact} />
     </div>
   );
 }

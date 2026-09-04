@@ -800,6 +800,15 @@ const en: Dict = {
   "plans.studioNext": "Next: {movement} · Day {day}",
   "plans.studioPlanDone": "This plan is complete.",
 
+  // What a plan trains. The group NAMES come from the shared `muscle.*` labels above — the same
+  // ones the movement detail page's body map uses — so a plan and a movement never disagree about
+  // what "upperBack" is called.
+  "plans.muscles.title": "What this plan trains",
+  "plans.muscles.trains": "Trains",
+  "plans.muscles.gaps": "Not trained this week: {muscles}",
+  "plans.muscles.balanced": "This week covers every major muscle group.",
+  "plans.muscles.more": "+{n}",
+
   // Settings popup
   "settings.title": "Settings",
   "settings.nav": "Settings sections",
@@ -1923,6 +1932,13 @@ const zhHant: Dict = {
   // 分析工作區提示列：這份菜單接下來要練什麼
   "plans.studioNext": "下一個：{movement} · 第 {day} 天",
   "plans.studioPlanDone": "這份菜單完成了。",
+
+  // 這份菜單練到哪些部位。
+  "plans.muscles.title": "這份菜單練到的部位",
+  "plans.muscles.trains": "訓練",
+  "plans.muscles.gaps": "這週還沒練到：{muscles}",
+  "plans.muscles.balanced": "這週各大肌群都有練到。",
+  "plans.muscles.more": "+{n}",
 
   // Settings popup
   "settings.title": "設定",

@@ -136,6 +136,20 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("Jumping Jacks", prompt)
         self.assertIn("not yet analysable", prompt)
 
+    def test_movements_are_listed_with_their_primary_muscles(self) -> None:
+        prompt = plan_agent._system_prompt(lang="en", plan_scoped=False)
+        # readable form: camelCase keys become space-separated lowercase words.
+        self.assertIn("Squat — quads, glutes", prompt)
+        self.assertIn("Deadlift — glutes, hamstrings", prompt)
+        self.assertIn("Overhead Press — shoulders, triceps", prompt)
+        self.assertIn("Sit-up — abs", prompt)
+
+    def test_carries_the_balance_rules(self) -> None:
+        prompt = plan_agent._system_prompt(lang="en", plan_scoped=False)
+        self.assertIn("pair pushing", prompt)
+        self.assertIn("consecutive days", prompt)
+        self.assertIn("coverage a tool result just reported", prompt)
+
 
 class PlanToolsShapeTests(unittest.TestCase):
     def test_exactly_the_six_tools(self) -> None:
@@ -474,6 +488,116 @@ class DispatchBoundaryTests(_DispatcherTestCase):
         # pinned directly so it is not a partial branch under the coverage gate.
         d = self._dispatcher()
         self.assertIsNone(d._fresh_plan())
+
+
+class MovementCatalogLinesTests(unittest.TestCase):
+    def test_a_movement_with_no_muscle_entry_falls_back_to_the_bare_name(self) -> None:
+        # Defensive-only in the live data (all sixteen catalog movements carry a MOVEMENT_MUSCLES
+        # entry today, checked directly by test_movement_muscles.py), but pinned so it is not a
+        # partial branch under the coverage gate -- same reasoning as
+        # DispatchBoundaryTests.test_fresh_plan_is_none_with_no_scoped_plan_id.
+        from src.pose.movements import muscles as muscles_module
+
+        with mock.patch.object(muscles_module, "MOVEMENT_MUSCLES", {}):
+            lines = plan_agent._movement_catalog_lines()
+        self.assertIn("  - Squat\n", lines + "\n")
+        self.assertNotIn("Squat —", lines)
+
+
+class ReadableMuscleTests(unittest.TestCase):
+    def test_camel_case_key_becomes_space_separated_words(self) -> None:
+        self.assertEqual(plan_agent._readable_muscle("upperBack"), "upper back")
+        self.assertEqual(plan_agent._readable_muscle("hipFlexors"), "hip flexors")
+
+    def test_single_word_key_is_unchanged(self) -> None:
+        self.assertEqual(plan_agent._readable_muscle("quads"), "quads")
+
+
+class PlanCoverageTests(_DispatcherTestCase):
+    """`_plan_coverage` riding the tool result text -- get_plan and every mutating tool."""
+
+    def test_get_plan_text_carries_coverage_with_gaps(self) -> None:
+        d = self._dispatcher()
+        self._create(d, items=[{"day_index": 1, "movement": "Squat"}])
+        out = d.dispatch("get_plan", {})
+        body = json.loads(out.text)
+        self.assertIn("coverage", body)
+        self.assertEqual(set(body["coverage"]["primary"]), {"quads", "glutes"})
+        self.assertIn("upperBack", body["coverage"]["gaps"])  # Squat alone never touches upper back
+        self.assertIn("1", body["coverage"]["by_day"])  # JSON turns the int day_index key into "1"
+        self.assertEqual(set(body["coverage"]["by_day"]["1"]), {"quads", "glutes"})
+
+    def test_a_mutating_tool_text_carries_updated_coverage(self) -> None:
+        d = self._dispatcher()
+        self._create(d, items=[{"day_index": 1, "movement": "Squat"}])
+        out = d.dispatch("add_item", {"day_index": 2, "movement": "Row"})
+        body = json.loads(out.text)
+        self.assertIn("coverage", body)
+        # Row's primary (lats, upperBack) is now part of the whole-plan primary set.
+        self.assertIn("lats", body["coverage"]["primary"])
+        self.assertIn("upperBack", body["coverage"]["primary"])
+        # and no longer a gap, now that something trains it.
+        self.assertNotIn("upperBack", body["coverage"]["gaps"])
+        # per-day: day 1 is still Squat-only, day 2 is Row-only.
+        self.assertEqual(set(body["coverage"]["by_day"]["1"]), {"quads", "glutes"})
+        self.assertEqual(set(body["coverage"]["by_day"]["2"]), {"lats", "upperBack"})
+
+    def test_create_plan_text_carries_coverage(self) -> None:
+        d = self._dispatcher()
+        out = d.dispatch(
+            "create_plan",
+            {"name": "W", "items": [{"day_index": 1, "movement": "Bicep Curl"}]},
+        )
+        body = json.loads(out.text)
+        self.assertEqual(body["coverage"]["primary"], ["biceps"])
+
+    def test_remove_item_text_carries_coverage(self) -> None:
+        d = self._dispatcher()
+        created = self._create(d, items=[{"day_index": 1, "movement": "Squat"}])
+        item_id = created["plan"]["items"][0]["id"]
+        out = d.dispatch("remove_item", {"item_id": item_id})
+        body = json.loads(out.text)
+        # nothing left in the plan -- empty-safe, not absent.
+        self.assertEqual(body["coverage"]["primary"], [])
+        self.assertEqual(body["coverage"]["by_day"], {})
+
+    def test_update_plan_text_carries_coverage(self) -> None:
+        d = self._dispatcher()
+        self._create(d, items=[{"day_index": 1, "movement": "Squat"}])
+        out = d.dispatch("update_plan", {"name": "Renamed"})
+        body = json.loads(out.text)
+        self.assertEqual(set(body["coverage"]["primary"]), {"quads", "glutes"})
+
+    def test_update_item_text_carries_coverage(self) -> None:
+        d = self._dispatcher()
+        created = self._create(d, items=[{"day_index": 1, "movement": "Squat"}])
+        item_id = created["plan"]["items"][0]["id"]
+        out = d.dispatch("update_item", {"item_id": item_id, "movement": "Row"})
+        body = json.loads(out.text)
+        self.assertEqual(set(body["coverage"]["primary"]), {"lats", "upperBack"})
+
+    def test_error_payloads_never_carry_coverage(self) -> None:
+        d = self._dispatcher()
+        out = d.dispatch("add_item", {"day_index": 1, "movement": "Burpee"})  # unknown movement
+        body = json.loads(out.text)
+        self.assertNotIn("coverage", body)
+
+        out = d.dispatch("get_plan", {})  # no plan scoped yet
+        body = json.loads(out.text)
+        self.assertNotIn("coverage", body)
+
+    def test_coverage_is_empty_safe_on_a_plan_with_no_items(self) -> None:
+        d = self._dispatcher()
+        out = d.dispatch("create_plan", {"name": "Empty-ish", "items": [{"day_index": 1, "movement": "Squat"}]})
+        # remove the only item so the plan is empty, then read it back.
+        item_id = json.loads(out.text)["plan"]["items"][0]["id"]
+        d.dispatch("remove_item", {"item_id": item_id})
+        out = d.dispatch("get_plan", {})
+        body = json.loads(out.text)
+        self.assertEqual(body["coverage"]["primary"], [])
+        self.assertEqual(body["coverage"]["secondary"], [])
+        self.assertEqual(body["coverage"]["by_day"], {})
+        self.assertGreater(len(body["coverage"]["gaps"]), 0)
 
 
 # ------------------------------------------------------------------------------------ loop + frames

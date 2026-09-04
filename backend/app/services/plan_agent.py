@@ -63,9 +63,29 @@ def _validate_int(value: Any, *, low: int, high: int, field: str) -> tuple[int |
     return n, None
 
 
+def _readable_muscle(key: str) -> str:
+    """A muscle KEY (``muscles.MUSCLES`` spelling, e.g. ``"upperBack"``, ``"hipFlexors"``) as
+    space-separated lowercase words, for prose the model reads (never for tool-result JSON, which
+    stays keys-only — see ``_plan_coverage``)."""
+    import re
+
+    return re.sub(r"(?<!^)(?=[A-Z])", " ", key).lower()
+
+
 def _movement_catalog_lines() -> str:
-    """The sixteen catalog movements, grouped by body region, for the system prompt."""
+    """The sixteen catalog movements, grouped by body region, each with its primary muscles, for
+    the system prompt — e.g. ``Squat — quads, glutes``. The muscle table lets Lumen reason about
+    balance (pair pushing with pulling, don't stack the same primary group two days running)
+    without waiting on a tool round-trip just to remember what a movement trains.
+    """
     from src.pose.movements.catalog import CORE, FULL_BODY, LOWER_BODY, UPPER_BODY
+    from src.pose.movements.muscles import MOVEMENT_MUSCLES
+
+    def _entry(name: str) -> str:
+        primary = MOVEMENT_MUSCLES.get(name, {}).get("primary", ())
+        if not primary:
+            return name
+        return f"{name} — {', '.join(_readable_muscle(m) for m in primary)}"
 
     groups = [
         ("Lower body", LOWER_BODY),
@@ -77,7 +97,45 @@ def _movement_catalog_lines() -> str:
         # ``catalog.py`` itself hardcodes FULL_BODY rather than asking the registry.
         ("Full body (not yet analysable in the studio)", FULL_BODY),
     ]
-    return "\n".join(f"- {label}: {', '.join(names)}" for label, names in groups)
+    lines = []
+    for label, names in groups:
+        lines.append(f"- {label}:")
+        lines.extend(f"  - {_entry(name)}" for name in names)
+    return "\n".join(lines)
+
+
+def _plan_coverage(plan: dict[str, Any] | None) -> dict[str, Any]:
+    """The shared-vocabulary muscle-coverage summary for ``plan``'s CURRENT items.
+
+    Rides only the tool-result TEXT the model reads back (never the ``tool_done`` SSE frame's
+    ``plan`` payload, which stays the plain plan the frontend already knows how to draw) — see the
+    module's ``PLAN_TOOLS``/``_result`` machinery. Muscle KEYS only (``"quads"``, not "quadriceps"
+    or a sentence), so the model can quote them back verbatim and so this stays compact against
+    ``_MAX_RESULT_CHARS`` alongside the plan itself.
+
+    ``by_day`` adds the PRIMARY muscles trained on each day that has at least one item, keyed by
+    ``day_index`` — the piece the whole-plan ``primary``/``secondary``/``gaps`` triple can't answer
+    on its own: "don't stack legs two days running" needs to know THIS day's primaries, not the
+    week's.  A plan with no items yet (``create_plan`` was never called, or every item was removed)
+    is not an error here — it answers the same empty-safe shape ``muscles.coverage(())`` does: empty
+    ``primary``/``secondary``, the full gap checklist, and an empty ``by_day``.
+    """
+    from src.pose.movements.muscles import coverage as muscle_coverage
+
+    items = (plan or {}).get("items") or []
+    result = muscle_coverage(it.get("movement") for it in items if it.get("movement"))
+
+    by_day: dict[int, list[str]] = {}
+    days = sorted({it["day_index"] for it in items if it.get("day_index") is not None})
+    for day in days:
+        day_movements = (
+            it.get("movement")
+            for it in items
+            if it.get("day_index") == day and it.get("movement")
+        )
+        by_day[day] = muscle_coverage(day_movements)["primary"]
+    result["by_day"] = by_day
+    return result
 
 
 def _system_prompt(*, lang: str, plan_scoped: bool) -> str:
@@ -121,8 +179,13 @@ def _system_prompt(*, lang: str, plan_scoped: bool) -> str:
         "- After a tool runs, confirm in 1-3 short lines exactly WHAT changed (day, movement, "
         "sets×reps) — never claim a change a tool did not confirm.\n"
         "- When the request is ambiguous (which day? replace this exercise or add another?), ask — "
-        "never guess.\n\n"
-        "MOVEMENT CATALOG (16 movements):\n" + _movement_catalog_lines() + "\n"
+        "never guess.\n"
+        "- Balance the week: cover the major muscle groups across all days, pair pushing movements "
+        "with pulling ones, and avoid stacking the same primary muscle group on consecutive days.\n"
+        "- When the user asks what a plan trains, or what it's missing (\"這週哪裡沒練到\"), answer "
+        "from the coverage a tool result just reported — never from memory or the catalog above; "
+        "call get_plan first if you don't already have a fresh one this turn.\n\n"
+        "MOVEMENT CATALOG (16 movements, with primary muscles):\n" + _movement_catalog_lines() + "\n"
     )
 
 
@@ -354,7 +417,9 @@ class _PlanDispatcher:
         plan = self._fresh_plan()
         if plan is None:
             return self._result({"error": "The scoped plan no longer exists."})
-        return self._result({"plan": plan})  # read-only: no frame_plan, nothing changed.
+        # read-only: no frame_plan, nothing changed for the client to draw. coverage still rides
+        # the text so the model can answer a "what am I missing" question off this one call.
+        return self._result({"plan": plan, "coverage": _plan_coverage(plan)})
 
     def _create_plan(self, args: dict[str, Any]) -> chat_service._ToolResult:
         if self.plan_id:
@@ -394,7 +459,7 @@ class _PlanDispatcher:
         )
         self.plan_id = str(created["id"])  # PINNED for the rest of this request.
         plan = self._fresh_plan()
-        return self._result({"plan": plan}, frame_plan=plan)
+        return self._result({"plan": plan, "coverage": _plan_coverage(plan)}, frame_plan=plan)
 
     def _add_item(self, args: dict[str, Any]) -> chat_service._ToolResult:
         if not self.plan_id:
@@ -413,7 +478,7 @@ class _PlanDispatcher:
             notes=item["notes"],
         )
         plan = self._fresh_plan()
-        return self._result({"plan": plan}, frame_plan=plan)
+        return self._result({"plan": plan, "coverage": _plan_coverage(plan)}, frame_plan=plan)
 
     def _update_item(self, args: dict[str, Any]) -> chat_service._ToolResult:
         if not self.plan_id:
@@ -457,7 +522,7 @@ class _PlanDispatcher:
         if row is None:
             return self._result({"error": f"No item {item_id!r} in this plan."})
         plan = self._fresh_plan()
-        return self._result({"plan": plan}, frame_plan=plan)
+        return self._result({"plan": plan, "coverage": _plan_coverage(plan)}, frame_plan=plan)
 
     def _remove_item(self, args: dict[str, Any]) -> chat_service._ToolResult:
         if not self.plan_id:
@@ -471,7 +536,7 @@ class _PlanDispatcher:
         if not removed:
             return self._result({"error": f"No item {item_id!r} in this plan."})
         plan = self._fresh_plan()
-        return self._result({"plan": plan}, frame_plan=plan)
+        return self._result({"plan": plan, "coverage": _plan_coverage(plan)}, frame_plan=plan)
 
     def _update_plan(self, args: dict[str, Any]) -> chat_service._ToolResult:
         if not self.plan_id:
@@ -492,7 +557,7 @@ class _PlanDispatcher:
         if row is None:
             return self._result({"error": "The scoped plan no longer exists."})
         plan = self._fresh_plan()
-        return self._result({"plan": plan}, frame_plan=plan)
+        return self._result({"plan": plan, "coverage": _plan_coverage(plan)}, frame_plan=plan)
 
     # -- shared item validation ------------------------------------------------------------------
 

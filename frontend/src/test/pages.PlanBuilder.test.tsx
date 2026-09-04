@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./renderWithProviders";
 import type { LiveToolRun, Plan } from "../api";
@@ -111,6 +111,25 @@ describe("PlanBuilder", () => {
         "/plans/p9"
       )
     );
+  });
+});
+
+describe("PlanBuilder — what the drafted plan trains", () => {
+  it("has no coverage summary before a plan exists, and one after", async () => {
+    renderWithProviders(<PlanBuilder />, { route: "/plans/new" });
+    await screen.findByText(/the plan will appear here/i);
+    // Absent, not an empty box: there is nothing to summarise yet.
+    expect(screen.queryByRole("heading", { name: /what this plan trains/i })).toBeNull();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /Three full-body days a week/i })
+    );
+
+    const card = (await screen.findByRole("heading", {
+      name: /what this plan trains/i,
+    })).closest("section") as HTMLElement;
+    expect(within(card).getByText("Quadriceps")).toBeInTheDocument();
+    expect(within(card).getByText(/not trained this week/i)).toBeInTheDocument();
   });
 });
 

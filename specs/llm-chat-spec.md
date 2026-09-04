@@ -1218,3 +1218,30 @@ The frontend threads this conversation through the *existing* `PUT`/`GET
 change: `conversations.video_id` is an untyped text column with no FK, and neither
 `routers/conversations.py` nor `services/store.py` validates it as a uuid anywhere — it is an opaque
 string end to end, so `plan:<uuid>` round-trips exactly like any other key.
+
+### Muscle coverage (v3.3.1)
+
+Lumen also reasons about muscle balance, so it can write a week that hits the major groups and
+answer "這週哪裡沒練到" (what does this week miss) from FACTS rather than a guess. The muscle
+table itself is `src.pose.movements.muscles` — a backend-side transcription of
+`frontend/src/lib/movementDetail.ts`'s `primary`/`secondary` lists (see that module's docstring for
+why it's a written-out copy, not an import, and `tests/test_movement_muscles.py` for the drift
+guard). Its `coverage(movements) -> {"primary": [...], "secondary": [...], "gaps": [...]}` is the
+shared vocabulary both the frontend and this feature use: primary if a muscle is `primary` for at
+least one movement, else secondary if `secondary` for at least one, ranked by (times primary desc,
+times secondary desc, declaration order); `gaps` are the major groups (quads, hamstrings, glutes,
+chest, upperBack, lats, shoulders, abs) that are neither.
+
+This rides two places, both text-only — the SSE frame shapes above are UNCHANGED, and `tool_done.plan`
+stays the plain `GET /api/plans/{id}` shape:
+
+- The system prompt lists each of the sixteen catalog movements with its primary muscles in
+  readable form (`Squat — quads, glutes`), and adds balance rules: cover the major groups across the
+  week, pair pushing with pulling, avoid stacking the same primary group on consecutive days, and
+  answer coverage questions from a tool result, never from memory.
+- Every tool result the model reads back — `get_plan` and all five mutating tools — carries a
+  `coverage` object for the WHOLE plan (`{"primary": [...], "secondary": [...], "gaps": [...],
+  "by_day": {day_index: [primary muscles that day]}}`), built fresh from the plan's current items
+  each call. Muscle KEYS only (`"quads"`, no prose), to stay inside `_MAX_TOOL_RESULT_CHARS`
+  alongside the plan itself. Error payloads never carry it; an empty plan gets the empty-safe shape
+  (`primary`/`secondary`/`by_day` empty, `gaps` the full checklist), not an omitted key.

@@ -7,7 +7,7 @@ import PlanPreview from "../components/plans/PlanPreview";
 import { LumenAvatar } from "../components/LumenLoader";
 import type { Plan } from "../api";
 import { useI18n } from "../lib/i18n";
-import { useIsMobile } from "../lib/useIsMobile";
+import { useIsMobile, useMediaQuery } from "../lib/useIsMobile";
 
 /**
  * "和 Lumen 一起規劃" — build a training plan by talking to the coach.
@@ -23,6 +23,12 @@ import { useIsMobile } from "../lib/useIsMobile";
 export default function PlanBuilder() {
   const { t } = useI18n();
   const isMobile = useIsMobile();
+  // The chat column is a FIXED 440px, so every pixel the window loses comes out of the preview
+  // beside it: at a 1024px window that column is 232px, and the muscle card's fixed-width legend
+  // then rendered OUTSIDE the card's own border. Same container-not-viewport problem the plan
+  // page has, and the same answer -- the preview is told it is narrow and drops to its compact
+  // shape. 1360px is where the column clears ~520px, enough for the bodies and the legend.
+  const narrowPreview = useMediaQuery("(max-width: 1359px)");
 
   const [plan, setPlan] = useState<Plan | null>(null);
   // Handed back down to PlanCoach so a reload-free follow-up turn is scoped to the created plan.
@@ -76,7 +82,7 @@ export default function PlanBuilder() {
       {plan ? (
         <>
           <p className="mb-3 font-display text-lg font-bold text-content">{plan.name}</p>
-          <PlanPreview plan={plan} />
+          <PlanPreview plan={plan} compact={narrowPreview} />
         </>
       ) : (
         emptyPreview
@@ -161,7 +167,7 @@ export default function PlanBuilder() {
                     <X size={16} weight="bold" />
                   </button>
                 </div>
-                {plan ? <PlanPreview plan={plan} /> : emptyPreview}
+                {plan ? <PlanPreview plan={plan} compact /> : emptyPreview}
               </div>
             </div>
           )}

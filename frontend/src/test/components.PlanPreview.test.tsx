@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
+import { render, screen, within } from "@testing-library/react";
 import { I18nProvider } from "../lib/i18n";
 import PlanPreview from "../components/plans/PlanPreview";
 import type { Plan, PlanItem } from "../api";
@@ -33,13 +33,17 @@ function plan(items: PlanItem[]): Plan {
   };
 }
 
-function renderPreview(items: PlanItem[]) {
+function renderPreview(items: PlanItem[], compact?: boolean) {
   return render(
     <I18nProvider>
-      <PlanPreview plan={plan(items)} />
+      <PlanPreview plan={plan(items)} compact={compact} />
     </I18nProvider>
   );
 }
+
+// The localStorage stub in src/test/setup.ts is one Map for the whole file, so the language a
+// test chooses would otherwise leak into the next one.
+beforeEach(() => localStorage.clear());
 
 describe("PlanPreview rest days", () => {
   it("folds the trailing empty days of a three-day plan into one line", () => {
@@ -64,5 +68,60 @@ describe("PlanPreview rest days", () => {
     expect(screen.queryByText(/Day 2–/)).toBeNull();
     // The trailing run 4–7 still collapses, so exactly one range line exists.
     expect(screen.getByText(/Day 4–7 · Rest/)).toBeInTheDocument();
+  });
+});
+
+describe("PlanPreview muscle coverage", () => {
+  it("shows what the drafted plan trains, under the day bands", () => {
+    // Squat (quads/glutes) plus a push-up (chest/triceps): the summary fills in from the same
+    // streamed plan the bands are drawn from, so it appears as Lumen writes.
+    renderPreview([item(1, "Squat"), item(2, "Push-up")]);
+
+    const card = screen.getByRole("heading", { name: /what this plan trains/i }).closest("section");
+    expect(card).not.toBeNull();
+    expect(within(card as HTMLElement).getByText("Quadriceps")).toBeInTheDocument();
+    expect(within(card as HTMLElement).getByText("Chest")).toBeInTheDocument();
+    // Neither movement touches the back, so the week is not balanced yet and says so.
+    expect(within(card as HTMLElement).getByText(/not trained this week/i)).toHaveTextContent(
+      /lats/i
+    );
+  });
+
+  it("says the week is balanced instead of showing an empty gap line", () => {
+    const items = [
+      item(1, "Squat"),
+      item(2, "Deadlift"),
+      item(3, "Push-up"),
+      item(4, "Row"),
+      item(5, "Overhead Press"),
+    ];
+    renderPreview(items);
+
+    expect(screen.getByText(/covers every major muscle group/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not trained this week/i)).toBeNull();
+  });
+
+  it("renders nothing at all when no item's movement is in the catalog", () => {
+    // An empty plan must not read "not trained this week: everything".
+    renderPreview([item(1, "Plank")]);
+    expect(screen.queryByRole("heading", { name: /what this plan trains/i })).toBeNull();
+  });
+
+  it("names the gaps in Traditional Chinese with a Chinese list separator", () => {
+    // The joiner is language-dependent — "腿後肌、上背", not "腿後肌, 上背".
+    localStorage.setItem("lang", "zh-Hant");
+    renderPreview([item(1, "Squat"), item(2, "Push-up")]);
+
+    expect(screen.getByRole("heading", { name: "這份菜單練到的部位" })).toBeInTheDocument();
+    expect(screen.getByText(/這週還沒練到：/)).toHaveTextContent("上背、闊背肌");
+  });
+
+  it("drops the body maps but keeps the groups when compact", () => {
+    renderPreview([item(1, "Squat")], true);
+
+    expect(screen.getByRole("heading", { name: /what this plan trains/i })).toBeInTheDocument();
+    expect(screen.getByText("Quadriceps")).toBeInTheDocument();
+    expect(screen.queryByText("Anterior")).toBeNull();
+    expect(screen.queryByText("Posterior")).toBeNull();
   });
 });

@@ -235,3 +235,49 @@ describe("PlanDetail — deleting", () => {
     expect(await screen.findByText(/no longer exists/i)).toBeInTheDocument();
   });
 });
+
+describe("PlanDetail — what the plan trains", () => {
+  it("names the day's prime movers on the day band's own header line", async () => {
+    renderWithProviders(<PlanDetail />);
+    const band = (await screen.findByText("Day 1")).closest("section") as HTMLElement;
+    // Scoped to the band: the same names also appear in the coverage summary below the week.
+    expect(within(band).getByText("Glutes")).toBeInTheDocument();
+    expect(within(band).getByText("Quadriceps")).toBeInTheDocument();
+  });
+
+  it("caps a busy day at three groups and counts the rest", async () => {
+    vi.spyOn(api, "getPlan").mockResolvedValue(
+      plan({
+        items: [
+          item({ id: "i1", day_index: 1, movement: "Squat" }),
+          item({ id: "i2", day_index: 1, movement: "Push-up" }),
+          item({ id: "i3", day_index: 1, movement: "Row" }),
+        ],
+      })
+    );
+    renderWithProviders(<PlanDetail />);
+    const band = (await screen.findByText("Day 1")).closest("section") as HTMLElement;
+    expect(within(band).getByText("Chest")).toBeInTheDocument();
+    expect(within(band).getByText("+3")).toBeInTheDocument();
+    // Ranked fourth, so it belongs to the "+3" and must not be drawn as a fourth chip.
+    expect(within(band).queryByText("Lats")).toBeNull();
+  });
+
+  it("says nothing about muscles on a rest day", async () => {
+    renderWithProviders(<PlanDetail />);
+    const band = (await screen.findByText("Day 2")).closest("section") as HTMLElement;
+    expect(within(band).getByText(/rest day/i)).toBeInTheDocument();
+    expect(within(band).queryByText("Glutes")).toBeNull();
+    expect(within(band).queryByText("Quadriceps")).toBeNull();
+  });
+
+  it("summarises the whole week below the day bands, gaps included", async () => {
+    renderWithProviders(<PlanDetail />);
+    const card = (await screen.findByRole("heading", {
+      name: /what this plan trains/i,
+    })).closest("section") as HTMLElement;
+    expect(within(card).getByText("Quadriceps")).toBeInTheDocument();
+    // A week of nothing but squats misses most of the upper body, and the card says which parts.
+    expect(within(card).getByText(/not trained this week/i)).toHaveTextContent(/chest/i);
+  });
+});
