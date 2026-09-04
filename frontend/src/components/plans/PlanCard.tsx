@@ -38,14 +38,16 @@ export default function PlanCard({ plan }: Props) {
   return (
     <Link
       to={`/plans/${plan.id}`}
-      className="group flex h-full flex-col rounded-2xl border border-border-dark bg-surface p-4 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-card-hover"
+      className="group flex h-full flex-col rounded-2xl border border-border-dark bg-surface p-4 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-card-hover active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-display text-[15px] font-semibold text-content">
             {plan.name}
           </h3>
-          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+          {/* `tabular-nums` so the counts in a column of cards line up rather than jittering
+              with the glyph widths of "1" against "11". */}
+          <p className="mt-1 flex items-center gap-1.5 text-xs tabular-nums text-muted">
             <CalendarBlank size={13} weight="duotone" className="shrink-0" />
             {plan.day_count === 1
               ? t("plans.dayCountOne")
@@ -107,7 +109,7 @@ export default function PlanCard({ plan }: Props) {
       </ul>
 
       {plan.started_at && (
-        <p className="mt-auto pt-3 text-[11px] text-faint">
+        <p className="mt-auto pt-3 text-[11px] tabular-nums text-faint">
           {t("plans.startedOn", {
             date: new Date(plan.started_at).toLocaleDateString(lang),
           })}

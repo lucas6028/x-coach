@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowsLeftRight,
@@ -8,6 +8,7 @@ import {
   Lightbulb,
   MapPin,
   Path,
+  Plus,
   Record as RecordIcon,
   ShieldCheck,
   Timer,
@@ -19,10 +20,11 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-r
 import AppLayout from "../components/AppLayout";
 import MovementArt from "../components/movements/MovementArt";
 import MuscleMap from "../components/movements/MuscleMap";
-import { api, type HistoryItem, type Retrieval } from "../api";
+import { api, type HistoryItem, type PlanSummary, type Retrieval } from "../api";
 import { useAuth } from "../lib/auth";
 import { movementLabel, useI18n } from "../lib/i18n";
 import { MOVEMENT_GROUPS, type AnalyzableMovement } from "../lib/movements";
+import { PLAN_DAYS } from "../lib/plans";
 import { movementDetail, type Muscle, type MovementDetail as Detail } from "../lib/movementDetail";
 import { movementMistakes, type Mistake } from "../lib/movementMistakes";
 import { summaryCategory } from "../lib/retrieval";
@@ -167,13 +169,16 @@ export default function MovementDetail() {
                 </button>
               ))}
             </div>
-            <Link
-              to="/movements"
-              className="mb-2 inline-flex h-10 shrink-0 items-center gap-2 rounded-2xl border border-border-dark bg-surface px-4 text-[13px] font-semibold text-muted transition-colors hover:text-content"
-            >
-              <ArrowLeft size={15} weight="bold" />
-              {t("detail.back")}
-            </Link>
+            <div className="mb-2 flex shrink-0 items-center gap-2">
+              <AddToPlanMenu movement={movement} />
+              <Link
+                to="/movements"
+                className="inline-flex h-10 shrink-0 items-center gap-2 rounded-2xl border border-border-dark bg-surface px-4 text-[13px] font-semibold text-muted transition-colors hover:text-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <ArrowLeft size={15} weight="bold" />
+                {t("detail.back")}
+              </Link>
+            </div>
           </div>
 
           {tab === "overview" && (
@@ -1056,6 +1061,217 @@ function RecordsTab({ movement, label }: { movement: string; label: string }) {
             </span>
           </Link>
         ))
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// "加入菜單" — put this movement into one of the user's own plans, without leaving the page that
+// convinced them to.
+//
+// SIGNED OUT IT RENDERS NOTHING. This is a public page, and a control that can only ever answer
+// "sign in first" is a worse invitation than no control: the sign-in prompts on this page belong
+// to the tabs that actually hold personal data (My records).
+//
+// The plans are fetched on OPEN, not on mount, for the same reason — an eager `listPlans` on a
+// public page is a 401 for most of its visitors and a request nobody asked for for the rest.
+//
+// Hand-rolled rather than a Select: this app has no select primitive, and the menu here is not a
+// list of options but a tiny form (which plan, which day), so the pattern it follows is
+// settings/LanguageSelect's — a `role="menu"` popover that closes on outside click and Escape.
+// ---------------------------------------------------------------------------------------------
+function AddToPlanMenu({ movement }: { movement: string }) {
+  const { t } = useI18n();
+  const { user } = useAuth();
+  const ref = useRef<HTMLDivElement>(null);
+
+  const [open, setOpen] = useState(false);
+  const [plans, setPlans] = useState<PlanSummary[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [planId, setPlanId] = useState("");
+  const [day, setDay] = useState(1);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // The result, kept AFTER the menu closes: the confirmation is the point of the interaction, and
+  // it carries the way into the plan the exercise just landed in.
+  const [added, setAdded] = useState<{ id: string; name: string; day: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Lazy, and only once per open-from-empty: reopening the menu after a successful add should show
+  // the plans it already has rather than blanking them behind a spinner.
+  useEffect(() => {
+    if (!open || plans !== null) return;
+    let cancelled = false;
+    setLoadFailed(false);
+    api
+      .listPlans()
+      .then((mine) => {
+        if (cancelled) return;
+        setPlans(mine);
+        setPlanId((cur) => cur || mine[0]?.id || "");
+      })
+      .catch(() => !cancelled && setLoadFailed(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [open, plans]);
+
+  if (!user) return null;
+
+  const chosen = plans?.find((p) => p.id === planId);
+
+  const add = async () => {
+    if (!chosen) return;
+    setBusy(true);
+    setError("");
+    try {
+      // The same defaults AddExerciseForm uses, so an exercise added from here and one added on
+      // the plan page start life identically.
+      await api.addPlanItem(chosen.id, { day_index: day, movement, sets: 3, reps: 10 });
+      setAdded({ id: chosen.id, name: chosen.name, day });
+      setOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("plans.addFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((v) => !v);
+          setAdded(null);
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex h-10 shrink-0 items-center gap-2 rounded-2xl border border-border-dark bg-surface px-4 text-[13px] font-semibold text-content transition-all hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+      >
+        <Plus size={15} weight="bold" />
+        {t("plans.addTo")}
+      </button>
+
+      {added && (
+        <p className="absolute right-0 top-full z-10 mt-1.5 flex w-max max-w-[18rem] items-center gap-1.5 rounded-xl border border-secondary/30 bg-secondary/[0.07] px-3 py-2 text-[12px] text-content">
+          <Check size={14} weight="bold" className="shrink-0 text-secondary" />
+          {t("plans.addedTo", { plan: added.name, n: added.day })}
+          <Link
+            to={`/plans/${encodeURIComponent(added.id)}`}
+            className="shrink-0 rounded font-semibold text-primary underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            {t("plans.open")}
+          </Link>
+        </p>
+      )}
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 z-20 mt-1.5 w-[19rem] rounded-2xl border border-border-dark bg-surface p-3 shadow-card-hover"
+        >
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+            {t("plans.addToPlan")}
+          </p>
+
+          {plans === null && !loadFailed && (
+            <div className="mt-2 space-y-1.5">
+              {[0, 1].map((i) => (
+                <div key={i} className="h-9 animate-pulse rounded-xl bg-content/[0.06]" />
+              ))}
+            </div>
+          )}
+
+          {loadFailed && <p className="mt-2 text-xs text-danger">{t("plans.loadFailed")}</p>}
+
+          {plans !== null && plans.length === 0 && (
+            <div className="mt-2">
+              <p className="text-xs text-muted">{t("plans.addToEmpty")}</p>
+              <Link
+                to="/plans/new"
+                className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-primary px-3.5 py-2 text-xs font-semibold text-primary-content transition-colors hover:bg-primary/90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                {t("plans.addToCreate")}
+              </Link>
+            </div>
+          )}
+
+          {plans !== null && plans.length > 0 && (
+            <>
+              <ul className="scrollbar-thin mt-2 max-h-40 space-y-1 overflow-y-auto">
+                {plans.map((p) => (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={p.id === planId}
+                      onClick={() => setPlanId(p.id)}
+                      className={`flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left text-[13px] transition-colors ${
+                        p.id === planId
+                          ? "bg-primary/10 font-semibold text-primary"
+                          : "text-content hover:bg-content/[0.04]"
+                      }`}
+                    >
+                      <span className="min-w-0 truncate">{p.name}</span>
+                      {p.id === planId && <Check size={14} weight="bold" className="shrink-0" />}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+
+              <p className="mt-3 text-[11px] font-semibold uppercase tracking-wider text-faint">
+                {t("plans.addToDay")}
+              </p>
+              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                {PLAN_DAYS.map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-pressed={d === day}
+                    onClick={() => setDay(d)}
+                    className={`h-9 w-9 rounded-lg text-[12px] font-semibold tabular-nums transition-colors ${
+                      d === day
+                        ? "bg-primary text-primary-content"
+                        : "bg-content/[0.05] text-muted hover:text-content"
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+
+              {error && <p className="mt-2 text-xs text-danger">{error}</p>}
+
+              <button
+                type="button"
+                onClick={() => void add()}
+                disabled={busy || !chosen}
+                className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-full bg-primary py-2 text-xs font-semibold text-primary-content transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                {busy ? t("plans.adding") : t("plans.add")}
+              </button>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

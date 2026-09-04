@@ -1166,3 +1166,55 @@ committed message's `tools` contains neither `id` nor `pending`.
 5. A stream that dies mid-tool leaves no row claiming to still be running.
 6. Nothing v3.1 pinned regresses: records still persist, no server path is visible, graph concepts
    are still not called citations.
+
+## v3.3: the Lumen plan agent
+
+A second, unrelated feature reuses this layer's tool-calling machinery wholesale: **Lumen**, the
+coach persona, builds and edits a user's training plan (訓練菜單) by conversation. Rather than fork
+the tool loop, `services/chat.py`'s round-trip loop — retraction, round/time caps, the
+4xx-without-tools retry, unique tool ids across rounds — was extracted into a generic
+`_run_tool_loop(*, messages, system, model, tools, dispatch, max_rounds=_MAX_TOOL_ROUNDS,
+query_label=_tool_query_label, done_extra=None)`. `_answer_stream_inner` (this spec's own feature)
+is now a thin caller of it; `services/plan_agent.py` is the second. Nothing in the loop knows what a
+"fault" or a "plan" is — everything feature-specific is a parameter:
+
+- `dispatch(name, args) -> _ToolResult` — no `context` third argument the way `_dispatch_tool` takes
+  one; each caller closes over its own state instead (a read-only analysis blob here, a mutable
+  `token`/`user_id`/`plan_id` for the plan agent).
+- `query_label(name, args) -> str` — the `tool` frame's human-readable subject, derived from the
+  call's own arguments because the frame is yielded *before* dispatch runs (v3.2's ordering rule).
+- `done_extra() -> dict` — merged into the terminal `done` frame; the plan agent uses it for
+  `plan_id`.
+- `_ToolResult` gained an optional `payload: dict | None` field, merged into the `tool_done` frame
+  when set. The three coaching tools never set it, so this feature's frames are byte-identical to
+  v3.2.
+
+### Endpoint
+
+`POST /api/plans/chat` (declared in `routers/plans.py`, before `/plans/{plan_id}` — same ordering
+rule as `/plans/templates`). Auth `get_current_user` (401); 503 when `chat_configured` is false; 422
+when the last message isn't the user's; 404 when a given `plan_id` isn't a uuid or isn't owned by
+the caller. Request: `{messages, plan_id: str | null, model: str | null, lang: "zh-Hant" | "en"}`.
+Response is the same SSE vocabulary as `/api/chat` (`delta`/`tool`/`tool_done`/`reset`/`done`/
+`error`), plus: `tool_done.plan` (the full plan with items, `GET /api/plans/{id}` shape) on any
+mutating tool; `done.plan_id` when a plan exists at the end of the turn.
+
+### Tools
+
+`get_plan` (read-only, never carries `tool_done.plan`), `create_plan` (allowed only once per
+conversation — a second call is a refusal error payload, never a raise), `add_item`, `update_item`,
+`remove_item`, `update_plan`. Every movement string is canonicalized via
+`src.pose.movements.catalog.canonical_movement`; day_index/sets/reps are validated (not silently
+clamped, unlike `kg_query`'s `hops`/`rag_search`'s `top_k` — a plan's numbers are user-visible
+claims, not internal tuning knobs) and an out-of-range value is refused with the bound named, so the
+model can retry. `_PlanDispatcher.dispatch` is a NEVER-RAISES boundary exactly like
+`chat_service._run_tool`: every failure — a bad argument, a plan deleted mid-conversation, a raising
+store call — becomes an `{"error": ...}` payload.
+
+### Persistence
+
+The frontend threads this conversation through the *existing* `PUT`/`GET
+/api/conversations/{video_id}` endpoints under the key `plan:<plan_id>`. This needed no backend
+change: `conversations.video_id` is an untyped text column with no FK, and neither
+`routers/conversations.py` nor `services/store.py` validates it as a uuid anywhere — it is an opaque
+string end to end, so `plan:<uuid>` round-trips exactly like any other key.

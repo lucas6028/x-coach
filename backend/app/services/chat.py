@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -725,10 +725,17 @@ class _ToolResult:
     ``text`` is the ``role:"tool"`` message content — prefixed and truncated. ``sources`` is the
     provenance the client renders, derived from the RAW result *before* truncation, because a hit
     big enough to be cut is exactly the one whose citations matter most.
+
+    ``payload`` is an OPTIONAL, tool-specific bundle merged straight into the ``tool_done`` SSE
+    frame (see ``_run_tool_loop``) -- e.g. the plan agent's mutating tools ship the freshly written
+    plan here so the client can update its preview without a round trip. ``None`` by default so the
+    three coaching tools (which have nothing of the sort to ship) are byte-identical to before this
+    field existed.
     """
 
     text: str
     sources: list[dict[str, str]]
+    payload: dict[str, Any] | None = None
 
 
 def _run_tool(name: str, args: dict[str, Any], context: dict[str, Any]) -> Any:
@@ -999,16 +1006,72 @@ def _answer_stream_inner(
 ) -> Iterator[str]:
     """Stream a grounded coaching reply for ``messages`` as SSE frames, running tools as needed.
 
-    ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last; the
-    backend prepends the grounded system prompt. ``model`` is the already-resolved (allow-listed)
-    provider slug. Yields ``delta`` frames, optional ``tool``/``tool_done``/``reset`` frames, then
-    exactly one terminator: ``done`` (carrying the model used) or ``error``.
+    Thin now (spec v3.3): the whole tool-round machinery lives in ``_run_tool_loop``, shared with
+    the plan agent (``backend/app/services/plan_agent.py``). This function's only job is to build
+    THIS feature's grounded system prompt and hand ``_dispatch_tool`` in as a plain ``(name, args)
+    -> _ToolResult`` closure over ``context`` — the loop itself knows nothing about analyses,
+    faults, or knowledge retrieval.
+    """
+    system = _build_system_prompt(context) + _TOOL_GROUNDING_RULE
+    yield from _run_tool_loop(
+        messages=messages,
+        system=system,
+        model=model,
+        tools=_TOOLS,
+        dispatch=lambda name, args: _dispatch_tool(name, args, context),
+        query_label=_tool_query_label,
+    )
 
-    TOOL ROUND-TRIPS NEVER LEAVE THIS FUNCTION. ``ChatMessage.role`` is ``Literal["user",
-    "assistant"]``, the client holds the conversation, and ``store.upsert_conversation`` persists it
-    — so a ``role:"tool"`` turn has nowhere to live. The loop therefore runs entirely server-side
-    inside one request and only the final assistant text is streamed and persisted (spec v3
-    decision 3).
+
+def _run_tool_loop(
+    *,
+    messages: list[dict[str, Any]],
+    system: str,
+    model: str,
+    tools: list[dict[str, Any]] | None,
+    dispatch: Callable[[str, dict[str, Any]], _ToolResult],
+    max_rounds: int = _MAX_TOOL_ROUNDS,
+    query_label: Callable[[str, dict[str, Any]], str] = _tool_query_label,
+    done_extra: Callable[[], dict[str, Any]] | None = None,
+) -> Iterator[str]:
+    """Run the shared model round-trip loop and stream it as SSE frames.
+
+    ``messages`` is the client-held conversation (roles ``user``/``assistant``), newest last;
+    ``system`` is prepended as the system turn. ``model`` is the already-resolved (allow-listed)
+    provider slug. Yields ``delta`` frames, optional ``tool``/``tool_done``/``reset`` frames, then
+    exactly one terminator: ``done`` (carrying the model used, plus whatever ``done_extra()`` adds)
+    or ``error``.
+
+    GENERALISED OUT OF THE ANSWER-ONLY LOOP (spec v3.3) so the plan agent can reuse the identical
+    tool-calling contract — retraction, round/time caps, the 4xx-without-tools retry, unique tool
+    ids across rounds — for a completely different tool catalogue (plan mutations instead of
+    coaching lookups). Everything feature-specific is a PARAMETER: the system prompt, the tool
+    schema, how a call is dispatched, and how its human-readable label is derived. Nothing in this
+    function knows what a "fault" or a "plan" is.
+
+    ``dispatch`` receives only ``(name, args)`` — deliberately NOT a third ``context`` argument the
+    way ``_dispatch_tool`` does, because the two callers close over completely different state (a
+    read-only analysis blob here, a mutable ``token``/``user_id``/``plan_id`` there) and forcing a
+    shared shape would leak one caller's concern into the other's signature. A caller that needs
+    context closes over it in the callable it hands in, as ``_answer_stream_inner`` above does.
+
+    ``query_label`` exists because the ``tool`` frame is yielded BEFORE dispatch runs (v3.2's whole
+    point — the tray must name a slow lookup while it is still running), so the label can only be
+    derived from ``(name, args)``, never from the result. ``_tool_query_label`` (the default) is
+    coaching-specific; the plan agent supplies its own.
+
+    ``done_extra`` lets a caller add extra keys to the terminal ``done`` frame (the plan agent uses
+    it for ``plan_id``) without this function knowing what those keys mean. Called at most once, only
+    on the successful path, right before the ``done`` frame is built — never on an ``error`` exit.
+
+    THIS FUNCTION DOES NOT CATCH EXCEPTIONS FROM ``dispatch`` — unlike ``_dispatch_tool``, which is
+    a NEVER-RAISES contract enforced at ITS OWN boundary. A crash from a badly-behaved ``dispatch``
+    propagates out of here to the caller's own outermost shell (``answer_stream`` /
+    ``plan_chat_stream``), the one place per feature that knows the HTTP 200 is already committed
+    and turns any escaping exception into a single in-band ``error`` frame. Wrapping the call here
+    too would be a second, redundant safety net with no test able to tell the two apart —
+    ``test_a_dispatch_tool_crash_yields_exactly_one_error_frame_and_no_done`` pins that the crash
+    reaches the outer shell, not a try/except in this loop.
 
     RETRACTION, NOT BUFFERING (spec v3 section 1). A round streams its text the moment it arrives,
     because ``finish_reason`` only lands at the *end* of a round — "stream only the final round"
@@ -1021,7 +1084,6 @@ def _answer_stream_inner(
     THE TIME BUDGET IS SHARED, NOT PER-ROUND. This endpoint is metered; N rounds must not cost N×
     ``chat_timeout()``. Each round is given only what is left.
     """
-    system = _build_system_prompt(context) + _TOOL_GROUNDING_RULE
     convo: list[dict[str, Any]] = [{"role": "system", "content": system}, *messages]
     deadline = time.monotonic() + chat_timeout()
     # True once the HTTP 200 has carried output, which makes a retry illegal (it would double-emit).
@@ -1038,7 +1100,7 @@ def _answer_stream_inner(
     # `f"call_{i}"` tool_call_id fallback below, which stays as it is.
     tool_seq = 0
 
-    for round_index in range(_MAX_TOOL_ROUNDS + 1):
+    for round_index in range(max_rounds + 1):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             # No *delta* text has reached the client at this point, ever (streamed_any is False by
@@ -1050,13 +1112,13 @@ def _answer_stream_inner(
 
         # The extra final iteration never offers tools: it is the "answer from what you gathered"
         # round the caps fall through to, so the user gets prose instead of a failure.
-        offer_tools = round_index < _MAX_TOOL_ROUNDS
+        offer_tools = round_index < max_rounds
         turn: _Turn | None = None
         narrated = False
 
         try:
             for item in _stream_turn(
-                convo, model, timeout=remaining, tools=_TOOLS if offer_tools else None
+                convo, model, timeout=remaining, tools=tools if offer_tools else None
             ):
                 if isinstance(item, _Turn):
                     turn = item
@@ -1108,9 +1170,9 @@ def _answer_stream_inner(
             # `int(frag.get("index", ...))`, `fn.get("name")`, `slot["arguments"] +=` block) is NOT
             # itself exception-wrapped -- a chunk that is valid JSON but the wrong SHAPE (a
             # "tool_calls": 5, a "function": "kg_query" string, a non-string "arguments") raises a
-            # plain TypeError/AttributeError there, not an _LLMError. This function is the only frame
-            # in the stack that knows the HTTP 200 is already committed, so it is the one place that
-            # can turn that crash into an in-band `error` frame instead of a dead stream. Deliberately
+            # plain TypeError/AttributeError there, not an _LLMError. It is cheap and correct to turn
+            # that crash into an in-band `error` frame right here, at the point of failure, rather
+            # than letting it propagate needlessly up to the caller's outer shell. Deliberately
             # `Exception`, not `BaseException`: GeneratorExit must keep propagating so a client
             # disconnect still tears this generator down normally. Placed AFTER the `_LLMError`
             # clause so the 4xx-without-tools retry above still gets first refusal.
@@ -1165,14 +1227,19 @@ def _answer_stream_inner(
             tool_seq += 1
             yield _sse(
                 "tool",
-                {"id": uid, "name": call["name"], "query": _tool_query_label(call["name"], args)},
+                {"id": uid, "name": call["name"], "query": query_label(call["name"], args)},
             )
-            outcome = _dispatch_tool(call["name"], args, context)
+            outcome = dispatch(call["name"], args)
             finished: dict[str, Any] = {"id": uid}
             if outcome.sources:
                 # Omitted rather than [] so a client can tell "this tool has nothing to cite"
                 # (get_analysis) from "this tool cited nothing".
                 finished["sources"] = outcome.sources
+            if outcome.payload:
+                # Merged straight in -- the plan agent's mutating tools ship {"plan": ...} here so
+                # the client can update its preview from THIS frame, with no extra round trip. Never
+                # set by the three coaching tools, so this is a no-op on the answer path.
+                finished.update(outcome.payload)
             yield _sse("tool_done", finished)
             convo.append(
                 {
@@ -1188,4 +1255,10 @@ def _answer_stream_inner(
         yield _sse("error", {"detail": "The LLM returned an empty message."})
         return
 
-    yield _sse("done", {"model": model})
+    done_data: dict[str, Any] = {"model": model}
+    if done_extra:
+        # Called once, only on this successful exit -- never on an error return above. The plan
+        # agent uses it to add `plan_id`; the answer path passes no `done_extra`, so `done_data`
+        # here is always exactly `{"model": model}`, byte-identical to before this parameter existed.
+        done_data.update(done_extra())
+    yield _sse("done", done_data)

@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Play, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
-import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, Play, Plus, Trash, WarningCircle, X } from "@phosphor-icons/react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import ConfirmDialog from "../components/ConfirmDialog";
 import AddExerciseForm from "../components/plans/AddExerciseForm";
+import PlanCoach from "../components/plans/PlanCoach";
 import PlanItemRow from "../components/plans/PlanItemRow";
+import { LumenAvatar } from "../components/LumenLoader";
 import { api, type NewPlanItem, type Plan } from "../api";
 import { useI18n } from "../lib/i18n";
 import type { AnalyzableMovement } from "../lib/movements";
+import { useIsMobile } from "../lib/useIsMobile";
 import { PLAN_DAYS, currentDay, isAnalyzable, itemsByDay, progressRatio } from "../lib/plans";
 
 type Status = "loading" | "ready" | "error";
@@ -18,6 +21,12 @@ type Status = "loading" | "ready" | "error";
 export default function PlanDetail() {
   const { t, lang } = useI18n();
   const { planId = "" } = useParams();
+  const isMobile = useIsMobile();
+  const [searchParams] = useSearchParams();
+
+  // `?coach=1` opens the panel — read ONCE, into the initial state. Kept as an effect it would
+  // re-open the panel every time the user closed it, since the param is still in the URL.
+  const [coachOpen, setCoachOpen] = useState(() => searchParams.get("coach") === "1");
 
   const [plan, setPlan] = useState<Plan | null>(null);
   const [status, setStatus] = useState<Status>("loading");
@@ -67,6 +76,17 @@ export default function PlanDetail() {
       cancelled = true;
     };
   }, []);
+
+  // The phone sheet is a modal, so Escape dismisses it like every other dialog in the app. The
+  // desktop panel is a column of the page, not an overlay, and deliberately ignores Escape.
+  useEffect(() => {
+    if (!isMobile || !coachOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCoachOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [isMobile, coachOpen]);
 
   // Splice the changed item into the local copy rather than refetching the plan: a refetch after
   // every tick would reorder nothing and cost a round trip, and it would also blank the day columns
@@ -148,7 +168,7 @@ export default function PlanDetail() {
   const backLink = (
     <Link
       to="/plans"
-      className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-content"
+      className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-content active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     >
       <ArrowLeft size={14} weight="bold" />
       {t("plans.back")}
@@ -178,7 +198,17 @@ export default function PlanDetail() {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <main className="mx-auto max-w-6xl px-4 py-8 lg:px-6 lg:py-12">
             {backLink}
-            <div className="mt-6 h-[420px] animate-pulse rounded-2xl border border-border-dark bg-surface" />
+            {/* Shaped like what arrives — a title block, then the day bands — so the page does not
+                visibly re-flow the moment the plan lands. */}
+            <div className="mt-4 h-8 w-56 animate-pulse rounded-lg bg-content/[0.06]" />
+            <div className="mt-6 flex flex-col gap-3">
+              {PLAN_DAYS.map((day) => (
+                <div
+                  key={day}
+                  className="h-[76px] animate-pulse rounded-2xl border border-border-dark bg-surface"
+                />
+              ))}
+            </div>
           </main>
         </div>
       </AppLayout>
@@ -190,19 +220,56 @@ export default function PlanDetail() {
   const today = currentDay(plan.items);
   const ratio = progressRatio(completed, plan.items.length);
 
+  // One component in two frames: a column beside the plan on a desktop, a sheet over it on a
+  // phone. `onPlan` replaces the page's plan in place — a tool that rewrote the week has already
+  // handed back the whole fresh plan, so a refetch would only blank the bands to learn what we
+  // were just told.
+  // The sheet IS the card, so the panel inside it drops its own shell — a bordered, rounded,
+  // shadowed card sitting inside a bordered, rounded sheet is one frame too many.
+  const renderCoach = (className: string) => (
+    <PlanCoach
+      planId={plan.id}
+      onPlan={setPlan}
+      suggestions={[
+        t("plans.coach.chipFourDays"),
+        t("plans.coach.chipFewerSets"),
+        t("plans.coach.chipSwap"),
+        t("plans.coach.chipCore"),
+      ]}
+      className={className}
+    />
+  );
+
+  const panelOpen = coachOpen && !isMobile;
+
+  // WHY THE EXERCISE GRID NARROWS WITH THE PANEL: `xl:grid-cols-3` is a VIEWPORT query, so it
+  // still fires at 1280px once 400px of that viewport belongs to the coach. The arithmetic is the
+  // one recorded below — 1152 (max-w-6xl) − 48 (px) − 400 (panel) − 24 (gap) − 32 (band padding)
+  // − 16 (two gaps) leaves ~210px a cell against the ~241px a row needs, which is exactly the
+  // overflow that killed the seven-column version. Two across at that width gives ~320px.
+  const itemGrid = panelOpen
+    ? "mt-3 grid grid-cols-1 gap-2 xl:grid-cols-2"
+    : "mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3";
+
   return (
     <AppLayout>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <main className="mx-auto max-w-6xl px-4 py-8 lg:px-6 lg:py-12">
           {backLink}
 
+          <div
+            className={
+              panelOpen ? "grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_400px]" : undefined
+            }
+          >
+          <div className="min-w-0">
           <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <h1 className="font-display text-2xl font-bold text-content">{plan.name}</h1>
               {plan.notes && (
                 <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted">{plan.notes}</p>
               )}
-              <p className="mt-2 text-xs text-muted">
+              <p className="mt-2 text-xs tabular-nums text-muted">
                 {plan.started_at
                   ? `${t("plans.progress", { done: completed, total: plan.items.length })} · ${
                       today === null
@@ -216,11 +283,24 @@ export default function PlanDetail() {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
+              {/* Desktop only: on a phone this same panel is reached from the floating button
+                  below, because a fifth control in this row would wrap onto its own line. */}
+              {!isMobile && (
+                <button
+                  type="button"
+                  onClick={() => setCoachOpen((v) => !v)}
+                  aria-expanded={coachOpen}
+                  className="inline-flex items-center gap-2 rounded-full border border-border-dark bg-surface px-4 py-2 text-[13px] font-semibold text-content transition-all hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  <LumenAvatar size={17} />
+                  {coachOpen ? t("plans.coach.close") : t("plans.coach.open")}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => (plan.started_at ? setConfirming("restart") : void start())}
                 disabled={planBusy || plan.items.length === 0}
-                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-[13px] font-semibold text-primary-content shadow-accent transition-colors hover:bg-primary/90 disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-[13px] font-semibold text-primary-content shadow-accent transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 <Play size={14} weight="fill" />
                 {planBusy
@@ -233,7 +313,7 @@ export default function PlanDetail() {
                 type="button"
                 onClick={() => setConfirming("delete")}
                 aria-label={t("plans.deletePlan")}
-                className="rounded-full border border-border-dark p-2 text-faint transition-colors hover:border-danger/40 hover:text-danger"
+                className="rounded-full border border-border-dark p-2 text-faint transition-all hover:border-danger/40 hover:text-danger active:scale-[0.95] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger"
               >
                 <Trash size={15} weight="duotone" />
               </button>
@@ -294,7 +374,7 @@ export default function PlanDetail() {
                       <button
                         type="button"
                         onClick={() => setAddingTo(day)}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border-dark px-3 py-1 text-[11px] font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary"
+                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border-dark px-3.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                       >
                         <Plus size={12} weight="bold" />
                         {t("plans.addExercise")}
@@ -306,7 +386,7 @@ export default function PlanDetail() {
                     // Up to three exercises across on a wide screen. The narrowest cell this
                     // produces is the phone's full width; the widest day still never squeezes a row
                     // below what its own controls need.
-                    <ul className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                    <ul className={itemGrid}>
                       {items.map((item) => (
                         <PlanItemRow
                           key={item.id}
@@ -337,8 +417,61 @@ export default function PlanDetail() {
               );
             })}
           </div>
+          </div>
+
+            {/* Sticky and full-height with its own scroll, like the builder's chat column: a long
+                plan scrolls past a conversation that stays put. */}
+            {panelOpen && (
+              <aside className="h-[600px] min-h-0 lg:sticky lg:top-6 lg:h-[min(calc(100vh-14rem),46rem)]">
+                {renderCoach("h-full")}
+              </aside>
+            )}
+          </div>
         </main>
       </div>
+
+      {/* PHONE: a floating way in, and a sheet rather than a column — there is no second column on
+          a phone, and the plan is what the user came to look at. Lifted clear of the tab bar's
+          own safe-area inset so it never sits on top of the navigation. */}
+      {isMobile && !coachOpen && (
+        <button
+          type="button"
+          onClick={() => setCoachOpen(true)}
+          aria-label={t("plans.coach.open")}
+          className="fixed bottom-[calc(max(env(safe-area-inset-bottom),0.75rem)+5.25rem)] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-accent transition-transform active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <LumenAvatar size={30} />
+        </button>
+      )}
+
+      {isMobile && coachOpen && (
+        <div className="fixed inset-0 z-40 flex flex-col justify-end bg-content/30">
+          {/* The backdrop is a dismiss target, not a control: `aria-hidden` keeps it out of the
+              accessibility tree, where it would otherwise be a second element named "Close
+              Lumen" competing with the button in the sheet. */}
+          <div aria-hidden="true" onClick={() => setCoachOpen(false)} className="flex-1" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("chat.coach")}
+            className="flex h-[78vh] flex-col rounded-t-2xl border-t border-border-dark bg-surface pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+          >
+            <div className="mb-1 flex shrink-0 justify-end px-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCoachOpen(false)}
+                aria-label={t("plans.coach.close")}
+                className="rounded-full p-2.5 text-faint transition-colors hover:bg-content/[0.06] hover:text-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <X size={16} weight="bold" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              {renderCoach("h-full rounded-none border-0 shadow-none")}
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirming === "restart"}

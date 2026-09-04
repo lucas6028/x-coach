@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./renderWithProviders";
-import { api, type PlanSummary, type PlanTemplate } from "../api";
+import { api, type Plan, type PlanSummary, type PlanTemplate } from "../api";
 
 const navigate = vi.fn();
 vi.mock("react-router-dom", async () => {
@@ -39,10 +39,24 @@ const template: PlanTemplate = {
   ],
 };
 
+// The "continue" card fetches the one started plan to learn today's exercises, which the list rows
+// do not carry. Stubbed for every test so a started fixture does not reach the network.
+const full: Plan = {
+  id: "p1",
+  name: "Upper week",
+  notes: null,
+  template_key: null,
+  started_at: "2026-08-10T00:00:00Z",
+  created_at: "2026-08-13T00:00:00Z",
+  updated_at: "2026-08-13T00:00:00Z",
+  items: [],
+};
+
 beforeEach(() => {
   navigate.mockReset();
   vi.spyOn(api, "listPlans").mockResolvedValue([]);
   vi.spyOn(api, "planTemplates").mockResolvedValue([template]);
+  vi.spyOn(api, "getPlan").mockResolvedValue(full);
 });
 afterEach(() => vi.restoreAllMocks());
 
@@ -52,8 +66,11 @@ describe("Plans — listing", () => {
       plan({ started_at: "2026-08-10T00:00:00Z", completed_count: 1 }),
     ]);
     renderWithProviders(<Plans />);
-    expect(await screen.findByText("Upper week")).toBeInTheDocument();
-    expect(screen.getByText(/1 of 3 done/i)).toBeInTheDocument();
+    // A started, unfinished plan now appears TWICE: once in the "continue" card that leads the
+    // page and once in the grid below it. Both state the same progress, on purpose — the card is
+    // the shortcut into today, the grid row is the plan among the others.
+    expect(await screen.findAllByText("Upper week")).toHaveLength(2);
+    expect(screen.getAllByText(/1 of 3 done/i)).toHaveLength(2);
   });
 
   it("shows a plan that was never started as 'not started', not as 0% done", async () => {
@@ -130,7 +147,7 @@ describe("Plans — templates", () => {
 });
 
 describe("Plans — blank create", () => {
-  it("sends no template_key when started from the New plan button", async () => {
+  it("sends no template_key when started from the Build it myself button", async () => {
     const create = vi.spyOn(api, "createPlan").mockResolvedValue({
       id: "blank",
       name: "Leg day",
@@ -142,7 +159,7 @@ describe("Plans — blank create", () => {
       items: [],
     });
     renderWithProviders(<Plans />);
-    await userEvent.click(await screen.findByRole("button", { name: /new plan/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /build it myself/i }));
     await userEvent.type(screen.getByLabelText(/plan name/i), "Leg day");
     await userEvent.click(screen.getByRole("button", { name: /^create$/i }));
 
@@ -153,7 +170,7 @@ describe("Plans — blank create", () => {
   it("refuses to submit an empty name", async () => {
     const create = vi.spyOn(api, "createPlan");
     renderWithProviders(<Plans />);
-    await userEvent.click(await screen.findByRole("button", { name: /new plan/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /build it myself/i }));
     expect(screen.getByRole("button", { name: /^create$/i })).toBeDisabled();
     expect(create).not.toHaveBeenCalled();
   });
@@ -161,7 +178,7 @@ describe("Plans — blank create", () => {
   it("shows the server's message when the create fails, and stays open", async () => {
     vi.spyOn(api, "createPlan").mockRejectedValue(new Error("Unknown template 'nope'."));
     renderWithProviders(<Plans />);
-    await userEvent.click(await screen.findByRole("button", { name: /new plan/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /build it myself/i }));
     await userEvent.type(screen.getByLabelText(/plan name/i), "Leg day");
     await userEvent.click(screen.getByRole("button", { name: /^create$/i }));
 
@@ -175,10 +192,10 @@ describe("Plans — blank create", () => {
     // The dialog stays mounted between uses; without a reset the second plan starts life named
     // after the first.
     renderWithProviders(<Plans />);
-    await userEvent.click(await screen.findByRole("button", { name: /new plan/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /build it myself/i }));
     await userEvent.type(screen.getByLabelText(/plan name/i), "Leg day");
     await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
-    await userEvent.click(screen.getByRole("button", { name: /new plan/i }));
+    await userEvent.click(screen.getByRole("button", { name: /build it myself/i }));
     expect((screen.getByLabelText(/plan name/i) as HTMLInputElement).value).toBe("");
   });
 });

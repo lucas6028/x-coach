@@ -112,6 +112,14 @@ const en: Dict = {
   "chat.tool.get_analysis": "Re-reading the analysis",
   "chat.tool.kg_query": "Searching the knowledge graph",
   "chat.tool.rag_search": "Searching the literature",
+  // Lumen's plan tools (POST /api/plans/chat). Same renderer as the three above — a plan tool
+  // without a label here would draw its raw key into the thread.
+  "chat.tool.get_plan": "Reading the plan",
+  "chat.tool.create_plan": "Building the plan",
+  "chat.tool.add_item": "Adding an exercise",
+  "chat.tool.update_item": "Adjusting an exercise",
+  "chat.tool.remove_item": "Removing an exercise",
+  "chat.tool.update_plan": "Updating the plan",
   "chat.tool.generic": "Looking something up",
   // The separator between the tool label and its query subject ("Searching the knowledge graph{sep}knee
   // valgus"). Localised because zh-Hant wants the fullwidth "：" — the only user-facing string on this
@@ -690,6 +698,7 @@ const en: Dict = {
   "plans.save": "Save",
   "plans.day": "Day {n}",
   "plans.rest": "Rest day",
+  "plans.restRange": "Day {from}–{to} · Rest",
   "plans.addExercise": "Add exercise",
   "plans.setsReps": "{sets} × {reps}",
   "plans.setsLabel": "Sets",
@@ -733,6 +742,63 @@ const en: Dict = {
   "plans.studioBanner": "From {plan} · Day {day}",
   "plans.studioLinked": "Ticked off in your plan.",
   "plans.studioBackToPlan": "Back to plan",
+
+  // Lumen's plan coach (shared by the builder page and the plan detail panel). The analysis tray's
+  // chat.* copy is deliberately NOT reused where it names the analysis — this conversation is about
+  // a plan, and telling someone to "sign in to chat about this analysis" on the builder is wrong.
+  "plans.coach.role": "Builds and edits your plan",
+  "plans.coach.placeholder": "Tell Lumen what you want to train…",
+  "plans.coach.inputLabel": "Message Lumen",
+  "plans.coach.signIn": "Sign in to plan with Lumen.",
+
+  // Builder page (/plans/new)
+  "plans.builder.title": "Plan with Lumen",
+  "plans.builder.subtitle":
+    "Say what you are training for and Lumen drafts a week. You can edit every exercise afterwards.",
+  "plans.builder.previewTitle": "Plan preview",
+  "plans.builder.empty": "Tell me your goal and the plan will appear here.",
+  "plans.builder.openPlan": "Open the plan",
+  "plans.builder.showPreview": "Preview plan",
+  "plans.builder.hidePreview": "Close preview",
+  "plans.builder.greeting":
+    "Hi, I'm Lumen. What are you training for, how many days a week can you train, and is there anything you need to avoid?",
+  "plans.builder.chipFullBody": "Three full-body days a week",
+  "plans.builder.chipUpper": "Mostly upper body",
+  "plans.builder.chipRehab": "Rehab, low load",
+
+  // Plans list: the two ways in, and the "continue" card for a run already under way.
+  "plans.planWithLumen": "Plan with Lumen",
+  "plans.buildMyself": "Build it myself",
+  "plans.mineTitle": "Your plans",
+  "plans.continueTitle": "Pick up where you left off",
+  "plans.dayOf": "Day {n} of {total}",
+  "plans.todayExercises": "Today's exercises",
+  // Deliberately NOT the header CTA's wording: both render together on an empty list, and two
+  // links with one accessible name is an ambiguity for anyone navigating by name.
+  "plans.emptyTitle": "Nothing planned yet",
+  "plans.emptyCta": "Start with Lumen",
+  "plans.customiseWithLumen": "Customise with Lumen",
+
+  // Plan detail: Lumen's panel
+  "plans.coach.open": "Ask Lumen to adjust",
+  "plans.coach.close": "Close Lumen",
+  "plans.coach.chipFourDays": "Make it four days a week",
+  "plans.coach.chipFewerSets": "Use fewer sets",
+  "plans.coach.chipSwap": "Swap one exercise out",
+  "plans.coach.chipCore": "Add some core work",
+
+  // Add to plan, from a movement's own page
+  "plans.addTo": "Add to a plan",
+  "plans.addToPlan": "Choose a plan",
+  "plans.addToDay": "Which day",
+  "plans.addToEmpty": "You have no plans yet.",
+  "plans.addToCreate": "Create one with Lumen",
+  "plans.addedTo": "Added to {plan} · Day {n}",
+  "plans.addFailed": "Could not add that exercise.",
+
+  // Studio banner: what this plan asks for next, once the current item is ticked off
+  "plans.studioNext": "Next: {movement} · Day {day}",
+  "plans.studioPlanDone": "This plan is complete.",
 
   // Settings popup
   "settings.title": "Settings",
@@ -1207,6 +1273,12 @@ const zhHant: Dict = {
   "chat.tool.get_analysis": "重讀分析細節",
   "chat.tool.kg_query": "搜尋知識圖譜",
   "chat.tool.rag_search": "查詢文獻",
+  "chat.tool.get_plan": "讀取菜單",
+  "chat.tool.create_plan": "建立菜單",
+  "chat.tool.add_item": "加入動作",
+  "chat.tool.update_item": "調整動作",
+  "chat.tool.remove_item": "移除動作",
+  "chat.tool.update_plan": "更新菜單",
   "chat.tool.generic": "查詢中",
   "chat.tool.sep": "：",
   "chat.tool.sourcesN": "引用來源 {n} 筆",
@@ -1731,7 +1803,7 @@ const zhHant: Dict = {
   "plans.open": "開啟",
   "plans.templatesTitle": "從範本開始",
   "plans.templatesSubtitle": "範本會複製一份給你，之後想怎麼改都可以。",
-  "plans.useTemplate": "使用",
+  "plans.useTemplate": "直接使用",
   "plans.templateItems": "{days} 天、共 {n} 個動作",
 
   // 建立菜單
@@ -1762,6 +1834,7 @@ const zhHant: Dict = {
   "plans.save": "儲存",
   "plans.day": "第 {n} 天",
   "plans.rest": "休息日",
+  "plans.restRange": "第 {from}–{to} 天 · 休息日",
   "plans.addExercise": "加入動作",
   "plans.setsReps": "{sets} 組 × {reps} 下",
   "plans.setsLabel": "組數",
@@ -1798,6 +1871,58 @@ const zhHant: Dict = {
   "plans.studioBanner": "來自「{plan}」· 第 {day} 天",
   "plans.studioLinked": "已在菜單中打勾。",
   "plans.studioBackToPlan": "回到菜單",
+
+  // Lumen 排菜單的對話介面（建立頁與菜單詳情共用）
+  "plans.coach.role": "幫你排課表、也幫你改",
+  "plans.coach.placeholder": "跟 Lumen 說你想怎麼練…",
+  "plans.coach.inputLabel": "傳訊息給 Lumen",
+  "plans.coach.signIn": "登入後就可以請 Lumen 幫你排菜單。",
+
+  // 建立菜單頁（/plans/new）
+  "plans.builder.title": "和 Lumen 一起規劃",
+  "plans.builder.subtitle": "說說你想練什麼，Lumen 會先排一份出來，每個動作之後都還能自己改。",
+  "plans.builder.previewTitle": "菜單預覽",
+  "plans.builder.empty": "告訴我你的目標，菜單會出現在這裡。",
+  "plans.builder.openPlan": "打開菜單",
+  "plans.builder.showPreview": "預覽菜單",
+  "plans.builder.hidePreview": "關閉預覽",
+  "plans.builder.greeting":
+    "嗨，我是 Lumen。你想練什麼目標？一週大概能練幾天？有沒有想避開的部位或動作？",
+  "plans.builder.chipFullBody": "一週三天全身",
+  "plans.builder.chipUpper": "上半身為主",
+  "plans.builder.chipRehab": "復健 / 低負荷",
+
+  // 菜單列表：兩種建立方式，以及進行中的「接續」卡片
+  "plans.planWithLumen": "和 Lumen 一起規劃",
+  "plans.buildMyself": "自己建立",
+  "plans.mineTitle": "我的菜單",
+  "plans.continueTitle": "接著上次繼續",
+  "plans.dayOf": "第 {n} 天 / 共 {total} 天",
+  "plans.todayExercises": "今天的動作",
+  "plans.emptyTitle": "還沒有排任何訓練",
+  "plans.emptyCta": "讓 Lumen 幫你排",
+  "plans.customiseWithLumen": "請 Lumen 客製",
+
+  // 菜單詳情：Lumen 面板
+  "plans.coach.open": "找 Lumen 調整",
+  "plans.coach.close": "關閉 Lumen",
+  "plans.coach.chipFourDays": "改成一週四天",
+  "plans.coach.chipFewerSets": "減少組數",
+  "plans.coach.chipSwap": "換掉一個動作",
+  "plans.coach.chipCore": "加一點核心",
+
+  // 從動作頁加入菜單
+  "plans.addTo": "加入菜單",
+  "plans.addToPlan": "選擇菜單",
+  "plans.addToDay": "加到第幾天",
+  "plans.addToEmpty": "你還沒有任何菜單。",
+  "plans.addToCreate": "請 Lumen 幫你排一份",
+  "plans.addedTo": "已加入「{plan}」· 第 {n} 天",
+  "plans.addFailed": "沒辦法加入這個動作。",
+
+  // 分析工作區提示列：這份菜單接下來要練什麼
+  "plans.studioNext": "下一個：{movement} · 第 {day} 天",
+  "plans.studioPlanDone": "這份菜單完成了。",
 
   // Settings popup
   "settings.title": "設定",
