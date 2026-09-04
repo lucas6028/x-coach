@@ -52,10 +52,80 @@ afterEach(() => vi.restoreAllMocks());
 describe("PlanDetail — rendering", () => {
   it("shows every day slot, rest days included", async () => {
     // Hiding empty days would make "Day 3" mean a different position in different plans.
+    // Asserted through the strip's tabs rather than by counting the words "rest day" loose on the
+    // page: the week is now seven tiles, and "there are seven of them, six marked rest" is the
+    // same claim stated against the structure that carries it.
     renderWithProviders(<PlanDetail />);
-    expect(await screen.findByText("Day 1")).toBeInTheDocument();
-    expect(screen.getByText("Day 7")).toBeInTheDocument();
-    expect(screen.getAllByText(/rest day/i).length).toBe(6);
+    const strip = await screen.findByRole("tablist");
+    const tabs = within(strip).getAllByRole("tab");
+    expect(tabs).toHaveLength(7);
+    expect(tabs[0]).toHaveTextContent("Day 1");
+    expect(tabs[6]).toHaveTextContent("Day 7");
+    expect(within(strip).getAllByText("Rest")).toHaveLength(6);
+  });
+
+  it("opens on the day the user is on", async () => {
+    // Default selection: currentDay, else the first day with items, else day 1. Day 1 holds the
+    // only (unticked) exercise here, so that is the day the panel must be showing.
+    renderWithProviders(<PlanDetail />);
+    const panel = await screen.findByRole("tabpanel");
+    expect(within(panel).getByRole("heading", { name: "Day 1" })).toBeInTheDocument();
+    expect(within(panel).getByText("Squat")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /day 1/i })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens on the current day when earlier days are already done", async () => {
+    vi.mocked(api.getPlan).mockResolvedValue(
+      plan({
+        items: [
+          item({ id: "i1", day_index: 1, completed_at: "2026-08-13T01:00:00Z" }),
+          item({ id: "i2", day_index: 4, movement: "Row" }),
+        ],
+      })
+    );
+    renderWithProviders(<PlanDetail />);
+    const panel = await screen.findByRole("tabpanel");
+    expect(within(panel).getByRole("heading", { name: "Day 4" })).toBeInTheDocument();
+    expect(within(panel).getByText("Row")).toBeInTheDocument();
+  });
+
+  it("shows another day's exercises when its tile is picked", async () => {
+    vi.mocked(api.getPlan).mockResolvedValue(
+      plan({
+        items: [
+          item({ id: "i1", day_index: 1 }),
+          item({ id: "i2", day_index: 5, movement: "Row" }),
+        ],
+      })
+    );
+    renderWithProviders(<PlanDetail />);
+    await userEvent.click(await screen.findByRole("tab", { name: /day 5/i }));
+
+    const panel = screen.getByRole("tabpanel");
+    expect(within(panel).getByText("Row")).toBeInTheDocument();
+    expect(within(panel).queryByText("Squat")).toBeNull();
+    expect(screen.getByRole("tab", { name: /day 5/i })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /day 1/i })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("shows a composed rest-day state with a way out of it", async () => {
+    const add = vi
+      .spyOn(api, "addPlanItem")
+      .mockResolvedValue(item({ id: "i2", day_index: 2, movement: "Row" }));
+    renderWithProviders(<PlanDetail />);
+    await userEvent.click(await screen.findByRole("tab", { name: /day 2/i }));
+
+    const panel = screen.getByRole("tabpanel");
+    expect(within(panel).getByText(/nothing planned for this day/i)).toBeInTheDocument();
+    // The empty state's own action is the only "Add exercise" on a rest day, and it works.
+    await userEvent.click(within(panel).getByRole("button", { name: /add exercise/i }));
+    await userEvent.selectOptions(within(panel).getByLabelText(/movement/i), "Row");
+    await userEvent.click(within(panel).getByRole("button", { name: /^add$/i }));
+
+    await waitFor(() =>
+      expect(add).toHaveBeenCalledWith("p1", { day_index: 2, movement: "Row", sets: 3, reps: 10 })
+    );
+    expect(await within(panel).findByText("Row")).toBeInTheDocument();
   });
 
   it("renders an exercise with its sets and reps", async () => {
@@ -151,28 +221,44 @@ describe("PlanDetail — editing", () => {
     expect(screen.getByText("Squat")).toBeInTheDocument();
   });
 
-  it("adds an exercise to the day whose form was opened", async () => {
+  it("adds an exercise to the day the panel is showing", async () => {
+    // The form is still per-day and the day is still not a field — but the day it belongs to is
+    // now the SELECTED one, so the day is chosen in the strip first. Scoped to the panel rather
+    // than to `.closest("section")` on the text "Day 3", which now matches a tile as well.
     const add = vi
       .spyOn(api, "addPlanItem")
       .mockResolvedValue(item({ id: "i2", day_index: 3, movement: "Row" }));
     renderWithProviders(<PlanDetail />);
-    // Day 3's own "Add exercise" button — the form is per-day, so the day is not a field.
-    const dayThree = (await screen.findByText("Day 3")).closest("section")!;
-    await userEvent.click(within(dayThree).getByRole("button", { name: /add exercise/i }));
-    await userEvent.selectOptions(within(dayThree).getByLabelText(/movement/i), "Row");
-    await userEvent.click(within(dayThree).getByRole("button", { name: /^add$/i }));
+    await userEvent.click(await screen.findByRole("tab", { name: /day 3/i }));
+
+    const panel = screen.getByRole("tabpanel");
+    await userEvent.click(within(panel).getByRole("button", { name: /add exercise/i }));
+    await userEvent.selectOptions(within(panel).getByLabelText(/movement/i), "Row");
+    await userEvent.click(within(panel).getByRole("button", { name: /^add$/i }));
 
     await waitFor(() =>
       expect(add).toHaveBeenCalledWith("p1", { day_index: 3, movement: "Row", sets: 3, reps: 10 })
     );
-    expect(await within(dayThree).findByText("Row")).toBeInTheDocument();
+    expect(await within(panel).findByText("Row")).toBeInTheDocument();
+  });
+
+  it("closes the add form when another day is selected", async () => {
+    // A form left open across a selection change would let someone fill it in while looking at
+    // Wednesday and land the exercise on Monday.
+    renderWithProviders(<PlanDetail />);
+    const panel = await screen.findByRole("tabpanel");
+    await userEvent.click(within(panel).getByRole("button", { name: /add exercise/i }));
+    expect(within(panel).getByLabelText(/movement/i)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("tab", { name: /day 6/i }));
+    expect(screen.queryByLabelText(/^movement$/i)).toBeNull();
   });
 
   it("offers every catalog movement in the picker, not just the analysable ones", async () => {
     renderWithProviders(<PlanDetail />);
-    const dayOne = (await screen.findByText("Day 1")).closest("section")!;
-    await userEvent.click(within(dayOne).getByRole("button", { name: /add exercise/i }));
-    const select = within(dayOne).getByLabelText(/movement/i);
+    const panel = await screen.findByRole("tabpanel");
+    await userEvent.click(within(panel).getByRole("button", { name: /add exercise/i }));
+    const select = within(panel).getByLabelText(/movement/i);
     expect(within(select).getAllByRole("option")).toHaveLength(16);
     expect(within(select).getByRole("option", { name: "Jumping Jacks" })).toBeInTheDocument();
   });
@@ -237,12 +323,24 @@ describe("PlanDetail — deleting", () => {
 });
 
 describe("PlanDetail — what the plan trains", () => {
-  it("names the day's prime movers on the day band's own header line", async () => {
+  it("names the day's prime movers on the focused day's header line", async () => {
     renderWithProviders(<PlanDetail />);
-    const band = (await screen.findByText("Day 1")).closest("section") as HTMLElement;
-    // Scoped to the band: the same names also appear in the coverage summary below the week.
-    expect(within(band).getByText("Glutes")).toBeInTheDocument();
-    expect(within(band).getByText("Quadriceps")).toBeInTheDocument();
+    // Scoped to the PANEL, where `.closest("section")` on a day label used to do the scoping: the
+    // same names now appear in three places — this header, the day's tile in the strip, and the
+    // coverage summary below the week — so an unscoped query would match several nodes.
+    const panel = await screen.findByRole("tabpanel");
+    expect(within(panel).getByText("Glutes")).toBeInTheDocument();
+    expect(within(panel).getByText("Quadriceps")).toBeInTheDocument();
+  });
+
+  it("names the day's top group on its tile in the strip", async () => {
+    renderWithProviders(<PlanDetail />);
+    const tab = await screen.findByRole("tab", { name: /day 1/i });
+    // One name and a count, not the whole map: a ~150px tile has room for about eleven characters.
+    expect(within(tab).getByText("Glutes")).toBeInTheDocument();
+    expect(within(tab).queryByText("Quadriceps")).toBeNull();
+    expect(within(tab).getByText("+1")).toBeInTheDocument();
+    expect(within(tab).getByText("0/1")).toBeInTheDocument();
   });
 
   it("caps a busy day at three groups and counts the rest", async () => {
@@ -256,19 +354,23 @@ describe("PlanDetail — what the plan trains", () => {
       })
     );
     renderWithProviders(<PlanDetail />);
-    const band = (await screen.findByText("Day 1")).closest("section") as HTMLElement;
-    expect(within(band).getByText("Chest")).toBeInTheDocument();
-    expect(within(band).getByText("+3")).toBeInTheDocument();
+    const panel = await screen.findByRole("tabpanel");
+    expect(within(panel).getByText("Chest")).toBeInTheDocument();
+    expect(within(panel).getByText("+3")).toBeInTheDocument();
     // Ranked fourth, so it belongs to the "+3" and must not be drawn as a fourth chip.
-    expect(within(band).queryByText("Lats")).toBeNull();
+    expect(within(panel).queryByText("Lats")).toBeNull();
   });
 
   it("says nothing about muscles on a rest day", async () => {
     renderWithProviders(<PlanDetail />);
-    const band = (await screen.findByText("Day 2")).closest("section") as HTMLElement;
-    expect(within(band).getByText(/rest day/i)).toBeInTheDocument();
-    expect(within(band).queryByText("Glutes")).toBeNull();
-    expect(within(band).queryByText("Quadriceps")).toBeNull();
+    await userEvent.click(await screen.findByRole("tab", { name: /day 2/i }));
+    const panel = screen.getByRole("tabpanel");
+    expect(within(panel).getByText(/rest day/i)).toBeInTheDocument();
+    expect(within(panel).queryByText("Glutes")).toBeNull();
+    expect(within(panel).queryByText("Quadriceps")).toBeNull();
+    // And its tile says nothing either — a rest day has no prime movers to name.
+    const tab = screen.getByRole("tab", { name: /day 2/i });
+    expect(within(tab).queryByText("Glutes")).toBeNull();
   });
 
   it("summarises the whole week below the day bands, gaps included", async () => {

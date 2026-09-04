@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Play, Plus, Trash, WarningCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, Moon, Play, Plus, Trash, WarningCircle, X } from "@phosphor-icons/react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import ConfirmDialog from "../components/ConfirmDialog";
@@ -12,12 +12,26 @@ import { useI18n } from "../lib/i18n";
 import type { AnalyzableMovement } from "../lib/movements";
 import { useIsMobile, useMediaQuery } from "../lib/useIsMobile";
 import PlanMuscleCoverage from "../components/plans/PlanMuscleCoverage";
-import { PLAN_DAYS, currentDay, isAnalyzable, itemsByDay, progressRatio } from "../lib/plans";
+import WeekStrip from "../components/plans/WeekStrip";
+import {
+  PLAN_DAYS,
+  currentDay,
+  isAnalyzable,
+  itemsByDay,
+  progressRatio,
+  usedDays,
+} from "../lib/plans";
 import { dayMuscles } from "../lib/planMuscles";
 
 type Status = "loading" | "ready" | "error";
 
-// One plan, as one full-width band per day. Editing is immediate — every tick, add and remove is its own
+/** The `tabpanel` the week strip drives, and how each tile's `tab` is named. Module-level rather
+ *  than generated: there is exactly one plan page at a time, and a stable id is what lets the
+ *  panel point back at the tab that opened it. */
+const DAY_PANEL_ID = "plan-day-panel";
+const dayTabId = (day: number) => `plan-day-tab-${day}`;
+
+// One plan, as a week strip plus one focused day. Editing is immediate — every tick, add and remove is its own
 // request and the local copy is patched from the response, rather than a save button over a draft:
 // a plan is edited while standing in a gym, and a draft that needs saving is a draft that gets lost.
 export default function PlanDetail() {
@@ -53,6 +67,15 @@ export default function PlanDetail() {
   // plan. `null` for the plan-level actions (start, delete).
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [addingTo, setAddingTo] = useState<number | null>(null);
+
+  // WHICH DAY THE PANEL SHOWS, as "the one the user picked, or else the derived one" — NOT as a
+  // day number seeded by an effect. The distinction matters twice. Before the user has picked
+  // anything, `null` lets the selection track the plan: tick off the last exercise of day 1 and
+  // the panel moves to day 2, and a week Lumen rewrote opens on ITS current day rather than on
+  // whatever the old plan's day happened to be. After they have picked, the number wins and
+  // nothing moves under them — an effect that recomputed a stored default would yank the panel
+  // away mid-edit every time a tick changed `currentDay`.
+  const [pickedDay, setPickedDay] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<"delete" | "restart" | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
   const [itemError, setItemError] = useState("");
@@ -208,17 +231,18 @@ export default function PlanDetail() {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <main className="mx-auto max-w-6xl px-4 py-8 lg:px-6 lg:py-12">
             {backLink}
-            {/* Shaped like what arrives — a title block, then the day bands — so the page does not
-                visibly re-flow the moment the plan lands. */}
+            {/* Shaped like what arrives — a title block, the week strip, then one day panel — so
+                the page does not visibly re-flow the moment the plan lands. */}
             <div className="mt-4 h-8 w-56 animate-pulse rounded-lg bg-content/[0.06]" />
-            <div className="mt-6 flex flex-col gap-3">
+            <div className="mt-6 flex gap-2">
               {PLAN_DAYS.map((day) => (
                 <div
                   key={day}
-                  className="h-[76px] animate-pulse rounded-2xl border border-border-dark bg-surface"
+                  className="h-[76px] min-w-[7.5rem] flex-1 basis-0 animate-pulse rounded-2xl border border-border-dark bg-surface"
                 />
               ))}
             </div>
+            <div className="mt-3 h-[152px] animate-pulse rounded-2xl border border-border-dark bg-surface" />
           </main>
         </div>
       </AppLayout>
@@ -229,6 +253,12 @@ export default function PlanDetail() {
   const completed = plan.items.filter((it) => it.completed_at).length;
   const today = currentDay(plan.items);
   const ratio = progressRatio(completed, plan.items.length);
+
+  // The default the brief asks for, in order: the day the user is on, else the first day that
+  // holds anything, else day 1. `currentDay` is null on a FINISHED plan, which is why the second
+  // fallback exists — otherwise completing a week would drop the panel onto an empty day 1.
+  const selectedDay = pickedDay ?? today ?? usedDays(plan.items)[0] ?? 1;
+  const selectedItems = days[selectedDay - 1];
 
   // One component in two frames: a column beside the plan on a wide desktop, a sheet over it
   // anywhere narrower. Exactly ONE of the two call sites below renders at a time -- two mounted
@@ -353,91 +383,135 @@ export default function PlanDetail() {
             </p>
           )}
 
-          {/* ONE FULL-WIDTH BAND PER DAY, not seven columns across.
-              Seven columns was the first attempt and it broke: at >=1280px each day got ~147px
-              while a single exercise row needs ~241px, so the row overflowed its card by 120px
-              (spilling over the next day) and the flex-1 label was crushed to ZERO width -- the
-              movement name simply disappeared. A day column cannot hold a horizontal row carrying a
-              checkbox, an icon, a name, an action and a delete button, and no amount of truncation
-              fixes that; the row's fixed parts alone exceed the column.
-              Bands also spend the vertical space where it is earned: a rest day is one thin line
-              here instead of a full-height empty column, and the days that hold work get the whole
-              page width for their exercises. Every day is still shown, rest days included, so
-              "Day 3" means the same thing in every plan. */}
-          <div className="mt-6 flex flex-col gap-3">
-            {PLAN_DAYS.map((day) => {
-              const items = days[day - 1];
-              const isToday = today === day;
-              return (
-                <section
-                  key={day}
-                  className={`rounded-2xl border p-4 ${
-                    isToday ? "border-primary/40 bg-primary/[0.03]" : "border-border-dark bg-surface"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <h2
-                      className={`shrink-0 text-xs font-semibold uppercase tracking-wider ${
-                        isToday ? "text-primary" : "text-faint"
-                      }`}
-                    >
-                      {t("plans.day", { n: day })}
-                    </h2>
-                    {items.length === 0 && addingTo !== day && (
-                      <span className="shrink-0 text-[11px] text-faint">{t("plans.rest")}</span>
-                    )}
-                    <DayMuscles items={items} />
-                    {/* The connector carries the row's rhythm, so it gets a floor rather than
-                        being the first thing squeezed to nothing: a day whose chips happen to run
-                        long should still read like the day above it, not like a header that lost
-                        its rule. */}
-                    <span className="h-px min-w-6 flex-1 bg-border-dark" />
-                    {addingTo !== day && (
-                      <button
-                        type="button"
-                        onClick={() => setAddingTo(day)}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border-dark px-3.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      >
-                        <Plus size={12} weight="bold" />
-                        {t("plans.addExercise")}
-                      </button>
-                    )}
-                  </div>
+          {/* THE WEEK AS A STRIP OF SEVEN SUMMARY TILES, PLUS ONE FOCUSED DAY.
+              Two earlier layouts are buried under this one, and both failures come down to the
+              same measurement, so it is recorded here as well as in WeekStrip.
 
-                  {items.length > 0 && (
-                    // Up to three exercises across on a wide screen. The narrowest cell this
-                    // produces is the phone's full width; the widest day still never squeezes a row
-                    // below what its own controls need.
-                    <ul className={itemGrid}>
-                      {items.map((item) => (
-                        <PlanItemRow
-                          key={item.id}
-                          item={item}
-                          planId={plan.id}
-                          analyzable={isAnalyzable(item.movement, analyzable)}
-                          busy={busyItem === item.id}
-                          onToggle={() =>
-                            void patchItem(item.id, { completed: !item.completed_at })
-                          }
-                          onRemove={() => void removeItem(item.id)}
-                        />
-                      ))}
-                    </ul>
-                  )}
+              (1) SEVEN COLUMNS, each holding its own exercises. At >=1280px a column is ~147px
+              while one exercise ROW needs ~241px — a checkbox, an icon, a name, an action chip and
+              a delete button — so rows overflowed their column by ~120px into the next day and the
+              flex-1 movement NAME was squeezed to zero width and vanished. Truncation cannot save
+              it: the fixed parts alone exceed the column. THE RULE THAT COMES OUT OF THAT, and the
+              one thing not to regress: an exercise row never goes in a narrow per-day column. A
+              narrow tile holding only a SUMMARY — a label, a count, a bar, one muscle name — is
+              fine, because every part of it can shrink.
 
-                  {addingTo === day && (
-                    <div className="mt-3 max-w-xs">
-                      <AddExerciseForm
-                        day={day}
-                        busy={planBusy}
-                        onAdd={(item) => void addItem(item)}
-                        onCancel={() => setAddingTo(null)}
-                      />
-                    </div>
-                  )}
-                </section>
-              );
-            })}
+              (2) SEVEN FULL-WIDTH BANDS stacked down the page. Legal, but it gave a rest day the
+              same visual weight as a training day: a three-day plan drew three bands of content and
+              then four near-empty ones, each still carrying a label, a hairline and a button, so
+              most of the page was furniture — and there was no "week" anywhere, only a list you
+              scrolled.
+
+              The strip is the summary layer (narrow is fine there) and the panel below it is the
+              row layer, at the FULL page width the rows need. Every day still exists in the strip,
+              rest days included, so "Day 3" means the same thing in every plan. */}
+          <div className="mt-6">
+            <WeekStrip
+              days={days}
+              selected={selectedDay}
+              today={today}
+              onSelect={(day) => {
+                setPickedDay(day);
+                // The add form belongs to the day it was opened on. Leaving it open across a
+                // selection change would let someone fill it in while looking at Wednesday and
+                // land the exercise on Monday.
+                setAddingTo(null);
+              }}
+              panelId={DAY_PANEL_ID}
+              tabId={dayTabId}
+            />
+
+            <section
+              id={DAY_PANEL_ID}
+              role="tabpanel"
+              aria-labelledby={dayTabId(selectedDay)}
+              tabIndex={-1}
+              className="mt-3 rounded-2xl border border-border-dark bg-surface p-4"
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <h2 className="shrink-0 text-sm font-semibold text-content">
+                  {t("plans.day", { n: selectedDay })}
+                </h2>
+                <span className="shrink-0 text-xs text-faint">
+                  {selectedItems.length === 0
+                    ? t("plans.rest")
+                    : selectedItems.length === 1
+                      ? t("plans.exerciseCountOne")
+                      : t("plans.exerciseCount", { n: selectedItems.length })}
+                </span>
+                <DayMuscles items={selectedItems} />
+                <span className="h-px min-w-6 flex-1 bg-border-dark" />
+                {/* A rest day's only add action is the one inside its empty state below — two
+                    buttons saying "Add exercise" a hundred pixels apart is a choice the user does
+                    not have to make. */}
+                {addingTo !== selectedDay && selectedItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAddingTo(selectedDay)}
+                    // `ml-auto` for the wrapped case: this header wraps, and when the chips push
+                    // the button onto a second line the hairline spacer stays behind on the first
+                    // one, so without it the button lands hard against the left margin instead of
+                    // where its whole line expects it.
+                    className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border-dark px-3.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
+                    <Plus size={12} weight="bold" />
+                    {t("plans.addExercise")}
+                  </button>
+                )}
+              </div>
+
+              {selectedItems.length > 0 && (
+                // Up to three exercises across on a wide screen. The narrowest cell this produces
+                // is the phone's full width; the widest day still never squeezes a row below what
+                // its own controls need.
+                <ul className={itemGrid}>
+                  {selectedItems.map((item) => (
+                    <PlanItemRow
+                      key={item.id}
+                      item={item}
+                      planId={plan.id}
+                      analyzable={isAnalyzable(item.movement, analyzable)}
+                      busy={busyItem === item.id}
+                      onToggle={() => void patchItem(item.id, { completed: !item.completed_at })}
+                      onRemove={() => void removeItem(item.id)}
+                    />
+                  ))}
+                </ul>
+              )}
+
+              {/* A composed empty state, not a blank box: it says what this day IS and offers the
+                  one action that changes it. */}
+              {selectedItems.length === 0 && addingTo !== selectedDay && (
+                <div className="mt-3 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border-dark px-4 py-8 text-center">
+                  <Moon size={22} weight="duotone" className="text-faint" />
+                  <p className="max-w-sm text-sm leading-relaxed text-muted">
+                    {t("plans.restEmptyBody")}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAddingTo(selectedDay)}
+                    // `py-2.5` rather than the header pill's `py-1.5`: this is the only way out of
+                    // a rest day and it is meant to be tapped, so it clears the 36px touch target
+                    // (16px line + 2 x 10px) instead of the 28px a header-sized pill would give.
+                    className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border-dark bg-surface px-4 py-2.5 text-xs font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
+                    <Plus size={12} weight="bold" />
+                    {t("plans.addExercise")}
+                  </button>
+                </div>
+              )}
+
+              {addingTo === selectedDay && (
+                <div className="mt-3 max-w-xs">
+                  <AddExerciseForm
+                    day={selectedDay}
+                    busy={planBusy}
+                    onAdd={(item) => void addItem(item)}
+                    onCancel={() => setAddingTo(null)}
+                  />
+                </div>
+              )}
+            </section>
           </div>
 
           {/* Below the week, not beside it: it is a summary OF the bands above, and it sits inside
@@ -526,15 +600,18 @@ export default function PlanDetail() {
 }
 
 /**
- * What this day trains, as up to three muted chips on the day's own header line. Three and then a
- * count: a full session touches eight groups, and naming them all would out-shout the day label and
- * the add button sharing this row.
+ * What the FOCUSED day trains, as up to three muted chips on the day panel's header line. Three
+ * and then a count: a full session touches eight groups, and naming them all would out-shout the
+ * day label and the add button sharing this row.
  *
- * HIDDEN BELOW `sm`: the header is a single non-wrapping row (label / rest / rule / add button) and
- * at 375px the chips push the button off the card. The coverage summary under the bands carries the
- * same information on a phone, in a place that has room for it.
+ * VISIBLE AT EVERY WIDTH, unlike the version that lived on the old day bands. That one was hidden
+ * below `sm` because a band header was a single NON-WRAPPING row and at 375px the chips shoved the
+ * add button off the card. This header wraps (`flex-wrap` on the parent), and there is now exactly
+ * one of these on the page instead of seven, so the chips can take a second line on a phone
+ * instead of disappearing from it.
  *
- * A rest day has no items, so `dayMuscles` is empty and nothing renders.
+ * A rest day has no items, so `dayMuscles` is empty and nothing renders. The strip's tiles name
+ * only the top group, and the coverage card below names the whole week.
  */
 function DayMuscles({ items }: { items: PlanItem[] }) {
   const { t } = useI18n();
@@ -543,7 +620,7 @@ function DayMuscles({ items }: { items: PlanItem[] }) {
   const shown = muscles.slice(0, 3);
   const overflow = muscles.length - shown.length;
   return (
-    <ul className="hidden shrink-0 items-center gap-1.5 sm:flex">
+    <ul className="flex shrink-0 items-center gap-1.5">
       {shown.map((m) => (
         <li
           key={m}
