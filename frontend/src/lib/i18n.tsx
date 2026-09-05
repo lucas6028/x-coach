@@ -669,6 +669,10 @@ const en: Dict = {
   "plans.templatesSubtitle": "A copy is made — edit it however you like afterwards.",
   "plans.useTemplate": "Use this",
   "plans.templateItems": "{n} exercises over {days} days",
+  // The one-day templates ("Quick core session") otherwise read "over 1 days". Same
+  // singular-key idiom as plans.daysCount / plans.dayCountOne; this i18n layer has no
+  // plural engine, so a second key IS the plural rule.
+  "plans.templateItemsOneDay": "{n} exercises in one day",
 
   // Create dialog
   "plans.createTitle": "New training plan",
@@ -1822,6 +1826,7 @@ const zhHant: Dict = {
   "plans.templatesSubtitle": "範本會複製一份給你，之後想怎麼改都可以。",
   "plans.useTemplate": "直接使用",
   "plans.templateItems": "{days} 天、共 {n} 個動作",
+  "plans.templateItemsOneDay": "一天、共 {n} 個動作",
 
   // 建立菜單
   "plans.createTitle": "新增訓練菜單",

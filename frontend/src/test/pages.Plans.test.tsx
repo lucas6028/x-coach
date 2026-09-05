@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./renderWithProviders";
 import { api, type Plan, type PlanSummary, type PlanTemplate } from "../api";
@@ -118,6 +118,99 @@ describe("Plans — templates", () => {
     const field = screen.getByLabelText(/plan name/i) as HTMLInputElement;
     // Prefilled so the common case is one more click, not a naming decision.
     expect(field.value).toBe("Quick core session");
+  });
+
+  it("gives every template its own card, each carrying both actions", async () => {
+    // Mocked locally rather than in `beforeEach`: the other tests address "Use this" and
+    // "Customise with Lumen" in the singular, and a second template would make those ambiguous.
+    vi.mocked(api.planTemplates).mockResolvedValue([
+      template,
+      {
+        key: "full_body_starter",
+        name: "Full-body starter",
+        description: "Three sessions a week covering the whole body.",
+        items: [
+          { day_index: 1, movement: "Squat", sets: 3, reps: 10 },
+          { day_index: 1, movement: "Push-up", sets: 3, reps: 8 },
+          { day_index: 3, movement: "Row", sets: 3, reps: 10 },
+        ],
+      },
+    ]);
+    renderWithProviders(<Plans />);
+
+    for (const [name, meta] of [
+      // A one-day template takes the singular key, so this reads "in one day" rather than the
+      // "over 1 days" the plural string produced.
+      ["Quick core session", /2 exercises in one day/i],
+      ["Full-body starter", /3 exercises over 2 days/i],
+    ] as const) {
+      const card = (await screen.findByText(name)).closest("li") as HTMLElement;
+      // Each card stands on its own: what it is, how big it is, and both ways in.
+      expect(within(card).getByText(meta)).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: /use this/i })).toBeInTheDocument();
+      expect(within(card).getByRole("button", { name: /customise with lumen/i })).toBeInTheDocument();
+      // The actions are real buttons in the card, not a link wrapping the card — a card with two
+      // destinations cannot be one click target, and nothing here may nest interactives.
+      expect(card.querySelector("a")).toBeNull();
+    }
+  });
+
+  it("names the movements a template trains, capped with a +n", async () => {
+    vi.mocked(api.planTemplates).mockResolvedValue([
+      {
+        key: "full_body_starter",
+        name: "Full-body starter",
+        description: "Everything.",
+        items: ["Squat", "Push-up", "Row", "Lunge", "Deadlift", "Sit-up"].map((movement, i) => ({
+          day_index: 1,
+          movement,
+          sets: 3,
+          reps: 10 + i,
+        })),
+      },
+    ]);
+    renderWithProviders(<Plans />);
+    const card = (await screen.findByText("Full-body starter")).closest("li") as HTMLElement;
+    // Scoped to the PILL row, not the card: the muscle line below carries its own "+n" overflow,
+    // so a bare getByText("+2") would be asserting "somewhere on this card" and would go
+    // ambiguous the moment either limit changes.
+    const pills = card.querySelector("ul") as HTMLElement;
+    expect(within(pills).getByText("Squat")).toBeInTheDocument();
+    // Four pills then a count, the same ending PlanCard uses — nine distinct movements would
+    // otherwise be the whole card.
+    expect(within(pills).getAllByRole("listitem")).toHaveLength(5);
+    expect(within(pills).getByText("+2")).toBeInTheDocument();
+  });
+
+  it("disables only the Lumen action while that template is being created", async () => {
+    // Held open deliberately: the busy state exists to stop a double-fire, so it has to be
+    // observable while the request is still in flight.
+    let release!: (plan: Plan) => void;
+    vi.spyOn(api, "createPlan").mockReturnValue(
+      new Promise<Plan>((resolve) => {
+        release = resolve;
+      })
+    );
+    renderWithProviders(<Plans />);
+    const card = (await screen.findByText("Quick core session")).closest("li") as HTMLElement;
+    await userEvent.click(within(card).getByRole("button", { name: /customise with lumen/i }));
+
+    const busy = await within(card).findByRole("button", { name: /creating/i });
+    expect(busy).toBeDisabled();
+    // The plain copy route stays open: it does not go through the same request.
+    expect(within(card).getByRole("button", { name: /use this/i })).toBeEnabled();
+
+    release({
+      id: "new-plan",
+      name: "Quick core session",
+      notes: null,
+      template_key: "quick_core",
+      started_at: null,
+      created_at: "",
+      updated_at: "",
+      items: [],
+    });
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/plans/new-plan?coach=1"));
   });
 
   it("creates from the template and opens the new plan", async () => {

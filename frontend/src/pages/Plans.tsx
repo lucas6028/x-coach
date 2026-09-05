@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Plus, Sparkle, WarningCircle } from "@phosphor-icons/react";
+import { ArrowRight, CalendarBlank, Plus, Sparkle, WarningCircle } from "@phosphor-icons/react";
 import { Link, useNavigate } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import PlanCard from "../components/plans/PlanCard";
@@ -10,7 +10,7 @@ import { api, type Plan, type PlanSummary, type PlanTemplate } from "../api";
 import { movementLabel, useI18n } from "../lib/i18n";
 import { MuscleSummaryChips } from "../components/plans/PlanMuscleCoverage";
 import { currentDay, itemsByDay, progressRatio, templateText } from "../lib/plans";
-import { planCoverage } from "../lib/planMuscles";
+import { coverageOf, planCoverage } from "../lib/planMuscles";
 
 type Status = "loading" | "ready" | "error";
 
@@ -37,7 +37,7 @@ export default function Plans() {
   // explicit third state, because `undefined` would be indistinguishable from "closed".
   const [creatingFrom, setCreatingFrom] = useState<string | null>(null);
 
-  // The template currently being handed to Lumen, so its row can say so and cannot be double-fired.
+  // The template currently being handed to Lumen, so its card can say so and cannot be double-fired.
   const [customising, setCustomising] = useState<string | null>(null);
   const [customiseError, setCustomiseError] = useState("");
 
@@ -342,49 +342,90 @@ export default function Plans() {
                 </p>
               )}
 
-              {/* A strip of rows rather than a grid of cards: each template now carries two
-                  actions, and two buttons stacked in a card cell is a card that is mostly
-                  buttons. A row gives the description the width and the actions the end. */}
-              <ul className="mt-4 flex flex-col gap-2">
+              {/* Cards, on the same grid as the user's own plans above — asked for, and the old
+                  objection to them no longer applies. That objection assumed a card cell holding
+                  nothing but two stacked buttons; the cell now carries the body PlanCard carries
+                  (meta line, movement pills, muscle line), so the two actions are a FOOTER under
+                  content rather than the content, and they sit side by side in one row at every
+                  column width from about 1150px up. `mt-auto` on that row lines the actions up
+                  across cards whose descriptions run to different lengths; every card's two
+                  labels are identical, so where the column IS too narrow for one row (the
+                  1024-1150 band, where three columns are at their tightest) all five wrap the
+                  same way and the rows still line up. That fit is why "Use this" lost its `+`
+                  glyph here: with it, the pair overran a 1280px three-up column by two pixels.
+
+                  What is deliberately NOT copied from PlanCard: the whole-card lift and
+                  `active:scale`. PlanCard is one link, and the lift is what says so — a card with
+                  two actions must not claim to be a single click target, and `:active` on the cell
+                  would fire from a mousedown on either button. Hover and focus-within move the
+                  border and the shadow instead, and the real focus rings stay on the buttons. */}
+              <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
                 {templates.map((template) => {
                   const days = new Set(template.items.map((i) => i.day_index)).size;
-                  // Distinct movements only, and only the first few: the point of the line is
+                  // Distinct movements only, and only the first few: the point of the pills is
                   // "what does this train", which repeating "Squat" three times does not answer.
-                  const movements = [...new Set(template.items.map((i) => i.movement))].slice(0, 3);
+                  // Same cap and same `+n` ending as PlanCard — the full-body template holds nine
+                  // distinct movements and would otherwise be all pills.
+                  const movements = [...new Set(template.items.map((i) => i.movement))];
+                  const shown = movements.slice(0, 4);
+                  const overflow = movements.length - shown.length;
+                  // Ranked over DISTINCT movements, exactly as PlanCard ranks a plan summary's
+                  // `movements` — the two lines then mean the same thing on both cards.
+                  const muscles = coverageOf(movements).primary;
                   const busy = customising === template.key;
                   return (
                     <li
                       key={template.key}
-                      className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-2xl border border-border-dark bg-surface p-3 transition-colors hover:border-primary/30"
+                      className="flex h-full min-w-0 flex-col rounded-2xl border border-border-dark bg-surface p-4 shadow-card transition-all hover:border-primary/35 hover:shadow-card-hover focus-within:border-primary/35 focus-within:shadow-card-hover"
                     >
-                      <div className="min-w-[12rem] flex-1">
-                        <h3 className="font-display text-[15px] font-semibold text-content">
-                          {templateText(t, template.key, "name", template.name)}
-                        </h3>
-                        <p className="mt-0.5 text-xs leading-relaxed text-muted">
-                          {templateText(t, template.key, "desc", template.description)}
-                        </p>
-                        <p className="mt-1.5 text-[11px] tabular-nums text-faint">
-                          {t("plans.templateItems", { n: template.items.length, days })}
-                          <span aria-hidden="true"> · </span>
-                          {movements.map((m) => movementLabel(t, m)).join(" · ")}
-                        </p>
-                      </div>
+                      <h3 className="truncate font-display text-[15px] font-semibold text-content">
+                        {templateText(t, template.key, "name", template.name)}
+                      </h3>
+                      {/* The same meta line PlanCard draws, down to the icon and `tabular-nums`:
+                          it is the single strongest signal that these are the same kind of thing. */}
+                      <p className="mt-1 flex items-center gap-1.5 text-xs tabular-nums text-muted">
+                        <CalendarBlank size={13} weight="duotone" className="shrink-0" />
+                        {t(days === 1 ? "plans.templateItemsOneDay" : "plans.templateItems", {
+                          n: template.items.length,
+                          days,
+                        })}
+                      </p>
+                      <p className="mt-2 text-xs leading-relaxed text-muted">
+                        {templateText(t, template.key, "desc", template.description)}
+                      </p>
 
-                      <div className="flex shrink-0 items-center gap-2">
+                      <ul className="mt-3 flex flex-wrap gap-1.5">
+                        {shown.map((movement) => (
+                          <li
+                            key={movement}
+                            className="inline-flex items-center gap-1 rounded-full bg-content/[0.04] px-2 py-1 text-[11px] font-medium text-muted"
+                          >
+                            <MovementIcon movement={movement} size={13} />
+                            {movementLabel(t, movement)}
+                          </li>
+                        ))}
+                        {overflow > 0 && (
+                          <li className="inline-flex items-center rounded-full bg-content/[0.04] px-2 py-1 text-[11px] font-medium text-faint">
+                            +{overflow}
+                          </li>
+                        )}
+                      </ul>
+
+                      <MuscleSummaryChips muscles={muscles} className="mt-2" />
+
+                      <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-4">
                         <button
                           type="button"
                           onClick={() => setCreatingFrom(template.key)}
-                          className="inline-flex items-center gap-1.5 rounded-full border border-border-dark px-3.5 py-2 text-xs font-semibold text-content transition-all hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          className="inline-flex min-h-[36px] items-center gap-1.5 whitespace-nowrap rounded-full border border-border-dark px-3 py-2 text-xs font-semibold text-content transition-all hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                         >
-                          <Plus size={13} weight="bold" />
                           {t("plans.useTemplate")}
                         </button>
                         <button
                           type="button"
                           onClick={() => void customise(template)}
                           disabled={busy}
-                          className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary transition-all hover:bg-primary/15 active:scale-[0.98] disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                          className="inline-flex min-h-[36px] items-center gap-1.5 whitespace-nowrap rounded-full bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-all hover:bg-primary/15 active:scale-[0.98] disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                         >
                           <LumenAvatar size={15} />
                           {busy ? t("plans.creating") : t("plans.customiseWithLumen")}
