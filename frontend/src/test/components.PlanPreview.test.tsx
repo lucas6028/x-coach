@@ -124,7 +124,12 @@ describe("PlanPreview muscle coverage", () => {
     expect(screen.queryByText("Anterior")).toBeNull();
     expect(screen.queryByText("Posterior")).toBeNull();
     // The plate is the thing compact drops; the groups beside it are the thing it keeps.
-    expect(container.querySelectorAll("img").length).toBe(0);
+    // Scoped to the anatomical plates rather than every `img` on the page: the exercise rows now
+    // carry the movement-library figure too, and counting those would make this assertion fail for
+    // a reason that has nothing to do with what compact drops.
+    expect(container.querySelectorAll('img[src*="muscles-worked"]').length).toBe(0);
+    // Still present, so the scoping above cannot pass by finding no images at all.
+    expect(container.querySelectorAll('img[src^="/movements/"]').length).toBeGreaterThan(0);
   });
 
   it("layers one shipped plate per distinct movement", () => {

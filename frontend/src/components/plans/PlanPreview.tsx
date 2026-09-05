@@ -1,7 +1,7 @@
 import type { Plan, PlanItem } from "../../api";
 import { itemsByDay, PLAN_DAYS } from "../../lib/plans";
 import { movementLabel, useI18n } from "../../lib/i18n";
-import MovementIcon from "../movements/MovementIcon";
+import MovementArt from "../movements/MovementArt";
 import PlanMuscleCoverage from "./PlanMuscleCoverage";
 
 /** One row of the preview: a real day, or a run of consecutive rest days folded into a single line. */
@@ -90,9 +90,13 @@ export default function PlanPreview({ plan, compact }: { plan: Plan; compact?: b
                   // container -- in the builder's preview COLUMN two across at a 1024px window is
                   // two ~100px cells, every movement name an ellipsis. `compact` is the container
                   // signal the caller passes; without it the preview owns its full width.
+                  // Three across waits for `2xl`, not `xl`: the 64px figure stage takes width the
+                  // name column used to have, and at a 1280px window three cells left the movement
+                  // name truncated to about three characters ("Pu…", "Sit…"). Two across keeps the
+                  // name readable, which is the point of the row.
                   compact
                     ? "mt-3 grid grid-cols-1 gap-2"
-                    : "mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3"
+                    : "mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-3"
                 }
               >
                 {items.map((item) => (
@@ -102,7 +106,17 @@ export default function PlanPreview({ plan, compact }: { plan: Plan; compact?: b
                     key={item.id}
                     className="flex min-w-0 items-center gap-2.5 rounded-xl border border-border-dark bg-surface px-3 py-2.5"
                   >
-                    <MovementIcon movement={item.movement} size={17} />
+                    {/* The library figure, not the 17px glyph: this column is where the user
+                        watches a plan appear, and a name plus a monochrome pictogram does not tell
+                        them what Lumen just added. A thumbnail rather than the detail page's
+                        full-width stage — that card is a square, and a square per exercise in a
+                        ~400px preview column would make a nine-exercise week metres tall.
+                        The stage is the library's own: the art is an opaque pre-matted square, so
+                        it needs a square, full-bleed, rounded frame or its matte shows as a hard
+                        white box. */}
+                    <span className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-gradient-to-b from-[#f7f5ff] to-[#eceefb]">
+                      <MovementArt movement={item.movement} />
+                    </span>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px] font-medium text-content">
                         {movementLabel(t, item.movement)}
