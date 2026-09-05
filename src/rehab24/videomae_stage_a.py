@@ -147,8 +147,17 @@ def run_arm(
     config: FoldConfig,
     device: torch.device,
     seed: int,
+    retain_predictions: bool = False,
 ) -> list[dict]:
-    """Full LOSO for one feature dir, retaining per-sample predictions for strata."""
+    """Full LOSO for one feature dir, retaining per-sample predictions for strata.
+
+    ``retain_predictions`` additionally stores each fold's ``sample_ids`` and
+    ``probabilities`` on the fold record. It defaults to False so the committed
+    Stage A / framing artifacts keep their existing schema byte-for-byte; the
+    identity control turns it on to save out-of-fold probabilities WITHOUT
+    reimplementing the fold loop, which is the only way its OOF can be shown to
+    reproduce the framing folds exactly.
+    """
     folds: list[dict] = []
     for test_subject in ordered_subjects:
         val_subject = pick_val_subject(test_subject, ordered_subjects, sample_counts)
@@ -167,8 +176,14 @@ def run_arm(
             )
 
         metrics = compute_metrics(probabilities, fold_labels, threshold=threshold)
+        predictions = (
+            {"sample_ids": list(sample_ids), "probabilities": [float(p) for p in probabilities]}
+            if retain_predictions
+            else {}
+        )
         folds.append(
             {
+                **predictions,
                 "test_subject": test_subject,
                 "val_subject": val_subject,
                 "n_test": int(len(fold_labels)),
