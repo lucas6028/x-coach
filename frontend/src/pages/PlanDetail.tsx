@@ -283,20 +283,29 @@ export default function PlanDetail() {
 
   const panelOpen = coachOpen && !sheetCoach;
 
-  // WHY THE EXERCISE GRID NARROWS WITH THE PANEL: `xl:grid-cols-3` is a VIEWPORT query, so it
-  // still fires at 1280px once 400px of that viewport belongs to the coach. The arithmetic is the
-  // one recorded below — 1152 (max-w-6xl) − 48 (px) − 400 (panel) − 24 (gap) − 32 (band padding)
-  // − 16 (two gaps) leaves ~210px a cell against the ~241px a row needs, which is exactly the
-  // overflow that killed the seven-column version. Two across at that width gives ~320px.
-  // MEASURED, not guessed: at 1280 (the narrowest width that gets a panel at all) the plan column
-  // renders 483px, so two across is (483 - 32 padding - 8 gap) / 2 = 221px a cell -- under the
-  // 241px floor, and it showed: a zh-Hant screenshot at 1280 truncated the movement name and
-  // broke "3 組 x 12 下" over three lines. Two across needs a 522px column, which arrives at
-  // ~1320px of viewport, so `min-[1360px]` with a little margin. Below that the panel is open and
-  // the exercises simply run ONE across at the column's full width, which is never too narrow.
+  // COLUMN COUNTS FOR A CARD, NOT A ROW. The exercise used to be a thin horizontal band whose
+  // controls sat side by side with its label, which is why this grid used to guard a ~241px
+  // minimum cell and run only one across beside the coach panel. A `PlanItemRow` is now a card
+  // with a SQUARE art stage and its controls stacked underneath, so the binding constraint moved:
+  // the floor is the ~115px its action row needs (chip + 36px remove), and the CEILING is what
+  // matters instead — three across on a wide screen would make each figure ~350px tall, which is a
+  // poster, not a plan. So the counts go UP.
+  //
+  // Widths, measured against the shell (max-w-[1500px], 240px sidebar from `lg`, main `p-5`,
+  // content `max-w-6xl` with `px-4`/`lg:px-6`, day panel `p-4`, `gap-3`):
+  //   1500 viewport, 4 across → ~259px a cell (~239px of art)
+  //   1280 viewport, 4 across → ~216px
+  //    768 viewport, 3 across → ~226px
+  //    375 viewport, 2 across → ~151px (~131px of content, against the ~115px floor)
+  // Two across on a phone rather than one: one across would give a 300px figure and fit a single
+  // exercise on screen, which turns a day into a scroll.
+  //
+  // WHY THE COUNT STILL DROPS WITH THE PANEL: these are VIEWPORT queries, so `xl` still fires at
+  // 1280px once 400px of that viewport belongs to the coach. At 1280 with the panel the plan
+  // column is ~483px, which is two cards; three needs ~560px and arrives around 1360.
   const itemGrid = panelOpen
-    ? "mt-3 grid grid-cols-1 gap-2 min-[1360px]:grid-cols-2"
-    : "mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3";
+    ? "mt-3 grid grid-cols-2 gap-3 min-[1360px]:grid-cols-3"
+    : "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4";
 
   return (
     <AppLayout>
@@ -461,9 +470,8 @@ export default function PlanDetail() {
               </div>
 
               {selectedItems.length > 0 && (
-                // Up to three exercises across on a wide screen. The narrowest cell this produces
-                // is the phone's full width; the widest day still never squeezes a row below what
-                // its own controls need.
+                // Up to four exercises across on a wide screen, two on a phone — see the
+                // `itemGrid` arithmetic above for why the counts are what they are.
                 <ul className={itemGrid}>
                   {selectedItems.map((item) => (
                     <PlanItemRow

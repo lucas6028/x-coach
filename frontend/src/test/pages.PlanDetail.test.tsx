@@ -134,6 +134,15 @@ describe("PlanDetail — rendering", () => {
     expect(screen.getByText(/3 × 10/)).toBeInTheDocument();
   });
 
+  it("leads each exercise with the movements-library figure", async () => {
+    // The day panel and the movements library draw the same movement the same way. Queried by src
+    // because the figure is decoration (`alt=""`) and so has no accessible role of its own; the
+    // card's own behaviour is covered in components.plans.PlanItemRow.test.tsx.
+    const { container } = renderWithProviders(<PlanDetail />);
+    await screen.findByText("Squat");
+    expect(container.querySelector('img[src="/movements/squat.png"]')).toBeInTheDocument();
+  });
+
   it("shows the not-found state for a missing plan", async () => {
     vi.mocked(api.getPlan).mockRejectedValue(new Error("404"));
     renderWithProviders(<PlanDetail />);
