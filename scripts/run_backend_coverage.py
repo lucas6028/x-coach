@@ -43,6 +43,14 @@ _DEFAULT_TESTS = [
     # silently drops a measured module to ~40% and sinks the whole gate.
     "tests/test_plans_api.py",
     "tests/test_plans_store.py",
+    # The Lumen plan agent (backend/app/services/plan_agent.py) plus the generic tool-loop it shares
+    # with services/chat.py -- leaving this out drops plan_agent.py to 0% and sinks the gate.
+    "tests/test_plan_agent.py",
+    # The drift guard for src/pose/movements/muscles.py against the frontend movementDetail.ts.
+    # Not itself a backend.app module, but plan_agent.py's coverage() call site depends on the
+    # table it guards being honest, and the explicit default list above is the only thing that
+    # runs it under `--fail-under` without a caller remembering to name it by hand.
+    "tests/test_movement_muscles.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

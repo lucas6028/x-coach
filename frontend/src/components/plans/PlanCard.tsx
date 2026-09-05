@@ -2,7 +2,9 @@ import { CalendarBlank, CaretRight, CheckCircle } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import MovementIcon from "../movements/MovementIcon";
 import { movementLabel, useI18n } from "../../lib/i18n";
+import { MuscleSummaryChips } from "./PlanMuscleCoverage";
 import { progressRatio } from "../../lib/plans";
+import { coverageOf } from "../../lib/planMuscles";
 import type { PlanSummary } from "../../api";
 
 interface Props {
@@ -35,17 +37,24 @@ export default function PlanCard({ plan }: Props) {
   const shown = plan.movements.slice(0, 4);
   const overflow = plan.movements.length - shown.length;
 
+  // The list row carries `movements` (distinct names) and no items, so the card's muscle line is
+  // derived from those names — see `coverageOf` on why that can rank differently from the plan
+  // page, which counts every item.
+  const muscles = coverageOf(plan.movements).primary;
+
   return (
     <Link
       to={`/plans/${plan.id}`}
-      className="group flex h-full flex-col rounded-2xl border border-border-dark bg-surface p-4 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-card-hover"
+      className="group flex h-full flex-col rounded-2xl border border-border-dark bg-surface p-4 shadow-card transition-all hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-card-hover active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="truncate font-display text-[15px] font-semibold text-content">
             {plan.name}
           </h3>
-          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted">
+          {/* `tabular-nums` so the counts in a column of cards line up rather than jittering
+              with the glyph widths of "1" against "11". */}
+          <p className="mt-1 flex items-center gap-1.5 text-xs tabular-nums text-muted">
             <CalendarBlank size={13} weight="duotone" className="shrink-0" />
             {plan.day_count === 1
               ? t("plans.dayCountOne")
@@ -106,8 +115,12 @@ export default function PlanCard({ plan }: Props) {
         )}
       </ul>
 
+      {/* The movement pills say which exercises; this says which muscles. Both fit because they
+          read as different things — pills above, plain dotted names below. */}
+      <MuscleSummaryChips muscles={muscles} className="mt-2" />
+
       {plan.started_at && (
-        <p className="mt-auto pt-3 text-[11px] text-faint">
+        <p className="mt-auto pt-3 text-[11px] tabular-nums text-faint">
           {t("plans.startedOn", {
             date: new Date(plan.started_at).toLocaleDateString(lang),
           })}

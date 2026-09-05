@@ -19,14 +19,18 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.auth import CurrentUser, get_current_user
+from backend.app.services import plan_agent
 from backend.app.services import plans as plans_store
 from backend.app.services import store
+from backend.app.settings import get_settings, resolve_chat_model
 
 router = APIRouter(prefix="/api", tags=["plans"])
 
@@ -217,6 +221,27 @@ class UpdatePlanBody(BaseModel):
     notes: str | None = Field(None, max_length=500)
 
 
+class PlanChatMessage(BaseModel):
+    """One turn of the plan-agent conversation. Same shape as ``routers/chat.py::ChatMessage``."""
+
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1)
+
+
+class PlanChatRequest(BaseModel):
+    # The conversation so far, oldest first; the last entry must be the new user turn (422 otherwise).
+    messages: list[PlanChatMessage] = Field(..., min_length=1)
+    # None = "builder" mode, no plan yet. A uuid scopes the agent to that existing plan (404 if the
+    # caller does not own it).
+    plan_id: str | None = None
+    # The caller's chosen model, validated against the server allowlist exactly like /api/chat; an
+    # unknown/absent value falls back to the configured default.
+    model: str | None = None
+    # Drives the system prompt's language instruction. Defaults to zh-Hant, the product's primary
+    # audience (see CLAUDE.md's copy-style note).
+    lang: Literal["zh-Hant", "en"] = "zh-Hant"
+
+
 # ---------------------------------------------------------------------------
 # Templates. DECLARED BEFORE /plans/{plan_id}: FastAPI matches routes in declaration order, so the
 # dynamic route would otherwise swallow "templates" as a plan id and answer 404.
@@ -278,6 +303,54 @@ def create_plan(
         notes=body.notes,
         template_key=body.template_key,
         items=items,
+    )
+
+
+@router.post("/plans/chat")
+async def plan_chat(
+    body: PlanChatRequest,
+    user: CurrentUser = Depends(get_current_user),
+) -> StreamingResponse:
+    """Stream Lumen's plan-building/editing reply as Server-Sent Events.
+
+    DECLARED BEFORE ``/plans/{plan_id}``: FastAPI matches routes in declaration order, and without
+    this a POST to ``/plans/chat`` would parse ``"chat"`` as a plan id against the WRONG route (the
+    same reasoning ``/plans/templates`` documents above for GET). Pre-flight failures return a real
+    HTTP status before the stream opens -- 401 (no session), 503 (LLM unconfigured), 422 (last turn
+    not the user's), 404 (a given ``plan_id`` the caller does not own) -- mirroring ``POST /api/chat``
+    exactly. Once the 200 stream starts, every failure is an in-band ``error`` event instead.
+    """
+    if not get_settings().chat_configured:
+        raise HTTPException(
+            status_code=503,
+            detail="Conversational coaching is not configured on the server.",
+        )
+
+    if body.messages[-1].role != "user":
+        raise HTTPException(status_code=422, detail="The last message must be from the user.")
+
+    plan_id = _plan_uuid(body.plan_id) if body.plan_id is not None else None
+    if plan_id is not None and not plans_store.plan_exists(
+        token=user.token, plan_id=plan_id, user_id=user.id
+    ):
+        raise HTTPException(status_code=404, detail=f"No plan '{body.plan_id}'.")
+
+    messages = [m.model_dump() for m in body.messages]
+    # resolve_chat_model reads the admin overrides, which can do a synchronous Supabase round-trip on
+    # a cold cache -- run it in a threadpool so it never blocks the event loop (routers/chat.py:112).
+    model = await run_in_threadpool(resolve_chat_model, body.model)
+
+    return StreamingResponse(
+        plan_agent.plan_chat_stream(
+            messages=messages,
+            plan_id=plan_id,
+            token=user.token,
+            user_id=user.id,
+            model=model,
+            lang=body.lang,
+        ),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

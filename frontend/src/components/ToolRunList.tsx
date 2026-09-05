@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Wrench } from "@phosphor-icons/react";
 import { useI18n } from "../lib/i18n";
 import type { ToolRun } from "../api";
 import { LumenLoader } from "./LumenLoader";
@@ -6,7 +7,20 @@ import { LumenLoader } from "./LumenLoader";
 // The tools we have i18n labels for. A name outside this list falls back to the generic label —
 // `t()` returns the key itself on a miss (i18n.tsx), so an unguarded lookup would render a raw key
 // like "chat.tool.something_else" into the tray.
-const TOOL_LABEL_KEYS = ["get_analysis", "kg_query", "rag_search"] as const;
+// The last six are the plan coach's tools (POST /api/plans/chat). They live in the same list
+// because the renderer is shared: PlanCoach hands its live runs to this component unchanged, and a
+// name missing here would draw the raw key "chat.tool.add_item" into the plan thread.
+const TOOL_LABEL_KEYS = [
+  "get_analysis",
+  "kg_query",
+  "rag_search",
+  "get_plan",
+  "create_plan",
+  "add_item",
+  "update_item",
+  "remove_item",
+  "update_plan",
+] as const;
 
 // A committed `ToolRun` plus the one live field the renderer cares about. `pending` is absent on a
 // message restored from history — a stored record is finished by definition.
@@ -49,11 +63,17 @@ function ToolRunRow({ run }: { run: DisplayToolRun }) {
   const sources = Array.isArray(run.sources) ? run.sources : [];
   const isConcept = sources.some((s) => s.kind === "concept");
   return (
-    <div className="text-xs text-muted" aria-busy={!!run.pending}>
+    <div
+      // A tinted, rounded row rather than a bare line: a tool call is a step the coach took, and
+      // three of them stacked under one answer otherwise read as three loose fragments of text.
+      className="rounded-xl bg-content/[0.02] px-2.5 py-1.5 text-xs text-muted"
+      aria-busy={!!run.pending}
+    >
       {/* The label, the query, and the pending marker share ONE element: the marker is an element
           child, which testing-library's text matcher ignores, so the line still matches by text and
           still parents the source block below it. */}
       <div className="flex items-center gap-2">
+        <Wrench size={12} weight="bold" aria-hidden="true" className="shrink-0 text-faint" />
         {known ? t(`chat.tool.${run.name}`) : t("chat.tool.generic")}
         {run.query ? `${t("chat.tool.sep")}${run.query}` : ""}
         {run.pending && (
@@ -67,7 +87,7 @@ function ToolRunRow({ run }: { run: DisplayToolRun }) {
         )}
       </div>
       {sources.length > 0 && (
-        <div className="mt-1 flex flex-col gap-0.5 pl-3">
+        <div className="mt-1 flex flex-col gap-0.5 pl-6">
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}

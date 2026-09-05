@@ -1,23 +1,56 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, Play, Plus, Trash, WarningCircle } from "@phosphor-icons/react";
-import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, Moon, Play, Plus, Trash, WarningCircle, X } from "@phosphor-icons/react";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import ConfirmDialog from "../components/ConfirmDialog";
 import AddExerciseForm from "../components/plans/AddExerciseForm";
+import PlanCoach from "../components/plans/PlanCoach";
 import PlanItemRow from "../components/plans/PlanItemRow";
-import { api, type NewPlanItem, type Plan } from "../api";
+import { LumenAvatar } from "../components/LumenLoader";
+import { api, type NewPlanItem, type Plan, type PlanItem } from "../api";
 import { useI18n } from "../lib/i18n";
 import type { AnalyzableMovement } from "../lib/movements";
-import { PLAN_DAYS, currentDay, isAnalyzable, itemsByDay, progressRatio } from "../lib/plans";
+import { useIsMobile, useMediaQuery } from "../lib/useIsMobile";
+import PlanMuscleCoverage from "../components/plans/PlanMuscleCoverage";
+import WeekStrip from "../components/plans/WeekStrip";
+import {
+  PLAN_DAYS,
+  currentDay,
+  isAnalyzable,
+  itemsByDay,
+  progressRatio,
+  usedDays,
+} from "../lib/plans";
+import { dayMuscles } from "../lib/planMuscles";
 
 type Status = "loading" | "ready" | "error";
 
-// One plan, as one full-width band per day. Editing is immediate — every tick, add and remove is its own
+/** The `tabpanel` the week strip drives, and how each tile's `tab` is named. Module-level rather
+ *  than generated: there is exactly one plan page at a time, and a stable id is what lets the
+ *  panel point back at the tab that opened it. */
+const DAY_PANEL_ID = "plan-day-panel";
+const dayTabId = (day: number) => `plan-day-tab-${day}`;
+
+// One plan, as a week strip plus one focused day. Editing is immediate — every tick, add and remove is its own
 // request and the local copy is patched from the response, rather than a save button over a draft:
 // a plan is edited while standing in a gym, and a draft that needs saving is a draft that gets lost.
 export default function PlanDetail() {
   const { t, lang } = useI18n();
   const { planId = "" } = useParams();
+  const isMobile = useIsMobile();
+  // WHY A SECOND, WIDER BREAKPOINT THAN `useIsMobile`: the coach column is 400px wide, and the
+  // plan beside it needs room for a real exercise row. Below 1280px it does not have it -- at
+  // 1024px the plan column lands at ~232px against the ~241px one row needs, which is the exact
+  // overflow recorded on the day-band comment below: the rows collapse and the "add exercise"
+  // button escapes the band and ends up UNDER the panel, unreachable. So between 1024 and 1279
+  // the coach opens as the same bottom sheet the phone uses -- an overlay borrows no width -- and
+  // only from `xl` does it become a column of the page.
+  const sheetCoach = useMediaQuery("(max-width: 1279px)");
+  const [searchParams] = useSearchParams();
+
+  // `?coach=1` opens the panel — read ONCE, into the initial state. Kept as an effect it would
+  // re-open the panel every time the user closed it, since the param is still in the URL.
+  const [coachOpen, setCoachOpen] = useState(() => searchParams.get("coach") === "1");
 
   const [plan, setPlan] = useState<Plan | null>(null);
   const [status, setStatus] = useState<Status>("loading");
@@ -34,6 +67,15 @@ export default function PlanDetail() {
   // plan. `null` for the plan-level actions (start, delete).
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [addingTo, setAddingTo] = useState<number | null>(null);
+
+  // WHICH DAY THE PANEL SHOWS, as "the one the user picked, or else the derived one" — NOT as a
+  // day number seeded by an effect. The distinction matters twice. Before the user has picked
+  // anything, `null` lets the selection track the plan: tick off the last exercise of day 1 and
+  // the panel moves to day 2, and a week Lumen rewrote opens on ITS current day rather than on
+  // whatever the old plan's day happened to be. After they have picked, the number wins and
+  // nothing moves under them — an effect that recomputed a stored default would yank the panel
+  // away mid-edit every time a tick changed `currentDay`.
+  const [pickedDay, setPickedDay] = useState<number | null>(null);
   const [confirming, setConfirming] = useState<"delete" | "restart" | null>(null);
   const [planBusy, setPlanBusy] = useState(false);
   const [itemError, setItemError] = useState("");
@@ -67,6 +109,17 @@ export default function PlanDetail() {
       cancelled = true;
     };
   }, []);
+
+  // The sheet is a modal, so Escape dismisses it like every other dialog in the app. The desktop
+  // panel is a column of the page, not an overlay, and deliberately ignores Escape.
+  useEffect(() => {
+    if (!sheetCoach || !coachOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCoachOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sheetCoach, coachOpen]);
 
   // Splice the changed item into the local copy rather than refetching the plan: a refetch after
   // every tick would reorder nothing and cost a round trip, and it would also blank the day columns
@@ -148,7 +201,7 @@ export default function PlanDetail() {
   const backLink = (
     <Link
       to="/plans"
-      className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-content"
+      className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors hover:text-content active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     >
       <ArrowLeft size={14} weight="bold" />
       {t("plans.back")}
@@ -178,7 +231,18 @@ export default function PlanDetail() {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <main className="mx-auto max-w-6xl px-4 py-8 lg:px-6 lg:py-12">
             {backLink}
-            <div className="mt-6 h-[420px] animate-pulse rounded-2xl border border-border-dark bg-surface" />
+            {/* Shaped like what arrives — a title block, the week strip, then one day panel — so
+                the page does not visibly re-flow the moment the plan lands. */}
+            <div className="mt-4 h-8 w-56 animate-pulse rounded-lg bg-content/[0.06]" />
+            <div className="mt-6 flex gap-2">
+              {PLAN_DAYS.map((day) => (
+                <div
+                  key={day}
+                  className="h-[76px] min-w-[7.5rem] flex-1 basis-0 animate-pulse rounded-2xl border border-border-dark bg-surface"
+                />
+              ))}
+            </div>
+            <div className="mt-3 h-[152px] animate-pulse rounded-2xl border border-border-dark bg-surface" />
           </main>
         </div>
       </AppLayout>
@@ -190,19 +254,84 @@ export default function PlanDetail() {
   const today = currentDay(plan.items);
   const ratio = progressRatio(completed, plan.items.length);
 
+  // The default the brief asks for, in order: the day the user is on, else the first day that
+  // holds anything, else day 1. `currentDay` is null on a FINISHED plan, which is why the second
+  // fallback exists — otherwise completing a week would drop the panel onto an empty day 1.
+  const selectedDay = pickedDay ?? today ?? usedDays(plan.items)[0] ?? 1;
+  const selectedItems = days[selectedDay - 1];
+
+  // One component in two frames: a column beside the plan on a wide desktop, a sheet over it
+  // anywhere narrower. Exactly ONE of the two call sites below renders at a time -- two mounted
+  // copies would be two live conversations. `onPlan` replaces the page's plan in place — a tool that rewrote the week has already
+  // handed back the whole fresh plan, so a refetch would only blank the bands to learn what we
+  // were just told.
+  // The sheet IS the card, so the panel inside it drops its own shell — a bordered, rounded,
+  // shadowed card sitting inside a bordered, rounded sheet is one frame too many.
+  const renderCoach = (className: string) => (
+    <PlanCoach
+      planId={plan.id}
+      onPlan={setPlan}
+      suggestions={[
+        t("plans.coach.chipFourDays"),
+        t("plans.coach.chipFewerSets"),
+        t("plans.coach.chipSwap"),
+        t("plans.coach.chipCore"),
+      ]}
+      className={className}
+    />
+  );
+
+  const panelOpen = coachOpen && !sheetCoach;
+
+  // COLUMN COUNTS FOR A CARD, NOT A ROW. The exercise used to be a thin horizontal band whose
+  // controls sat side by side with its label, which is why this grid used to guard a ~241px
+  // minimum cell and run only one across beside the coach panel. A `PlanItemRow` is now a card
+  // with a SQUARE art stage and its controls stacked underneath, so the binding constraint moved:
+  // the floor is the ~115px its action row needs (chip + 36px remove), and the CEILING is what
+  // matters instead — three across on a wide screen would make each figure ~350px tall, which is a
+  // poster, not a plan. So the counts go UP.
+  //
+  // The counts came DOWN again, on the user's instruction ("make the figure bigger in every day").
+  // The note above argued that three across makes a poster rather than a plan; that judgement was
+  // overruled, and the figure won. Keeping the old counts while this comment said otherwise would
+  // leave the next reader trusting a rule the code no longer follows.
+  //
+  // Widths, measured against the shell (max-w-[1500px], 240px sidebar from `lg`, main `p-5`,
+  // content `max-w-6xl` with `px-4`/`lg:px-6`, day panel `p-4`, `gap-3`):
+  //   1500 viewport, 3 across → ~350px a cell (~330px of art), was ~239px at four across
+  //   1024 viewport, 3 across → ~305px
+  //    768 viewport, 2 across → ~345px, was ~226px at three across
+  //    375 viewport, 2 across → ~151px, unchanged
+  // The phone stays at two across. One would give a ~300px figure and fit a single exercise on
+  // screen, turning a day into a scroll — that part of the old reasoning still holds, and nobody
+  // complained about the phone.
+  //
+  // WITH THE PANEL the plan column is ~483px at 1280 and ~560px at 1360, so two across is what
+  // fits at either width; the extra column it used to gain at 1360 is what made those figures
+  // small, so it is gone.
+  const itemGrid = panelOpen
+    ? "mt-3 grid grid-cols-2 gap-3"
+    : "mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3";
+
   return (
     <AppLayout>
       <div className="flex-1 min-h-0 overflow-y-auto">
         <main className="mx-auto max-w-6xl px-4 py-8 lg:px-6 lg:py-12">
           {backLink}
 
+          <div
+            className={
+              panelOpen ? "grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]" : undefined
+            }
+          >
+          <div className="min-w-0">
           <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
               <h1 className="font-display text-2xl font-bold text-content">{plan.name}</h1>
               {plan.notes && (
                 <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted">{plan.notes}</p>
               )}
-              <p className="mt-2 text-xs text-muted">
+              <p className="mt-2 text-xs tabular-nums text-muted">
                 {plan.started_at
                   ? `${t("plans.progress", { done: completed, total: plan.items.length })} · ${
                       today === null
@@ -216,11 +345,24 @@ export default function PlanDetail() {
             </div>
 
             <div className="flex shrink-0 items-center gap-2">
+              {/* Desktop only: on a phone this same panel is reached from the floating button
+                  below, because a fifth control in this row would wrap onto its own line. */}
+              {!isMobile && (
+                <button
+                  type="button"
+                  onClick={() => setCoachOpen((v) => !v)}
+                  aria-expanded={coachOpen}
+                  className="inline-flex items-center gap-2 rounded-full border border-border-dark bg-surface px-4 py-2 text-[13px] font-semibold text-content transition-all hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                >
+                  <LumenAvatar size={17} />
+                  {coachOpen ? t("plans.coach.close") : t("plans.coach.open")}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => (plan.started_at ? setConfirming("restart") : void start())}
                 disabled={planBusy || plan.items.length === 0}
-                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-[13px] font-semibold text-primary-content shadow-accent transition-colors hover:bg-primary/90 disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2 text-[13px] font-semibold text-primary-content shadow-accent transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
               >
                 <Play size={14} weight="fill" />
                 {planBusy
@@ -233,7 +375,7 @@ export default function PlanDetail() {
                 type="button"
                 onClick={() => setConfirming("delete")}
                 aria-label={t("plans.deletePlan")}
-                className="rounded-full border border-border-dark p-2 text-faint transition-colors hover:border-danger/40 hover:text-danger"
+                className="rounded-full border border-border-dark p-2 text-faint transition-all hover:border-danger/40 hover:text-danger active:scale-[0.95] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-danger"
               >
                 <Trash size={15} weight="duotone" />
               </button>
@@ -256,89 +398,194 @@ export default function PlanDetail() {
             </p>
           )}
 
-          {/* ONE FULL-WIDTH BAND PER DAY, not seven columns across.
-              Seven columns was the first attempt and it broke: at >=1280px each day got ~147px
-              while a single exercise row needs ~241px, so the row overflowed its card by 120px
-              (spilling over the next day) and the flex-1 label was crushed to ZERO width -- the
-              movement name simply disappeared. A day column cannot hold a horizontal row carrying a
-              checkbox, an icon, a name, an action and a delete button, and no amount of truncation
-              fixes that; the row's fixed parts alone exceed the column.
-              Bands also spend the vertical space where it is earned: a rest day is one thin line
-              here instead of a full-height empty column, and the days that hold work get the whole
-              page width for their exercises. Every day is still shown, rest days included, so
-              "Day 3" means the same thing in every plan. */}
-          <div className="mt-6 flex flex-col gap-3">
-            {PLAN_DAYS.map((day) => {
-              const items = days[day - 1];
-              const isToday = today === day;
-              return (
-                <section
-                  key={day}
-                  className={`rounded-2xl border p-4 ${
-                    isToday ? "border-primary/40 bg-primary/[0.03]" : "border-border-dark bg-surface"
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <h2
-                      className={`shrink-0 text-xs font-semibold uppercase tracking-wider ${
-                        isToday ? "text-primary" : "text-faint"
-                      }`}
-                    >
-                      {t("plans.day", { n: day })}
-                    </h2>
-                    {items.length === 0 && addingTo !== day && (
-                      <span className="shrink-0 text-[11px] text-faint">{t("plans.rest")}</span>
-                    )}
-                    <span className="h-px flex-1 bg-border-dark" />
-                    {addingTo !== day && (
-                      <button
-                        type="button"
-                        onClick={() => setAddingTo(day)}
-                        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border-dark px-3 py-1 text-[11px] font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary"
-                      >
-                        <Plus size={12} weight="bold" />
-                        {t("plans.addExercise")}
-                      </button>
-                    )}
-                  </div>
+          {/* THE WEEK AS A STRIP OF SEVEN SUMMARY TILES, PLUS ONE FOCUSED DAY.
+              Two earlier layouts are buried under this one, and both failures come down to the
+              same measurement, so it is recorded here as well as in WeekStrip.
 
-                  {items.length > 0 && (
-                    // Up to three exercises across on a wide screen. The narrowest cell this
-                    // produces is the phone's full width; the widest day still never squeezes a row
-                    // below what its own controls need.
-                    <ul className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-                      {items.map((item) => (
-                        <PlanItemRow
-                          key={item.id}
-                          item={item}
-                          planId={plan.id}
-                          analyzable={isAnalyzable(item.movement, analyzable)}
-                          busy={busyItem === item.id}
-                          onToggle={() =>
-                            void patchItem(item.id, { completed: !item.completed_at })
-                          }
-                          onRemove={() => void removeItem(item.id)}
-                        />
-                      ))}
-                    </ul>
-                  )}
+              (1) SEVEN COLUMNS, each holding its own exercises. At >=1280px a column is ~147px
+              while one exercise ROW needs ~241px — a checkbox, an icon, a name, an action chip and
+              a delete button — so rows overflowed their column by ~120px into the next day and the
+              flex-1 movement NAME was squeezed to zero width and vanished. Truncation cannot save
+              it: the fixed parts alone exceed the column. THE RULE THAT COMES OUT OF THAT, and the
+              one thing not to regress: an exercise row never goes in a narrow per-day column. A
+              narrow tile holding only a SUMMARY — a label, a count, a bar, one muscle name — is
+              fine, because every part of it can shrink.
 
-                  {addingTo === day && (
-                    <div className="mt-3 max-w-xs">
-                      <AddExerciseForm
-                        day={day}
-                        busy={planBusy}
-                        onAdd={(item) => void addItem(item)}
-                        onCancel={() => setAddingTo(null)}
-                      />
-                    </div>
-                  )}
-                </section>
-              );
-            })}
+              (2) SEVEN FULL-WIDTH BANDS stacked down the page. Legal, but it gave a rest day the
+              same visual weight as a training day: a three-day plan drew three bands of content and
+              then four near-empty ones, each still carrying a label, a hairline and a button, so
+              most of the page was furniture — and there was no "week" anywhere, only a list you
+              scrolled.
+
+              The strip is the summary layer (narrow is fine there) and the panel below it is the
+              row layer, at the FULL page width the rows need. Every day still exists in the strip,
+              rest days included, so "Day 3" means the same thing in every plan. */}
+          <div className="mt-6">
+            <WeekStrip
+              days={days}
+              selected={selectedDay}
+              today={today}
+              onSelect={(day) => {
+                setPickedDay(day);
+                // The add form belongs to the day it was opened on. Leaving it open across a
+                // selection change would let someone fill it in while looking at Wednesday and
+                // land the exercise on Monday.
+                setAddingTo(null);
+              }}
+              panelId={DAY_PANEL_ID}
+              tabId={dayTabId}
+            />
+
+            <section
+              id={DAY_PANEL_ID}
+              role="tabpanel"
+              aria-labelledby={dayTabId(selectedDay)}
+              tabIndex={-1}
+              className="mt-3 rounded-2xl border border-border-dark bg-surface p-4"
+            >
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <h2 className="shrink-0 text-sm font-semibold text-content">
+                  {t("plans.day", { n: selectedDay })}
+                </h2>
+                <span className="shrink-0 text-xs text-faint">
+                  {selectedItems.length === 0
+                    ? t("plans.rest")
+                    : selectedItems.length === 1
+                      ? t("plans.exerciseCountOne")
+                      : t("plans.exerciseCount", { n: selectedItems.length })}
+                </span>
+                <DayMuscles items={selectedItems} />
+                <span className="h-px min-w-6 flex-1 bg-border-dark" />
+                {/* A rest day's only add action is the one inside its empty state below — two
+                    buttons saying "Add exercise" a hundred pixels apart is a choice the user does
+                    not have to make. */}
+                {addingTo !== selectedDay && selectedItems.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAddingTo(selectedDay)}
+                    // `ml-auto` for the wrapped case: this header wraps, and when the chips push
+                    // the button onto a second line the hairline spacer stays behind on the first
+                    // one, so without it the button lands hard against the left margin instead of
+                    // where its whole line expects it.
+                    className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-border-dark px-3.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
+                    <Plus size={12} weight="bold" />
+                    {t("plans.addExercise")}
+                  </button>
+                )}
+              </div>
+
+              {selectedItems.length > 0 && (
+                // Up to four exercises across on a wide screen, two on a phone — see the
+                // `itemGrid` arithmetic above for why the counts are what they are.
+                <ul className={itemGrid}>
+                  {selectedItems.map((item) => (
+                    <PlanItemRow
+                      key={item.id}
+                      item={item}
+                      planId={plan.id}
+                      analyzable={isAnalyzable(item.movement, analyzable)}
+                      busy={busyItem === item.id}
+                      onToggle={() => void patchItem(item.id, { completed: !item.completed_at })}
+                      onRemove={() => void removeItem(item.id)}
+                    />
+                  ))}
+                </ul>
+              )}
+
+              {/* A composed empty state, not a blank box: it says what this day IS and offers the
+                  one action that changes it. */}
+              {selectedItems.length === 0 && addingTo !== selectedDay && (
+                <div className="mt-3 flex flex-col items-center gap-3 rounded-xl border border-dashed border-border-dark px-4 py-8 text-center">
+                  <Moon size={22} weight="duotone" className="text-faint" />
+                  <p className="max-w-sm text-sm leading-relaxed text-muted">
+                    {t("plans.restEmptyBody")}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setAddingTo(selectedDay)}
+                    // `py-2.5` rather than the header pill's `py-1.5`: this is the only way out of
+                    // a rest day and it is meant to be tapped, so it clears the 36px touch target
+                    // (16px line + 2 x 10px) instead of the 28px a header-sized pill would give.
+                    className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-border-dark bg-surface px-4 py-2.5 text-xs font-medium text-muted transition-colors hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  >
+                    <Plus size={12} weight="bold" />
+                    {t("plans.addExercise")}
+                  </button>
+                </div>
+              )}
+
+              {addingTo === selectedDay && (
+                <div className="mt-3 max-w-xs">
+                  <AddExerciseForm
+                    day={selectedDay}
+                    busy={planBusy}
+                    onAdd={(item) => void addItem(item)}
+                    onCancel={() => setAddingTo(null)}
+                  />
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* Below the week, not beside it: it is a summary OF the bands above, and it sits inside
+              the same column so the sticky Lumen panel keeps its own full height. */}
+          <PlanMuscleCoverage items={plan.items} className="mt-3" compact={panelOpen} />
+          </div>
+
+            {/* Sticky and full-height with its own scroll, like the builder's chat column: a long
+                plan scrolls past a conversation that stays put. */}
+            {panelOpen && (
+              <aside className="h-[600px] min-h-0 xl:sticky xl:top-6 xl:h-[min(calc(100vh-14rem),46rem)]">
+                {renderCoach("h-full")}
+              </aside>
+            )}
           </div>
         </main>
       </div>
+
+      {/* PHONE: a floating way in, and a sheet rather than a column — there is no second column on
+          a phone, and the plan is what the user came to look at. Lifted clear of the tab bar's
+          own safe-area inset so it never sits on top of the navigation. */}
+      {isMobile && !coachOpen && (
+        <button
+          type="button"
+          onClick={() => setCoachOpen(true)}
+          aria-label={t("plans.coach.open")}
+          className="fixed bottom-[calc(max(env(safe-area-inset-bottom),0.75rem)+5.25rem)] right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-primary shadow-accent transition-transform active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+        >
+          <LumenAvatar size={30} />
+        </button>
+      )}
+
+      {sheetCoach && coachOpen && (
+        <div className="fixed inset-0 z-40 flex flex-col justify-end bg-content/30">
+          {/* The backdrop is a dismiss target, not a control: `aria-hidden` keeps it out of the
+              accessibility tree, where it would otherwise be a second element named "Close
+              Lumen" competing with the button in the sheet. */}
+          <div aria-hidden="true" onClick={() => setCoachOpen(false)} className="flex-1" />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("chat.coach")}
+            className="flex h-[78vh] flex-col rounded-t-2xl border-t border-border-dark bg-surface pb-[max(env(safe-area-inset-bottom),0.75rem)]"
+          >
+            <div className="mb-1 flex shrink-0 justify-end px-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setCoachOpen(false)}
+                aria-label={t("plans.coach.close")}
+                className="rounded-full p-2.5 text-faint transition-colors hover:bg-content/[0.06] hover:text-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+              >
+                <X size={16} weight="bold" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1">
+              {renderCoach("h-full rounded-none border-0 shadow-none")}
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmDialog
         open={confirming === "restart"}
@@ -363,5 +610,44 @@ export default function PlanDetail() {
         onCancel={() => setConfirming(null)}
       />
     </AppLayout>
+  );
+}
+
+/**
+ * What the FOCUSED day trains, as up to three muted chips on the day panel's header line. Three
+ * and then a count: a full session touches eight groups, and naming them all would out-shout the
+ * day label and the add button sharing this row.
+ *
+ * VISIBLE AT EVERY WIDTH, unlike the version that lived on the old day bands. That one was hidden
+ * below `sm` because a band header was a single NON-WRAPPING row and at 375px the chips shoved the
+ * add button off the card. This header wraps (`flex-wrap` on the parent), and there is now exactly
+ * one of these on the page instead of seven, so the chips can take a second line on a phone
+ * instead of disappearing from it.
+ *
+ * A rest day has no items, so `dayMuscles` is empty and nothing renders. The strip's tiles name
+ * only the top group, and the coverage card below names the whole week.
+ */
+function DayMuscles({ items }: { items: PlanItem[] }) {
+  const { t } = useI18n();
+  const muscles = dayMuscles(items);
+  if (muscles.length === 0) return null;
+  const shown = muscles.slice(0, 3);
+  const overflow = muscles.length - shown.length;
+  return (
+    <ul className="flex shrink-0 items-center gap-1.5">
+      {shown.map((m) => (
+        <li
+          key={m}
+          className="rounded-full bg-content/[0.05] px-2 py-0.5 text-[10.5px] font-medium text-faint"
+        >
+          {t(`muscle.${m}`)}
+        </li>
+      ))}
+      {overflow > 0 && (
+        <li className="text-[10.5px] font-medium tabular-nums text-faint">
+          {t("plans.muscles.more", { n: overflow })}
+        </li>
+      )}
+    </ul>
   );
 }
