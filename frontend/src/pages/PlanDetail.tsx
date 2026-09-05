@@ -291,21 +291,27 @@ export default function PlanDetail() {
   // matters instead — three across on a wide screen would make each figure ~350px tall, which is a
   // poster, not a plan. So the counts go UP.
   //
+  // The counts came DOWN again, on the user's instruction ("make the figure bigger in every day").
+  // The note above argued that three across makes a poster rather than a plan; that judgement was
+  // overruled, and the figure won. Keeping the old counts while this comment said otherwise would
+  // leave the next reader trusting a rule the code no longer follows.
+  //
   // Widths, measured against the shell (max-w-[1500px], 240px sidebar from `lg`, main `p-5`,
   // content `max-w-6xl` with `px-4`/`lg:px-6`, day panel `p-4`, `gap-3`):
-  //   1500 viewport, 4 across → ~259px a cell (~239px of art)
-  //   1280 viewport, 4 across → ~216px
-  //    768 viewport, 3 across → ~226px
-  //    375 viewport, 2 across → ~151px (~131px of content, against the ~115px floor)
-  // Two across on a phone rather than one: one across would give a 300px figure and fit a single
-  // exercise on screen, which turns a day into a scroll.
+  //   1500 viewport, 3 across → ~350px a cell (~330px of art), was ~239px at four across
+  //   1024 viewport, 3 across → ~305px
+  //    768 viewport, 2 across → ~345px, was ~226px at three across
+  //    375 viewport, 2 across → ~151px, unchanged
+  // The phone stays at two across. One would give a ~300px figure and fit a single exercise on
+  // screen, turning a day into a scroll — that part of the old reasoning still holds, and nobody
+  // complained about the phone.
   //
-  // WHY THE COUNT STILL DROPS WITH THE PANEL: these are VIEWPORT queries, so `xl` still fires at
-  // 1280px once 400px of that viewport belongs to the coach. At 1280 with the panel the plan
-  // column is ~483px, which is two cards; three needs ~560px and arrives around 1360.
+  // WITH THE PANEL the plan column is ~483px at 1280 and ~560px at 1360, so two across is what
+  // fits at either width; the extra column it used to gain at 1360 is what made those figures
+  // small, so it is gone.
   const itemGrid = panelOpen
-    ? "mt-3 grid grid-cols-2 gap-3 min-[1360px]:grid-cols-3"
-    : "mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4";
+    ? "mt-3 grid grid-cols-2 gap-3"
+    : "mt-3 grid grid-cols-2 gap-3 lg:grid-cols-3";
 
   return (
     <AppLayout>
