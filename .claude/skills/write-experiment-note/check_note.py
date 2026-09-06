@@ -190,7 +190,10 @@ def check_file(path: str) -> tuple[list[str], list[str]]:
             "spelled out inline — a reader without the plan open cannot resolve it"
         )
 
-    coined = {term: english for term, english in TRANSLATED_JARGON.items() if term in text}
+    # A coinage used ONLY as the parenthesised gloss right after its English term
+    # ("within-class position（類內位置）") is exactly what the rule asks for.
+    glossed = re.sub(r"[A-Za-z][A-Za-z0-9 \-]*（[^（）]{1,12}）", "", text)
+    coined = {term: english for term, english in TRANSLATED_JARGON.items() if term in glossed}
     if coined:
         warns.append(
             "Chinese coinages used where the English term belongs ("
