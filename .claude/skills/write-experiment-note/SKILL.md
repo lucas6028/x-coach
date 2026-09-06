@@ -77,6 +77,34 @@ codes. Concretely:
 - `[[some-name]]` is a **memory-file link** — it dangles for every reader outside
   this machine. Cite the note path or the number in prose.
 
+### Technical terms stay in English — never coin a Chinese translation
+
+The prose is Chinese; the **terms** are English. A lab-mate searches the literature,
+the code, and the sibling notes by the English word, and a home-made translation
+breaks every one of those lookups. This applies to:
+
+- Statistics and metrics: `ROC-AUC`, `balanced accuracy`, `Spearman ρ`, `permutation
+  test`, `null distribution`, `bootstrap CI`, `Holm`, `Wilcoxon`, `p-value`, `subject-macro`.
+- Experimental-design vocabulary: `gate`, `positive control`, `negative control`,
+  `pre-registration`, `plan deviation`, `primary` / `secondary`, `arm`, `fold`, `LOSO`,
+  `within-session`, `within-class position`, `residualization`, `probe`, `drift`,
+  `shortcut`, `confound`, `floor` / `ceiling`, `undetermined`.
+- Method and model names, dataset names, identifiers, file names, CLI flags.
+
+Write the English term and, **on first use only**, a short Chinese gloss of what it
+*means* in parentheses — then use the English term for the rest of the note.
+
+- ✅ `within-class position（同一段錄影、同一標籤的 rep 裡排第幾）` … later just
+  `within-class position`.
+- ✅ `positive control（證明介入真的拿掉了東西的檢查）` … later `positive control`.
+- ❌ `類內位置`, `位置平衡`, `殘差化`, `正控制`, `門檻`(for gate), `探針`(for probe),
+  `漂移`(for drift), `虛無分布`(for null distribution), `捷徑`(for shortcut) used as
+  *the* term. These read as invented vocabulary and cannot be grepped or cited.
+
+Chinese is right for ordinary prose, for the gloss, and for plain words that are not
+terms of art (做對／做錯, 錄影, 受試者, 第幾下). When in doubt, ask: would a reader
+type this word into Google Scholar or `grep`? If yes, it stays English.
+
 If the user asks for a wider audience than that, ask what they want dropped — do
 not unilaterally cut the statistics.
 
