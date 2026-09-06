@@ -1,160 +1,146 @@
 ---
 name: write-experiment-note
-description: The standing convention for every note under notes/ — 寫 note、寫實驗筆記、寫實驗結果、整理實驗結果、記錄實驗、把結果寫成 note、實驗跑完要寫下來、寫事前登錄計畫、改寫 note、重寫 note、把 note 寫給大家看/寫得讓人看得懂、潤飾實驗筆記; also write, draft, or clean up an experiment note, results note, findings note, ablation/control writeup, or pre-registration plan in notes/. Use whenever an experiment, ablation, control, measurement, or validation run has finished and the outcome needs writing down — and whenever an existing notes/*.md is unclear, jargon-heavy, or written only for its author.
+description: The standing convention for every note under notes/ — 寫 note、寫實驗筆記、寫實驗結果、整理實驗結果、記錄實驗、把結果寫成 note、實驗跑完要寫下來、寫事前登錄計畫、改寫 note、重寫 note、把 note 寫給大家看/寫得讓人看得懂、潤飾實驗筆記; also write, draft, or clean up an experiment note, results note, findings note, ablation/control writeup, or pre-registration plan in notes/. Use whenever an experiment, ablation, control, measurement, or validation run has finished and the outcome needs writing down — and whenever an existing notes/*.md is unclear, jargon-heavy, or written only for its author. Notes are written in English regardless of the language of the request.
 ---
 
-# Notes convention (`notes/*.md`)
+# Experiment notes (`notes/*.md`)
 
-**This is how every note in `notes/` gets written from now on** — new ones first,
-rewrites second. Paths are relative to the repo root.
+**Notes are written in English.** This holds regardless of the language the request came
+in; ask for a note in Chinese and the note is still English. Only reply to the user in
+their language, and only outside the file.
 
-Worked reference: **`notes/rehab24_videomae_framing_results.md`**. Read it before
-writing your first note in this genre.
+The genre is an **internal analysis memo**: a curated retrospective report, organised by
+question and result, written after the run for a teammate who was not there. It is *not*
+a lab notebook. Chronology, dead ends, timing benchmarks and failed attempts do not
+belong in the note; if they need keeping, put them in a run log next to the artifacts.
 
-A PostToolUse hook (`.claude/settings.json`) lints every `notes/*.md` written with
-the **Write or Edit tool** and reports back automatically. It is advisory — never
-blocks, structure only. **A `sed`/heredoc write through Bash bypasses it entirely**
-(the payload carries a command string, not a file path), so when you write a note
-that way, run the linter by hand.
+Reference note, matching this convention exactly:
+**`notes/rehab24_videomae_position_control_results.en.md`**. Read it before writing your
+first note in this genre. Older notes in `notes/` are Chinese and predate this rule; they
+are still valid, but do not copy their register.
 
-## Writing a new note
+## The skeleton
 
-1. **Before the experiment runs**, if it has a pre-registered plan, write
-   `notes/<stem>_validation_plan.md` first: hypotheses, the primary comparison,
-   exclusion rules, and the interpretation table. Fix them before any number
-   exists. (See `rehab24_videomae_framing_validation_plan.md` §7–8 for the shape.)
-2. **Title states the finding or the question** — never "實驗 3 結果".
-3. **Front the answer**: an emphasised block before the first `##`
-   (`**Question.**` / `**Verdict:**` / `**這份文件在回答什麼**`) or a first section
-   that is the lead (`## 一句話` / `## 兩句話` / `## 0.`). Method comes after.
-4. **Report the gates** that had to pass before you looked at any accuracy, and
-   the deviations from the plan — including ones that changed nothing.
-5. **Results with dispersion**: point estimate, ± std, how many subjects/folds
+```markdown
+# <Declarative title carrying the finding, with the number if there is one>
+
+*<dataset> · <what kind of experiment> · run <date> · <link to the plan or sibling note>*
+
+**Result.** The headline in two or three sentences: what was done, the one number that
+answers the question, with dispersion and n.
+
+**Caveat on reading it.** Only if something qualifies the headline: a failed gate, a plan
+deviation, a scope limit that a reader must carry with the number. Omit if there is none.
+
+## Background
+Why this experiment had to happen. Two to four sentences and a pointer to the prior note.
+Not a motivational essay.
+
+## Method
+What was measured or intervened on, and the one design decision a reader would otherwise
+get wrong. Then the procedure, compactly. State what was fixed before results existed.
+
+## Gates
+Table of the checks that had to pass before any outcome was looked at, with pass/fail.
+A failed gate goes here in full, not in a footnote.
+
+## Results
+The main table: arms as rows, the statistic with dispersion, n above chance, interval,
+p. Per-unit values below it. Then at most three sentences saying what pattern to see.
+
+## Secondary
+Analyses that qualify but never replace the main result. Compact.
+
+## <Bounds / controls>
+Zero-parameter or upper-bound controls, named for what they measure.
+
+## Deviations from the plan
+Table: item, what the plan said, what happened, what it changes. Include deviations that
+changed nothing.
+
+## Not supported
+Bulleted. What the result does not license, including the limits a reader would otherwise
+assume away.
+
+## Reproduce
+Code paths, the commands in order, runtime and hardware, artifact paths.
+```
+
+Sections are dropped when they have no content, not padded. A note without a plan has no
+Gates or Deviations section; a note with no controls has no Bounds section. The spine that
+always survives: title, Result, Method, Results, Not supported, Reproduce.
+
+## Register
+
+Flat reporting. The reader already wants the answer, so nothing needs to be sold.
+
+- **Declarative title stating the finding**, with the number when there is one.
+  "Removing the linear position subspace costs 0.019 of within-session AUC", not
+  "Position control results" and not a question.
+- **Tables carry the numbers.** Prose says what pattern to see in them, in a few
+  sentences. A measurement staged as a prose set-piece is a rhetorical device.
+- **No second person, no rhetorical framing.** Cut "a nastier story", "this door was wide
+  open", "sail straight through untouched", and open questions ranked by how much they
+  should worry the reader. Vivid prose gets audited less carefully than flat prose, which
+  is the opposite of what a control experiment is for.
+- **One idea per sentence.** Short paragraphs. No narrative walk-through; if one session
+  or fold is worth showing, give its numbers in three lines and move on.
+- **Standard terminology, used as-is.** Expand an uncommon acronym on first use. Do not
+  invent shorthand, and do not translate terms of art.
+- **Identifiers get a one-line gloss on first use.** `full_frame_letterbox`,
+  `person_crop`, arm, gate, floor. Keep the identifier, it matches filenames, but never
+  use one naked. Say what a `P0`/`P1`-style label is *for* instead of using the label.
+- **Add a terminology table** when the note leans on more than about three pieces of
+  project-specific vocabulary.
+- **`[[some-name]]` is a memory-file link** and dangles for every reader outside this
+  machine. Cite the note path or the number in prose.
+
+Default audience: a teammate who knows basic ML but nothing about this project. Keep the
+statistics. If a wider audience is wanted, ask what to drop rather than cutting them.
+
+## The rules
+
+1. **Write the plan first.** If the experiment is pre-registered, write
+   `notes/<stem>_validation_plan.md` before the run: hypotheses, the primary comparison,
+   exclusion rules, the interpretation table. Fix them before any number exists, and
+   commit it before producing results.
+2. **The title states the finding**, per Register above.
+3. **Front the answer** in a `**Result.**` block before the first `##`. Method comes after.
+4. **Report the gates**, including the ones that failed, and every plan deviation,
+   including the ones that changed nothing.
+5. **Every number carries dispersion**: point estimate, ± SD, how many subjects or folds
    went the same way, and the interval. Never a bare mean.
-6. **Write the ❌ list** — see rule 4 below. Write it even when the result is good.
-7. **End with reproduction**: artifact paths under `data/`, the script to re-run.
-8. **Run the linter** (below) before you call it done.
+6. **`p ≥ 0.05` is "undetermined"**, never "no difference" and never "equivalent". An
+   equivalence claim needs an equivalence test and power this project does not have. This
+   is the single most load-bearing rule in the corpus.
+7. **A number that could be a floor or a ceiling is labelled as one.** If a control was
+   only partly effective, say what that does to the estimate.
+8. **Every claim traces to a measured number, a pre-registered rule, or a cited note**,
+   never to reasoning invented while writing. When a rule lives in a sibling
+   `*_validation_plan.md`, read the plan and spell the rule out inline; a bare `§8` is
+   unreadable to anyone without that file open.
+9. **Write the "Not supported" section**, even when the result is good.
+10. **End with reproduction**: code paths, commands, runtime, artifact paths under `data/`.
+11. **Run the linter** before calling it done.
 
-## The six rules
+## Rewriting an existing note
 
-Each is the corpus convention, not taste — cited notes are where to see it.
+Everything above still applies. Additionally:
 
-1. **The title states the finding or the question.**
-   `videomae_b1_repeated_splits_results.md`: 「person-crop 的 +0.026 是分割雜訊」.
-   `rehab24_box_geometry_control.md`: 「不泛化,但查出了更大的東西」.
-
-2. **Front the answer.** `fit3d_sparse_depth_summary.md` (`**Question.**`),
-   `camera-placement-hypothesis.md` (`**Verdict:**`), `videomae_b1_...` (`## 一句話`).
-
-3. **`p ≥ 0.05` is "undetermined", never "no difference" and never "equivalent."**
-   Pre-registered in `rehab24_videomae_framing_validation_plan.md` §7.2 and the
-   single most load-bearing rule in the corpus. Claiming equivalence needs an
-   equivalence test and power this project does not have.
-
-4. **Every note carries a "what this does NOT support" section.** Named variously:
-   `可以說 / 不能說`, `確立 / 未測`, `沒做的事`, `Caveats (honest)`,
-   `One confound named`.
-
-5. **Every claim traces to a measured number, a pre-registered rule, or a cited
-   note** — never to reasoning you invented while writing. If a rule lives in a
-   sibling `*_validation_plan.md`, **read the plan and spell the rule out inline**;
-   a bare `§8` is unreadable to anyone without that file open.
-
-6. **End with reproduction.** See the `## 重現` / `Reproduce:` tail in
-   `model_fusion_gate_results.md`, `fit3d_sparse_depth_summary.md`.
-
-## 講重點 — the reader must be able to say "所以呢"
-
-A note that is correct but leaves the reader 不知所以然 has failed. The model to
-imitate is the understanding path of `~/.claude/skills/illustrated-explainer`
-(為什麼 → 直覺 → 機制 → 結果 → 所以呢), adapted to a results note:
-
-1. **Lead = four plain sentences, in this order, before any table.**
-   (a) 我們原本擔心什麼／想知道什麼 — the doubt in one sentence a non-member can feel.
-   (b) 我們做了什麼 — the intervention in words, no method names yet.
-   (c) 看到什麼 — the one number that answers (a), with its dispersion.
-   (d) **所以呢** — what changes because of (c): which claim survives, which dies,
-   what the next step is. If (d) is missing, the note has no point.
-2. **Intuition before every statistic.** The first time a statistic appears, one
-   sentence says what it measures *in this experiment's terms* and why that one
-   (「within-session AUC：只在同一段錄影裡比，所以人、衣服、背景這些整段不變的東西
-   對它零貢獻——這正是我們要排除的」). A number whose meaning the reader cannot
-   restate is noise.
-3. **Every section opens with the question it answers**, in one line, and closes
-   with the answer in one line. A reader skimming only first and last lines of each
-   section must get the whole argument.
-4. **One concrete walk-through.** Pick one session / one subject / one fold and show
-   the numbers for it end to end (「P4 這段錄影 12 個 rep：位置規則排出 …，模型排出
-   …，殘差化後 …」). The abstract statistic becomes real; a wrong intuition shows
-   up here first.
-5. **Tell the reader how to read a table before showing it**, and after it say what
-   pattern to see (「三件事同時成立：…」). A table dropped without a reading is a
-   data dump, not a finding.
-6. **Name the surprise.** If the result differs from the pre-registered expectation
-   (plan §5-style prior), say so in the lead and say what it means, not only in a
-   deviation table.
-7. **Cut anything that does not serve (d).** Provenance, hashes, gate logs, ddof
-   footnotes go to a gates section or an appendix. The body carries the argument.
-
-Worked contrast (from `rehab24_videomae_position_control_results.md`, 2026-09-06):
-
-- ❌ 不知所以然: 「移除 k = 1 個方向後，AUC 0.8720 ± 0.0439；但 §6.3 的 positive
-  control 沒過，probe 仍有 +0.26，primary 依計畫不判讀。k = 16：0.8556，probe 中位數
-  +0.05 落回 null。」 — every number is right; a lab-mate cannot say what was learned.
-- ✅ 講重點: 「我們擔心模型是在讀『這一下在錄影的什麼位置』而不是動作。所以把特徵裡
-  能預測位置的方向拿掉再重訓。結果：位置訊息在特徵裡是真的、而且很寬（要拿掉 16 個
-  方向才拿乾淨），但拿乾淨之後模型在同一段錄影裡排對錯的能力幾乎沒變（0.8741 → 0.8556，
-  9/9 位受試者仍 > 0.5）。所以：『訊號來自畫面裡的人』這句話保住了，代價是註明線性
-  位置路徑最多佔 5%、非線性路徑沒測；原本登錄的『只拿一個方向』不夠，是 plan deviation。」
-
-Self-check before calling a note done: read only the lead and the first/last line of
-each section. If you cannot reconstruct 為什麼做 → 做了什麼 → 看到什麼 → 所以呢, rewrite
-the lead, not the tables.
-
-## Register — who it is for
-
-Default audience: **a lab-mate who knows basic ML but nothing about this project.**
-Keep the statistics (balanced accuracy, LOSO, Wilcoxon, Holm); kill the private
-codes. Concretely:
-
-- Every internal identifier (`full_frame_letterbox`, `person_crop`, arm/臂, gate,
-  floor) gets a one-line plain gloss on first use. Keep the identifier — it matches
-  filenames — but never use one naked.
-- `P0`/`P1`/`P2`-style labels: say what the thing is *for* instead.
-- Add a 名詞說明 section when the note leans on more than ~3 pieces of vocabulary.
-- `[[some-name]]` is a **memory-file link** — it dangles for every reader outside
-  this machine. Cite the note path or the number in prose.
-
-### Technical terms stay in English — never coin a Chinese translation
-
-The prose is Chinese; the **terms** are English. A lab-mate searches the literature,
-the code, and the sibling notes by the English word, and a home-made translation
-breaks every one of those lookups. This applies to:
-
-- Statistics and metrics: `ROC-AUC`, `balanced accuracy`, `Spearman ρ`, `permutation
-  test`, `null distribution`, `bootstrap CI`, `Holm`, `Wilcoxon`, `p-value`, `subject-macro`.
-- Experimental-design vocabulary: `gate`, `positive control`, `negative control`,
-  `pre-registration`, `plan deviation`, `primary` / `secondary`, `arm`, `fold`, `LOSO`,
-  `within-session`, `within-class position`, `residualization`, `probe`, `drift`,
-  `shortcut`, `confound`, `floor` / `ceiling`, `undetermined`.
-- Method and model names, dataset names, identifiers, file names, CLI flags.
-
-Write the English term and, **on first use only**, a short Chinese gloss of what it
-*means* in parentheses — then use the English term for the rest of the note.
-
-- ✅ `within-class position（同一段錄影、同一標籤的 rep 裡排第幾）` … later just
-  `within-class position`.
-- ✅ `positive control（證明介入真的拿掉了東西的檢查）` … later `positive control`.
-- ❌ `類內位置`, `位置平衡`, `殘差化`, `正控制`, `門檻`(for gate), `探針`(for probe),
-  `漂移`(for drift), `虛無分布`(for null distribution), `捷徑`(for shortcut) used as
-  *the* term. These read as invented vocabulary and cannot be grepped or cited.
-
-Chinese is right for ordinary prose, for the gloss, and for plain words that are not
-terms of art (做對／做錯, 錄影, 受試者, 第幾下). When in doubt, ask: would a reader
-type this word into Google Scholar or `grep`? If yes, it stays English.
-
-If the user asks for a wider audience than that, ask what they want dropped — do
-not unilaterally cut the statistics.
+1. **`--numbers` before and after.** Every measured figure survives. When the diff reports
+   a dropped token, check it individually: a figure now written at higher precision, or a
+   narrative restatement of a number that is still present, is fine; a lost measurement is
+   not.
+2. **Move, don't delete.** Audit-trail material goes to an appendix. A gate result that is
+   itself a finding stays in the body.
+3. **Collapse revision-history narration.** A note saying "the previous version said…" is
+   talking to itself. State the resolved position.
+4. **A stale claim contradicting a later section is a real bug.** Fix it by grounding in a
+   measured number, never by authoring new reasoning. If it cannot be grounded, flag it to
+   the user instead of inventing a justification.
+5. **A derived number is not a verified number.** Re-deriving `87.6% ≈ (75.3+100)/2` is a
+   guess until the JSON is open.
+6. **Translating an existing Chinese note is a rewrite**, so `--numbers` applies to it.
 
 ## Harness
 
@@ -167,45 +153,34 @@ not unilaterally cut the statistics.
 .venv/Scripts/python.exe .claude/skills/write-experiment-note/check_note.py --numbers notes/foo.md
 ```
 
-The linter checks structure only. Register, whether jargon was actually expanded,
-and whether a claim traces to a measured number are **not** machine-checkable.
-A `pass` does not mean the note is good.
+A PostToolUse hook (`.claude/settings.json`) lints every `notes/*.md` written with the
+Write or Edit tool and reports back. It is advisory and never blocks. **A `sed`/heredoc
+write through Bash bypasses it entirely**, so after one of those, run `check_note.py` by
+hand.
 
-Baseline for calibration: **24 of 39 notes pass, including all 15 current-standard
-results notes**; the 15 failures are older `## 背景`-first summaries, walkthroughs,
-and dataset references. If a note you consider good fails, fix the rule in
-`check_note.py`, not the note.
+The linter checks structure only. Register, whether terminology was actually glossed, and
+whether a claim traces to a measured number are **not** machine-checkable. A pass does not
+mean the note is good.
 
-## Rewriting an existing note
-
-Everything above still applies. Additionally:
-
-1. `--numbers` before and after. **Every figure survives verbatim.**
-2. **Move, don't delete.** Audit-trail material (plan deviations, extraction logs,
-   gate output, reproduction checks) goes to appendices — but a gate result that is
-   itself a finding stays in the body.
-3. **Collapse revision-history narration.** A note saying 「本 note 的前一版寫…」 is
-   talking to itself; state the resolved position.
-4. **A stale claim contradicting a later section is a real bug — fix it by grounding
-   in a measured number, never by authoring new reasoning.** If you cannot ground it,
-   flag it to the user instead of inventing a justification.
-5. **A derived number is not a verified number.** Re-deriving `87.6% ≈ (75.3+100)/2`
-   is a guess until you open the JSON.
+Calibration: 29 of 44 notes pass. The 15 failures are older `## 背景`-first summaries,
+walkthroughs and dataset references that predate the convention. If a note you consider
+good fails, fix the rule in `check_note.py`, not the note.
 
 ## Gotchas
 
-- **No bare `python` on this machine** — a guard hook blocks it. Always
+- **No bare `python` on this machine.** A guard hook blocks it. Always
   `.venv/Scripts/python.exe`.
-- **The Bash and PowerShell tools share one cwd.** A `cd notes` in one call persists
-  and silently breaks every later relative path. Use paths from the repo root.
-- **`jq` is not installed here.** The hook parses its stdin payload in Python for
-  exactly this reason — do not "simplify" it back to a jq pipeline.
-- **Multiset number-diffing is useless** for a restructuring rewrite — section
-  numbers (`§7.2`, `## 3.1`) dominate the noise. `check_note.py` strips those and
-  set-diffs; do not change it back to counting occurrences.
-- **The equivalence warning over-fires by design.** It flags any line pairing a
-  p-value with 等價/沒有差異 — including lines that correctly say "p = 0.570 是
-  未定,不是等價". Read it, don't silence it.
-- **Results tables can disagree across sections legitimately** (a pooled rate vs a
-  per-camera vs a per-frame rate). When two of your own numbers look contradictory,
-  label the measurement definition — a reader will otherwise read it as an error.
+- **The Bash and PowerShell tools share one cwd.** A `cd notes` in one call persists and
+  silently breaks every later relative path. Use paths from the repo root.
+- **`jq` is not installed here.** The hook parses its stdin payload in Python for exactly
+  this reason; do not "simplify" it back to a jq pipeline.
+- **Multiset number-diffing is useless** for a restructuring rewrite, because section
+  numbers dominate the noise. `check_note.py` strips those and set-diffs; do not change it
+  back to counting occurrences.
+- **The equivalence warning over-fires by design.** It flags any line pairing a p-value
+  with an equivalence word, including lines that correctly say "p = 0.570 is undetermined,
+  not equivalent". Read it, do not silence it.
+- **Results tables can disagree across sections legitimately**: a pooled rate, a
+  per-camera rate and a per-frame rate are different measurements. When two of your own
+  numbers look contradictory, label the measurement definition, or a reader will read it
+  as an error.

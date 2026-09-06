@@ -5,10 +5,14 @@ WHAT THIS CHECKS: only mechanically-decidable structure — that the note has a
 claim-shaped title, a lead conclusion, an honesty/limits section, a reproduction
 pointer, and a link to its pre-registration plan when one exists on disk.
 
-WHAT THIS CANNOT CHECK: register (是否寫給人看), whether jargon was actually
-expanded, whether a claim traces to a measured number, or whether a rewrite
-preserved every figure. Those are the substance of the skill and live in
-SKILL.md. A PASS here does NOT mean the note is good.
+WHAT THIS CANNOT CHECK: register (flat reporting vs. persuasion), whether
+terminology was actually glossed, whether a claim traces to a measured number,
+or whether a rewrite preserved every figure. Those are the substance of the
+skill and live in SKILL.md. A PASS here does NOT mean the note is good.
+
+New notes are written in English (SKILL.md). The Chinese notes already in the
+corpus predate that rule and still pass every check here; only a NEW note that
+is majority-CJK draws a warning.
 
 Usage (from repo root):
     .venv/Scripts/python.exe .claude/skills/write-experiment-note/check_note.py notes/foo.md
@@ -42,7 +46,11 @@ import sys
 # are the ones the corpus actually uses, in both Chinese and English notes.
 
 # A title that states the question or the finding, not "Experiment 3 results".
-TITLE_CLAIM_MARK = re.compile(r"[?？—–:：]")
+# Claim-shaped means one of: punctuation that introduces a claim after a topic
+# ("B1 repeated splits: …"), a question mark, or a measured figure in the title
+# itself, which is what the current English convention asks for ("Removing the
+# linear position subspace costs 0.019 of within-session AUC").
+TITLE_CLAIM_MARK = re.compile(r"[?？—–:：]|\d")
 TITLE_LABEL_ONLY = re.compile(r"^(結果|摘要|實驗摘要|results|summary|notes?)$", re.I)
 
 # A lead block that fronts the answer/question before the method. The corpus does
@@ -50,7 +58,7 @@ TITLE_LABEL_ONLY = re.compile(r"^(結果|摘要|實驗摘要|results|summary|not
 # (**Question.** / **Goal.** / **Verdict:** / **這份文件在回答什麼**), or a first
 # section that is itself the lead (`## 一句話`, `## 0. 事前登錄`, `## 兩句話`).
 LEAD_HEADING_PAT = re.compile(
-    r"^##\s*(0[\.、\s]|一句話|兩句話|三句話|TL;?DR|結論|Conclusion|Summary|Verdict)",
+    r"^##\s*(0[\.、\s]|一句話|兩句話|三句話|TL;?DR|結論|Conclusion|Summary|Verdict|Result)",
     re.M | re.I,
 )
 LEAD_BLOCK_PAT = re.compile(r"(\*\*[^*\n]+\*\*|^>\s)", re.M)
@@ -112,6 +120,33 @@ def plan_sibling(path: str) -> str | None:
     return None
 
 
+CJK_PAT = re.compile(r"[\u4e00-\u9fff]")
+LATIN_WORD_PAT = re.compile(r"[A-Za-z]{2,}")
+
+
+def is_majority_cjk(text: str) -> bool:
+    """Rough language test: CJK characters vs. Latin words in the prose.
+
+    Deliberately crude. It only has to separate "a Chinese note" from "an English
+    note that quotes a few Chinese identifiers or legacy headings", and it is only
+    ever consulted for files that are not yet in git HEAD.
+    """
+    cjk = len(CJK_PAT.findall(text))
+    latin = len(LATIN_WORD_PAT.findall(text))
+    return cjk > max(40, latin * 0.5)
+
+
+def in_head(path: str) -> bool:
+    try:
+        subprocess.run(
+            ["git", "cat-file", "-e", f"HEAD:{path.replace(os.sep, '/')}"],
+            capture_output=True, check=True,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
 # Home-made Chinese translations of terms of art. Advisory: the English term is what a
 # reader greps, cites, and searches the literature for; a coinage breaks all three. Only
 # words that are NOT standard Chinese prose are listed -- 受試者, 錄影, 做對／做錯 are fine,
@@ -151,8 +186,9 @@ def check_file(path: str) -> tuple[list[str], list[str]]:
             # convention is to state the finding or the question.
             warns.append(
                 f"H1 reads as a label rather than a claim or question: {title!r} — "
-                "for a results note the corpus states the finding in the title, e.g. "
-                "'B1 repeated splits:person-crop 的 +0.026 是分割雜訊'"
+                "a results note states the finding in the title, ideally with the "
+                "number, e.g. 'Removing the linear position subspace costs 0.019 of "
+                "within-session AUC'"
             )
 
     lead_zone = text.split("\n## ", 1)[0]
@@ -198,8 +234,15 @@ def check_file(path: str) -> tuple[list[str], list[str]]:
         warns.append(
             "Chinese coinages used where the English term belongs ("
             + ", ".join(f"{term}→{english}" for term, english in sorted(coined.items())[:8])
-            + "): technical terms stay in English with a Chinese gloss on first use only "
-            "(SKILL.md 'Technical terms stay in English')"
+            + "): in a Chinese note, terms of art stay in English with a gloss on first "
+            "use only. New notes are written in English outright (SKILL.md)."
+        )
+
+    if is_majority_cjk(text) and not in_head(path):
+        warns.append(
+            "this reads as a new Chinese note — notes are written in English regardless "
+            "of the language of the request (SKILL.md, first line). Existing Chinese "
+            "notes are exempt; a translation counts as a rewrite, so run --numbers on it"
         )
 
     for i, line in enumerate(text.splitlines(), 1):
