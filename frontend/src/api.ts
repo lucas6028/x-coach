@@ -314,18 +314,42 @@ export interface ChatContext {
 // fire, so the two failure modes stay distinguishable to the caller.
 export interface ChatStreamHandlers {
   onDelta: (text: string) => void;
-  onDone: (model: string) => void;
+  // `extra` carries the plan-chat-only fields of the `done` frame. Optional trailing argument so
+  // every existing caller — which passes a one-parameter function — stays assignable.
+  onDone: (model: string, extra?: { plan_id?: string }) => void;
   onError: (detail: string) => void;
   // The coach started a tool call. Fires BEFORE the tool runs, so the UI can name the lookup while
   // it is still in flight. Optional so a caller that doesn't surface tool progress is unaffected.
   onTool?: (id: number, name: string, query: string) => void;
   // That tool call finished. Always fires once per `onTool`, even with no sources — it is the
   // completion signal, not the sources signal, so a tool with nothing to cite still settles.
-  onToolDone?: (id: number, sources: ToolSource[]) => void;
+  onToolDone?: (id: number, sources: ToolSource[], extra?: { plan?: Plan }) => void;
   // Discard everything streamed so far this turn: the round that produced it also called a tool, so
   // its text was narration ("let me look that up"), not the answer. Safe because the caller commits
   // the assistant turn only once the stream ends.
   onReset?: () => void;
+  // PLAN CHAT ONLY. A `tool_done` frame whose tool wrote the plan carries the full fresh plan; this
+  // fires for it regardless of whether the frame could be correlated to a run (see dispatchSSE).
+  // `/api/chat` never emits it, so the analysis tray simply never sets this handler.
+  onPlan?: (plan: Plan) => void;
+}
+
+// Handlers for `planChatStream`. Deliberately NOT `ChatStreamHandlers`: the plan coach cares about
+// the plan a tool wrote, not about the sources it cited, and it wants the whole live run rather
+// than three positional fields. The wire format is identical — only the shape handed to the caller
+// differs — so both go through the one `dispatchSSE` parser via an adapter.
+export interface PlanChatStreamHandlers {
+  onDelta: (text: string) => void;
+  /** A plan tool started. The run arrives ready to push onto the live list (`pending: true`). */
+  onTool?: (run: LiveToolRun) => void;
+  /** That tool settled. `extra.plan` is present only for a tool that wrote the plan. */
+  onToolDone?: (id: number, extra: { plan?: Plan }) => void;
+  /** Convenience: the fresh plan from any `tool_done` that carried one. */
+  onPlan?: (plan: Plan) => void;
+  onReset?: () => void;
+  /** `plan_id` is present when a plan exists at the end of the turn (created now, or passed in). */
+  onDone: (info: { model: string; plan_id?: string }) => void;
+  onError: (detail: string) => void;
 }
 
 // A persisted chat thread for one analysed video (one per user+video_id). Restored on history-replay.
@@ -521,6 +545,9 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
     query?: string;
     sources?: ToolSource[];
     id?: number;
+    // Plan chat only: the full fresh plan a write tool produced, and the plan the turn ended with.
+    plan?: Plan;
+    plan_id?: string;
   };
   try {
     data = JSON.parse(dataLines.join("\n"));
@@ -536,11 +563,36 @@ function dispatchSSE(frame: string, handlers: ChatStreamHandlers): void {
   // against the current backend (which always sends an id): two id-less `tool` frames in one turn
   // would both land as -1, and a `tool_done` carrying `id: -1` would then write to both rows. Not
   // worth defensive code for a case the server never produces.
-  else if (event === "tool_done" && typeof data.id === "number")
-    handlers.onToolDone?.(data.id, data.sources ?? []);
-  else if (event === "reset") handlers.onReset?.();
-  else if (event === "done") handlers.onDone(data.model ?? "");
+  else if (event === "tool_done") {
+    // The PLAN is dispatched before the id guard on purpose. The guard's tradeoff above ("losing a
+    // citation beats mis-attributing one") does not transfer to a plan: an uncorrelatable frame
+    // still carries the user's real, already-written plan, and dropping it would leave the preview
+    // showing a plan the server no longer has. Only the run CORRELATION needs the id.
+    if (data.plan) handlers.onPlan?.(data.plan);
+    if (typeof data.id === "number")
+      handlers.onToolDone?.(data.id, data.sources ?? [], { plan: data.plan });
+  } else if (event === "reset") handlers.onReset?.();
+  else if (event === "done") handlers.onDone(data.model ?? "", { plan_id: data.plan_id });
   else if (event === "error") handlers.onError(data.detail ?? "Chat failed");
+}
+
+// Drain an SSE response body, splitting on the blank-line frame boundary and dispatching each
+// whole frame. A frame can straddle two chunks, so buffer until a full "\n\n"-terminated frame is
+// available. Shared by both streaming endpoints so there is exactly one transport to reason about.
+async function pumpSSE(body: ReadableStream<Uint8Array>, handlers: ChatStreamHandlers) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      dispatchSSE(buffer.slice(0, sep), handlers);
+      buffer = buffer.slice(sep + 2);
+    }
+  }
 }
 
 // Carries the HTTP status so the UI can tell an expired session (401) apart from an LLM outage
@@ -865,21 +917,53 @@ export const api = {
       );
     }
 
-    // Read the byte stream, splitting on the blank-line frame boundary. A frame can straddle two
-    // chunks, so buffer until a full "\n\n"-terminated frame is available before dispatching.
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let sep: number;
-      while ((sep = buffer.indexOf("\n\n")) !== -1) {
-        dispatchSSE(buffer.slice(0, sep), handlers);
-        buffer = buffer.slice(sep + 2);
-      }
+    await pumpSSE(res.body, handlers);
+  },
+
+  // Lumen's plan conversation, streamed as SSE (requires a signed-in session; 401 otherwise).
+  // Same transport and frame vocabulary as `chatStream` — what differs is the grounding: instead of
+  // an analysis blob the server gets a plan id and runs tools that READ AND WRITE that plan, so the
+  // interesting payload is `tool_done.plan` (the full fresh plan) rather than cited sources.
+  // `planId` null means builder mode: no plan exists yet, and the model may create one, in which
+  // case its id arrives on `done` (and on the first `tool_done.plan`).
+  async planChatStream(
+    messages: ChatMessage[],
+    planId: string | null,
+    handlers: PlanChatStreamHandlers,
+    opts: { model?: string; lang?: "zh-Hant" | "en"; signal?: AbortSignal } = {}
+  ): Promise<void> {
+    const res = await fetch("/api/plans/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      // `model` and `lang` are always sent (null = server default) — unlike /api/chat, where the
+      // key is omitted, because this body has a fixed shape in the contract both sides code to.
+      body: JSON.stringify({
+        messages: leanMessages(messages),
+        plan_id: planId,
+        model: opts.model ?? null,
+        lang: opts.lang ?? "zh-Hant",
+      }),
+      ...(opts.signal ? { signal: opts.signal } : {}),
+    });
+    if (!res.ok || !res.body) {
+      const detail = await res.json().catch(() => ({}));
+      throw new ChatError(
+        (detail as { detail?: string }).detail || `Chat failed (${res.status})`,
+        res.status
+      );
     }
+    // Adapt the shared parser's positional callbacks to the plan-shaped handlers.
+    await pumpSSE(res.body, {
+      onDelta: handlers.onDelta,
+      onDone: (model, extra) =>
+        handlers.onDone({ model, ...(extra?.plan_id ? { plan_id: extra.plan_id } : {}) }),
+      onError: handlers.onError,
+      onTool: (id, name, query) => handlers.onTool?.({ id, name, query, pending: true }),
+      onToolDone: (id, _sources, extra) =>
+        handlers.onToolDone?.(id, extra?.plan ? { plan: extra.plan } : {}),
+      onPlan: (plan) => handlers.onPlan?.(plan),
+      onReset: () => handlers.onReset?.(),
+    });
   },
 
   // Two grounded next-question suggestions for a completed turn (a separate, best-effort call the

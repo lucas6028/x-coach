@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardText } from "@phosphor-icons/react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, UploadLimitError, type Analysis } from "./api";
+import { api, UploadLimitError, type Analysis, type PlanItem } from "./api";
 import AppLayout from "./components/AppLayout";
 import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
@@ -18,6 +18,7 @@ import { movementLabel, useI18n } from "./lib/i18n";
 import { useIsMobile } from "./lib/useIsMobile";
 import { useLiffContext } from "./lib/liffContext";
 import type { AnalyzableMovement } from "./lib/movements";
+import { isAnalyzable } from "./lib/plans";
 
 export default function App() {
   const { t } = useI18n();
@@ -48,7 +49,14 @@ export default function App() {
   const planItemId = searchParams.get("plan_item");
   // The plan's name and this item's day, for the banner. Fetched rather than passed in the URL:
   // a name in a query string is a second copy that goes stale the moment the plan is renamed.
-  const [planCtx, setPlanCtx] = useState<{ name: string; day: number } | null>(null);
+  // `items` rides along so the banner can name what this plan asks for NEXT once the current item
+  // is ticked off — the plan is already being fetched, and asking again for a list we were handed
+  // would be a second round trip for data we threw away.
+  const [planCtx, setPlanCtx] = useState<{
+    name: string;
+    day: number;
+    items: PlanItem[];
+  } | null>(null);
   // Whether this analysis has been ticked off in the plan, so the banner can say so.
   const [planLinked, setPlanLinked] = useState(false);
   useEffect(() => {
@@ -62,7 +70,7 @@ export default function App() {
       .then((p) => {
         if (cancelled) return;
         const item = p.items.find((it) => it.id === planItemId);
-        setPlanCtx({ name: p.name, day: item?.day_index ?? 1 });
+        setPlanCtx({ name: p.name, day: item?.day_index ?? 1, items: p.items });
         // Arriving on an item that is already ticked (a re-record, or a back-button return) must
         // show the linked state rather than claiming it is still outstanding.
         setPlanLinked(!!item?.completed_at);
@@ -291,6 +299,17 @@ export default function App() {
 
   const hasResult = !!analysis;
 
+  // What this plan asks for after the item that was just ticked off. The fetched copy still shows
+  // the current item as outstanding (it is ticked after that fetch), so it is skipped BY ID rather
+  // than by its own flag. Analysable items are preferred but not required: an exercise the studio
+  // cannot grade is still the next thing to train, and the plan page ticks it off by hand.
+  const remaining = planCtx
+    ? planCtx.items
+        .filter((it) => it.id !== planItemId && !it.completed_at)
+        .sort((a, b) => a.day_index - b.day_index || a.position - b.position)
+    : [];
+  const nextItem = remaining.find((it) => isAnalyzable(it.movement, movements)) ?? remaining[0];
+
   return (
     <AppLayout
       onNewAnalysis={newAnalysis}
@@ -322,6 +341,37 @@ export default function App() {
             {t("plans.studioBanner", { plan: planCtx.name, day: planCtx.day })}
           </span>
           {planLinked && <span className="text-secondary">{t("plans.studioLinked")}</span>}
+          {/* Only once this item is done: before that, the next exercise is a distraction from
+              the one the user came here to record. */}
+          {planLinked &&
+            (nextItem ? (
+              <Link
+                to={`/app?movement=${encodeURIComponent(nextItem.movement)}&plan=${encodeURIComponent(
+                  planId ?? ""
+                )}&plan_item=${encodeURIComponent(nextItem.id)}`}
+                // This is the studio's only link from /app to /app, so React Router re-renders
+                // rather than remounting: `movement` and the plan context follow the URL on their
+                // own, but the RESULT does not — without this the next exercise opens under the
+                // report for the one just finished. `planLinked` is cleared with it so the banner
+                // does not keep claiming a tick that belongs to the previous item while the new
+                // plan fetch is in flight.
+                onClick={() => {
+                  setAnalysis(null);
+                  setError("");
+                  setStatusMsg("");
+                  setPlanLinked(false);
+                  skipReloadId.current = null;
+                }}
+                className="font-semibold text-primary underline-offset-2 hover:underline"
+              >
+                {t("plans.studioNext", {
+                  movement: movementLabel(t, nextItem.movement),
+                  day: nextItem.day_index,
+                })}
+              </Link>
+            ) : (
+              <span className="text-muted">{t("plans.studioPlanDone")}</span>
+            ))}
           <Link
             to={`/plans/${planId}`}
             className="ml-auto font-semibold text-primary underline-offset-2 hover:underline"

@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import History from "./pages/History";
 import MovementDetail from "./pages/MovementDetail";
 import Movements from "./pages/Movements";
+import PlanBuilder from "./pages/PlanBuilder";
 import PlanDetail from "./pages/PlanDetail";
 import Plans from "./pages/Plans";
 import Settings from "./pages/Settings";
@@ -90,6 +91,16 @@ export default function AppRoutes() {
         element={
           <RequireAuth>
             <Plans />
+          </RequireAuth>
+        }
+      />
+      {/* BEFORE /plans/:planId, or "new" is read as a plan id and the detail page fetches a plan
+          that does not exist. Same gate: the builder writes a plan into the caller's account. */}
+      <Route
+        path="/plans/new"
+        element={
+          <RequireAuth>
+            <PlanBuilder />
           </RequireAuth>
         }
       />

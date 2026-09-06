@@ -115,10 +115,12 @@ class TestKgQueryCorpus(unittest.TestCase):
         # detector rules and therefore no `kg_query` for this gate to check. `catalog.py` joins
         # them for that reason: it is the sixteen-name movement catalog the plan API validates
         # against (all sixteen, not the fourteen registered here), and it contains no
-        # `build_detection` call at all. Anything else appearing in this directory is a detector
+        # `build_detection` call at all. `muscles.py` joins them for the same reason: it is the
+        # muscle-coverage table the Lumen plan agent reads (src/pose/movements/muscles.py), also
+        # with no `build_detection` call. Anything else appearing in this directory is a detector
         # and must be listed in MODULE_MOVEMENTS.
         present = {p.name for p in MOVEMENTS_DIR.glob("*.py")} - {
-            "__init__.py", "base.py", "registry.py", "catalog.py"
+            "__init__.py", "base.py", "registry.py", "catalog.py", "muscles.py"
         }
         self.assertEqual(present, set(MODULE_MOVEMENTS))
 

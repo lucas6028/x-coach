@@ -1,25 +1,37 @@
 import { Check, ChartBar, Lock, Trash, VideoCamera } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
-import MovementIcon from "../movements/MovementIcon";
+import MovementArt from "../movements/MovementArt";
 import { movementLabel, useI18n } from "../../lib/i18n";
 import type { PlanItem } from "../../api";
 
 interface Props {
   item: PlanItem;
   planId: string;
-  /** False when no detector is registered for this movement (Jumping Jacks, High Knee): the row
+  /** False when no detector is registered for this movement (Jumping Jacks, High Knee): the card
    *  offers only the manual tick, and says why. */
   analyzable: boolean;
-  /** A write for this row is in flight — the controls lock rather than queueing a second one. */
+  /** A write for this card is in flight — the controls lock rather than queueing a second one. */
   busy: boolean;
   onToggle: () => void;
   onRemove: () => void;
 }
 
-// One exercise inside a day. Three things live on the row and they are deliberately separate
-// controls, not one: the tick (I did this), the studio link (record it and let the coach look), and
-// the remove button. Folding the tick into the studio link would make "I trained but didn't film
-// it" unrecordable, which is most sessions.
+// One exercise inside a day, as a CARD led by the movements-library figure. It was a thin
+// horizontal band with a 17px glyph; at that size the figure said nothing a reader could use, so
+// the exercise is now recognised by its picture the way it is on the library page, and the card is
+// deliberately shaped as a sibling of `MovementCard` rather than a second visual language.
+//
+// THE STAGE. Square and full-bleed, for the reason recorded at length in MovementCard.tsx: the
+// 1254px source PNGs are OPAQUE, PRE-MATTED squares, not trimmed transparent cutouts, so insetting
+// them — or dropping them into a wide, short band — leaves a hard-edged white box floating over
+// the gradient. Square also holds both the tall figures (a standing press) and the wide ones (a
+// push-up plank) at a usable size, which a 16:9 band cannot.
+//
+// THREE CONTROLS, STILL SEPARATE. The tick (I did this), the studio link (record it and let the
+// coach look), and remove are deliberately three controls, not one. Folding the tick into the
+// studio link would make "I trained but didn't film it" unrecordable, which is most sessions. The
+// tick moved onto the stage as a 36px overlay so the art can have the card's full width; it is
+// still its own button with its own `aria-pressed` and its own labels.
 export default function PlanItemRow({
   item,
   planId,
@@ -38,96 +50,123 @@ export default function PlanItemRow({
     `/app?movement=${encodeURIComponent(item.movement)}` +
     `&plan=${encodeURIComponent(planId)}&plan_item=${encodeURIComponent(item.id)}`;
 
+  const FOCUS =
+    "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
+
+  // The action slot shares a shape across all three of its states so the bottom of every card in
+  // the grid lines up. `min-w-0 flex-1` (not `shrink-0`) is what lets it yield to the remove
+  // button in a ~131px phone cell instead of pushing out of the card.
+  const SLOT =
+    `inline-flex min-h-[36px] min-w-0 flex-1 items-center justify-center gap-1 rounded-full px-2.5 text-[11px] transition-colors ${FOCUS}`;
+
   return (
     <li
-      // `min-w-0` so the row can actually shrink to its grid cell. Without it a flex/grid item
-      // floors at its intrinsic content width and pushes out of the card instead of letting the
-      // label truncate — which is exactly how this row used to overflow its day.
-      className={`flex min-w-0 items-center gap-2.5 rounded-xl border px-3 py-2.5 transition-colors ${
-        done ? "border-secondary/30 bg-secondary/[0.06]" : "border-border-dark bg-surface"
+      // `min-w-0` so the card can actually shrink to its grid cell. Without it a flex/grid item
+      // floors at its intrinsic content width and pushes out of the day panel instead of letting
+      // the label truncate — which is exactly how this used to overflow.
+      className={`flex h-full min-w-0 flex-col rounded-2xl border p-2.5 transition-colors ${
+        done
+          ? "border-secondary/45 bg-secondary/[0.07]"
+          : "border-border-dark bg-surface hover:border-primary/35"
       }`}
     >
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={busy}
-        aria-pressed={done}
-        aria-label={done ? t("plans.markUndone", { movement: label }) : t("plans.markDone", { movement: label })}
-        className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border transition-colors disabled:opacity-50 ${
-          done
-            ? "border-secondary bg-secondary text-white"
-            : "border-border-dark text-transparent hover:border-primary/50"
-        }`}
-      >
-        <Check size={13} weight="bold" />
-      </button>
+      <div className="relative">
+        <span className="block aspect-square overflow-hidden rounded-xl bg-gradient-to-b from-[#f7f5ff] to-[#eceefb]">
+          <MovementArt movement={item.movement} />
+        </span>
 
-      <MovementIcon movement={item.movement} size={17} dim={done} />
-
-      <div className="min-w-0 flex-1">
-        <p
-          className={`truncate text-[13px] font-medium ${done ? "text-muted line-through" : "text-content"}`}
+        {/* The tick sits ON the stage because the stage is the card's full width and there is no
+            room beside it for a control. It carries its own solid backdrop rather than relying on
+            the art behind it: the figures are drawn light, and a translucent badge over a pale
+            limb is not readable as either state. */}
+        <button
+          type="button"
+          onClick={onToggle}
+          disabled={busy}
+          aria-pressed={done}
+          aria-label={done ? t("plans.markUndone", { movement: label }) : t("plans.markDone", { movement: label })}
+          title={done ? t("plans.markUndone", { movement: label }) : t("plans.markDone", { movement: label })}
+          // `motion-safe:` on the press, because a transform is the one thing here that a reader
+          // who asked for reduced motion should not get; the colour transitions are fine either way.
+          className={`absolute left-1.5 top-1.5 flex h-9 w-9 items-center justify-center rounded-full shadow-sm ring-1 transition-colors motion-safe:active:scale-95 disabled:opacity-50 ${FOCUS} ${
+            done
+              ? // Unticking is a real action and this badge is its only affordance, so the done
+                // state gets a hover of its own rather than sitting there looking inert.
+                "bg-secondary text-white ring-secondary/60 hover:bg-secondary/85 active:bg-secondary/75"
+              : "bg-white text-content/30 ring-black/15 hover:text-secondary hover:ring-secondary/40 active:bg-secondary/10"
+          }`}
         >
-          {label}
-        </p>
-        <p className="text-[11px] text-faint">
-          {t("plans.setsReps", { sets: item.sets, reps: item.reps })}
-          {item.notes ? ` · ${item.notes}` : ""}
-        </p>
+          <Check size={18} weight="bold" />
+        </button>
       </div>
 
-      {/* Only ever ONE of these three: the report (this item produced an analysis), the studio link
-          (it can produce one), or the tick-only note (it never can). */}
-      {/* The VISIBLE label is the short one; the full phrase is the accessible name.
-          "Record & analyse" / 錄影並分析 renders ~128px wide, and the row's fixed parts already
-          come to ~100px — together they left nothing for the movement name, which is how the name
-          vanished entirely. Screen readers and tooltips still get the full wording, so nothing is
-          actually lost by shortening what is drawn. */}
-      {item.analysis_id ? (
-        <Link
-          to={`/app?analysis=${encodeURIComponent(item.analysis_id)}`}
-          aria-label={t("plans.viewReport")}
-          title={t("plans.viewReport")}
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-content/[0.04] px-2.5 py-1 text-[11px] font-semibold text-content transition-colors hover:bg-primary hover:text-primary-content"
-        >
-          <ChartBar size={12} weight="duotone" />
-          {t("plans.viewReportShort")}
-        </Link>
-      ) : analyzable ? (
-        <Link
-          to={studioHref}
-          aria-label={t("plans.analyze")}
-          title={t("plans.analyze")}
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-content/[0.04] px-2.5 py-1 text-[11px] font-semibold text-content transition-colors hover:bg-primary hover:text-primary-content"
-        >
-          <VideoCamera size={12} weight="fill" />
-          {t("plans.analyzeShort")}
-        </Link>
-      ) : (
-        // Not a disabled button: there is no action behind it. It is a labelled note explaining
-        // why this row has no studio link, which is the same choice MovementCard makes for the
-        // movements its "Soon" tile cannot open.
-        <span
-          title={t("plans.tickOnly")}
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-content/[0.04] px-2.5 py-1 text-[11px] font-medium text-faint"
-        >
-          {/* Deliberately NOT `movements.soon`. On the movement menu "Soon" means the movement
-              itself is unavailable; here the movement is perfectly plannable and only its VIDEO
-              ANALYSIS is missing, so it gets a label that says that. */}
-          <Lock size={12} weight="duotone" />
-          {t("plans.tickOnlyLabel")}
-        </span>
-      )}
-
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={busy}
-        aria-label={t("plans.removeItem", { movement: label })}
-        className="shrink-0 rounded-lg p-1 text-faint transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+      <p
+        className={`mt-2 truncate text-[13px] font-medium ${done ? "text-muted line-through" : "text-content"}`}
       >
-        <Trash size={14} weight="duotone" />
-      </button>
+        {label}
+      </p>
+      <p className="truncate text-[11px] text-faint">
+        {t("plans.setsReps", { sets: item.sets, reps: item.reps })}
+      </p>
+      {item.notes && <p className="line-clamp-2 text-[11px] text-faint">{item.notes}</p>}
+
+      {/* `mt-auto` so the action row sits on the card's floor whatever the note above it does —
+          grid cells stretch to the tallest card in their row, and a floating action row would put
+          three cards' buttons at three different heights. */}
+      <div className="mt-auto flex items-center gap-1.5 pt-2">
+        {/* Only ever ONE of these three: the report (this item produced an analysis), the studio
+            link (it can produce one), or the tick-only note (it never can). */}
+        {/* The VISIBLE label is the short one; the full phrase is the accessible name. The card is
+            as narrow as half a phone, and the full "Record & analyse" / 錄影並分析 does not fit
+            beside the remove button. Screen readers and tooltips still get the full wording. */}
+        {item.analysis_id ? (
+          <Link
+            to={`/app?analysis=${encodeURIComponent(item.analysis_id)}`}
+            aria-label={t("plans.viewReport")}
+            title={t("plans.viewReport")}
+            className={`${SLOT} bg-content/[0.04] font-semibold text-content hover:bg-primary hover:text-primary-content active:bg-primary/85 motion-safe:active:scale-[0.98]`}
+          >
+            <ChartBar size={13} weight="duotone" className="shrink-0" />
+            <span className="truncate">{t("plans.viewReportShort")}</span>
+          </Link>
+        ) : analyzable ? (
+          <Link
+            to={studioHref}
+            aria-label={t("plans.analyze")}
+            title={t("plans.analyze")}
+            className={`${SLOT} bg-content/[0.04] font-semibold text-content hover:bg-primary hover:text-primary-content active:bg-primary/85 motion-safe:active:scale-[0.98]`}
+          >
+            <VideoCamera size={13} weight="fill" className="shrink-0" />
+            <span className="truncate">{t("plans.analyzeShort")}</span>
+          </Link>
+        ) : (
+          // Not a disabled button: there is no action behind it. It is a labelled note explaining
+          // why this card has no studio link, which is the same choice MovementCard makes for the
+          // movements its "Soon" tile cannot open.
+          <span
+            title={t("plans.tickOnly")}
+            className={`${SLOT} bg-content/[0.04] font-medium text-faint`}
+          >
+            {/* Deliberately NOT `movements.soon`. On the movement menu "Soon" means the movement
+                itself is unavailable; here the movement is perfectly plannable and only its VIDEO
+                ANALYSIS is missing, so it gets a label that says that. */}
+            <Lock size={13} weight="duotone" className="shrink-0" />
+            <span className="truncate">{t("plans.tickOnlyLabel")}</span>
+          </span>
+        )}
+
+        {/* Quiet, but a real 36px target — it was a 22px `p-1` glyph, which is under the floor for
+            anything meant to be tapped. */}
+        <button
+          type="button"
+          onClick={onRemove}
+          disabled={busy}
+          aria-label={t("plans.removeItem", { movement: label })}
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-faint transition-colors hover:bg-danger/10 hover:text-danger active:bg-danger/20 motion-safe:active:scale-95 disabled:opacity-50 ${FOCUS}`}
+        >
+          <Trash size={15} weight="duotone" />
+        </button>
+      </div>
     </li>
   );
 }
