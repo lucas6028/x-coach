@@ -63,6 +63,54 @@ Each is the corpus convention, not taste — cited notes are where to see it.
 6. **End with reproduction.** See the `## 重現` / `Reproduce:` tail in
    `model_fusion_gate_results.md`, `fit3d_sparse_depth_summary.md`.
 
+## 講重點 — the reader must be able to say "所以呢"
+
+A note that is correct but leaves the reader 不知所以然 has failed. The model to
+imitate is the understanding path of `~/.claude/skills/illustrated-explainer`
+(為什麼 → 直覺 → 機制 → 結果 → 所以呢), adapted to a results note:
+
+1. **Lead = four plain sentences, in this order, before any table.**
+   (a) 我們原本擔心什麼／想知道什麼 — the doubt in one sentence a non-member can feel.
+   (b) 我們做了什麼 — the intervention in words, no method names yet.
+   (c) 看到什麼 — the one number that answers (a), with its dispersion.
+   (d) **所以呢** — what changes because of (c): which claim survives, which dies,
+   what the next step is. If (d) is missing, the note has no point.
+2. **Intuition before every statistic.** The first time a statistic appears, one
+   sentence says what it measures *in this experiment's terms* and why that one
+   (「within-session AUC：只在同一段錄影裡比，所以人、衣服、背景這些整段不變的東西
+   對它零貢獻——這正是我們要排除的」). A number whose meaning the reader cannot
+   restate is noise.
+3. **Every section opens with the question it answers**, in one line, and closes
+   with the answer in one line. A reader skimming only first and last lines of each
+   section must get the whole argument.
+4. **One concrete walk-through.** Pick one session / one subject / one fold and show
+   the numbers for it end to end (「P4 這段錄影 12 個 rep：位置規則排出 …，模型排出
+   …，殘差化後 …」). The abstract statistic becomes real; a wrong intuition shows
+   up here first.
+5. **Tell the reader how to read a table before showing it**, and after it say what
+   pattern to see (「三件事同時成立：…」). A table dropped without a reading is a
+   data dump, not a finding.
+6. **Name the surprise.** If the result differs from the pre-registered expectation
+   (plan §5-style prior), say so in the lead and say what it means, not only in a
+   deviation table.
+7. **Cut anything that does not serve (d).** Provenance, hashes, gate logs, ddof
+   footnotes go to a gates section or an appendix. The body carries the argument.
+
+Worked contrast (from `rehab24_videomae_position_control_results.md`, 2026-09-06):
+
+- ❌ 不知所以然: 「移除 k = 1 個方向後，AUC 0.8720 ± 0.0439；但 §6.3 的 positive
+  control 沒過，probe 仍有 +0.26，primary 依計畫不判讀。k = 16：0.8556，probe 中位數
+  +0.05 落回 null。」 — every number is right; a lab-mate cannot say what was learned.
+- ✅ 講重點: 「我們擔心模型是在讀『這一下在錄影的什麼位置』而不是動作。所以把特徵裡
+  能預測位置的方向拿掉再重訓。結果：位置訊息在特徵裡是真的、而且很寬（要拿掉 16 個
+  方向才拿乾淨），但拿乾淨之後模型在同一段錄影裡排對錯的能力幾乎沒變（0.8741 → 0.8556，
+  9/9 位受試者仍 > 0.5）。所以：『訊號來自畫面裡的人』這句話保住了，代價是註明線性
+  位置路徑最多佔 5%、非線性路徑沒測；原本登錄的『只拿一個方向』不夠，是 plan deviation。」
+
+Self-check before calling a note done: read only the lead and the first/last line of
+each section. If you cannot reconstruct 為什麼做 → 做了什麼 → 看到什麼 → 所以呢, rewrite
+the lead, not the tables.
+
 ## Register — who it is for
 
 Default audience: **a lab-mate who knows basic ML but nothing about this project.**
@@ -76,6 +124,34 @@ codes. Concretely:
 - Add a 名詞說明 section when the note leans on more than ~3 pieces of vocabulary.
 - `[[some-name]]` is a **memory-file link** — it dangles for every reader outside
   this machine. Cite the note path or the number in prose.
+
+### Technical terms stay in English — never coin a Chinese translation
+
+The prose is Chinese; the **terms** are English. A lab-mate searches the literature,
+the code, and the sibling notes by the English word, and a home-made translation
+breaks every one of those lookups. This applies to:
+
+- Statistics and metrics: `ROC-AUC`, `balanced accuracy`, `Spearman ρ`, `permutation
+  test`, `null distribution`, `bootstrap CI`, `Holm`, `Wilcoxon`, `p-value`, `subject-macro`.
+- Experimental-design vocabulary: `gate`, `positive control`, `negative control`,
+  `pre-registration`, `plan deviation`, `primary` / `secondary`, `arm`, `fold`, `LOSO`,
+  `within-session`, `within-class position`, `residualization`, `probe`, `drift`,
+  `shortcut`, `confound`, `floor` / `ceiling`, `undetermined`.
+- Method and model names, dataset names, identifiers, file names, CLI flags.
+
+Write the English term and, **on first use only**, a short Chinese gloss of what it
+*means* in parentheses — then use the English term for the rest of the note.
+
+- ✅ `within-class position（同一段錄影、同一標籤的 rep 裡排第幾）` … later just
+  `within-class position`.
+- ✅ `positive control（證明介入真的拿掉了東西的檢查）` … later `positive control`.
+- ❌ `類內位置`, `位置平衡`, `殘差化`, `正控制`, `門檻`(for gate), `探針`(for probe),
+  `漂移`(for drift), `虛無分布`(for null distribution), `捷徑`(for shortcut) used as
+  *the* term. These read as invented vocabulary and cannot be grepped or cited.
+
+Chinese is right for ordinary prose, for the gloss, and for plain words that are not
+terms of art (做對／做錯, 錄影, 受試者, 第幾下). When in doubt, ask: would a reader
+type this word into Google Scholar or `grep`? If yes, it stays English.
 
 If the user asks for a wider audience than that, ask what they want dropped — do
 not unilaterally cut the statistics.

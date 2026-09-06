@@ -112,6 +112,28 @@ def plan_sibling(path: str) -> str | None:
     return None
 
 
+# Home-made Chinese translations of terms of art. Advisory: the English term is what a
+# reader greps, cites, and searches the literature for; a coinage breaks all three. Only
+# words that are NOT standard Chinese prose are listed -- 受試者, 錄影, 做對／做錯 are fine,
+# and single characters (折, 臂) or words with ordinary meanings (混淆, 事前登錄) are left
+# out because they fire on prose (手臂, 混淆矩陣) far more often than on coinages.
+TRANSLATED_JARGON = {
+    "類內位置": "within-class position",
+    "位置平衡": "position-balanced",
+    "殘差化": "residualization",
+    "正控制": "positive control",
+    "負控制": "negative control",
+    "探針": "probe",
+    "漂移": "drift",
+    "虛無分布": "null distribution",
+    "置換檢定": "permutation test",
+    "捷徑": "shortcut",
+    "地板線": "floor",
+    "取景": "framing",
+    "判讀表": "decision table",
+}
+
+
 def check_file(path: str) -> tuple[list[str], list[str]]:
     text = read(path)
     head = "\n".join(text.splitlines()[:45])
@@ -166,6 +188,18 @@ def check_file(path: str) -> tuple[list[str], list[str]]:
             + ", ".join(sorted(bare_refs)[:6])
             + "): confirm each is either a ref to THIS note's own section, or is "
             "spelled out inline — a reader without the plan open cannot resolve it"
+        )
+
+    # A coinage used ONLY as the parenthesised gloss right after its English term
+    # ("within-class position（類內位置）") is exactly what the rule asks for.
+    glossed = re.sub(r"[A-Za-z][A-Za-z0-9 \-]*（[^（）]{1,12}）", "", text)
+    coined = {term: english for term, english in TRANSLATED_JARGON.items() if term in glossed}
+    if coined:
+        warns.append(
+            "Chinese coinages used where the English term belongs ("
+            + ", ".join(f"{term}→{english}" for term, english in sorted(coined.items())[:8])
+            + "): technical terms stay in English with a Chinese gloss on first use only "
+            "(SKILL.md 'Technical terms stay in English')"
         )
 
     for i, line in enumerate(text.splitlines(), 1):
