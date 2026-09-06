@@ -38,6 +38,10 @@ null 95% 區間只有 [−0.086, +0.085]，雙尾 p = 1/10001。這條門是真�
 而且 probe 的**平均值**（+0.12）仍在其 null 區間外——兩位受試者（P4、P8）的位置訊息
 沒有拿乾淨。
 
+**補一句（bound）。** 看得見的 drift 是真的：同一段錄影內，人物框的左緣（AUC 0.6465，8/9）
+和面積（0.3743，7/9 反向）都顯著（雙尾 p = 1/10001），但都沒跨過事前訂的 0.15 判準；
+亮度不是載體（0.5069，undetermined）。
+
 ---
 
 ## 1. 名詞說明
@@ -166,7 +170,7 @@ P10 只有 16 個樣本、一段錄影，AUC 1.0 把平均拉高；方向與結�
 | λ 的選法 | 計畫未指定 | 執行前固定：訓練受試者內 LOSO、六點網格、每 fold 一個 λ（§2） | 無事後調整 |
 | §6.4 的 null 平均 | 「null 平均 0.5002 ± 0.0211」 | 正式模組（sessions 排序後迭代）得 0.4999 ± 0.0211；探索腳本的迭代順序得 0.5002 | 同一種子、同一統計量，差別只在 session 迭代順序改變了 RNG 的消耗順序；observed 0.8741 與 p 不變 |
 | 測試檔路徑 | `tests/rehab24/test_videomae_position_control.py` | `tests/test_rehab24_videomae_position_control.py`（跟既有測試同一層） | 無 |
-| 亮度的解碼 | 「一次 CPU 解碼」 | 每 4 幀取一幀的灰階平均（stride 記在 sidecar，改 stride 會拒絕沿用快取） | 無：燈光漂移是慢變量 |
+| 亮度的解碼 | 「一次 CPU 解碼」 | 每 4 幀取一幀的灰階平均（stride 記在 sidecar，改 stride 會拒絕沿用快取）。解碼器從 OpenCV 改為 ffmpeg（每幀 area 平均到 16×9 再取均值）：OpenCV 路徑在這台機器只有約 11 fps，第一次跑到 1 小時 45 分被系統以記憶體不足砍掉；兩種後端在真實影片前 40 個取樣幀的差最大 0.27 灰階（rank 統計不受影響），合成資料上有測試對照 | 無 |
 | §6.4 null 檢查的觸發 | — | `replicate-exploratory` 只在 10,000 次 / 種子 20260906 時斷言 null 數字；五個統計量永遠斷言 | 無 |
 
 ## 6. Bound：看得見的 drift 有多強（計畫 §3.3）
@@ -236,7 +240,7 @@ balanced accuracy，這裡是同一段錄影內的排序。框幾何跨人不泛
 .venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py analyze --k 16 --permutations 10000 --permutation-seed 20260906
 .venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py predict --k 1 --naive --seeds 42 7 1234 --device cpu
 .venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py analyze --k 1 --naive --permutations 10000 --permutation-seed 20260906
-.venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py drift-proxies --permutations 10000
+.venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py drift-proxies --permutations 10000 --luminance-backend ffmpeg
 ```
 
 全部 CPU（`.venv`，torch 2.13 CPU）；每個臂三個 seed 十折約 20–40 分鐘，k ≥ 1 先把
