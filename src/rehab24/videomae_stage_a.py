@@ -18,9 +18,11 @@ baselines, on identical folds and seeds, so deltas are properly paired.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
+from typing import Callable, Sequence
 
 import numpy as np
 
@@ -137,6 +139,77 @@ def stratified_metrics(
     return results
 
 
+def materialize_transformed_features(
+    source_dir: Path,
+    sample_ids: Sequence[str],
+    transform: Callable[[np.ndarray], np.ndarray],
+    destination: Path,
+) -> int:
+    """Write ``transform``-ed copies of ``sample_ids``' features into ``destination``.
+
+    Materialising to disk instead of patching the loader is what keeps
+    ``train_one_fold`` untouched: it re-reads ``video_feature`` from an npz either way,
+    so a fold trained on a transformed directory travels the identical code path as one
+    trained on the originals.
+
+    Only the 0-d metadata entries are copied. The per-clip arrays are dropped because
+    the classifier never reads them and copying them would multiply the disk cost of a
+    per-fold materialisation by an order of magnitude.
+
+    A transform may expose a ``digest`` string; when it does, the sidecar written here
+    lets a later call with the same transform and the same ids skip the rewrite, which
+    is what makes three seeds of one arm cost one materialisation instead of three. A
+    transform without a digest is always rewritten -- silently reusing a directory
+    whose provenance cannot be checked is the failure this guards against.
+    """
+    from src.video.videomae_video_classifier import clear_feature_cache, feature_path_index
+
+    ordered = list(sample_ids)
+    digest = getattr(transform, "digest", None)
+    signature = {
+        "n_samples": len(ordered),
+        "sample_id_digest": hashlib.sha256("\n".join(sorted(ordered)).encode("utf-8")).hexdigest(),
+        "transform_digest": digest,
+    }
+    sidecar = destination / "_materialization.json"
+    if digest is not None and sidecar.exists():
+        try:
+            if json.load(sidecar.open(encoding="utf-8")) == signature:
+                if len(list(destination.glob("*.npz"))) == len(ordered):
+                    return len(ordered)
+        except json.JSONDecodeError:  # pragma: no cover - a truncated sidecar just rewrites
+            pass
+
+    index = feature_path_index(source_dir)
+    missing = [sample_id for sample_id in ordered if sample_id not in index]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} feature files missing from {source_dir} (first: {missing[:5]}); "
+            "cannot materialise a transformed fold directory."
+        )
+
+    destination.mkdir(parents=True, exist_ok=True)
+    for path in destination.glob("*.npz"):
+        path.unlink()
+    for sample_id in ordered:
+        with np.load(index[sample_id], allow_pickle=False) as data:
+            payload = {key: data[key] for key in data.files if data[key].ndim == 0}
+            payload["video_feature"] = np.asarray(transform(data["video_feature"]), dtype=np.float32)
+        np.savez_compressed(destination / f"{sample_id}.npz", **payload)
+
+    written = len(list(destination.glob("*.npz")))
+    if written != len(ordered):
+        raise SystemExit(
+            f"Materialised {written} feature files into {destination} but expected {len(ordered)}. "
+            "build_samples skips missing ids silently, so a short directory would train on fewer samples."
+        )
+    with sidecar.open("w", encoding="utf-8") as handle:
+        json.dump(signature, handle, indent=2, sort_keys=True)
+    # Paths were just rewritten in place, so any memoised feature or dir index is stale.
+    clear_feature_cache()
+    return written
+
+
 def run_arm(
     feature_dir: Path,
     labels: dict[str, int],
@@ -148,6 +221,8 @@ def run_arm(
     device: torch.device,
     seed: int,
     retain_predictions: bool = False,
+    feature_transform_factory: Callable[[list[str]], Callable[[np.ndarray], np.ndarray]] | None = None,
+    materialize_root: Path | None = None,
 ) -> list[dict]:
     """Full LOSO for one feature dir, retaining per-sample predictions for strata.
 
@@ -157,7 +232,17 @@ def run_arm(
     identity control turns it on to save out-of-fold probabilities WITHOUT
     reimplementing the fold loop, which is the only way its OOF can be shown to
     reproduce the framing folds exactly.
+
+    ``feature_transform_factory`` is the position control's hook. It is called once per
+    fold with *that fold's training ids* and must return a callable applied to every
+    sample's feature vector; the fold then trains on a materialised copy under
+    ``materialize_root``. Calling it per fold from here is what makes a train-only fit
+    structural rather than a convention: the factory is never handed the test ids.
+    Left at ``None`` (the default) not one byte of the original path changes.
     """
+    if feature_transform_factory is not None and materialize_root is None:
+        raise SystemExit("feature_transform_factory needs materialize_root: the caller decides where fold dirs live.")
+
     folds: list[dict] = []
     for test_subject in ordered_subjects:
         val_subject = pick_val_subject(test_subject, ordered_subjects, sample_counts)
@@ -165,13 +250,23 @@ def run_arm(
         val_ids = subject_samples[val_subject]
         train_ids = [sid for s in ordered_subjects if s not in {test_subject, val_subject} for sid in subject_samples[s]]
 
+        fold_dir = feature_dir
+        if feature_transform_factory is not None:
+            fold_dir = materialize_root / f"fold_P{test_subject}"
+            materialize_transformed_features(
+                feature_dir,
+                [*train_ids, *val_ids, *test_ids],
+                feature_transform_factory(list(train_ids)),
+                fold_dir,
+            )
+
         threshold, probabilities, fold_labels = train_one_fold(
-            feature_dir, train_ids, val_ids, test_ids, labels, config, device, seed
+            fold_dir, train_ids, val_ids, test_ids, labels, config, device, seed
         )
-        sample_ids = ordered_test_ids(feature_dir, test_ids, labels)
+        sample_ids = ordered_test_ids(fold_dir, test_ids, labels)
         if len(sample_ids) != len(probabilities):
             raise SystemExit(
-                f"Prediction/id misalignment for subject P{test_subject} in {feature_dir.name}: "
+                f"Prediction/id misalignment for subject P{test_subject} in {fold_dir.name}: "
                 f"{len(probabilities)} predictions vs {len(sample_ids)} ids. Run the feature audit."
             )
 
