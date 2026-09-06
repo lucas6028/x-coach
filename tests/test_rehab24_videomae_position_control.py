@@ -808,3 +808,44 @@ class RunArmTransformHookTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LuminanceBackendsTests(unittest.TestCase):
+    """The ffmpeg backend must measure the same quantity as the cv2 reference.
+
+    A synthetic clip whose brightness ramps frame by frame is written with OpenCV, then
+    read back by both decoders; per-frame means must agree to within the 8-bit rounding
+    of ffmpeg's 16x9 area average, and the sampled frame indices and total frame count
+    must be identical, otherwise a rep's [first_frame, last_frame] window would select
+    different frames under the two backends.
+    """
+
+    def test_ffmpeg_and_cv2_agree_on_a_synthetic_ramp(self):
+        import shutil
+        import tempfile
+
+        if shutil.which("ffmpeg") is None:
+            self.skipTest("ffmpeg not on PATH")
+        import cv2
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ramp.avi"
+            writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"MJPG"), 30.0, (64, 36))
+            for index in range(24):
+                frame = np.full((36, 64, 3), 40 + 8 * index, dtype=np.uint8)
+                writer.write(frame)
+            writer.release()
+            cv_frames, cv_levels, cv_total = control.cv2_frame_levels(path, 4)
+            ff_frames, ff_levels, ff_total = control.ffmpeg_frame_levels(path, 4)
+        self.assertEqual(cv_total, 24)
+        self.assertEqual(cv_total, ff_total)
+        self.assertEqual(cv_frames, ff_frames)
+        self.assertEqual(cv_frames, [0, 4, 8, 12, 16, 20])
+        for cv_level, ff_level in zip(cv_levels, ff_levels):
+            self.assertAlmostEqual(cv_level, ff_level, delta=2.0)
+        self.assertTrue(all(b > a for a, b in zip(ff_levels, ff_levels[1:])))
+
+    def test_unknown_backend_is_refused(self):
+        with self.assertRaises(SystemExit):
+            control.compute_luminance([], Path("."), 4, backend="nope")
+

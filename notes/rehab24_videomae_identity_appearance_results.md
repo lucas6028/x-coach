@@ -280,6 +280,8 @@ VideoMAE 的全部 correctness 訊號**。
 - **不支持「模型看的是動作本身」。** 標籤在錄影中是分段的（27/61 段完全分段），
   「這是第幾下」單獨就有 0.8239 的強度。本設計無法分辨「讀動作」與「讀在錄影中的位置」。
   位置中性的錄影只有 3 段、2 位受試者，遠不足以撐起推論。
+  **2026-09-06 更新：** 後續的位置控制實驗把線性可讀的位置子空間（16 維）投影掉後
+  AUC 仍有 0.8556，份額 4.9%（見 §9 末段）；線性路徑關閉，非線性路徑仍未測。
 - **不支持「模型使用時間順序」。** 同一段錄影內的單幀姿勢差異也可能產生 AUC。
   這需要 repetition 層級的靜態幀控制與時間打亂控制，本實驗都沒做。
 - **不支持「外觀完全沒有貢獻」。** 0.5241 是「這個 appearance-only 建法沒顯示足夠訊號」，
@@ -306,6 +308,18 @@ VideoMAE 的全部 correctness 訊號**。
 在同一個資料集裡這件事已經做到極限：`background_only` 把非人物路徑壓到 0.5357，
 剩下的路徑要另外設計實驗（rep 層級的靜態幀控制、時間打亂控制），
 或換一個標籤不分段的資料集。
+
+**2026-09-06 後續：位置控制實驗已完成**
+（[`rehab24_videomae_position_control_results.md`](rehab24_videomae_position_control_results.md)）。
+特徵確實線性編碼類內位置（probe Spearman 中位數 +0.43，null [−0.086, +0.085]）。
+在每個 fold 內投影掉 16 個能預測類內位置的方向再重訓，within-session AUC 從 0.8741 變成
+**0.8556 ± 0.0435**（9/9，p = 1/10001），沿位置子空間的份額 **4.9%**；probe 中位數落回
+null（+0.05，p = 0.24），但 probe 平均值 +0.12 仍顯著，P4、P8 沒拿乾淨。
+依該計畫第 7 節第一列（在「k = 1 primary 正控制失敗、改讀 k = 16 secondary」這個
+plan deviation 之下），線性位置路徑關閉，fusion pre-registration **允許開**，條件不變：
+只比 NLF 與 `full_frame_letterbox` 的 calibrated late fusion、validation-only calibration、
+單一 fusion 規則、以 subject 為配對單位、相對 NLF 沒有改善就停。
+非線性的位置路徑仍未測，本節上一段建議的位置基線仍然適用。
 
 ---
 

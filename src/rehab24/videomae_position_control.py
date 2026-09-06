@@ -51,8 +51,11 @@ import argparse
 import csv
 import hashlib
 import json
+import shutil
 import statistics
+import subprocess
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -126,6 +129,9 @@ EXPECTED_INTERLEAVED_SESSIONS = 34
 
 #: Plan §3.3. Every proxy is a zero-parameter, model-free quantity.
 LUMINANCE_STRIDE = 4
+LUMINANCE_BACKENDS = ("cv2", "ffmpeg")
+DEFAULT_LUMINANCE_BACKEND = "ffmpeg"
+FFMPEG_WORKERS = 4
 
 
 # --------------------------------------------------------------------------- #
@@ -1017,10 +1023,63 @@ def box_geometry_values(box_dir: Path, sample_ids: Sequence[str]) -> dict[str, d
     }
 
 
+def cv2_frame_levels(path: Path, stride: int) -> tuple[list[int], list[float], int]:
+    """Reference decoder: grey mean of every ``stride``-th frame via OpenCV."""
+    import cv2
+
+    capture = cv2.VideoCapture(str(path))
+    frames: list[int] = []
+    levels: list[float] = []
+    frame_index = 0
+    while True:
+        ok, frame = capture.read()
+        if not ok:
+            break
+        if frame_index % stride == 0:
+            frames.append(frame_index)
+            levels.append(float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean()))
+        frame_index += 1
+    capture.release()
+    return frames, levels, frame_index
+
+
+FFMPEG_THUMB = (16, 9)
+
+
+def ffmpeg_frame_levels(path: Path, stride: int) -> tuple[list[int], list[float], int]:
+    """Grey mean of every ``stride``-th frame via one ffmpeg subprocess.
+
+    Every frame is decoded (the stride is applied here, not in ffmpeg, so the total
+    frame count is exact and matches the cv2 path) and area-averaged to a 16x9 grey
+    thumbnail; the mean of that thumbnail equals the full-frame mean up to the 8-bit
+    rounding of each cell. ``-fps_mode passthrough`` stops ffmpeg from duplicating or
+    dropping frames to hit a nominal rate.
+    """
+    width, height = FFMPEG_THUMB
+    command = [
+        "ffmpeg", "-v", "error", "-nostdin", "-threads", "2", "-i", str(path),
+        "-vf", f"scale={width}:{height}:flags=area", "-fps_mode", "passthrough",
+        "-pix_fmt", "gray", "-f", "rawvideo", "-",
+    ]
+    completed = subprocess.run(command, capture_output=True, check=False)
+    if completed.returncode != 0:
+        raise SystemExit(f"ffmpeg failed on {path}: {completed.stderr.decode(errors='replace').strip()}")
+    raw = np.frombuffer(completed.stdout, dtype=np.uint8)
+    per_frame = width * height
+    if raw.size == 0 or raw.size % per_frame != 0:
+        raise SystemExit(f"ffmpeg returned {raw.size} bytes for {path}, not a multiple of {per_frame}.")
+    means = raw.reshape(-1, per_frame).astype(np.float64).mean(axis=1)
+    n_frames = int(means.shape[0])
+    frames = list(range(0, n_frames, stride))
+    return frames, [float(means[index]) for index in frames], n_frames
+
+
 def compute_luminance(
     rows: Sequence[dict[str, str]],
     data_root: Path,
     stride: int = LUMINANCE_STRIDE,
+    cache_dir: Path | None = None,
+    backend: str = DEFAULT_LUMINANCE_BACKEND,
 ) -> dict[str, tuple[float, int]]:
     """Mean greyscale level over each repetition's frame range, one decode per video.
 
@@ -1029,32 +1088,72 @@ def compute_luminance(
     The stride is recorded in the CSV's ``.meta.json`` sidecar and in
     ``drift_proxies.json``, and ``run_drift_proxies`` refuses to reuse a cache written
     at a different stride, so it can never be silently changed.
-    """
-    import cv2
 
+    ``backend`` picks the decoder. ``cv2`` is the reference (BGR -> grey mean over the
+    full frame in Python); on this host it runs at ~11 fps on REHAB24-6's 1080p 4:4:4
+    streams, i.e. four to five hours for 130 videos, and the first attempt was killed
+    before finishing. ``ffmpeg`` decodes the same frames in a subprocess and area-averages
+    each one to 16x9 grey before the mean is taken -- the same quantity up to 8-bit
+    rounding of the area average -- at ~150 fps, four videos at a time. Both write the
+    same cache/CSV schema, and the backend is recorded in the CSV's sidecar.
+    """
     by_video: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in rows:
         by_video[row["video_path"]].append(row)
 
+    if backend not in LUMINANCE_BACKENDS:
+        raise SystemExit(f"Unknown luminance backend {backend!r}; choose from {LUMINANCE_BACKENDS}.")
+    if backend == "ffmpeg" and shutil.which("ffmpeg") is None:
+        raise SystemExit("ffmpeg is not on PATH; use --luminance-backend cv2 or install ffmpeg.")
+
+    for video_path in by_video:
+        if not (data_root / video_path).exists():
+            raise SystemExit(f"Missing video {data_root / video_path}; cannot compute the luminance drift proxy.")
+
+    def decode(video_path: str) -> tuple[list[int], list[float], int]:
+        if backend == "ffmpeg":
+            return ffmpeg_frame_levels(data_root / video_path, stride)
+        return cv2_frame_levels(data_root / video_path, stride)
+
+    def cache_file(video_path: str) -> Path | None:
+        return None if cache_dir is None else cache_dir / f"{Path(video_path).stem}.stride{stride}.npz"
+
     result: dict[str, tuple[float, int]] = {}
-    for index, (video_path, members) in enumerate(sorted(by_video.items()), start=1):
+    ordered = sorted(by_video.items())
+    decoded: dict[str, tuple[list[int], list[float], int]] = {}
+    pending = [video_path for video_path, _ in ordered if cache_file(video_path) is None or not cache_file(video_path).exists()]
+    if backend == "ffmpeg" and pending:
+        # ffmpeg is a separate process per video, so the GIL is not in the way and the
+        # 12-core host can decode several 4:4:4 streams at once.
+        with ThreadPoolExecutor(max_workers=FFMPEG_WORKERS) as pool:
+            for video_path, value in zip(pending, pool.map(decode, pending)):
+                decoded[video_path] = value
+    for index, (video_path, members) in enumerate(ordered, start=1):
         path = data_root / video_path
-        if not path.exists():
-            raise SystemExit(f"Missing video {path}; cannot compute the luminance drift proxy.")
-        capture = cv2.VideoCapture(str(path))
-        frames: list[int] = []
-        levels: list[float] = []
-        frame_index = 0
-        while True:
-            ok, frame = capture.read()
-            if not ok:
-                break
-            if frame_index % stride == 0:
-                frames.append(frame_index)
-                levels.append(float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean()))
-            frame_index += 1
-        capture.release()
-        print(f"  [{index}/{len(by_video)}] {video_path}: {frame_index} frames, {len(levels)} sampled")
+        # Per-video cache: a full decode of the 128 videos takes hours on this CPU and the
+        # first attempt was killed by the host at ~1h45 with nothing persisted. Each
+        # video's per-frame levels are written as soon as it finishes so a re-run resumes
+        # instead of restarting; the stride is part of the file name so a cache written
+        # at one stride can never be read back under another.
+        cache_path = cache_file(video_path)
+        if cache_path is not None:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+        if cache_path is not None and cache_path.exists():
+            with np.load(cache_path, allow_pickle=False) as cached:
+                frames = [int(value) for value in cached["frames"]]
+                levels = [float(value) for value in cached["levels"]]
+                frame_index = int(cached["n_frames"])
+            print(f"  [{index}/{len(by_video)}] {video_path}: cached ({frame_index} frames, {len(levels)} sampled)", flush=True)
+        else:
+            frames, levels, frame_index = decoded[video_path] if video_path in decoded else decode(video_path)
+            if cache_path is not None:
+                np.savez(
+                    cache_path,
+                    frames=np.asarray(frames, dtype=np.int64),
+                    levels=np.asarray(levels, dtype=np.float64),
+                    n_frames=np.asarray(frame_index, dtype=np.int64),
+                )
+            print(f"  [{index}/{len(by_video)}] {video_path}: {frame_index} frames, {len(levels)} sampled", flush=True)
 
         frame_array = np.asarray(frames, dtype=np.int64)
         level_array = np.asarray(levels, dtype=np.float64)
@@ -1069,7 +1168,7 @@ def compute_luminance(
     return result
 
 
-def write_luminance(path: Path, values: dict[str, tuple[float, int]], stride: int) -> None:
+def write_luminance(path: Path, values: dict[str, tuple[float, int]], stride: int, backend: str = DEFAULT_LUMINANCE_BACKEND) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle)
@@ -1078,7 +1177,7 @@ def write_luminance(path: Path, values: dict[str, tuple[float, int]], stride: in
             level, count = values[sample_id]
             writer.writerow([sample_id, repr(level), count])
     with path.with_suffix(".meta.json").open("w", encoding="utf-8") as handle:
-        json.dump({"frame_stride": stride, "n_samples": len(values)}, handle, indent=2, sort_keys=True)
+        json.dump({"frame_stride": stride, "n_samples": len(values), "backend": backend}, handle, indent=2, sort_keys=True)
 
 
 def read_luminance(path: Path) -> dict[str, tuple[float, int]]:
@@ -1755,6 +1854,7 @@ def run_drift_proxies(
     n_permutations: int,
     permutation_seed: int,
     stride: int = LUMINANCE_STRIDE,
+    luminance_backend: str = DEFAULT_LUMINANCE_BACKEND,
 ) -> dict:
     rows = load_manifest(manifest_path)
     repetitions = build_repetitions(rows)
@@ -1777,14 +1877,16 @@ def run_drift_proxies(
             raise SystemExit(f"{luminance_path} is missing {len(missing)} samples (first: {missing[:5]}).")
     else:
         print(f"Decoding {len({row['video_path'] for row in rows})} videos at stride {stride} ...")
-        luminance = compute_luminance(rows, data_root, stride)
-        write_luminance(luminance_path, luminance, stride)
+        luminance = compute_luminance(rows, data_root, stride, cache_dir=output_dir / "luminance_cache", backend=luminance_backend)
+        write_luminance(luminance_path, luminance, stride, backend=luminance_backend)
 
     proxies = box_geometry_values(box_dir, sample_ids)
     proxies["luminance"] = {sample_id: value for sample_id, (value, _) in luminance.items()}
 
     report = drift_proxy_report(repetitions, proxies, n_permutations, permutation_seed)
     report["luminance_frame_stride"] = stride
+    meta_path = luminance_path.with_suffix(".meta.json")
+    report["luminance_backend"] = json.load(meta_path.open(encoding="utf-8")).get("backend", "cv2") if meta_path.exists() else luminance_backend
     report["box_feature_index"] = BOX_FEATURE_INDEX
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1868,6 +1970,7 @@ def build_parser() -> argparse.ArgumentParser:
     drift.add_argument("--permutations", type=int, default=DEFAULT_PERMUTATIONS)
     drift.add_argument("--permutation-seed", type=int, default=DEFAULT_PERMUTATION_SEED)
     drift.add_argument("--frame-stride", type=int, default=LUMINANCE_STRIDE)
+    drift.add_argument("--luminance-backend", choices=LUMINANCE_BACKENDS, default=DEFAULT_LUMINANCE_BACKEND)
 
     return parser
 
@@ -1959,6 +2062,7 @@ def main(argv: Sequence[str] | None = None) -> None:
             args.permutations,
             args.permutation_seed,
             args.frame_stride,
+            args.luminance_backend,
         )
         print_drift_proxies(report)
         print(f"\nSaved to {args.output_dir / 'drift_proxies.json'}")
