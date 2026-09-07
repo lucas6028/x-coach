@@ -235,14 +235,14 @@ data/REHAB24-6/processed/videomae_checkpoint_report.json                        
 .venv\Scripts\python.exe scripts\rehab24\videomae_framing_report.py --arm kin=data\REHAB24-6\processed\videomae_framing\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --arm ssv2=data\REHAB24-6\processed\videomae_ssv2\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --arm ssv2_background_only=data\REHAB24-6\processed\videomae_ssv2\background_only\videomae_mean_pool_fc_norm_mean --primary ssv2:kin --secondary ssv2_background_only:kin --device cpu --output-prefix data\REHAB24-6\processed\videomae_checkpoint
 
 # 5. S1 and S3 within-session
-.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2 predict --arm-dir data\REHAB24-6\processed\videomae_ssv2\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --device cpu
-.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2 analyze --permutations 10000 --permutation-seed 20260908
-.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2_background_only predict --arm-dir data\REHAB24-6\processed\videomae_ssv2\background_only\videomae_mean_pool_fc_norm_mean --device cpu
-.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2_background_only analyze --permutations 10000 --permutation-seed 20260908
+.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py predict --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2 --arm-dir data\REHAB24-6\processed\videomae_ssv2\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --device cpu
+.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py analyze --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2 --permutations 10000 --permutation-seed 20260908
+.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py predict --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2_background_only --arm-dir data\REHAB24-6\processed\videomae_ssv2\background_only\videomae_mean_pool_fc_norm_mean --device cpu
+.venv\Scripts\python.exe scripts\rehab24\videomae_identity_control.py analyze --output-dir data\REHAB24-6\processed\videomae_identity_control_ssv2_background_only --permutations 10000 --permutation-seed 20260908
 
 # 6. S2 position readability
-# (--output-dir / --seeds are per-subcommand flags here and go AFTER the subcommand; the
-#  identity-control CLI above takes them before it. `analyze` keeps its default
+# (--output-dir / --seeds are per-subcommand flags in BOTH CLIs and go AFTER the
+#  subcommand. `analyze` keeps its default
 #  --framing-summary: the Kinetics framing summary is the per-subject 0.6612 baseline, and
 #  the helper reads only its full_frame_letterbox arm)
 .venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py predict --k 0 16 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --arm-dir data\REHAB24-6\processed\videomae_ssv2\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --seeds 42 7 1234 --device cpu
