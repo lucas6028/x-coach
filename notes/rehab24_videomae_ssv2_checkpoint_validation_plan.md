@@ -242,12 +242,14 @@ data/REHAB24-6/processed/videomae_checkpoint_report.json                        
 
 # 6. S2 position readability
 # (--output-dir / --seeds are per-subcommand flags here and go AFTER the subcommand; the
-#  identity-control CLI above takes them before it)
+#  identity-control CLI above takes them before it. `analyze` keeps its default
+#  --framing-summary: the Kinetics framing summary is the per-subject 0.6612 baseline, and
+#  the helper reads only its full_frame_letterbox arm)
 .venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py predict --k 0 16 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --arm-dir data\REHAB24-6\processed\videomae_ssv2\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --seeds 42 7 1234 --device cpu
 .venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py probe --k 0 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --arm-dir data\REHAB24-6\processed\videomae_ssv2\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --permutations 10000
 .venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py probe --k 16 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --arm-dir data\REHAB24-6\processed\videomae_ssv2\full_frame_letterbox\videomae_mean_pool_fc_norm_mean --permutations 10000
-.venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py analyze --k 0 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --framing-summary data\REHAB24-6\processed\videomae_checkpoint_summary.json --permutations 10000 --permutation-seed 20260908
-.venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py analyze --k 16 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --framing-summary data\REHAB24-6\processed\videomae_checkpoint_summary.json --permutations 10000 --permutation-seed 20260908
+.venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py analyze --k 0 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --permutations 10000 --permutation-seed 20260908
+.venv\Scripts\python.exe scripts\rehab24\videomae_position_control.py analyze --k 16 --output-dir data\REHAB24-6\processed\videomae_position_control_ssv2 --permutations 10000 --permutation-seed 20260908
 
 # 7. verdict rows
 .venv\Scripts\python.exe scripts\rehab24\videomae_checkpoint_report.py --output data\REHAB24-6\processed\videomae_checkpoint_report.json
