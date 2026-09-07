@@ -654,3 +654,13 @@ centre crop 224,在 480×600 上會切掉上下各約 1/6。**full-frame 那一�
   長寬比不再進入畫面;再跑一次 `box_geometry` 式的 zero-parameter 對照確認它掉到隨機。
 - 條件 2 需要更高的檢定力:目前 244 支 test 影片是硬限制,可考慮改用 repeated
   splits 或把 Fitness-AQA 其他動作(OHP、BarbellRow)一起納入。
+
+### 4.5 換 checkpoint 的複製(2026-09-07,事前登錄,見獨立 note)
+
+§2.6 的「刪掉運動員仍保留 91%」在 `MCG-NJU/videomae-base-finetuned-ssv2` 上複製:
+A = full_frame − background_only 為 +0.0127(Kinetics +0.0130),R = 0.92 [0.63, 1.30]
+(Kinetics 0.91 [0.61, 1.38]),事前登錄的主統計量 ΔA = −0.0003,95% CI [−0.075, +0.072],
+判讀為 undetermined。整個 SSv2 欄位比 Kinetics 高約 0.02–0.03,但與刪不刪運動員無關。
+計畫、gate 與可重現指令在 `videomae_ssv2_checkpoint_validation_plan.md` /
+`videomae_ssv2_checkpoint_results.md`。該 note 另記了一個未登錄的探索值:pose + SSv2
+full_frame 的 late fusion 0.702(Δ +0.052,CI [−0.002, +0.108]),不是判定。
