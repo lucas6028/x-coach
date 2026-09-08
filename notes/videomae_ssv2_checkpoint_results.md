@@ -157,7 +157,10 @@ retention figure: with the SSv2 full frame at 0.669, geometry alone is (0.578 �
   self-supervised pre-trained on SSv2, so pre-training data and fine-tune labels move
   together.
 - **Nothing about REHAB24-6**, where the background arm sits at chance and the confound
-  is identity and recording position.
+  is identity and recording position. Resolved 2026-09-08 in
+  [`rehab24_videomae_ssv2_checkpoint_results.md`](rehab24_videomae_ssv2_checkpoint_results.md):
+  the +0.02–0.03 column shift seen here does not transfer (ΔBA −0.027, undetermined;
+  within-session AUC 0.78 vs 0.87, p = 0.02).
 - **The 46–56% that needs no pixels** is a property of the annotation (box height,
   clip length) and no checkpoint can move it.
 

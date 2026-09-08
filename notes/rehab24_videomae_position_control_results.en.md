@@ -125,6 +125,10 @@ this is within-recording ranking.
 - Within-clip temporal order (16-frame shuffle) is still untested.
 - The five balanced-accuracy deltas are undetermined, not evidence of no effect.
 - 0.7309 vs 0.6612 is not a like-for-like comparison and was never tested.
+- 2026-09-08: the same procedure on the SSv2-finetuned checkpoint gives probe median
+  0.3843, AUC 0.7805 → 0.7772 at k = 16, share 1.2% (a floor, mean probe p = 0.033);
+  see [`rehab24_videomae_ssv2_checkpoint_results.md`](rehab24_videomae_ssv2_checkpoint_results.md).
+  The 4.9% here remains the Kinetics figure.
 
 ## Reproduce
 

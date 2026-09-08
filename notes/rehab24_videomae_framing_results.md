@@ -51,6 +51,12 @@ cam18 的 **65 支影片、幾乎每一幀**,腳掌與腳趾都在模型看不�
 > 只給片段長度可以拿到 0.6139。原因不難理解——REHAB24-6 只有一間實驗室、兩台固定
 > 相機,「場景」根本沒有變化可以辨識。
 
+> **2026-09-08 update.** The checkpoint comparison
+> ([`rehab24_videomae_ssv2_checkpoint_results.md`](rehab24_videomae_ssv2_checkpoint_results.md))
+> re-ran this arm with the SSv2-finetuned VideoMAE: LOSO BA 0.6341 ± 0.0341 against the
+> 0.6612 here, ΔBA −0.027 (2/9, p = 0.164, undetermined). Kinetics remains the quoted
+> checkpoint; every number in this note is Kinetics.
+
 ---
 
 ## 1. 讀之前的名詞說明

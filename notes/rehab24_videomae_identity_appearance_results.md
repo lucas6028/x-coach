@@ -282,6 +282,10 @@ VideoMAE 的全部 correctness 訊號**。
   位置中性的錄影只有 3 段、2 位受試者，遠不足以撐起推論。
   **2026-09-06 更新：** 後續的位置控制實驗把線性可讀的位置子空間（16 維）投影掉後
   AUC 仍有 0.8556，份額 4.9%（見 §9 末段）；線性路徑關閉，非線性路徑仍未測。
+  **2026-09-08 update:** the SSv2-finetuned checkpoint scores within-session AUC
+  0.7805 ± 0.0917 on the same arm (ΔAUC −0.094, 2/9, p = 0.0195), probe median 0.384,
+  share 1.2%; see `rehab24_videomae_ssv2_checkpoint_results.md`. The 0.8741 here stays
+  the Kinetics number and the quoted one.
 - **不支持「模型使用時間順序」。** 同一段錄影內的單幀姿勢差異也可能產生 AUC。
   這需要 repetition 層級的靜態幀控制與時間打亂控制，本實驗都沒做。
 - **不支持「外觀完全沒有貢獻」。** 0.5241 是「這個 appearance-only 建法沒顯示足夠訊號」，
