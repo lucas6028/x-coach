@@ -14,7 +14,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scipy.stats import wilcoxon
+try:  # pragma: no cover - scipy is optional in this repo and absent from requirements-ci
+    from scipy.stats import wilcoxon as _scipy_wilcoxon
+except ImportError:
+    _scipy_wilcoxon = None
 
 from src.rehab24 import videomae_checkpoint_report as report
 
@@ -111,12 +114,13 @@ def kin_side(fixture: Fixture) -> None:
 
 
 class PairedDeltaTest(unittest.TestCase):
+    @unittest.skipIf(_scipy_wilcoxon is None, "scipy not installed (optional dependency)")
     def test_two_sided_p_matches_scipy_exact_two_sided(self) -> None:
         cand = constant(0.70, 0.01)
         offsets = [0.03, -0.01, 0.05, 0.02, 0.04, -0.02, 0.06, 0.01, 0.03]
         base = {s: cand[s] - d for s, d in zip(SUBJECTS, offsets)}
         result = report.paired_subject_delta(cand, base, n_bootstrap=200, bootstrap_seed=1)
-        _, expected = wilcoxon(offsets, method="exact", alternative="two-sided")
+        _, expected = _scipy_wilcoxon(offsets, method="exact", alternative="two-sided")
         self.assertAlmostEqual(result["two_sided_p"], float(expected), places=12)
         self.assertEqual(result["n_positive"], 7)
         self.assertEqual(result["n_subjects"], 9)
