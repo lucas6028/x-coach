@@ -40,14 +40,12 @@ from src.rehab24.videomae_features import STATIC_FRAME_INDEX, TEMPORAL_ARMS, TUB
 from src.rehab24.videomae_identity_control import (
     ALPHA,
     DECISION_AUC,
-    MIN_SUBJECTS_ABOVE_CHANCE,
     SEEDS,
     analyze as within_session_analysis,
     audit_oof,
     bootstrap_interval,
     build_sessions,
     exact_wilcoxon_vs,
-    holm_correct,
     manifest_index,
     observed_statistic,
     print_analysis,
@@ -55,7 +53,6 @@ from src.rehab24.videomae_identity_control import (
     repetition_scores,
     write_oof,
 )
-from src.rehab24.videomae_identity_control import DEFAULT_ARM_DIR as BASELINE_FEATURE_DIR
 from src.rehab24.videomae_identity_control import DEFAULT_OUTPUT_DIR as BASELINE_OOF_DIR
 from src.rehab24.videomae_identity_control import oof_path as baseline_oof_path
 from src.rehab24.videomae_position_control import (
@@ -127,6 +124,13 @@ def null_path(output_dir: Path, arm: str) -> Path:
 # --------------------------------------------------------------------------- #
 
 PAIRING_KEYS = ("clip_starts", "first_frame", "last_frame", "total_frames")
+#: Provenance keys a temporal arm may legitimately differ from the baseline in.
+TEMPORAL_PROVENANCE_KEYS = ("temporal_transform", "temporal_seed_tag")
+FEATURE_KEY = "clip_features_mean_pool_fc_norm"
+
+
+def read_provenance(data) -> dict[str, str]:
+    return {key[len("provenance_"):]: str(data[key]) for key in data.files if key.startswith("provenance_")}
 
 
 def bundle_paths(raw_dir: Path) -> dict[str, Path]:
@@ -140,18 +144,25 @@ def relative_l2(first: np.ndarray, second: np.ndarray) -> float:
 
 
 def frame_pairing_gate(arm_raw_dir: Path, baseline_raw_dir: Path) -> dict:
-    """G1: every temporal bundle samples exactly the baseline's frames.
+    """G1: every temporal bundle samples exactly the baseline's frames, from the same
+    pixels, model and library.
 
-    Also reports how far the ``mean_pool_fc_norm`` clip features moved from the
-    baseline's (mean and max relative L2). For ``frame_identity`` that number is the
-    G3 diagnostic the plan asks for when 0.8741 does not reproduce; for the reordered
-    arms it is descriptive.
+    Three checks. (1) The four sampling keys are equal bundle by bundle. (2) Every
+    provenance key except the temporal ones is equal, so an arm extracted with the
+    wrong ``--variant`` or from another transformers version cannot pass (those keys
+    are computed before any pixel transform, so check 1 alone would let it through).
+    (3) The ``mean_pool_fc_norm`` features actually moved for a reordered arm (mean
+    relative L2 > 0); a reorder that never reached the pixels would otherwise return
+    four null deltas and read as "undetermined". For ``frame_identity`` the distance is
+    reported, not gated: G3 owns that reading and has its registered fallback.
     """
     arm = bundle_paths(arm_raw_dir)
     base = bundle_paths(baseline_raw_dir)
     missing = sorted(set(base) - set(arm))
     extra = sorted(set(arm) - set(base))
     mismatched: list[str] = []
+    provenance_mismatch: list[str] = []
+    arm_temporal: set[str] = set()
     distances: list[float] = []
     for rel in sorted(set(arm) & set(base)):
         with np.load(arm[rel], allow_pickle=False) as a, np.load(base[rel], allow_pickle=False) as b:
@@ -159,9 +170,21 @@ def frame_pairing_gate(arm_raw_dir: Path, baseline_raw_dir: Path) -> dict:
                 if key not in a.files or key not in b.files or not np.array_equal(a[key], b[key]):
                     mismatched.append(f"{rel}:{key}")
                     break
-            key = "clip_features_mean_pool_fc_norm"
-            if key in a.files and key in b.files and a[key].shape == b[key].shape:
-                distances.append(relative_l2(a[key].astype(np.float64), b[key].astype(np.float64)))
+            prov_a, prov_b = read_provenance(a), read_provenance(b)
+            arm_temporal.add(prov_a.get("temporal_transform", "<unstamped>"))
+            shared_keys = {k for k in prov_a if k not in TEMPORAL_PROVENANCE_KEYS} | set(prov_b)
+            for key in sorted(shared_keys):
+                if prov_a.get(key) != prov_b.get(key):
+                    provenance_mismatch.append(f"{rel}:{key}={prov_a.get(key)!r} vs baseline {prov_b.get(key)!r}")
+            if FEATURE_KEY in a.files and FEATURE_KEY in b.files and a[FEATURE_KEY].shape == b[FEATURE_KEY].shape:
+                distances.append(relative_l2(a[FEATURE_KEY].astype(np.float64), b[FEATURE_KEY].astype(np.float64)))
+    mean_distance = float(np.mean(distances)) if distances else None
+    temporal = arm_temporal.pop() if len(arm_temporal) == 1 else None
+    features_moved = (
+        True
+        if temporal == "frame_identity"
+        else (mean_distance is not None and mean_distance > 0)
+    )
     return {
         "arm_bundles": len(arm),
         "baseline_bundles": len(base),
@@ -169,12 +192,23 @@ def frame_pairing_gate(arm_raw_dir: Path, baseline_raw_dir: Path) -> dict:
         "missing": missing,
         "extra": extra,
         "mismatched": mismatched,
+        "provenance_mismatch": provenance_mismatch,
+        "temporal_transform": temporal,
         "feature_relative_l2": {
-            "mean": float(np.mean(distances)) if distances else None,
+            "mean": mean_distance,
             "max": float(np.max(distances)) if distances else None,
             "n": len(distances),
+            "gated": temporal != "frame_identity",
         },
-        "passed": len(arm) == EXPECTED_BUNDLES and not missing and not extra and not mismatched,
+        "passed": (
+            len(arm) == EXPECTED_BUNDLES
+            and not missing
+            and not extra
+            and not mismatched
+            and not provenance_mismatch
+            and temporal is not None
+            and features_moved
+        ),
     }
 
 
@@ -271,6 +305,26 @@ def permutation_gate(arm_raw_dir: Path, arm: str) -> dict:
 # --------------------------------------------------------------------------- #
 
 
+def assert_feature_dir_is_arm(feature_dir: Path, arm: str) -> int:
+    """The materialised dir must carry exactly one temporal stamp, equal to ``arm``.
+
+    Gates run on the raw dir; the classifier reads the materialised one; only the path
+    convention links them. The stamp is carried through materialisation, so it is the
+    one thing that ties an OOF file to the arm its gates were run on.
+    """
+    stamps: set[str] = set()
+    count = 0
+    for path in feature_dir.rglob("*.npz"):
+        count += 1
+        with np.load(path, allow_pickle=False) as data:
+            stamps.add(str(data["provenance_temporal_transform"]) if "provenance_temporal_transform" in data.files else "<unstamped>")
+    if count == 0:
+        raise SystemExit(f"No materialised bundles under {feature_dir}. Run `materialize --arm {arm}` first.")
+    if stamps != {arm}:
+        raise SystemExit(f"{feature_dir} carries temporal stamps {sorted(stamps)}, expected exactly {{{arm!r}}}.")
+    return count
+
+
 def run_predict(
     arm: str,
     feature_dir: Path,
@@ -286,6 +340,7 @@ def run_predict(
     device = torch.device(
         "cuda" if (device_arg != "cpu" and device_arg is not None and torch.cuda.is_available()) else "cpu"
     )
+    n_bundles = assert_feature_dir_is_arm(feature_dir, arm)
     config = FoldConfig()
     labels = {key: int(value) for key, value in json.load(labels_path.open()).items()}
     metadata = load_metadata(manifest_path)
@@ -296,7 +351,14 @@ def run_predict(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Temporal-control OOF on {device} | arm={arm} | features={feature_dir} | seeds {list(seeds)}")
-    report: dict = {"arm": arm, "feature_dir": str(feature_dir), "seeds": list(seeds), "config": vars(config), "per_seed": {}}
+    report: dict = {
+        "arm": arm,
+        "feature_dir": str(feature_dir),
+        "feature_bundles": n_bundles,
+        "seeds": list(seeds),
+        "config": vars(config),
+        "per_seed": {},
+    }
     for seed in seeds:
         print(f"\n--- {arm} | seed {seed} ---")
         folds = run_arm(
@@ -351,13 +413,18 @@ def load_baseline_oof(baseline_oof_dir: Path, seeds: Sequence[int]) -> list[dict
 
 
 def absolute_verdict(statistic: dict, p_value: float) -> dict:
-    """Is the arm itself above chance? (plan reading table, row 4 trigger)."""
+    """Is the arm itself above chance? (plan reading table, row 4 trigger).
+
+    The registered trigger is exactly two conditions: mean > 0.55 and permutation
+    p < 0.05. The subject count is reported alongside but does not enter the verdict;
+    the identity control's 6/9 rule is that plan's, not this one's.
+    """
     conditions = {
         "mean_auc_above_0.55": statistic["mean"] > DECISION_AUC,
-        "at_least_6_of_9_subjects_above_0.5": statistic["n_subjects_above_chance"] >= MIN_SUBJECTS_ABOVE_CHANCE,
         "permutation_p_below_0.05": p_value < ALPHA,
+        "subjects_above_0.5_descriptive": f"{statistic['n_subjects_above_chance']}/{statistic['n_subjects']}",
     }
-    above = all(conditions.values())
+    above = conditions["mean_auc_above_0.55"] and conditions["permutation_p_below_0.05"]
     return {
         "conditions": conditions,
         "above_chance": above,
@@ -400,7 +467,9 @@ def reproduction_check(statistic_mean: float, balanced_accuracy: dict | None) ->
     ba_mean = balanced_accuracy["mean"] if balanced_accuracy else None
     ba_delta = (ba_mean - FRAMING_BASELINE_BA) if ba_mean is not None else None
     auc_ok = abs(auc_delta) < REPRODUCTION_TOLERANCE
-    ba_ok = ba_delta is not None and abs(ba_delta) < REPRODUCTION_TOLERANCE
+    # A missing folds file is "unavailable", never a failed reproduction: the plan's
+    # fallback row (re-base on frame_identity) is for a venv mismatch, not a lost file.
+    ba_ok = (abs(ba_delta) < REPRODUCTION_TOLERANCE) if ba_delta is not None else None
     return {
         "within_session_auc": statistic_mean,
         "reference_within_session_auc": REFERENCE_WITHIN_SESSION_AUC,
@@ -411,7 +480,8 @@ def reproduction_check(statistic_mean: float, balanced_accuracy: dict | None) ->
         "tolerance": REPRODUCTION_TOLERANCE,
         "auc_reproduced": auc_ok,
         "ba_reproduced": ba_ok,
-        "passed": auc_ok and ba_ok,
+        "passed": (auc_ok and ba_ok) if ba_ok is not None else None,
+        "reason": None if ba_ok is not None else "LOSO folds unavailable; run predict with all seeds",
         "on_failure": "reading-table last row: pair every delta against frame_identity and report both baselines",
     }
 
@@ -549,6 +619,21 @@ def static_vs_shuffle(static: dict[str, float], shuffle: dict[str, float]) -> di
     }
 
 
+def holm_fixed_family(p_values: dict[str, float | None]) -> dict[str, dict]:
+    """Holm over a family whose size is the number of arms COMPARED, not the number
+    with a p-value. An unavailable p (all deltas zero, arm not analysed) stays in the
+    table as unavailable and keeps the denominator; dropping it would make the
+    survivors more significant than the registered family allows."""
+    family = len(p_values)
+    available = sorted(((name, p) for name, p in p_values.items() if p is not None), key=lambda item: item[1])
+    corrected: dict[str, dict] = {name: {"raw": None, "holm": None, "significant": None, "unavailable": True} for name in p_values}
+    running = 0.0
+    for index, (name, raw) in enumerate(available):
+        running = max(running, min(1.0, raw * (family - index)))
+        corrected[name] = {"raw": raw, "holm": running, "significant": running < ALPHA, "unavailable": False}
+    return {"family_size": family, "per_arm": corrected}
+
+
 def paired_report(
     output_dir: Path,
     arms: Sequence[str],
@@ -558,6 +643,16 @@ def paired_report(
     n_bootstrap: int,
     seed: int,
 ) -> dict:
+    # Every compared arm must have been through `analyze` (G4 OOF integrity, the
+    # 61-session gate and the estimator check live there); a truncated OOF would
+    # otherwise yield a clean-looking delta over fewer subjects.
+    summaries: dict[str, dict] = {}
+    for arm in arms:
+        path = summary_path(output_dir, arm)
+        if not path.exists():
+            raise SystemExit(f"Missing {path}: run `analyze --arm {arm}` (G4) before `paired`.")
+        summaries[arm] = json.load(path.open(encoding="utf-8"))
+
     baseline = per_subject_auc(baseline_rows, seeds)
     per_arm: dict[str, dict[str, float]] = {}
     comparisons: dict[str, dict] = {}
@@ -565,19 +660,30 @@ def paired_report(
         per_arm[arm] = per_subject_auc(load_arm_oof(output_dir, arm, seeds), seeds)
         comparisons[arm] = paired_comparison(baseline, per_arm[arm], n_bootstrap, seed)
 
-    raw_p = {arm: comparison["two_sided_p"] for arm, comparison in comparisons.items() if comparison["two_sided_p"] is not None}
+    # Registered Holm family (plan, Secondary): LOSO BA of every temporal arm vs the
+    # framing headline, corrected across the arms compared.
+    loso_ba_p = {
+        arm: (summaries[arm]["secondary"].get("loso_ba_vs_framing") or {}).get("two_sided_p")
+        for arm in arms
+    }
+    # Exploratory: the secondary arms' within-session paired p-values. The primary
+    # arm is excluded so the registered primary p is never Holm-multiplied.
+    within_secondary_p = {arm: comparisons[arm]["two_sided_p"] for arm in arms if arm != PRIMARY_ARM}
     report: dict = {
         "baseline": baseline_label,
         "baseline_per_subject": baseline,
         "seeds": list(seeds),
         "bootstrap": {"n_resamples": n_bootstrap, "seed": seed},
         "comparisons": comparisons,
-        "holm_two_sided": holm_correct(raw_p) if raw_p else {},
+        "loso_ba_vs_framing": {arm: summaries[arm]["secondary"].get("loso_ba_vs_framing") for arm in arms},
+        "holm_loso_ba_vs_framing": holm_fixed_family(loso_ba_p),
+        "holm_within_session_secondary_arms": {
+            "note": "exploratory family; the primary arm's paired p is read raw and is not in it",
+            **holm_fixed_family(within_secondary_p),
+        },
     }
     if PRIMARY_ARM in comparisons:
-        path = summary_path(output_dir, PRIMARY_ARM)
-        absolute = json.load(path.open(encoding="utf-8"))["primary"]["verdict"] if path.exists() else None
-        report["reading_table"] = reading_table_row(comparisons[PRIMARY_ARM], absolute)
+        report["reading_table"] = reading_table_row(comparisons[PRIMARY_ARM], summaries[PRIMARY_ARM]["primary"]["verdict"])
     if "rep_static_frame" in per_arm and PRIMARY_ARM in per_arm:
         report["static_vs_shuffle"] = static_vs_shuffle(per_arm["rep_static_frame"], per_arm[PRIMARY_ARM])
     if "frame_reverse" in comparisons:
@@ -594,7 +700,7 @@ def paired_report(
 def print_paired(report: dict) -> None:
     print(f"\n=== paired within-session AUC vs {report['baseline']} (n = subjects) ===")
     for arm, comparison in report["comparisons"].items():
-        holm = report["holm_two_sided"].get(arm, {})
+        holm = report["holm_within_session_secondary_arms"]["per_arm"].get(arm, {})
         share = comparison["share_of_above_chance_signal"]
         share_text = f"{share:+.3f}" if share is not None else "n/a"
         p_text = f"{comparison['two_sided_p']:.4f}" if comparison["two_sided_p"] is not None else "n/a"
@@ -602,8 +708,15 @@ def print_paired(report: dict) -> None:
             f"  {arm:<17} AUC {comparison['candidate_mean']:.4f}  delta {comparison['mean_delta']:+.4f} "
             f"± {comparison['sd_delta']:.4f}  drop {comparison['n_drop']}/{comparison['n_subjects']}  "
             f"CI {comparison['bootstrap_95ci_delta'][0]:+.4f}..{comparison['bootstrap_95ci_delta'][1]:+.4f}  "
-            f"p {p_text}  Holm {holm.get('holm', float('nan')):.4f}  share {share_text}"
+            f"p {p_text}  Holm {'raw (primary)' if arm == PRIMARY_ARM else (f'{holm['holm']:.4f}' if holm.get('holm') is not None else 'n/a')}  share {share_text}"
         )
+    print("\n  LOSO balanced accuracy vs 0.6612, Holm across the arms compared (registered family):")
+    for arm, entry in report["holm_loso_ba_vs_framing"]["per_arm"].items():
+        vs = report["loso_ba_vs_framing"].get(arm) or {}
+        if entry["unavailable"] or not vs.get("available"):
+            print(f"    {arm:<17} unavailable")
+        else:
+            print(f"    {arm:<17} delta {vs['mean_delta']:+.4f} ({vs['n_positive']}/{vs['n_subjects']} up)  raw p {entry['raw']:.4f}  Holm {entry['holm']:.4f}")
     if "reading_table" in report:
         print(f"\n  {report['reading_table']['row']}")
     if "static_vs_shuffle" in report:
@@ -747,8 +860,9 @@ def main(argv: Sequence[str] | None = None) -> None:
             print(f"LOSO balanced accuracy: {ba['mean']:.4f} ± {ba['sd_over_subjects']:.4f} vs {FRAMING_BASELINE_BA}: {delta}")
         if "reproduction" in summary:
             rep = summary["reproduction"]
+            status = "UNAVAILABLE" if rep["passed"] is None else ("PASS" if rep["passed"] else "FAIL")
             print(
-                f"G3 reproduction: {'PASS' if rep['passed'] else 'FAIL'} "
+                f"G3 reproduction: {status} "
                 f"(AUC {rep['within_session_auc']:.4f} vs {REFERENCE_WITHIN_SESSION_AUC}, "
                 f"BA {rep['loso_balanced_accuracy']} vs {FRAMING_BASELINE_BA})"
             )

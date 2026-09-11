@@ -6,6 +6,7 @@ import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import numpy as np
 
@@ -28,10 +29,14 @@ from src.rehab24.videomae_temporal_control import (
     permutation_gate,
     permutation_rule_ok,
     absolute_verdict,
+    assert_feature_dir_is_arm,
+    holm_fixed_family,
+    paired_report,
     reading_table_row,
     reproduction_check,
     static_vs_shuffle,
 )
+import src.rehab24.videomae_temporal_control as temporal_control
 
 N = 16
 
@@ -182,18 +187,67 @@ def write_dir(root: Path, temporal: str, samples: dict[str, list[int]], provenan
 class RawBundleGatesTest(unittest.TestCase):
     samples = {"a_rep1_cam17": [0, 10, 20, 30], "a_rep1_cam18": [0, 10, 20, 30], "b_rep2_cam17": [5, 15, 25, 35]}
 
+    provenance = {"variant": "full_frame_letterbox", "transformers_version": "5.5.0", "model_name": "m"}
+
+    def arm_provenance(self, arm: str, **extra) -> dict:
+        return {**self.provenance, "temporal_transform": arm, "temporal_seed_tag": "20260911", **extra}
+
+    def write_moved(self, root: Path, arm: str, provenance: dict) -> Path:
+        for sample_id, starts in self.samples.items():
+            payload = bundle(arm, sample_id, starts)
+            payload["clip_features_mean_pool_fc_norm"] = payload["clip_features_mean_pool_fc_norm"] * 2
+            save_feature(root / "train" / f"{sample_id}.npz", row(sample_id), payload, provenance)
+        return root
+
     def test_frame_pairing_passes_on_identical_sampling(self):
         with TemporaryDirectory() as tmp:
-            base = write_dir(Path(tmp) / "base", TEMPORAL_NONE, self.samples)
-            arm = write_dir(Path(tmp) / "arm", "frame_shuffle", self.samples)
+            base = write_dir(Path(tmp) / "base", TEMPORAL_NONE, self.samples, provenance=self.provenance)
+            arm = write_dir(Path(tmp) / "arm", "frame_shuffle", self.samples, provenance=self.arm_provenance("frame_shuffle"))
             gate = frame_pairing_gate(arm, base)
         self.assertEqual(gate["mismatched"], [])
         self.assertEqual(gate["missing"], [])
+        self.assertEqual(gate["provenance_mismatch"], [])
+        self.assertEqual(gate["temporal_transform"], "frame_shuffle")
         self.assertEqual(gate["arm_bundles"], 3)
         self.assertAlmostEqual(gate["feature_relative_l2"]["max"], 0.0)
-        # Only the bundle count keeps this synthetic dir from passing outright.
+        # Bundle count and unmoved features both keep this synthetic dir from passing.
         self.assertFalse(gate["passed"])
         self.assertEqual(gate["expected_bundles"], 2144)
+
+    def test_frame_pairing_gates_on_provenance_and_feature_movement(self):
+        with TemporaryDirectory() as tmp, mock.patch.object(temporal_control, "EXPECTED_BUNDLES", 3):
+            base = write_dir(Path(tmp) / "base", TEMPORAL_NONE, self.samples, provenance=self.provenance)
+            # identity: same features, same provenance -> passes; distance reported, not gated
+            ident = write_dir(Path(tmp) / "ident", "frame_identity", self.samples, provenance=self.arm_provenance("frame_identity"))
+            gate = frame_pairing_gate(ident, base)
+            self.assertTrue(gate["passed"], gate)
+            self.assertFalse(gate["feature_relative_l2"]["gated"])
+            # shuffle whose features never moved -> fails on movement
+            same = write_dir(Path(tmp) / "same", "frame_shuffle", self.samples, provenance=self.arm_provenance("frame_shuffle"))
+            self.assertFalse(frame_pairing_gate(same, base)["passed"])
+            # shuffle with moved features -> passes
+            gate = frame_pairing_gate(self.write_moved(Path(tmp) / "shuf", "frame_shuffle", self.arm_provenance("frame_shuffle")), base)
+            self.assertTrue(gate["passed"], gate)
+            self.assertGreater(gate["feature_relative_l2"]["mean"], 0)
+            # wrong --variant (the argparse default) or another transformers version -> fails on provenance
+            for key, value in (("variant", "full_frame"), ("transformers_version", "5.0.0")):
+                wrong = self.write_moved(Path(tmp) / ("wrong_" + key), "frame_shuffle", self.arm_provenance("frame_shuffle", **{key: value}))
+                gate = frame_pairing_gate(wrong, base)
+                self.assertFalse(gate["passed"])
+                self.assertEqual(len(gate["provenance_mismatch"]), 3)
+                self.assertIn(key, gate["provenance_mismatch"][0])
+
+    def test_feature_dir_must_carry_exactly_the_arms_stamp(self):
+        with TemporaryDirectory() as tmp:
+            good = write_dir(Path(tmp) / "good", "frame_shuffle", self.samples, provenance=self.arm_provenance("frame_shuffle"))
+            self.assertEqual(assert_feature_dir_is_arm(good, "frame_shuffle"), 3)
+            with self.assertRaises(SystemExit):
+                assert_feature_dir_is_arm(good, "frame_reverse")
+            unstamped = write_dir(Path(tmp) / "unstamped", TEMPORAL_NONE, self.samples, provenance=self.provenance)
+            with self.assertRaises(SystemExit):
+                assert_feature_dir_is_arm(unstamped, "frame_identity")
+            with self.assertRaises(SystemExit):
+                assert_feature_dir_is_arm(Path(tmp) / "empty", "frame_shuffle")
 
     def test_frame_pairing_names_a_clip_start_mismatch_and_a_missing_bundle(self):
         with TemporaryDirectory() as tmp:
@@ -298,12 +352,28 @@ class PairedInferenceTest(unittest.TestCase):
         self.assertTrue(static_vs_shuffle(static, shuffle)["row_5_triggered"])
         self.assertFalse(static_vs_shuffle(shuffle, static)["row_5_triggered"])
 
-    def test_absolute_verdict_carries_the_printers_reading_key(self):
-        statistic = {"mean": 0.87, "n_subjects_above_chance": 9}
-        verdict = absolute_verdict(statistic, 0.0001)
+    def test_absolute_verdict_uses_only_the_two_registered_conditions(self):
+        verdict = absolute_verdict({"mean": 0.87, "n_subjects_above_chance": 9, "n_subjects": 9}, 0.0001)
         self.assertTrue(verdict["above_chance"])
         self.assertIn("reading", verdict)
-        self.assertFalse(absolute_verdict({"mean": 0.52, "n_subjects_above_chance": 5}, 0.3)["above_chance"])
+        # 5/9 subjects above 0.5 must NOT veto: the plan's row-4 trigger is mean <= 0.55 or p >= 0.05 only
+        self.assertTrue(absolute_verdict({"mean": 0.62, "n_subjects_above_chance": 5, "n_subjects": 9}, 0.0004)["above_chance"])
+        self.assertFalse(absolute_verdict({"mean": 0.52, "n_subjects_above_chance": 9, "n_subjects": 9}, 0.0001)["above_chance"])
+        self.assertFalse(absolute_verdict({"mean": 0.80, "n_subjects_above_chance": 9, "n_subjects": 9}, 0.3)["above_chance"])
+
+    def test_holm_keeps_the_family_size_when_a_p_is_unavailable(self):
+        result = holm_fixed_family({"a": 0.016, "b": None, "c": 0.5, "d": 0.03})
+        self.assertEqual(result["family_size"], 4)
+        self.assertAlmostEqual(result["per_arm"]["a"]["holm"], 0.064)  # 0.016 * 4, not * 3
+        self.assertFalse(result["per_arm"]["a"]["significant"])
+        self.assertTrue(result["per_arm"]["b"]["unavailable"])
+        self.assertIsNone(result["per_arm"]["b"]["holm"])
+        self.assertAlmostEqual(result["per_arm"]["d"]["holm"], 0.09)
+
+    def test_paired_refuses_an_arm_that_was_never_analysed(self):
+        with TemporaryDirectory() as tmp:
+            with self.assertRaises(SystemExit):
+                paired_report(Path(tmp), ["frame_shuffle"], [], "full_frame_letterbox", [42], 10, 1)
 
     def test_reproduction_check_to_four_decimals(self):
         ok = reproduction_check(0.87412, {"mean": 0.66118})
@@ -312,7 +382,10 @@ class PairedInferenceTest(unittest.TestCase):
         self.assertFalse(off["auc_reproduced"])
         self.assertTrue(off["ba_reproduced"])
         self.assertFalse(off["passed"])
-        self.assertFalse(reproduction_check(0.8741, None)["passed"])
+        unavailable = reproduction_check(0.8741, None)
+        self.assertIsNone(unavailable["passed"])
+        self.assertIsNone(unavailable["ba_reproduced"])
+        self.assertIn("unavailable", unavailable["reason"])
 
 
 if __name__ == "__main__":
