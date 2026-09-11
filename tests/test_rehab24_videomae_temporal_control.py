@@ -27,6 +27,7 @@ from src.rehab24.videomae_temporal_control import (
     paired_comparison,
     permutation_gate,
     permutation_rule_ok,
+    absolute_verdict,
     reading_table_row,
     reproduction_check,
     static_vs_shuffle,
@@ -296,6 +297,13 @@ class PairedInferenceTest(unittest.TestCase):
         shuffle = {p: 0.75 for p in self.baseline}
         self.assertTrue(static_vs_shuffle(static, shuffle)["row_5_triggered"])
         self.assertFalse(static_vs_shuffle(shuffle, static)["row_5_triggered"])
+
+    def test_absolute_verdict_carries_the_printers_reading_key(self):
+        statistic = {"mean": 0.87, "n_subjects_above_chance": 9}
+        verdict = absolute_verdict(statistic, 0.0001)
+        self.assertTrue(verdict["above_chance"])
+        self.assertIn("reading", verdict)
+        self.assertFalse(absolute_verdict({"mean": 0.52, "n_subjects_above_chance": 5}, 0.3)["above_chance"])
 
     def test_reproduction_check_to_four_decimals(self):
         ok = reproduction_check(0.87412, {"mean": 0.66118})

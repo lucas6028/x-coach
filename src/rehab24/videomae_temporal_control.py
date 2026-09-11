@@ -357,7 +357,18 @@ def absolute_verdict(statistic: dict, p_value: float) -> dict:
         "at_least_6_of_9_subjects_above_0.5": statistic["n_subjects_above_chance"] >= MIN_SUBJECTS_ABOVE_CHANCE,
         "permutation_p_below_0.05": p_value < ALPHA,
     }
-    return {"conditions": conditions, "above_chance": all(conditions.values())}
+    above = all(conditions.values())
+    return {
+        "conditions": conditions,
+        "above_chance": above,
+        # `reading` is what the identity control's printer shows; the registered
+        # reading-table row lives in `paired`, not here.
+        "reading": (
+            "arm ranks correct above incorrect within recordings; the paired delta decides the reading-table row"
+            if above
+            else "arm is not above chance within recordings (reading table row 4 trigger)"
+        ),
+    }
 
 
 def position_secondaries(oof_rows: Sequence[dict], seeds: Sequence[int]) -> dict:
@@ -728,7 +739,11 @@ def main(argv: Sequence[str] | None = None) -> None:
         ba = summary["secondary"]["loso_balanced_accuracy"]
         if ba:
             vs = summary["secondary"]["loso_ba_vs_framing"]
-            delta = f"delta {vs['mean_delta']:+.4f} ({vs['n_positive']}/{vs['n_subjects']} up, p {vs['two_sided_p']:.4f})" if vs and vs.get("available") else "no framing baseline"
+            if vs and vs.get("available"):
+                p_text = f"{vs['two_sided_p']:.4f}" if vs["two_sided_p"] is not None else "n/a (all deltas zero)"
+                delta = f"delta {vs['mean_delta']:+.4f} ({vs['n_positive']}/{vs['n_subjects']} up, p {p_text})"
+            else:
+                delta = "no framing baseline"
             print(f"LOSO balanced accuracy: {ba['mean']:.4f} ± {ba['sd_over_subjects']:.4f} vs {FRAMING_BASELINE_BA}: {delta}")
         if "reproduction" in summary:
             rep = summary["reproduction"]
