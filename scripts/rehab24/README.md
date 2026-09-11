@@ -204,6 +204,29 @@ identical samples: CPU vs GPU differ by 4.1e-06 relative L2 (cosine 1.00000000),
 transformers 5.0.0 vs 5.5.0 differ by 9.4e-04 — the library version dominates the
 hardware by ~230x, which is the reason the baseline is re-extracted rather than reused.
 
+### Temporal-order arms (16-frame shuffle)
+
+Pre-registration: `notes/rehab24_videomae_temporal_shuffle_validation_plan.md`. The
+extractor's `--temporal` flag reorders the 16 decoded frames of every clip *after* the
+pixel transform and stores the permutation in the bundle; pixels and clip starts are
+those of `full_frame_letterbox`, so every arm is paired frame-for-frame with the stored
+baseline. Arms: `frame_identity` (reproduction gate, run first), `frame_shuffle`
+(primary), `frame_reverse`, `tubelet_shuffle`, `rep_static_frame`. Each arm needs its
+own `--output-dir`; the guard refuses to mix arms.
+
+```bash
+# extraction (GPU, .venv-cuda, 3 workers; ~80 min per arm on a GTX 1660 Ti)
+OMP_NUM_THREADS=4 .venv-cuda/Scripts/python.exe scripts/rehab24/extract_videomae_features.py   --variant full_frame_letterbox --temporal frame_identity --device cuda   --num-chunks 3 --chunk-index 0   --output-dir data/REHAB24-6/processed/videomae_raw_temporal/frame_identity   # repeat chunk-index 1 and 2
+
+# per arm, gates first; frame_identity must reproduce 0.8741 / 0.6612 before any other arm is extracted
+python scripts/rehab24/videomae_temporal_control.py gates       --arm frame_identity
+python scripts/rehab24/videomae_temporal_control.py materialize --arm frame_identity
+python scripts/rehab24/videomae_temporal_control.py predict     --arm frame_identity --device cpu
+python scripts/rehab24/videomae_temporal_control.py analyze     --arm frame_identity
+# ... same four steps for frame_shuffle, frame_reverse, tubelet_shuffle, rep_static_frame, then
+python scripts/rehab24/videomae_temporal_control.py paired
+```
+
 Fuse skeleton and VideoMAE features:
 
 ```bash

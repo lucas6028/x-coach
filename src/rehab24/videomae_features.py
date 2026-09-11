@@ -17,12 +17,20 @@ keeps clip aggregation (max vs mean) an offline decision, so the two pooling axe
 never move together in one measured delta. The stacks are cheap: 2144 samples x 2
 modes x 4 clips x 768 float32 is ~52 MB.
 
+``--temporal`` reorders (or repeats) the 16 decoded frames of every clip before they
+reach the processor, for the temporal-order arms of
+``notes/rehab24_videomae_temporal_shuffle_validation_plan.md``. It is orthogonal to
+``--variant``: pixels and clip starts are untouched, only the order changes, so every
+temporal arm is paired frame-for-frame with the stored baseline. The permutation used is
+stored in the bundle (``frame_permutations``) so the gate can verify it offline.
+
 Run ``videomae_materialize`` afterwards to derive the LOSO-ready feature dirs.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 from collections import defaultdict
 from pathlib import Path
 from typing import Sequence
@@ -51,6 +59,68 @@ from transformers import VideoMAEImageProcessor
 #: ``variant_geometry.VARIANTS``. ``person_crop_centercrop`` and ``reencoded`` are
 #: deliberately not offered: the plan's REHAB24-6 design does not include them.
 FRAMING_VARIANTS = ("full_frame", "full_frame_letterbox", "person_crop", "background_only")
+
+#: Temporal-order arms (temporal-shuffle plan, Design table). ``none`` is the default
+#: and stamps nothing, so bundles predating ``--temporal`` are indistinguishable from
+#: it; ``frame_identity`` runs the same natural order *through the reorder code path*
+#: and stamps it, which is the plan's reproduction gate (G3).
+TEMPORAL_NONE = "none"
+TEMPORAL_ARMS = ("frame_identity", "frame_shuffle", "frame_reverse", "tubelet_shuffle", "rep_static_frame")
+#: Mixed into every per-clip seed; the plan's permutation seed, fixed at registration.
+TEMPORAL_SEED_TAG = "20260911"
+#: VideoMAE's temporal token unit: two consecutive frames.
+TUBELET_SIZE = 2
+#: The frame a ``rep_static_frame`` clip repeats: index 8 of 16.
+STATIC_FRAME_INDEX = 8
+
+
+def clip_permutation_seed(sample_id: str, clip_start: int, tag: str = TEMPORAL_SEED_TAG) -> int:
+    """64-bit seed from SHA-256(``"{sample_id}:{clip_start}:{tag}"``), plan Design.
+
+    Keyed on sample id AND clip start, so the two cameras of a repetition and the four
+    clips of a sample all draw independent permutations, and a re-run reproduces every
+    one of them bit for bit.
+    """
+    digest = hashlib.sha256(f"{sample_id}:{int(clip_start)}:{tag}".encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def temporal_permutation(temporal: str, n_frames: int, sample_id: str, clip_start: int) -> np.ndarray:
+    """The frame index order one temporal arm shows the backbone, as an int array.
+
+    ``frame_identity`` is 0..n-1; ``frame_reverse`` is n-1..0; ``frame_shuffle`` is a
+    uniform permutation from :func:`clip_permutation_seed` (an identity draw is kept,
+    not redrawn); ``tubelet_shuffle`` permutes the n/2 consecutive pairs and keeps each
+    pair adjacent and in order; ``rep_static_frame`` repeats index 8 n times.
+    """
+    if temporal in (TEMPORAL_NONE, "frame_identity"):
+        return np.arange(n_frames, dtype=np.int64)
+    if temporal == "frame_reverse":
+        return np.arange(n_frames - 1, -1, -1, dtype=np.int64)
+    if temporal == "rep_static_frame":
+        return np.full(n_frames, min(STATIC_FRAME_INDEX, n_frames - 1), dtype=np.int64)
+    rng = np.random.default_rng(clip_permutation_seed(sample_id, clip_start))
+    if temporal == "frame_shuffle":
+        return rng.permutation(n_frames).astype(np.int64)
+    if temporal == "tubelet_shuffle":
+        if n_frames % TUBELET_SIZE:
+            raise ValueError(f"tubelet_shuffle needs an even clip length, got {n_frames}")
+        pairs = rng.permutation(n_frames // TUBELET_SIZE)
+        return np.concatenate([np.arange(TUBELET_SIZE) + TUBELET_SIZE * pair for pair in pairs]).astype(np.int64)
+    raise ValueError(f"Unknown temporal arm {temporal!r}; expected one of {TEMPORAL_ARMS} or {TEMPORAL_NONE!r}")
+
+
+def reorder_clip_frames(
+    frames: list[np.ndarray], temporal: str, sample_id: str, clip_start: int
+) -> tuple[list[np.ndarray], np.ndarray]:
+    """Apply one temporal arm to already-decoded, already-transformed frames.
+
+    Pure: returns a new list built by indexing the input, plus the permutation used.
+    Sits between ``transform_frames`` and ``encode_clip`` so pixels and clip sampling
+    are exactly those of the pixel arm the temporal arm is paired with.
+    """
+    permutation = temporal_permutation(temporal, len(frames), sample_id, clip_start)
+    return [frames[int(index)] for index in permutation], permutation
 
 
 def transform_frames(frames: list[np.ndarray], variant: str, box: Box | None) -> list[np.ndarray]:
@@ -134,23 +204,29 @@ def extract_repetition_features(
     fc_norm_eps: float,
     variant: str = "full_frame",
     box: Box | None = None,
+    temporal: str = TEMPORAL_NONE,
+    sample_id: str = "",
 ) -> dict[str, np.ndarray]:
     """Both token-pooling modes for one repetition, from one forward pass per clip.
 
     ``variant`` changes only the pixels. Clip starts are computed from the repetition's
     frame range before any transform, so every arm samples the identical frames and the
-    LOSO deltas stay paired frame-for-frame (plan §4.3).
+    LOSO deltas stay paired frame-for-frame (plan §4.3). ``temporal`` changes only the
+    order of the 16 frames after the pixel transform; ``sample_id`` keys its seed.
     """
     clip_starts = sample_clip_starts(first_frame, last_frame, clip_length, frame_stride, num_clips)
     legacy_clips: list[np.ndarray] = []
     corrected_clips: list[np.ndarray] = []
     used_starts: list[int] = []
+    permutations: list[np.ndarray] = []
 
     for start_frame in clip_starts:
         frames = read_clip_frames(cap, start_frame, clip_length, frame_stride, total_frames)
         if not frames:
             continue
         frames = transform_frames(frames, variant, box)
+        frames, permutation = reorder_clip_frames(frames, temporal, sample_id, start_frame)
+        permutations.append(permutation)
         legacy, corrected = encode_clip(
             backbone=backbone,
             processor=processor,
@@ -167,7 +243,7 @@ def extract_repetition_features(
     if not legacy_clips:
         raise RuntimeError(f"No VideoMAE features could be extracted for frames {first_frame}-{last_frame}")
 
-    return {
+    bundle = {
         f"clip_features_{LEGACY_FIRST_TOKEN}": np.stack(legacy_clips, axis=0),
         f"clip_features_{MEAN_POOL_FC_NORM}": np.stack(corrected_clips, axis=0),
         "clip_starts": np.asarray(used_starts, dtype=np.int32),
@@ -175,6 +251,10 @@ def extract_repetition_features(
         "last_frame": np.asarray(last_frame, dtype=np.int32),
         "total_frames": np.asarray(total_frames, dtype=np.int32),
     }
+    if temporal != TEMPORAL_NONE:
+        # Stored only for temporal arms so the baseline bundle schema stays byte-identical.
+        bundle["frame_permutations"] = np.stack(permutations, axis=0).astype(np.int8)
+    return bundle
 
 
 def save_feature(path: Path, row: dict[str, str], bundle: dict[str, np.ndarray], provenance: dict[str, str]) -> None:
@@ -225,8 +305,8 @@ def group_rows_by_video(rows: Sequence[dict[str, str]]) -> list[tuple[str, list[
     ]
 
 
-def assert_output_dir_matches_variant(output_dir: Path, variant: str) -> None:
-    """Refuse to add bundles of one variant to a directory holding another.
+def assert_output_dir_matches_variant(output_dir: Path, variant: str, temporal: str = TEMPORAL_NONE) -> None:
+    """Refuse to add bundles of one variant (or temporal arm) to a directory holding another.
 
     Plan §5.1: different variants must not share a raw dir. Nothing downstream would
     notice -- the audit's ``single_provenance`` check runs per directory, so a mixed
@@ -242,10 +322,21 @@ def assert_output_dir_matches_variant(output_dir: Path, variant: str) -> None:
     with np.load(existing, allow_pickle=False) as data:
         # Bundles predating --variant carry no stamp; they are all full_frame.
         found = str(data["provenance_variant"]) if "provenance_variant" in data.files else "full_frame"
+        # Bundles predating --temporal carry no stamp and are the natural order. They are
+        # NOT `frame_identity`: that arm must land in its own dir so the reproduction
+        # gate compares two directories rather than one directory with itself.
+        found_temporal = (
+            str(data["provenance_temporal_transform"]) if "provenance_temporal_transform" in data.files else TEMPORAL_NONE
+        )
     if found != variant:
         raise SystemExit(
             f"{output_dir} already holds `{found}` features ({existing.name}), but --variant is `{variant}`. "
             "Write each variant to its own --output-dir."
+        )
+    if found_temporal != temporal:
+        raise SystemExit(
+            f"{output_dir} already holds temporal arm `{found_temporal}` ({existing.name}), but --temporal is "
+            f"`{temporal}`. Write each temporal arm to its own --output-dir."
         )
 
 
@@ -272,6 +363,12 @@ def main() -> None:
         default=DEFAULT_PROCESSED_ROOT / "videomae_boxes.json",
         help="Fixed per-video mocap boxes, required by the box variants. Build with build_videomae_boxes.py.",
     )
+    parser.add_argument(
+        "--temporal",
+        choices=(TEMPORAL_NONE, *TEMPORAL_ARMS),
+        default=TEMPORAL_NONE,
+        help="Reorder the frames of every clip after the pixel transform. Each arm needs its own --output-dir.",
+    )
     parser.add_argument("--model-name", type=str, default="MCG-NJU/videomae-base-finetuned-kinetics")
     parser.add_argument("--clip-length", type=int, default=16)
     parser.add_argument("--frame-stride", type=int, default=2)
@@ -284,7 +381,7 @@ def main() -> None:
     args = parser.parse_args()
 
     device = resolve_device(args.device)
-    assert_output_dir_matches_variant(args.output_dir, args.variant)
+    assert_output_dir_matches_variant(args.output_dir, args.variant, args.temporal)
 
     box_index = None
     if args.variant in BOX_VARIANTS:
@@ -314,6 +411,9 @@ def main() -> None:
         provenance["fill_strategy"] = "horizontal_interpolation" if args.variant == "background_only" else "letterbox_114"
     elif args.variant == "full_frame_letterbox":
         provenance["fill_strategy"] = "letterbox_114"
+    if args.temporal != TEMPORAL_NONE:
+        provenance["temporal_transform"] = args.temporal
+        provenance["temporal_seed_tag"] = TEMPORAL_SEED_TAG
 
     rows = load_manifest(args.manifest)
     if args.limit is not None:
@@ -358,6 +458,8 @@ def main() -> None:
                     fc_norm_eps=fc_eps,
                     variant=args.variant,
                     box=box,
+                    temporal=args.temporal,
+                    sample_id=row["sample_id"],
                 )
                 save_feature(args.output_dir / row["split"] / f"{row['sample_id']}.npz", row, bundle, provenance)
                 written += 1
@@ -366,7 +468,9 @@ def main() -> None:
         print(f"[{video_index}] {video_path}: wrote {len(pending)} repetitions (total {written})")
 
     print(
-        f"Wrote {written} `{args.variant}` VideoMAE feature bundles "
+        f"Wrote {written} `{args.variant}` "
+        + ("" if args.temporal == TEMPORAL_NONE else f"/ `{args.temporal}` ")
+        + "VideoMAE feature bundles "
         f"({skipped} already present) under {args.output_dir}"
     )
 
