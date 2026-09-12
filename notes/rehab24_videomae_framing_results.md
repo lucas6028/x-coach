@@ -57,6 +57,15 @@ cam18 的 **65 支影片、幾乎每一幀**,腳掌與腳趾都在模型看不�
 > 0.6612 here, ΔBA −0.027 (2/9, p = 0.164, undetermined). Kinetics remains the quoted
 > checkpoint; every number in this note is Kinetics.
 
+> **2026-09-12 update.** The temporal-order control
+> ([`rehab24_videomae_temporal_shuffle_results.md`](rehab24_videomae_temporal_shuffle_results.md))
+> re-ran this arm with the 16 frames of every clip in random order: LOSO BA
+> 0.7007 ± 0.0619 against the 0.6612 here, ΔBA +0.0395 (8/9, two-sided p = 0.0117,
+> Holm 0.0352 across four arms), a secondary result reported without interpretation;
+> within-session AUC 0.8798 vs 0.8741 (undetermined). One static frame per clip gives
+> LOSO BA 0.5685 (ΔBA −0.0928, 0/9, Holm 0.0156). The "person, not background" reading
+> is untouched: the shuffle keeps the person and the background alike.
+
 ---
 
 ## 1. 讀之前的名詞說明

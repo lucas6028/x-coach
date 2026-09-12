@@ -288,6 +288,13 @@ VideoMAE 的全部 correctness 訊號**。
   the Kinetics number and the quoted one.
 - **不支持「模型使用時間順序」。** 同一段錄影內的單幀姿勢差異也可能產生 AUC。
   這需要 repetition 層級的靜態幀控制與時間打亂控制，本實驗都沒做。
+  **2026-09-12 update:** both controls were run
+  ([`rehab24_videomae_temporal_shuffle_results.md`](rehab24_videomae_temporal_shuffle_results.md)).
+  Shuffling the 16 frames of every clip leaves the within-session AUC at 0.8798 vs the
+  0.8741 here (paired delta −0.0057, 3/9 drop, p = 0.734: undetermined, not "order is
+  unused"); a rep-specific static frame repeated 16 times gives 0.7002 (delta +0.1739,
+  9/9, p = 0.0039). More than one frame is needed; whether their order is stays
+  undetermined.
 - **不支持「外觀完全沒有貢獻」。** 0.5241 是「這個 appearance-only 建法沒顯示足夠訊號」，
   不是等價性證據。
 - **不支持跨衣著、跨場地、跨日期、跨相機的穩健性。** REHAB24-6 沒有同一人換衣、

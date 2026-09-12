@@ -122,7 +122,12 @@ this is within-recording ranking.
 - P4 and P8 were not cleaned at k = 16, so the 4.9% share is a lower bound.
 - Drift that steps at the label boundary is collinear with the label and invisible here;
   in the 27 single-boundary sessions no analysis can separate it. Data-collection limit.
-- Within-clip temporal order (16-frame shuffle) is still untested.
+- Within-clip temporal order: tested 2026-09-12 in
+  [`rehab24_videomae_temporal_shuffle_results.md`](rehab24_videomae_temporal_shuffle_results.md).
+  Shuffling the 16 frames leaves within-session AUC at 0.8798 vs 0.8741 (paired delta
+  −0.0057, 3/9 drop, p = 0.734, undetermined); one static frame drops it to 0.7002
+  (share 46.5%, 9/9, p = 0.0039). Whatever survives the shuffle remains consistent with
+  a static carrier, so the 4.9% floor here is unchanged.
 - The five balanced-accuracy deltas are undetermined, not evidence of no effect.
 - 0.7309 vs 0.6612 is not a like-for-like comparison and was never tested.
 - 2026-09-08: the same procedure on the SSv2-finetuned checkpoint gives probe median
