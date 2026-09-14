@@ -9,7 +9,8 @@
     "backendImage": { "value": "ghcr.io/lucas6028/x-coach-backend:latest" },
     "frontendImage": { "value": "ghcr.io/lucas6028/x-coach-frontend:latest" },
 
-    "customDomain": { "value": "" },
+    "customDomains": { "value": ["xcoach.dev", "www.xcoach.dev"] },
+    "bindCertificates": { "value": true },
 
     "backendCpu": { "value": 2 },
     "maxConcurrentAnalyses": { "value": 2 },

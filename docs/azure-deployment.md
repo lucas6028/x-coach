@@ -178,6 +178,8 @@ az login                              # 互動式，只有你能跑
 ./infra/deploy.ps1 -Stage data        # 灌 KG 與向量庫
 ./infra/deploy.ps1 -Stage build       # 等 GitHub Actions 把兩個 image 建好
 ./infra/deploy.ps1 -Stage apps        # 第二趟：兩個 container app
+./infra/deploy.ps1 -Stage dns         # 印出 xcoach.dev 需要的 DNS 記錄，去 name.com 建
+./infra/deploy.ps1 -Stage domain      # 第三、四趟：掛上主機名稱，簽發並繫結憑證
 ```
 
 下面的 bash 版本是同一件事，給非 Windows 環境、也給你知道每個 stage 實際做了什麼。**不要在
@@ -342,7 +344,7 @@ az containerapp update -n xcoach-frontend -g $RG --image ghcr.io/lucas6028/x-coa
 `SUPABASE_SERVICE_ROLE_KEY` 是最需要小心的一個：它的存在只是為了讓 LINE LIFF 橋接能鑄出一個登入
 連結，絕不用於資料存取。它不能進到 frontend image，也不能出現在任何 build arg。
 
-## 自訂網域與 TLS
+## 自訂網域與 TLS：xcoach.dev
 
 系統產生的 `*.azurecontainerapps.io` FQDN 本來就提供 HTTPS，所以在你想用自己的主機名稱之前，TLS
 不需要做任何事。之後 Container Apps 會簽發一張**免費的受管憑證**（DigiCert）並自動續期 — 沒有
@@ -350,26 +352,78 @@ certbot 要跑。
 
 只有 frontend 需要；backend 是內部的。
 
-1. 加上 DNS 記錄。子網域需要一筆指向 frontend FQDN 的 `CNAME`，再加一筆位於 `asuid.<sub>`、
-   內容為驗證碼的 `TXT`。根網域（apex）需要一筆指向環境靜態 IP 的 `A` 記錄（範本輸出裡的
-   `environmentStaticIp`），再加一筆位於 `asuid` 的 `TXT`。
-2. 繫結網域並讓 Azure 簽發憑證：
+主機名稱**寫在範本裡**（`infra/main.parameters.json` 的 `customDomains`，目前是 `xcoach.dev` 與
+`www.xcoach.dev`），不是用 `az containerapp hostname add` 另外加：範本每一趟都會整個覆寫
+frontend 的 ingress，只存在 CLI 裡的主機名稱會在下一次 `-Stage apps` 被無聲地拿掉。憑證也是
+範本管的（每個主機名稱一個 `managedCertificates` 資源）。
 
-   ```bash
-   az containerapp hostname add -n xcoach-frontend -g $RG --hostname app.example.com
-   az containerapp hostname bind -n xcoach-frontend -g $RG --hostname app.example.com \
-       --environment xcoach-env --validation-method CNAME
-   ```
+### 順序：DNS → 主機名稱 → 憑證
+
+平台在**加上**主機名稱時就會驗證 `asuid.<host>` 的 TXT，而憑證又只能簽給 app **已經掛著**的主機
+名稱，所以是三步，缺一步就會得到一個既不提 DNS 也不提記錄的 validation error：
+
+1. **DNS 記錄。** `-Stage dns` 會印出下面這張表（值從環境本身讀出）。到 name.com 建，**取代**
+   這些名稱現有的 A / CNAME（xcoach.dev 目前指向 Vercel）：
+
+   | 類型  | 名稱                  | 值                                                 |
+   | ----- | --------------------- | -------------------------------------------------- |
+   | A     | `xcoach.dev`          | 環境的靜態 IP（輸出 `environmentStaticIp`）          |
+   | TXT   | `asuid.xcoach.dev`    | 環境的 `customDomainVerificationId`                |
+   | CNAME | `www.xcoach.dev`      | `xcoach-frontend.<環境 defaultDomain>`（輸出 `frontendDefaultFqdn`） |
+   | TXT   | `asuid.www.xcoach.dev`| 同上的 verification id                              |
+
+   根網域不能放 CNAME，所以 apex 走 A 記錄指向環境的靜態 IP；子網域走 CNAME 指向 frontend 的
+   系統 FQDN。範本用同一條規則挑驗證方式：一個點的（apex）用 HTTP 驗證，其餘用 CNAME 驗證。
+2. **掛上主機名稱（未繫結）。** `bindCertificates=false` 那一趟：主機名稱進到 ingress，
+   `bindingType: Disabled`。
+3. **簽發並繫結。** `bindCertificates=true` 那一趟：建立受管憑證，等 DigiCert 驗證通過（apex 是對
+   app 本身做 HTTP 驗證，所以第 2 步一定要先上線），再把繫結切到 `SniEnabled`。通常幾分鐘。
+
+`-Stage domain` 會先用 `Resolve-DnsName` 逐筆核對第 1 步，然後連跑第 2、3 步，並且用兩個 app
+**現在跑的 image** 重新部署，不是 HEAD — 這一步改的是 ingress，不是程式碼。bash 版本：
+
+```bash
+# 第 1 步的值
+az containerapp env show -n xcoach-env -g $RG \
+    --query '{ip:properties.staticIp,domain:properties.defaultDomain,verify:properties.customDomainConfiguration.customDomainVerificationId}'
+
+# 第 2、3 步：同「第二趟：兩個 app」那條指令，各加一個參數
+az deployment group create ... -p bindCertificates=false
+az deployment group create ... -p bindCertificates=true
+```
+
+**沒有 `.env` 的機器**（範本每一趟都要重送全部機密，不能空跑）改用下面三組指令，效果一樣，
+但憑證名稱**必須**跟範本產生的一致（`mc-` 加上把 `.` 換成 `-` 的主機名稱），下一次 `-Stage apps`
+才會把它們當成同一組資源而不是再簽一張：
+
+```bash
+az containerapp hostname add -n xcoach-frontend -g $RG --hostname xcoach.dev
+az containerapp hostname add -n xcoach-frontend -g $RG --hostname www.xcoach.dev
+az containerapp env certificate create -g $RG -n xcoach-env -c mc-xcoach-dev     --hostname xcoach.dev     --validation-method HTTP
+az containerapp env certificate create -g $RG -n xcoach-env -c mc-www-xcoach-dev --hostname www.xcoach.dev --validation-method CNAME
+# 等 `az containerapp env certificate list ... --managed-certificates-only` 兩張都 Succeeded
+az containerapp hostname bind -n xcoach-frontend -g $RG --hostname xcoach.dev     --environment xcoach-env --certificate mc-xcoach-dev
+az containerapp hostname bind -n xcoach-frontend -g $RG --hostname www.xcoach.dev --environment xcoach-env --certificate mc-www-xcoach-dev
+```
+
+2026-09-14 xcoach.dev 就是這樣掛上去的。
+
+之後每一次 `-Stage apps` 都會先問 frontend 目前哪些主機名稱已經是 `SniEnabled`：全部都是就帶
+`bindCertificates=true`（否則重新部署會把繫結降回 Disabled）；有任何一個不是 — 第一次部署，或
+剛在參數檔加了新的主機名稱 — 就先核對 DNS、以未繫結的方式帶上去，並提醒你接著跑 `-Stage domain`。
 
 兩件會讓簽發失敗的事：
 
 - **CAA 記錄。** 如果根網域上存在任何 `CAA` 記錄，必須加上 `0 issue digicert.com`，否則簽發與
-  續期都會失敗。
-- **順序。** 請求憑證時 app 必須已經是公開可達的，因為 DigiCert 是透過 HTTP 驗證的。先部署，
-  再設 DNS，最後才繫結。
+  續期都會失敗。（2026-09 檢查時 xcoach.dev 沒有 CAA。）
+- **順序。** 見上。DNS 還沒生效就跑第 2 步，或 app 還沒公開可達就跑第 3 步，都會失敗。
 
-主機名稱上線後，在參數檔裡設定 `customDomain`：範本會把它餵給 `XCOACH_CORS_ORIGINS`。這只有在
-直接跨來源呼叫 API 時才有意義（SPA 本身透過 nginx 是同源的），但設對了也不花什麼成本。
+`customDomains` 同時餵給 `XCOACH_CORS_ORIGINS`（每個主機名稱一個 `https://` 來源）。這只有在直接
+跨來源呼叫 API 時才有意義（SPA 本身透過 nginx 是同源的），但設對了也不花什麼成本。
+
+網域切過來之後，「部署完之後，三件不在 Azure 裡的事」那一節的前兩件要用 `https://xcoach.dev`
+再做一次：Supabase 的 Site URL / Redirect URLs、LIFF endpoint、LINE webhook URL。Vercel 那邊的
+專案不會自動知道網域已經搬走，把它從 Vercel 專案的 Domains 移掉，免得之後誤判。
 
 在 frontend 前面加 Front Door 是選配。要 WAF 或全球快取時才加；TLS 與自訂網域都不需要它。
 

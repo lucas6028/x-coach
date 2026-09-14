@@ -12,6 +12,11 @@
 //   (images are built by .github/workflows/build-images.yml and pushed to GHCR)
 //   az deployment group create -g <rg> -f infra/main.bicep -p @infra/main.parameters.json
 //
+// A custom hostname (xcoach.dev) is a third and fourth pass, once its DNS records exist:
+//
+//   az deployment group create ... -p bindCertificates=false   (hostname added, unbound)
+//   az deployment group create ... -p bindCertificates=true    (certificate issued + bound)
+//
 // See docs/azure-deployment.md for the full walkthrough, including the 240s ingress
 // timeout, the Azure Files data share, and custom domains + managed TLS certificates.
 
@@ -38,8 +43,11 @@ param backendImage string = ''
 @description('Frontend image reference, e.g. ghcr.io/lucas6028/x-coach-frontend:<sha>. Required when deployApps is true.')
 param frontendImage string = ''
 
-@description('Public hostname the SPA is served on, e.g. app.example.com. Left blank the app is reachable on its generated *.azurecontainerapps.io FQDN only. The certificate is bound separately -- see docs/azure-deployment.md.')
-param customDomain string = ''
+@description('Public hostnames the SPA is served on, e.g. [\'xcoach.dev\', \'www.xcoach.dev\']. Empty keeps the app on its generated *.azurecontainerapps.io FQDN only. The DNS records (A or CNAME plus the asuid TXT) must exist BEFORE a hostname appears here: the platform verifies ownership when it is added and fails the deployment otherwise. See docs/azure-deployment.md.')
+param customDomains array = []
+
+@description('Issue a free managed certificate for every hostname in customDomains and bind it. Must be false on the pass that first adds a hostname -- a certificate cannot be requested for a hostname the app does not have yet -- and true on every pass after that, or a redeploy drops the binding. deploy.ps1 -Stage domain runs the false/true pair; -Stage apps passes whatever the frontend currently has.')
+param bindCertificates bool = true
 
 // --- Backend sizing --------------------------------------------------------------------
 // A single analysis is CPU/RAM-heavy (MediaPipe + rules + RAG) and the in-process cap is
@@ -142,7 +150,7 @@ var backendOrigin = 'http://${backendAppName}.internal.${containerAppsEnv.proper
 
 // Requests reach the API same-origin through nginx, so CORS normally never applies. This
 // keeps a direct browser call to the backend FQDN working from the SPA's own origin.
-var corsOrigins = empty(customDomain) ? '' : 'https://${customDomain}'
+var corsOrigins = join(map(customDomains, d => 'https://${d}'), ',')
 
 // ---------------------------------------------------------------------------------------
 // Observability
@@ -381,6 +389,28 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
 }
 
 // ---------------------------------------------------------------------------------------
+// Custom domains
+// ---------------------------------------------------------------------------------------
+//
+// One free managed certificate (DigiCert, auto-renewed) per hostname. The platform will
+// not issue one for a hostname the frontend does not already carry, so the first pass that
+// introduces a hostname must run with bindCertificates=false (hostname added, binding
+// Disabled) and the next with true. The certificate is validated against the LIVE DNS:
+// an apex (one dot: 'xcoach.dev') must resolve by A record to the environment's static
+// IP and is validated over HTTP; anything deeper must be a CNAME to the frontend FQDN.
+// A CAA record on the zone, if any, must allow digicert.com or issuance fails.
+
+resource managedCerts 'Microsoft.App/managedEnvironments/managedCertificates@2024-03-01' = [for d in customDomains: if (deployApps && bindCertificates) {
+  parent: containerAppsEnv
+  name: 'mc-${replace(d, '.', '-')}'
+  location: location
+  properties: {
+    subjectName: d
+    domainControlValidation: length(split(d, '.')) == 2 ? 'HTTP' : 'CNAME'
+  }
+}]
+
+// ---------------------------------------------------------------------------------------
 // Frontend
 // ---------------------------------------------------------------------------------------
 
@@ -398,6 +428,14 @@ resource frontend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
         // The generated *.azurecontainerapps.io FQDN is HTTPS already; this redirects the
         // plain-HTTP port so the LINE webhook and LIFF never see a downgrade.
         allowInsecure: false
+        // Declared here, not added out of band with `az containerapp hostname add`: this
+        // block REPLACES the ingress on every deployment, so a hostname that lives only in
+        // the CLI is silently dropped by the next `-Stage apps`.
+        customDomains: [for (d, i) in customDomains: {
+          name: d
+          bindingType: bindCertificates ? 'SniEnabled' : 'Disabled'
+          certificateId: bindCertificates ? managedCerts[i].id : null
+        }]
       }
       // No `registries`: see the backend app above.
     }
@@ -450,5 +488,11 @@ output dataShareName string = dataShare.name
 output backendInternalOrigin string = backendOrigin
 output frontendFqdn string = frontend.?properties.configuration.ingress.fqdn ?? ''
 
-@description('Point an apex A record at this, or a subdomain CNAME at the frontend FQDN. Needed for the free managed certificate.')
+@description('Apex hostnames (xcoach.dev) point an A record here. Subdomains CNAME to frontendDefaultFqdn instead.')
 output environmentStaticIp string = containerAppsEnv.properties.staticIp
+
+@description('What a subdomain CNAME targets. Derived from the environment rather than read off the app, so it is known after the first pass, before the apps exist.')
+output frontendDefaultFqdn string = '${frontendAppName}.${containerAppsEnv.properties.defaultDomain}'
+
+@description('Value of the TXT record at asuid.<hostname> that proves ownership of each custom hostname.')
+output customDomainVerificationId string = containerAppsEnv.properties.customDomainConfiguration.customDomainVerificationId
