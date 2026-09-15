@@ -125,6 +125,10 @@ export interface PlanTemplate {
   name: string;
   description: string;
   items: Array<{ day_index: number; movement: string; sets: number; reps: number }>;
+  /** "rehab" | "fitness", added server-side alongside this feature. Absent on an older backend or
+   *  a template the migration hasn't tagged yet — every caller treats a missing category as
+   *  "fitness" rather than failing to bucket it. */
+  category?: "rehab" | "fitness";
 }
 
 export interface NewPlanItem {
@@ -168,6 +172,10 @@ export interface Checkin {
   flagged: boolean;
   flag_reasons: ("pain_high" | "pain_rise" | "form_drop")[];
   acknowledged_at: string | null;
+  /** The clinician who acknowledged the flag, when it has been. Optional: the plain check-in
+   *  endpoints existed before the clinician dashboard did, and every fixture built against the
+   *  old shape stays valid without it. */
+  acknowledged_by?: string | null;
   created_at: string;
 }
 
@@ -190,6 +198,53 @@ export interface CareClinician {
   email: string | null;
   display_name: string | null;
   accepted_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Clinician dashboard (WP3): the therapist-side view of the care loop above.
+// ---------------------------------------------------------------------------
+
+/** One linked patient's dashboard row, as GET /api/clinic/patients (and the `patient` field of
+ *  GET /api/clinic/patients/{id}) returns it. Every aggregation is computed server-side. */
+export interface ClinicPatientSummary {
+  link_id: string;
+  patient_id: string;
+  display_name: string | null;
+  email: string | null;
+  accepted_at: string;
+  last_checkin_at: string | null;
+  /** 0..1, or null when there is nothing to compute adherence from yet. */
+  adherence_7d: number | null;
+  open_flags: number;
+  inactive_7d: boolean;
+}
+
+/** One point of GET /api/clinic/patients/{id}'s 30-day `trend` series, oldest first. */
+export interface ClinicTrendPoint {
+  created_at: string;
+  form_score: number | null;
+  pain_nrs: number;
+}
+
+/** The full clinician view of one linked patient: GET /api/clinic/patients/{id}. */
+export interface ClinicPatientDetail {
+  patient: ClinicPatientSummary;
+  plans: PlanSummary[];
+  /** Up to 30 rows, newest first. */
+  checkins: Checkin[];
+  trend: ClinicTrendPoint[];
+  /** The flagged, unacknowledged rows — a subset of `checkins` when they fall in the same 30, but
+   *  not bounded by that window itself. */
+  open_flags: Checkin[];
+}
+
+/** One invite row, as POST/GET /api/clinic/invites return it. */
+export interface ClinicInvite {
+  id: string;
+  invite_code: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
 }
 
 // One fault a movement defines, with its 1-hop graph connectivity (0 = no linked
@@ -988,6 +1043,42 @@ export const api = {
 
   careUnlink: (linkId: string) =>
     sendJSON<{ link: unknown }>(`/api/care/links/${encodeURIComponent(linkId)}`, "DELETE"),
+
+  // --- Clinician dashboard (WP3) ---------------------------------------------
+  // Every route but `clinicStatus` is clinician-only server-side (403 otherwise); `clinicStatus`
+  // itself answers truthfully for any signed-in caller, the same split as `adminStatus`.
+
+  clinicStatus: () => getJSON<{ is_clinician: boolean }>("/api/clinic/status"),
+
+  clinicPatients: () =>
+    getJSON<{ patients: ClinicPatientSummary[] }>("/api/clinic/patients").then((r) => r.patients),
+
+  // 404 for a patient id the caller isn't linked to. Thrown by `getJSON` as a plain Error whose
+  // message starts with the status code (it is generated client-side, not the server's English
+  // detail), so callers branch on `err.message.startsWith("404")` rather than needing an ApiError.
+  clinicPatient: (id: string) =>
+    getJSON<ClinicPatientDetail>(`/api/clinic/patients/${encodeURIComponent(id)}`),
+
+  clinicCreateInvite: () => sendJSON<ClinicInvite>("/api/clinic/invites", "POST"),
+
+  clinicInvites: () =>
+    getJSON<{ invites: ClinicInvite[] }>("/api/clinic/invites").then((r) => r.invites),
+
+  // Revokes an accepted link OR a still-pending invite — an invite's id IS its link id.
+  clinicRevokeLink: (linkId: string) =>
+    sendJSON<{ link: unknown }>(`/api/clinic/links/${encodeURIComponent(linkId)}`, "DELETE"),
+
+  // Assign a plan to a linked patient: same body as `createPlan`, but the new plan is owned by the
+  // patient and stamped `assigned_by` = the caller. 404 if the caller isn't linked to `patientId`.
+  clinicAssignPlan: (
+    patientId: string,
+    body: { name: string; notes?: string | null; template_key?: string; items?: NewPlanItem[] }
+  ) => sendJSON<Plan>(`/api/clinic/patients/${encodeURIComponent(patientId)}/plans`, "POST", body),
+
+  // Acknowledge one flagged check-in. 404 if it doesn't exist (or isn't the caller's patient's),
+  // 409 if it isn't flagged.
+  clinicAckFlag: (checkinId: string) =>
+    sendJSON<{ checkin: Checkin }>(`/api/clinic/flags/${encodeURIComponent(checkinId)}/ack`, "PATCH"),
 
   // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
   // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user

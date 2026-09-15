@@ -393,6 +393,82 @@ describe("api.careClinicians / careUnlink", () => {
   });
 });
 
+describe("api clinic functions (WP3)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("clinicStatus GETs the status endpoint", async () => {
+    const spy = mockFetch({ is_clinician: true });
+    const result = await api.clinicStatus();
+    expect(result).toEqual({ is_clinician: true });
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/status");
+  });
+
+  it("clinicPatients GETs and unwraps the patients list", async () => {
+    const spy = mockFetch({ patients: [{ patient_id: "p1" }] });
+    const result = await api.clinicPatients();
+    expect(result).toEqual([{ patient_id: "p1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/patients");
+  });
+
+  it("clinicPatient encodes the id into the path", async () => {
+    const spy = mockFetch({ patient: { patient_id: "p 1" } });
+    await api.clinicPatient("p 1");
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/patients/p%201");
+  });
+
+  it("clinicPatient throws with a message that starts with the status code on a 404", async () => {
+    mockFetch({}, false, 404);
+    await expect(api.clinicPatient("missing")).rejects.toThrow(/^404/);
+  });
+
+  it("clinicCreateInvite POSTs with no body and returns the invite row", async () => {
+    const body = { id: "i1", invite_code: "AB12CD", status: "pending", created_at: "x", expires_at: "y" };
+    const spy = mockFetch(body);
+    const result = await api.clinicCreateInvite();
+    expect(result).toEqual(body);
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/invites");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("clinicInvites GETs and unwraps the invites list", async () => {
+    const spy = mockFetch({ invites: [{ id: "i1" }] });
+    const result = await api.clinicInvites();
+    expect(result).toEqual([{ id: "i1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/invites");
+  });
+
+  it("clinicRevokeLink DELETEs the link by id (an invite's id is its link id)", async () => {
+    const spy = mockFetch({ link: { id: "l1" } });
+    await api.clinicRevokeLink("l1");
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/links/l1");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+
+  it("clinicAssignPlan POSTs the plan body to the patient-scoped route", async () => {
+    const spy = mockFetch({ id: "pl1", items: [] });
+    await api.clinicAssignPlan("patient-1", { name: "Week 1", template_key: "quick_core" });
+    const [url, init] = [spy.mock.calls[0][0], spy.mock.calls[0][1] as RequestInit];
+    expect(url).toBe("/api/clinic/patients/patient-1/plans");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ name: "Week 1", template_key: "quick_core" });
+  });
+
+  it("clinicAckFlag PATCHes the flag route and returns the updated check-in", async () => {
+    const spy = mockFetch({ checkin: { id: "c1", acknowledged_at: "x" } });
+    const result = await api.clinicAckFlag("c1");
+    expect(result).toEqual({ checkin: { id: "c1", acknowledged_at: "x" } });
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/flags/c1/ack");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("PATCH");
+  });
+
+  it("clinicAckFlag surfaces the server's 409 detail for an already-clear check-in", async () => {
+    mockFetch({ detail: "Check-in is not flagged." }, false, 409);
+    await expect(api.clinicAckFlag("c1")).rejects.toThrow("Check-in is not flagged.");
+  });
+});
+
 describe("api.analyzeUpload", () => {
   afterEach(() => vi.restoreAllMocks());
 
