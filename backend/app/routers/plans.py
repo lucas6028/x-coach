@@ -59,11 +59,19 @@ class TemplateItem(BaseModel):
 class PlanTemplate(BaseModel):
     """A built-in starting point. ``name``/``description`` are English fallbacks; the frontend
     renders its own localized strings off ``key`` and sends the user-visible name back on create,
-    so a plan created in Chinese is stored in Chinese."""
+    so a plan created in Chinese is stored in Chinese.
+
+    ``category`` (WP4) lets the picker group the conservative, therapist-style routines separately
+    from the self-serve ones -- it is metadata about the TEMPLATE, never copied onto the plan or
+    its items, so it has no bearing on ``_build_plan_items`` or the ``assigned_by`` column a
+    clinician-assigned plan actually carries. Defaults to ``"fitness"`` so every template literal
+    that predates WP4 needs no edit.
+    """
 
     key: str
     name: str
     description: str
+    category: Literal["rehab", "fitness"] = "fitness"
     items: list[TemplateItem]
 
 
@@ -75,7 +83,65 @@ def _t(day: int, movement: str, sets: int, reps: int) -> TemplateItem:
 # a user who starts from a template can run the whole thing through the studio -- the two catalog
 # movements without a detector (Jumping Jacks, High Knee) are addable by hand but are not put in
 # anyone's path by default.
+#
+# The three "rehab" templates (WP4) are deliberately FIRST and deliberately conservative: 2 sets
+# instead of the fitness templates' 3-4, and only movements a clinician would recognise as low-load
+# strengthening/mobility work. They exist so a therapist assigning a plan through the clinic
+# dashboard (``POST /api/clinic/patients/{id}/plans``, which reuses this same ``TEMPLATES`` list via
+# ``_build_plan_items``) has a conservative starting point rather than having to hand-build one from
+# the fitness catalog every time.
 TEMPLATES: list[PlanTemplate] = [
+    PlanTemplate(
+        key="knee_rehab",
+        name="Knee rehab",
+        description="Low-load knee and hip strengthening, three short sessions a week.",
+        category="rehab",
+        items=[
+            _t(1, "Shoulder Bridge", 2, 10),
+            _t(1, "Leg Abduction", 2, 10),
+            _t(1, "Squat", 2, 10),
+            _t(3, "Shoulder Bridge", 2, 10),
+            _t(3, "Leg Abduction", 2, 10),
+            _t(3, "Lunge", 2, 10),
+            _t(5, "Squat", 2, 10),
+            _t(5, "Lunge", 2, 10),
+            _t(5, "Shoulder Bridge", 2, 10),
+        ],
+    ),
+    PlanTemplate(
+        key="shoulder_rehab",
+        name="Shoulder rehab",
+        description="Scapular control and shoulder mobility, three short sessions a week.",
+        category="rehab",
+        items=[
+            _t(1, "Arm Abduction", 2, 10),
+            _t(1, "Band Pull Apart", 2, 10),
+            _t(1, "Row", 2, 10),
+            _t(3, "Arm VW", 2, 10),
+            _t(3, "Band Pull Apart", 2, 10),
+            _t(3, "Arm Abduction", 2, 10),
+            _t(5, "Row", 2, 10),
+            _t(5, "Arm VW", 2, 10),
+            _t(5, "Band Pull Apart", 2, 10),
+        ],
+    ),
+    PlanTemplate(
+        key="low_back_core",
+        name="Low back & core",
+        description="Trunk control and a light hip hinge, three short sessions a week.",
+        category="rehab",
+        items=[
+            _t(1, "Shoulder Bridge", 2, 10),
+            _t(1, "Sit-up", 2, 10),
+            _t(1, "Torso Twist", 2, 10),
+            _t(3, "Deadlift", 2, 8),
+            _t(3, "Shoulder Bridge", 2, 10),
+            _t(3, "Torso Twist", 2, 10),
+            _t(5, "Sit-up", 2, 10),
+            _t(5, "Shoulder Bridge", 2, 10),
+            _t(5, "Deadlift", 2, 8),
+        ],
+    ),
     PlanTemplate(
         key="full_body_starter",
         name="Full-body starter",

@@ -198,6 +198,24 @@ class SystemPromptTests(unittest.TestCase):
         self.assertNotIn("evidence:", prompt)  # no evidence line when the fault carries none
         self.assertNotIn("reference:", prompt)  # no rag-snippet line either
 
+    def test_rehab_block_absent_by_default(self) -> None:
+        prompt = chat_service._build_system_prompt(_FAULT_CTX)
+        self.assertNotIn("REHAB MODE", prompt)
+
+    def test_rehab_block_present_when_the_context_flags_it(self) -> None:
+        ctx = dict(_FAULT_CTX, rehab=True)
+        prompt = chat_service._build_system_prompt(ctx)
+        self.assertIn("REHAB MODE", prompt)
+        self.assertIn("NEVER diagnose", prompt)
+        self.assertIn("contact their therapist", prompt)
+        # unlike the plan agent's block, this surface cannot edit a plan at all, so it carries no
+        # plan-editing refusal sentence.
+        self.assertNotIn("only the therapist may", prompt)
+
+    def test_system_preamble_rehab_flag_directly(self) -> None:
+        self.assertNotIn("REHAB MODE", chat_service._system_preamble("Squat"))
+        self.assertIn("REHAB MODE", chat_service._system_preamble("Squat", rehab=True))
+
 
 # --------------------------------------------------------------------- service: answer_stream
 
@@ -1721,6 +1739,80 @@ class ChatRouterTests(unittest.TestCase):
         ctx = ChatContext(fault_count=0, detail={"detections": [], "retrievals": []})
         self.assertEqual(ctx.model_dump()["detail"], {"detections": [], "retrievals": []})
         self.assertIsNone(ChatContext(fault_count=0).model_dump()["detail"])  # optional
+
+    def test_rehab_flag_is_threaded_into_the_context_the_service_receives(self) -> None:
+        captured: dict = {}
+
+        def fake_answer_stream(*, messages, context, model):
+            captured["context"] = context
+            yield 'event: done\ndata: {"model": "m"}\n\n'
+
+        body = chat_router.ChatRequest(
+            messages=[{"role": "user", "content": "hi"}],
+            context={**_FAULT_CTX, "analysis_id": "a1"},
+        )
+        with mock.patch.object(
+            chat_router, "get_settings", return_value=types.SimpleNamespace(chat_configured=True)
+        ), mock.patch.object(
+            app_settings, "get_settings", return_value=_fake_models("m")
+        ), mock.patch.object(
+            chat_router.plans_store, "analysis_in_assigned_plan", return_value=True
+        ), mock.patch.object(chat_service, "answer_stream", fake_answer_stream):
+            resp = self._run(body)
+            asyncio.run(_collect(resp))
+
+        self.assertTrue(captured["context"]["rehab"])
+
+    def test_followups_context_receives_the_rehab_flag_too(self) -> None:
+        captured: dict = {}
+
+        def fake_suggest(*, messages, context, model):
+            captured["context"] = context
+            return []
+
+        body = chat_router.ChatRequest(
+            messages=[
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "hello"},
+            ],
+            context={**_FAULT_CTX, "analysis_id": "a1"},
+        )
+        with mock.patch.object(
+            chat_router, "get_settings", return_value=types.SimpleNamespace(chat_configured=True)
+        ), mock.patch.object(
+            chat_router.plans_store, "analysis_in_assigned_plan", return_value=True
+        ), mock.patch.object(chat_service, "suggest_followups", fake_suggest):
+            self._run_followups(body)
+
+        self.assertTrue(captured["context"]["rehab"])
+
+
+class ResolveRehabTests(unittest.TestCase):
+    """`_resolve_rehab` -- the WP4 gate both chat endpoints run before building the system prompt."""
+
+    def test_false_when_no_analysis_id_is_given(self) -> None:
+        self.assertFalse(chat_router._resolve_rehab(analysis_id=None, user=_USER))
+
+    def test_true_when_the_store_says_the_plan_is_assigned(self) -> None:
+        with mock.patch.object(
+            chat_router.plans_store, "analysis_in_assigned_plan", return_value=True
+        ) as fn:
+            self.assertTrue(chat_router._resolve_rehab(analysis_id="a1", user=_USER))
+        fn.assert_called_once_with(token="tok", user_id="user-1", analysis_id="a1")
+
+    def test_false_when_the_store_says_the_plan_is_not_assigned(self) -> None:
+        with mock.patch.object(
+            chat_router.plans_store, "analysis_in_assigned_plan", return_value=False
+        ):
+            self.assertFalse(chat_router._resolve_rehab(analysis_id="a1", user=_USER))
+
+    def test_a_lookup_error_defaults_to_false_and_never_raises(self) -> None:
+        with mock.patch.object(
+            chat_router.plans_store,
+            "analysis_in_assigned_plan",
+            side_effect=RuntimeError("boom"),
+        ):
+            self.assertFalse(chat_router._resolve_rehab(analysis_id="a1", user=_USER))
 
 
 def _fake_models(models: str, followup: str = "openai/gpt-oss-120b"):

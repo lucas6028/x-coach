@@ -282,6 +282,69 @@ def plan_exists(*, token: str, plan_id: str, user_id: str) -> bool:
     return bool(resp.data or [])
 
 
+def plan_is_assigned(*, token: str, plan_id: str, user_id: str) -> bool:
+    """Whether the caller's plan was assigned by a therapist (``assigned_by`` is set).
+
+    The WP4 rehab-mode gate for the plan agent: ``plan_agent._plan_chat_stream_inner`` calls this
+    once, before building the system prompt, so it can tell the model (and the dispatcher's
+    mutating tools) whether it is looking at a plan the CALLER may freely edit or one only a
+    therapist may change. Same predicate shape as ``plan_exists`` -- filtered on both ``id`` and
+    ``user_id`` -- for the same reason: RLS already scopes the row, but the explicit predicate is
+    what turns "not yours" into a clean ``False`` here instead of leaking through as a KeyError on
+    an empty ``resp.data``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("training_plans")
+        .select("assigned_by")
+        .eq("id", plan_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return bool(rows and rows[0].get("assigned_by"))
+
+
+def analysis_in_assigned_plan(*, token: str, user_id: str, analysis_id: str) -> bool:
+    """Whether ``analysis_id`` is linked (via a completed plan item) to a plan a THERAPIST assigned.
+
+    The WP4 rehab-mode gate for the analysis chat (``routers/chat.py``): an analysis reached through
+    a plan item that was ticked off against a clinician-assigned plan should get the same safety
+    framing the plan agent gives that plan directly, even though the chat endpoint never threads a
+    ``plan_id`` of its own -- it only ever sees the analysis.
+
+    TWO READS, BOTH EXPLICITLY FILTERED ON ``user_id`` -- not left to RLS alone, the same posture
+    ``list_analyses`` documents for the clinician-select policy. The first proves the CALLER is the
+    one who linked this analysis to a plan item (a stray/foreign ``analysis_id`` naming someone
+    else's item must not flip rehab mode on for this caller's conversation); the second proves the
+    CALLER also owns the plan(s) those items belong to. Without the second filter, a plan id read off
+    someone else's item could be used to probe an unrelated plan's ``assigned_by`` -- harmless as an
+    information leak (it is only a boolean), but not a check this function's own ownership story
+    would justify making.
+    """
+    client = _user_client(token)
+    items_resp = (
+        client.table("plan_items")
+        .select("plan_id")
+        .eq("analysis_id", analysis_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    plan_ids = {row["plan_id"] for row in (items_resp.data or []) if row.get("plan_id")}
+    if not plan_ids:
+        return False
+
+    plans_resp = (
+        client.table("training_plans")
+        .select("assigned_by")
+        .in_("id", list(plan_ids))
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return any(row.get("assigned_by") for row in (plans_resp.data or []))
+
+
 def add_item(
     *,
     token: str,

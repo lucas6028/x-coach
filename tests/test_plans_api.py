@@ -103,6 +103,92 @@ class TemplateTests(unittest.TestCase):
         keys = [t.key for t in plans_router.TEMPLATES]
         self.assertEqual(len(set(keys)), len(keys))
 
+    def test_the_three_rehab_templates_exist_with_the_exact_catalog_spellings(self) -> None:
+        by_key = {t.key: t for t in plans_router.TEMPLATES}
+        for key in ("knee_rehab", "shoulder_rehab", "low_back_core"):
+            self.assertIn(key, by_key)
+
+        knee = by_key["knee_rehab"]
+        self.assertEqual(knee.name, "Knee rehab")
+        self.assertEqual(
+            [(it.day_index, it.movement, it.sets, it.reps) for it in knee.items],
+            [
+                (1, "Shoulder Bridge", 2, 10),
+                (1, "Leg Abduction", 2, 10),
+                (1, "Squat", 2, 10),
+                (3, "Shoulder Bridge", 2, 10),
+                (3, "Leg Abduction", 2, 10),
+                (3, "Lunge", 2, 10),
+                (5, "Squat", 2, 10),
+                (5, "Lunge", 2, 10),
+                (5, "Shoulder Bridge", 2, 10),
+            ],
+        )
+
+        shoulder = by_key["shoulder_rehab"]
+        self.assertEqual(shoulder.name, "Shoulder rehab")
+        self.assertEqual(
+            [(it.day_index, it.movement, it.sets, it.reps) for it in shoulder.items],
+            [
+                (1, "Arm Abduction", 2, 10),
+                (1, "Band Pull Apart", 2, 10),
+                (1, "Row", 2, 10),
+                (3, "Arm VW", 2, 10),
+                (3, "Band Pull Apart", 2, 10),
+                (3, "Arm Abduction", 2, 10),
+                (5, "Row", 2, 10),
+                (5, "Arm VW", 2, 10),
+                (5, "Band Pull Apart", 2, 10),
+            ],
+        )
+
+        low_back = by_key["low_back_core"]
+        self.assertEqual(low_back.name, "Low back & core")
+        self.assertEqual(
+            [(it.day_index, it.movement, it.sets, it.reps) for it in low_back.items],
+            [
+                (1, "Shoulder Bridge", 2, 10),
+                (1, "Sit-up", 2, 10),
+                (1, "Torso Twist", 2, 10),
+                (3, "Deadlift", 2, 8),
+                (3, "Shoulder Bridge", 2, 10),
+                (3, "Torso Twist", 2, 10),
+                (5, "Sit-up", 2, 10),
+                (5, "Shoulder Bridge", 2, 10),
+                (5, "Deadlift", 2, 8),
+            ],
+        )
+
+    def test_the_rehab_templates_are_listed_first(self) -> None:
+        first_three = [t.key for t in plans_router.TEMPLATES[:3]]
+        self.assertEqual(first_three, ["knee_rehab", "shoulder_rehab", "low_back_core"])
+
+    def test_category_defaults_to_fitness_and_the_rehab_templates_are_tagged_rehab(self) -> None:
+        by_key = {t.key: t for t in plans_router.TEMPLATES}
+        for key in ("knee_rehab", "shoulder_rehab", "low_back_core"):
+            self.assertEqual(by_key[key].category, "rehab")
+        # Every pre-existing template needed no edit: category defaults to "fitness".
+        for key in ("full_body_starter", "upper_body", "lower_body", "mobility", "quick_core"):
+            self.assertEqual(by_key[key].category, "fitness")
+
+    def test_category_is_public_on_the_templates_endpoint(self) -> None:
+        body = self.client.get("/api/plans/templates").json()
+        by_key = {t["key"]: t for t in body["templates"]}
+        self.assertEqual(by_key["knee_rehab"]["category"], "rehab")
+        self.assertEqual(by_key["full_body_starter"]["category"], "fitness")
+
+    def test_an_invalid_category_is_rejected_at_construction(self) -> None:
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            plans_router.PlanTemplate(
+                key="x",
+                name="X",
+                description="x",
+                category="cardio",  # type: ignore[arg-type]
+                items=[plans_router.TemplateItem(day_index=1, movement="Squat", sets=2, reps=10)],
+            )
+
 
 class PlanAuthTests(unittest.TestCase):
     """The plan endpoints are one user's own data and must 401 without a session.

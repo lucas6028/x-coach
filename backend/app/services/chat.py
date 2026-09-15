@@ -51,15 +51,36 @@ _REQUEST_TIMEOUT_S = 60.0
 # on screen regardless.
 _FOLLOWUP_TIMEOUT_S = 15.0
 
-def _system_preamble(movement: str) -> str:
+# WP4 rehab mode (chat side): appended to the preamble when the analysis under discussion is linked
+# to a therapist-assigned plan (see services/plans.py::analysis_in_assigned_plan and
+# routers/chat.py's threading of ChatContext.analysis_id). English only, unlike the plan agent's
+# language-switched block: this preamble carries no lang parameter of its own, and the "Reply in the
+# same language the user writes in" rule above already covers translating it. It omits the
+# plan-editing sentence the plan agent's block carries -- this chat cannot edit a plan at all, so
+# refusing to would be a claim about a capability this surface never had.
+_REHAB_BLOCK = (
+    "\nREHAB MODE — this analysis is linked to a plan the user's therapist assigned:\n"
+    "- You are supporting a patient on a plan their therapist assigned.\n"
+    "- NEVER diagnose or name a medical condition.\n"
+    "- Encourage adherence and good form.\n"
+    "- If the user mentions pain, dizziness, swelling, or worsening symptoms, tell them to stop and "
+    "contact their therapist immediately.\n"
+    "- You may still explain movements and answer general questions.\n"
+)
+
+
+def _system_preamble(movement: str, *, rehab: bool = False) -> str:
     """The grounded preamble, scoped to the movement whose rules actually ran.
 
     The movement is named rather than assumed because it is now USER-ASSERTED input: the studio
     lets the user pick, so a clip can be measured by rules that do not describe it (spec section
     9). Naming it makes every claim true relative to the assertion the user made, and puts that
     assertion in front of the model instead of leaving it implicit.
+
+    ``rehab`` appends the WP4 safety block (see ``_REHAB_BLOCK``) when this analysis is linked to a
+    therapist-assigned plan. Defaults false so every pre-WP4 caller is unaffected.
     """
-    return (
+    preamble = (
         f"You are the x-coach {movement} coach. You explain an ALREADY-COMPUTED analysis of one "
         f"{movement} repetition and answer the user's follow-up questions about it.\n\n"
         "GROUNDING RULES — these are absolute:\n"
@@ -74,6 +95,9 @@ def _system_preamble(movement: str) -> str:
         "and inline code for measurements/timecodes. Formatting never loosens the grounding rules "
         "above.\n"
     )
+    if rehab:
+        preamble += _REHAB_BLOCK
+    return preamble
 
 
 def _followup_instruction(movement: str) -> str:
@@ -202,7 +226,11 @@ def _build_system_prompt(context: dict[str, Any]) -> str:
     say, and "we cannot tell" must not resolve to "everything is fine".
     """
     movement = _resolve_movement(context)
-    lines: list[str] = [_system_preamble(movement), "ANALYSIS FACTS:"]
+    # ``rehab`` is resolved by the router (routers/chat.py::_resolve_rehab) and rides the same
+    # context dict as every other field here -- absent (falsy) for any client/context predating WP4,
+    # so this is a no-op except on a conversation actually linked to an assigned plan.
+    rehab = bool(context.get("rehab"))
+    lines: list[str] = [_system_preamble(movement, rehab=rehab), "ANALYSIS FACTS:"]
 
     view = context.get("view_type") or "unknown"
     conf = context.get("view_confidence")
