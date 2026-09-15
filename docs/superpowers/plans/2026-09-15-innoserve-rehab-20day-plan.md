@@ -244,14 +244,20 @@ Branch `feat/line-push-reminders`.
 ### 9/30 — Freeze and deploy
 
 - Full backend suite, coverage gate, frontend coverage (serial), `graphify update .`.
-- User applies `20260916000000_clinic.sql` on Supabase, grants one clinician role to a demo
-  account, sets `JOB_TOKEN` in Container Apps if WP5 shipped.
+- User applies `20260916000000_clinic.sql` then `20260927000000_daily_jobs.sql` on Supabase
+  (check both first with `node db/checks/run_pglite.mjs`), grants one clinician role to a demo
+  account, sets `JOB_TOKEN` in Container Apps and the two GitHub secrets
+  (`DAILY_JOB_API_BASE_URL`, `JOB_TOKEN`) if WP5 shipped.
 - Deploy via the existing GHA → GHCR → Container Apps path. Set `minReplicas=1` for
   10/1–10/5 (video recording) and again for 11/7; scale-to-zero cold starts would show in
   the video.
-- Seed two demo patients with 2–3 weeks of check-ins and analyses so the trend chart and a
-  red flag are visible in the video. Seeding script under `scripts/demo/seed_clinic.py`
-  (hits the real API with two demo accounts; never runs in CI).
+- Seed two demo patients with 2–3 weeks of check-ins so the trend chart and a red flag are
+  visible in the video: `scripts/demo/seed_clinic.sql`, pasted into the Supabase SQL editor
+  after the three demo accounts have signed in once (edit their emails at the top). **Changed
+  from the API script planned here:** check-ins are stamped `now()` by the server, so backdated
+  history cannot go through `POST /api/checkins`. The seed's flags equal what
+  `services/redflags.evaluate` returns for the same series (checked), and re-running it deletes
+  only its own rows. Analyses for the video are recorded live, not seeded.
 
 ## 4. Submission work (non-code, runs in parallel from 9/22)
 
