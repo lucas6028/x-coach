@@ -154,6 +154,32 @@ describe("api.setUserRole", () => {
   });
 });
 
+describe("api.setUserClinician", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("PUTs the make_clinician flag to the per-user role endpoint", async () => {
+    const spy = mockFetch({ ok: true });
+    const result = await api.setUserClinician("u2", true);
+    expect(result).toEqual({ ok: true });
+    expect(spy.mock.calls[0][0]).toBe("/api/admin/users/u2/role");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ make_clinician: true });
+  });
+
+  it("can revoke, including on the caller's own row (no self-guard)", async () => {
+    const spy = mockFetch({ ok: true });
+    await api.setUserClinician("u1", false);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ make_clinician: false });
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 500);
+    await expect(api.setUserClinician("u2", true)).rejects.toThrow("500");
+  });
+});
+
 describe("api.videoFileUrl", () => {
   it("returns the correct URL string", () => {
     expect(api.videoFileUrl("vid_001")).toBe("/api/video-file/vid_001");

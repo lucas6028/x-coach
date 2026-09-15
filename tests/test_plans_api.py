@@ -358,7 +358,9 @@ class ItemEndpointTests(_PlanApiTestCase):
 
     def test_unticking_clears_both_the_stamp_and_the_analysis_link(self) -> None:
         item = self._add()
-        with mock.patch.object(store, "get_analysis", return_value={"id": "an-1"}):
+        with mock.patch.object(
+            store, "get_analysis", return_value={"id": "an-1", "user_id": "u1"}
+        ):
             self.client.patch(
                 f"/api/plans/{self.plan_id}/items/{item['id']}",
                 json={"completed": True, "analysis_id": "11111111-1111-1111-1111-111111111111"},
@@ -373,7 +375,9 @@ class ItemEndpointTests(_PlanApiTestCase):
 
     def test_links_an_analysis_the_caller_owns(self) -> None:
         item = self._add()
-        with mock.patch.object(store, "get_analysis", return_value={"id": "an-1"}) as get:
+        with mock.patch.object(
+            store, "get_analysis", return_value={"id": "an-1", "user_id": "u1"}
+        ) as get:
             resp = self.client.patch(
                 f"/api/plans/{self.plan_id}/items/{item['id']}",
                 json={"completed": True, "analysis_id": "11111111-1111-1111-1111-111111111111"},
@@ -387,6 +391,20 @@ class ItemEndpointTests(_PlanApiTestCase):
         # analysis id onto its own item and leave itself a 看報告 link that 404s.
         item = self._add()
         with mock.patch.object(store, "get_analysis", return_value=None):
+            resp = self.client.patch(
+                f"/api/plans/{self.plan_id}/items/{item['id']}",
+                json={"completed": True, "analysis_id": "11111111-1111-1111-1111-111111111111"},
+            )
+        self.assertEqual(resp.status_code, 400, resp.text)
+
+    def test_rejects_an_analysis_owned_by_someone_else(self) -> None:
+        # The clinic migration's `analyses_clinician_select` policy lets a linked clinician's own
+        # JWT read a PATIENT's analysis via `get_analysis` too, so a non-null row no longer proves
+        # it is the CALLER's -- the row's own `user_id` must also match.
+        item = self._add()
+        with mock.patch.object(
+            store, "get_analysis", return_value={"id": "an-1", "user_id": "someone-else"}
+        ):
             resp = self.client.patch(
                 f"/api/plans/{self.plan_id}/items/{item['id']}",
                 json={"completed": True, "analysis_id": "11111111-1111-1111-1111-111111111111"},

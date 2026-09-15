@@ -51,6 +51,13 @@ _DEFAULT_TESTS = [
     # table it guards being honest, and the explicit default list above is the only thing that
     # runs it under `--fail-under` without a caller remembering to name it by hand.
     "tests/test_movement_muscles.py",
+    # Clinic core (WP1, feat/clinic-core): store.py's clinician-role seams are covered by
+    # test_backend.py, but services/clinic.py, routers/clinic.py and routers/care.py have no other
+    # entry point in this list -- leaving them out drops those three modules to ~20-40% (import-time
+    # only) and sinks the whole gate, exactly as the training-plans comment above describes for its
+    # own two files.
+    "tests/test_clinic_store.py",
+    "tests/test_clinic_api.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

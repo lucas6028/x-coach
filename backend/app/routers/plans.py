@@ -258,12 +258,15 @@ def list_plans(user: CurrentUser = Depends(get_current_user)) -> dict:
     return {"plans": plans_store.list_plans(token=user.token, user_id=user.id)}
 
 
-@router.post("/plans", status_code=201)
-def create_plan(
-    body: CreatePlanBody,
-    user: CurrentUser = Depends(get_current_user),
-) -> dict:
-    """Create a plan, either empty, from explicit items, or copied from a built-in template."""
+def _build_plan_items(body: CreatePlanBody) -> list[dict[str, Any]]:
+    """Turn a create-plan body into the item rows ``plans_store.create_plan`` expects: either a
+    copy of a built-in template's items, or the caller's own explicit items.
+
+    Shared by ``POST /api/plans`` and ``POST /api/clinic/patients/{id}/plans`` (the clinician
+    assign-a-plan route) so the template lookup, the 400 for an unknown key, and movement
+    canonicalization live in exactly one place -- two independent copies of this would have to be
+    kept in lockstep by hand every time a template gains a rule.
+    """
     items: list[dict[str, Any]]
     if body.template_key is not None:
         template = _TEMPLATES_BY_KEY.get(body.template_key)
@@ -295,14 +298,22 @@ def create_plan(
             }
             for it in body.items
         ]
+    return items
 
+
+@router.post("/plans", status_code=201)
+def create_plan(
+    body: CreatePlanBody,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Create a plan, either empty, from explicit items, or copied from a built-in template."""
     return plans_store.create_plan(
         token=user.token,
         user_id=user.id,
         name=body.name.strip(),
         notes=body.notes,
         template_key=body.template_key,
-        items=items,
+        items=_build_plan_items(body),
     )
 
 
@@ -482,8 +493,21 @@ def update_item(
         # could pin someone else's analysis id onto its own plan item. It leaks nothing on its own
         # (reading that analysis still goes through the RLS-scoped GET), but a plan item claiming
         # an analysis its owner cannot open is a broken link we can cheaply refuse.
+        #
+        # The row's OWN `user_id` must also equal the caller: the clinic migration's
+        # `analyses_clinician_select` policy lets a linked clinician's JWT read `get_analysis` on a
+        # PATIENT's analysis too (so the clinician dashboard can open a report), which means
+        # `get_analysis(...) is not None` alone no longer proves ownership. Without this a
+        # clinician editing a patient's plan item (via `PATCH /api/clinic/...`, out of WP1's scope,
+        # or simply this same endpoint if a clinician ever reached it) could link an analysis that
+        # is the PATIENT's, not the caller's own -- harmless today since only the caller's own plan
+        # items are reachable here, but the invariant this check exists for ("an analysis_id on an
+        # item was verified to belong to whoever wrote it") stops being true without it.
         resolved = str(uuid.UUID(analysis_id)) if _is_uuid(analysis_id) else None
-        if resolved is None or store.get_analysis(token=user.token, analysis_id=resolved) is None:
+        analysis_row = (
+            store.get_analysis(token=user.token, analysis_id=resolved) if resolved else None
+        )
+        if analysis_row is None or str(analysis_row.get("user_id")) != user.id:
             raise HTTPException(status_code=400, detail=f"No analysis '{analysis_id}'.")
         fields["analysis_id"] = resolved
 

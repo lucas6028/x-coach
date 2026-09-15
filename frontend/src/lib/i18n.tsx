@@ -1052,7 +1052,7 @@ const en: Dict = {
 
   // Admin panel P3 — user oversight
   "admin.users.title": "Users",
-  "admin.users.desc": "Read-only activity overview. Assign or revoke admin access per user.",
+  "admin.users.desc": "Read-only activity overview. Assign or revoke admin and clinician access per user.",
   "admin.users.loading": "Loading users…",
   "admin.users.loadError": "Couldn't load the users list.",
   "admin.users.empty": "No users yet.",
@@ -1061,9 +1061,11 @@ const en: Dict = {
   "admin.users.lastSignIn": "Last sign-in",
   "admin.users.analyses": "Analyses",
   "admin.users.conversations": "Conversations",
-  "admin.users.role": "Admin",
+  "admin.users.role": "Roles",
   "admin.users.makeAdmin": "Make admin",
   "admin.users.revokeAdmin": "Revoke admin",
+  "admin.users.makeClinician": "Make clinician",
+  "admin.users.revokeClinician": "Revoke clinician",
   "admin.users.you": "You",
   "admin.users.never": "Never",
   "admin.users.updateError": "Couldn't update this user's role.",
@@ -2172,7 +2174,7 @@ const zhHant: Dict = {
 
   // 後台管理 P3 — 使用者監看
   "admin.users.title": "使用者",
-  "admin.users.desc": "唯讀活動總覽。可逐一指派或取消管理員權限。",
+  "admin.users.desc": "唯讀活動總覽。可逐一指派或取消管理員與治療師權限。",
   "admin.users.loading": "載入使用者中…",
   "admin.users.loadError": "無法載入使用者清單。",
   "admin.users.empty": "尚無使用者。",
@@ -2181,9 +2183,11 @@ const zhHant: Dict = {
   "admin.users.lastSignIn": "最後登入",
   "admin.users.analyses": "分析數",
   "admin.users.conversations": "對話數",
-  "admin.users.role": "管理員",
+  "admin.users.role": "角色",
   "admin.users.makeAdmin": "設為管理員",
   "admin.users.revokeAdmin": "取消管理員",
+  "admin.users.makeClinician": "設為治療師",
+  "admin.users.revokeClinician": "取消治療師",
   "admin.users.you": "你",
   "admin.users.never": "從未",
   "admin.users.updateError": "無法更新這位使用者的角色。",

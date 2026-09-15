@@ -186,6 +186,18 @@ class CreateAndReadTests(_PlansTestCase):
         plan = self._plan()
         self.assertEqual(plan["items"], [])
 
+    def test_create_defaults_assigned_by_to_none(self) -> None:
+        # A self-authored plan (the ordinary path): `assigned_by` stays null.
+        plan = self._plan()
+        self.assertIsNone(plan["assigned_by"])
+
+    def test_create_stamps_the_assigning_clinician(self) -> None:
+        # The clinic "assign a plan" path (routers/clinic.py): the owner stays the patient
+        # (`user_id`), but `assigned_by` records who prescribed it.
+        plan = self._plan(user="patient-1", assigned_by="clinician-1")
+        self.assertEqual(plan["user_id"], "patient-1")
+        self.assertEqual(plan["assigned_by"], "clinician-1")
+
     def test_create_raises_when_the_insert_returns_nothing(self) -> None:
         # A silent empty insert would otherwise surface as a KeyError deep in the router.
         with mock.patch.object(_Query, "execute", return_value=_Resp([])):

@@ -1373,6 +1373,7 @@ class _FakeQuery:
         self.upserted: dict | None = None
         self.range_args: tuple | None = None
         self.deleted = False
+        self.eq_calls: list[tuple] = []
 
     def upsert(self, row, **kwargs):
         self.upserted = row
@@ -1400,6 +1401,7 @@ class _FakeQuery:
         return self
 
     def eq(self, *a, **k):
+        self.eq_calls.append(a)
         return self
 
     def limit(self, *a, **k):
@@ -1584,22 +1586,31 @@ class StoreListTests(unittest.TestCase):
     def test_list_returns_total_and_items(self) -> None:
         client, query = _fake_client(_Resp(data=[{"id": "a"}], count=3))
         with mock.patch.object(store, "_user_client", return_value=client):
-            out = store.list_analyses(token="t", limit=10, offset=5)
+            out = store.list_analyses(token="t", user_id="u1", limit=10, offset=5)
         self.assertEqual(out, {"total": 3, "items": [{"id": "a"}]})
         self.assertEqual(query.range_args, (5, 14))
 
     def test_list_handles_empty(self) -> None:
         client, _ = _fake_client(_Resp(data=None, count=None))
         with mock.patch.object(store, "_user_client", return_value=client):
-            out = store.list_analyses(token="t")
+            out = store.list_analyses(token="t", user_id="u1")
         self.assertEqual(out, {"total": 0, "items": []})
 
     def test_list_clamps_limit_and_offset(self) -> None:
         client, query = _fake_client(_Resp(data=[], count=0))
         with mock.patch.object(store, "_user_client", return_value=client):
-            store.list_analyses(token="t", limit=9999, offset=-5)
+            store.list_analyses(token="t", user_id="u1", limit=9999, offset=-5)
         # limit clamped to 200, offset floored to 0 -> range(0, 199).
         self.assertEqual(query.range_args, (0, 199))
+
+    def test_list_filters_by_user_id_explicitly(self) -> None:
+        # With the clinic migration's clinician SELECT policy on `analyses`, RLS alone no longer
+        # means "mine" -- a linked clinician's own JWT can also see a patient's rows. This is the
+        # explicit predicate that keeps a clinician's own history from listing their patients' too.
+        client, query = _fake_client(_Resp(data=[{"id": "mine"}], count=1))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            store.list_analyses(token="t", user_id="u1")
+        self.assertIn(("user_id", "u1"), query.eq_calls)
 
 
 class StoreDeleteTests(unittest.TestCase):
@@ -1741,6 +1752,17 @@ class StoreIsAdminTests(unittest.TestCase):
         with mock.patch.object(store, "_user_client", return_value=client):
             self.assertFalse(store.is_admin(token="t", user_id="u1"))
 
+    def test_is_clinician_true_when_role_row_present(self) -> None:
+        client, query = _fake_client(_Resp(data=[{"user_id": "u1"}]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertTrue(store.is_clinician(token="t", user_id="u1"))
+        client.table.assert_called_with("user_roles")
+
+    def test_is_clinician_false_when_no_role_row(self) -> None:
+        client, _ = _fake_client(_Resp(data=[]))
+        with mock.patch.object(store, "_user_client", return_value=client):
+            self.assertFalse(store.is_clinician(token="t", user_id="u1"))
+
 
 class GetAdminUserTests(unittest.TestCase):
     def test_passes_through_when_admin(self) -> None:
@@ -1755,6 +1777,22 @@ class GetAdminUserTests(unittest.TestCase):
         with mock.patch.object(store, "is_admin", return_value=False):
             with self.assertRaises(HTTPException) as ctx:
                 auth.get_admin_user(user=me)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+
+class GetClinicianUserTests(unittest.TestCase):
+    def test_passes_through_when_clinician(self) -> None:
+        me = CurrentUser(id="u1", token="tok")
+        with mock.patch.object(store, "is_clinician", return_value=True) as ic:
+            result = auth.get_clinician_user(user=me)
+        self.assertIs(result, me)
+        ic.assert_called_once_with(token="tok", user_id="u1")
+
+    def test_raises_403_when_not_clinician(self) -> None:
+        me = CurrentUser(id="u1", token="tok")
+        with mock.patch.object(store, "is_clinician", return_value=False):
+            with self.assertRaises(HTTPException) as ctx:
+                auth.get_clinician_user(user=me)
         self.assertEqual(ctx.exception.status_code, 403)
 
 
@@ -1847,7 +1885,7 @@ class AnalysesRouterTests(unittest.TestCase):
             resp = self.client.get("/api/analyses", params={"limit": 5, "offset": 2})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"total": 1, "items": [{"id": "a"}]})
-        ls.assert_called_once_with(token="tok", limit=5, offset=2)
+        ls.assert_called_once_with(token="tok", user_id="u1", limit=5, offset=2)
 
     def test_get_returns_analysis(self) -> None:
         with mock.patch.object(
@@ -2668,6 +2706,70 @@ class AdminUsersRouterTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json(), {"ok": True})
         sr.assert_called_once_with(token="tok", user_id="u2", make_admin=False)
+
+    # -- PUT /users/{id}/role — make_clinician (clinic core, WP1) ---------------------------------
+    def test_set_role_rejects_an_empty_body(self) -> None:
+        # Neither make_admin nor make_clinician given: a no-op body is a client bug, not a 200.
+        with mock.patch.object(store, "is_admin", return_value=True):
+            resp = self.client.put("/api/admin/users/u2/role", json={})
+        self.assertEqual(resp.status_code, 422)
+
+    def test_set_role_grants_clinician(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "set_clinician_role") as scr, \
+             mock.patch.object(store, "set_user_role") as sr:
+            resp = self.client.put(
+                "/api/admin/users/u2/role", json={"make_clinician": True}
+            )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True})
+        scr.assert_called_once_with(token="tok", user_id="u2", make_clinician=True)
+        # make_admin was not in the body: the admin role write is never touched.
+        sr.assert_not_called()
+
+    def test_set_role_revokes_clinician(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "set_clinician_role") as scr:
+            resp = self.client.put(
+                "/api/admin/users/u2/role", json={"make_clinician": False}
+            )
+        self.assertEqual(resp.status_code, 200)
+        scr.assert_called_once_with(token="tok", user_id="u2", make_clinician=False)
+
+    def test_set_role_self_promote_to_clinician_is_allowed(self) -> None:
+        # An admin MAY grant themselves clinician -- only the ADMIN self-demote is blocked.
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "set_clinician_role") as scr:
+            resp = self.client.put(
+                "/api/admin/users/u1/role", json={"make_clinician": True}
+            )
+        self.assertEqual(resp.status_code, 200)
+        scr.assert_called_once_with(token="tok", user_id="u1", make_clinician=True)
+
+    def test_set_role_clinician_only_body_skips_the_admin_guards(self) -> None:
+        # make_admin absent (None): the self-demote/last-admin guards must not fire just because
+        # this happens to be the caller's own id or the only admin in the system.
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "count_admins", return_value=1), \
+             mock.patch.object(store, "set_clinician_role") as scr:
+            resp = self.client.put(
+                "/api/admin/users/u1/role", json={"make_clinician": False}
+            )
+        self.assertEqual(resp.status_code, 200)
+        scr.assert_called_once_with(token="tok", user_id="u1", make_clinician=False)
+
+    def test_set_role_both_fields_together(self) -> None:
+        with mock.patch.object(store, "is_admin", return_value=True), \
+             mock.patch.object(store, "count_admins", return_value=2), \
+             mock.patch.object(store, "set_user_role") as sr, \
+             mock.patch.object(store, "set_clinician_role") as scr:
+            resp = self.client.put(
+                "/api/admin/users/u2/role",
+                json={"make_admin": False, "make_clinician": True},
+            )
+        self.assertEqual(resp.status_code, 200)
+        sr.assert_called_once_with(token="tok", user_id="u2", make_admin=False)
+        scr.assert_called_once_with(token="tok", user_id="u2", make_clinician=True)
 
     # -- GET /overview ----------------------------------------------------------------------------
     def test_overview_forbidden_for_non_admin(self) -> None:

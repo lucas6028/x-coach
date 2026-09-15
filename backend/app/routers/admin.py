@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.app import config, settings
 from backend.app.auth import CurrentUser, get_admin_user, get_current_user
@@ -206,9 +206,20 @@ def list_admin_users(user: CurrentUser = Depends(get_admin_user)) -> dict:
 
 
 class RoleUpdate(BaseModel):
-    """Body for the role toggle: ``make_admin`` True grants the admin role, False revokes it."""
+    """Body for the role toggle. ``make_admin`` True/False grants/revokes admin; ``make_clinician``
+    does the same for the clinician role (the clinic migration's second role). Both are optional so
+    the ORIGINAL ``{make_admin}``-only request shape keeps working unmodified, but at least one must
+    be given -- an empty body changes nothing and is a client bug, not a silent no-op.
+    """
 
-    make_admin: bool
+    make_admin: bool | None = None
+    make_clinician: bool | None = None
+
+    @model_validator(mode="after")
+    def _at_least_one_role(self) -> "RoleUpdate":
+        if self.make_admin is None and self.make_clinician is None:
+            raise ValueError("At least one of make_admin or make_clinician is required.")
+        return self
 
 
 @router.put("/users/{user_id}/role")
@@ -217,24 +228,37 @@ def set_admin_role(
     body: RoleUpdate,
     user: CurrentUser = Depends(get_admin_user),
 ) -> dict:
-    """Grant/revoke another user's admin role. An admin may NOT revoke their OWN role (anti-lockout).
+    """Grant/revoke another user's admin and/or clinician role.
 
-    The self-demote guard is a UX/safety backstop against locking the last admin out of the panel; the
-    write itself is still RLS-gated on ``is_admin(auth.uid())`` in Postgres.
+    An admin may NOT revoke their OWN admin role (anti-lockout) -- that guard, and the last-admin
+    guard, apply only when ``make_admin`` is explicitly ``False``; a request that only touches
+    ``make_clinician`` (including an admin granting THEMSELVES clinician, which is allowed) never
+    trips them. The self-demote/last-admin guards are a UX/safety backstop against locking the last
+    admin out of the panel; the writes themselves are still RLS-gated in Postgres (``is_admin`` is
+    the only role ``user_roles`` INSERT/DELETE policy lets write the table at all, so a clinician
+    grant/revoke also runs as an admin action).
     """
-    if user_id == user.id and not body.make_admin:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You cannot remove your own admin role.",
+    if body.make_admin is False:
+        if user_id == user.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot remove your own admin role.",
+            )
+        if store.count_admins(token=user.token) <= 1:
+            # Anti-lockout: refuse a revoke that would leave the project with zero admins. This
+            # closes the UI-driven path; a truly concurrent double-demote is a residual race
+            # acceptable at this scale.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot remove the last admin.",
+            )
+
+    if body.make_admin is not None:
+        store.set_user_role(token=user.token, user_id=user_id, make_admin=body.make_admin)
+    if body.make_clinician is not None:
+        store.set_clinician_role(
+            token=user.token, user_id=user_id, make_clinician=body.make_clinician
         )
-    if not body.make_admin and store.count_admins(token=user.token) <= 1:
-        # Anti-lockout: refuse a revoke that would leave the project with zero admins. This closes the
-        # UI-driven path; a truly concurrent double-demote is a residual race acceptable at this scale.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot remove the last admin.",
-        )
-    store.set_user_role(token=user.token, user_id=user_id, make_admin=body.make_admin)
     return {"ok": True}
 
 

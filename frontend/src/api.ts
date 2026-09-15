@@ -453,6 +453,7 @@ export interface AdminUserRow {
   analyses_count: number;
   conversations_count: number;
   is_admin: boolean;
+  is_clinician: boolean;
 }
 export interface AdminUsersResponse {
   users: AdminUserRow[];
@@ -763,6 +764,19 @@ export const api = {
       method: "PUT",
       headers: { "Content-Type": "application/json", ...(await authHeader()) },
       body: JSON.stringify({ make_admin: makeAdmin }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
+    return (await res.json()) as { ok: boolean };
+  },
+
+  // Grant/revoke another user's clinician role (admin-only). Unlike admin, no self-guard: an admin
+  // may grant or revoke clinician on their own row.
+  async setUserClinician(userId: string, makeClinician: boolean): Promise<{ ok: boolean }> {
+    const url = `/api/admin/users/${encodeURIComponent(userId)}/role`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ make_clinician: makeClinician }),
     });
     if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
     return (await res.json()) as { ok: boolean };

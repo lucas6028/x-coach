@@ -17,7 +17,7 @@ from backend.app.services.store import _user_client
 
 # Every column of a plan, and of its items, that the API returns. Spelled out rather than "*" so a
 # column added later (or an internal one) does not silently start appearing in API responses.
-_PLAN_COLUMNS = "id, name, notes, template_key, started_at, created_at, updated_at"
+_PLAN_COLUMNS = "id, name, notes, template_key, started_at, created_at, updated_at, assigned_by"
 _ITEM_COLUMNS = (
     "id, plan_id, day_index, position, movement, sets, reps, notes, completed_at, "
     "analysis_id, created_at"
@@ -123,12 +123,19 @@ def create_plan(
     notes: str | None = None,
     template_key: str | None = None,
     items: list[dict[str, Any]] | None = None,
+    assigned_by: str | None = None,
 ) -> dict[str, Any]:
     """Insert a plan and, in one more round trip, its initial items; return the plan with items.
 
     ``items`` is how a built-in template lands as a real, independently editable plan: the
     template's rows are COPIED in at creation, so a later edit to the template in code never
     mutates a plan the user already owns (the migration's `template_key` note).
+
+    ``user_id`` stays the OWNER (the patient, for a clinician-assigned plan) -- ``assigned_by`` is
+    the clinician who created it, or ``None`` for a plan the owner built themselves. This is what
+    the clinic migration's ``training_plans_clinician_insert`` policy checks
+    (``assigned_by = auth.uid()``): a clinician's own JWT can only insert a plan it stamps as its
+    own assignment, never a plan pretending to be the patient's self-authored one.
 
     The item insert is a single batched call. If it fails the plan row survives as an empty plan
     rather than being rolled back -- PostgREST has no cross-request transaction, and an empty plan
@@ -143,6 +150,7 @@ def create_plan(
                 "name": name,
                 "notes": notes,
                 "template_key": template_key,
+                "assigned_by": assigned_by,
             }
         )
         .execute()
