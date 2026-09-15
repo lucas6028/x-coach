@@ -26,6 +26,7 @@ from backend.app.routers import (
     checkins,
     clinic,
     conversations,
+    jobs,
     knowledge,
     line_webhook,
     movements,
@@ -99,6 +100,7 @@ app.include_router(line_webhook.router)
 app.include_router(clinic.router)
 app.include_router(care.router)
 app.include_router(checkins.router)
+app.include_router(jobs.router)
 
 
 @app.get("/api/health", tags=["meta"])

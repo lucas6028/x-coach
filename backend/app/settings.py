@@ -93,6 +93,12 @@ class Settings(BaseSettings):
     # make the chips crawl. Env-overridable; blank it to reuse the default answer model instead.
     llm_followup_model: str = "openai/gpt-oss-120b"
 
+    # Daily care-loop job (WP5): a GitHub Actions cron calls POST /api/jobs/daily with no user
+    # JWT, so it authenticates via this shared token (`X-Job-Token` header, compared with
+    # ``hmac.compare_digest``) instead of Supabase auth. Leave unset to keep the endpoint 503.
+    # See routers/jobs.py and db/migrations/20260927000000_daily_jobs.sql.
+    job_token: str = ""
+
     @property
     def auth_configured(self) -> bool:
         """True when the Supabase project URL and anon key are both present."""
@@ -132,6 +138,15 @@ class Settings(BaseSettings):
             and self.line_messaging_access_token
             and self.supabase_service_role_key
             and self.auth_configured
+        )
+
+    @property
+    def jobs_configured(self) -> bool:
+        """True when POST /api/jobs/daily can run: a token to authenticate the cron, the
+        service_role key (its RPCs are service_role-only, like the LINE bot's summary RPC), and
+        a LINE push token to actually reach patients/clinicians. Otherwise the endpoint is 503."""
+        return bool(
+            self.job_token and self.supabase_service_role_key and self.line_messaging_access_token
         )
 
 

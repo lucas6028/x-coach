@@ -65,6 +65,11 @@ _DEFAULT_TESTS = [
     "tests/test_scoring_drift.py",
     "tests/test_redflags.py",
     "tests/test_checkins_api.py",
+    # WP5 (feat/line-push-reminders): the LINE push helper and the nightly care-loop job. Same
+    # reasoning as the WP2 comment above -- services/line_bot.push and routers/jobs.py have no
+    # other entry point in this list.
+    "tests/test_line_push.py",
+    "tests/test_jobs_daily.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

@@ -94,6 +94,10 @@ param lineMessagingAccessToken string = ''
 param lineLiffId string = ''
 
 @secure()
+@description('Shared token for the nightly care-loop job (POST /api/jobs/daily), checked against the GitHub Actions cron X-Job-Token header. Blank keeps the endpoint disabled (503).')
+param jobToken string = ''
+
+@secure()
 @description('OpenAI-compatible API key for conversational coaching. Blank keeps /api/chat disabled (503).')
 param llmApiKey string = ''
 
@@ -279,6 +283,7 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
         { name: 'supabase-service-role-key', value: supabaseServiceRoleKey }
         { name: 'line-messaging-channel-secret', value: lineMessagingChannelSecret }
         { name: 'line-messaging-access-token', value: lineMessagingAccessToken }
+        { name: 'job-token', value: jobToken }
         { name: 'llm-api-key', value: llmApiKey }
         { name: 'r2-secret-access-key', value: r2SecretAccessKey }
       ]
@@ -306,6 +311,7 @@ resource backend 'Microsoft.App/containerApps@2024-03-01' = if (deployApps) {
             { name: 'LINE_MESSAGING_CHANNEL_SECRET', secretRef: 'line-messaging-channel-secret' }
             { name: 'LINE_MESSAGING_ACCESS_TOKEN', secretRef: 'line-messaging-access-token' }
             { name: 'LINE_LIFF_ID', value: lineLiffId }
+            { name: 'JOB_TOKEN', secretRef: 'job-token' }
             { name: 'LLM_API_KEY', secretRef: 'llm-api-key' }
             { name: 'LLM_MODELS', value: llmModels }
             { name: 'LLM_BASE_URL', value: llmBaseUrl }

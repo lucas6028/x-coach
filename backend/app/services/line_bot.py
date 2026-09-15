@@ -29,6 +29,7 @@ import base64
 import hashlib
 import hmac
 import logging
+import re
 import threading
 import time
 from collections.abc import Iterator
@@ -46,6 +47,18 @@ logger = logging.getLogger(__name__)
 # LINE's reply endpoint. Replies are free and need no push quota, but the reply token is
 # single-use and expires ~1 minute after the event — never retry a failed reply.
 LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
+
+# LINE's push endpoint: unlike a reply, this needs no reply token and costs push quota. It is
+# the daily care-loop job's (routers/jobs.py) only way to reach a user, since the job runs with
+# no inbound webhook event to reply to.
+LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
+
+# A LINE user id is always 'U' + 32 lowercase hex characters (see the daily-jobs migration's
+# line_user_id_of()). The job's RPCs are the only source of these ids, so a mismatch here is
+# either a bug upstream or malformed input — either way, refused locally with no network call.
+_LINE_USER_ID_RE = re.compile(r"^U[0-9a-f]{32}$")
+
+_PUSH_TIMEOUT_S = 5.0
 
 
 def verify_signature(raw_body: bytes, signature: str | None) -> bool:
@@ -639,3 +652,33 @@ def reply(reply_token: str, text: str) -> None:
     if response.status_code != 200:
         # Never log the body or the token — it can carry user-identifying content.
         logger.warning("LINE bot: reply rejected with status %s", response.status_code)
+
+
+def push(line_user_id: str, text: str) -> bool:
+    """Push ``text`` to ``line_user_id`` outside of any reply token; True only on a 2xx.
+
+    Used by the daily care-loop job (routers/jobs.py) — the only caller with no inbound webhook
+    event to reply to. Same channel access token as ``reply``, but this costs push quota and has
+    no reply-token deadline, so it gets its own (still short) timeout. Never raises: a failed
+    push must not abort the rest of the job's run, so every failure mode (a malformed id, a
+    non-2xx response, a transport error) is logged and returns False.
+    """
+    if not isinstance(line_user_id, str) or not _LINE_USER_ID_RE.match(line_user_id):
+        logger.warning("LINE push: refused a malformed line_user_id")
+        return False
+    settings = get_settings()
+    try:
+        response = httpx.post(
+            LINE_PUSH_URL,
+            headers={"Authorization": f"Bearer {settings.line_messaging_access_token}"},
+            json={"to": line_user_id, "messages": [{"type": "text", "text": text}]},
+            timeout=_PUSH_TIMEOUT_S,
+        )
+    except httpx.HTTPError:
+        logger.warning("LINE push: request failed")
+        return False
+    if 200 <= response.status_code < 300:
+        return True
+    # Never log the body — it can carry user-identifying content.
+    logger.warning("LINE push: rejected with status %s", response.status_code)
+    return False
