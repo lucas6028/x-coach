@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { api, ChatError, UploadLimitError, type ChatContext, type ChatMessage } from "../api";
+import {
+  api,
+  ApiError,
+  ChatError,
+  UploadLimitError,
+  type ChatContext,
+  type ChatMessage,
+} from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -290,6 +297,99 @@ describe("api.deleteAnalysis", () => {
   it("throws on non-ok responses", async () => {
     mockFetch({}, false, 404);
     await expect(api.deleteAnalysis("abc123")).rejects.toThrow("404");
+  });
+});
+
+describe("api.createCheckin", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("POSTs the check-in body as-is and returns the parsed Checkin", async () => {
+    const body = { plan_id: "p1", plan_item_id: "i1", analysis_id: "an-7", pain_nrs: 4, rpe: 6 };
+    const returned = { id: "c1", flagged: false, flag_reasons: [] };
+    const spy = mockFetch(returned);
+    const result = await api.createCheckin(body);
+    expect(result).toEqual(returned);
+    expect(spy.mock.calls[0][0]).toBe("/api/checkins");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it("throws with the backend detail on a 404 (bad plan/item)", async () => {
+    mockFetch({ detail: "Plan not found." }, false, 404);
+    await expect(api.createCheckin({ plan_id: "x", pain_nrs: 0 })).rejects.toThrow(
+      "Plan not found."
+    );
+  });
+});
+
+describe("api.listCheckins", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("builds the query string from plan_id and limit, and unwraps checkins", async () => {
+    const spy = mockFetch({ checkins: [{ id: "c1" }] });
+    const result = await api.listCheckins("p1", 5);
+    expect(result).toEqual([{ id: "c1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/checkins?plan_id=p1&limit=5");
+  });
+
+  it("omits params that are not given", async () => {
+    const spy = mockFetch({ checkins: [] });
+    await api.listCheckins();
+    expect(spy.mock.calls[0][0]).toBe("/api/checkins");
+  });
+});
+
+describe("api.careAccept", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("POSTs the code and returns the link", async () => {
+    const spy = mockFetch({ link: { id: "l1" } });
+    const result = await api.careAccept("ABC123");
+    expect(result).toEqual({ link: { id: "l1" } });
+    expect(spy.mock.calls[0][0]).toBe("/api/care/accept");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ code: "ABC123" });
+  });
+
+  it("throws an ApiError carrying the HTTP status on a 404 (bad/expired code)", async () => {
+    mockFetch({ detail: "Invite code is invalid or expired." }, false, 404);
+    await expect(api.careAccept("BAD")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      message: "Invite code is invalid or expired.",
+    });
+    mockFetch({ detail: "Invite code is invalid or expired." }, false, 404);
+    await expect(api.careAccept("BAD")).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("throws an ApiError with status 400 for the caller's own code", async () => {
+    mockFetch({ detail: "own code" }, false, 400);
+    await expect(api.careAccept("MINE")).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("api.careClinicians / careUnlink", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("careClinicians GETs and unwraps the clinicians list", async () => {
+    const spy = mockFetch({ clinicians: [{ link_id: "l1" }] });
+    const result = await api.careClinicians();
+    expect(result).toEqual([{ link_id: "l1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/care/clinicians");
+  });
+
+  it("careUnlink DELETEs the link by id", async () => {
+    const spy = mockFetch({ link: { id: "l1" } });
+    await api.careUnlink("l1");
+    expect(spy.mock.calls[0][0]).toBe("/api/care/links/l1");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+
+  it("careUnlink throws on a 404", async () => {
+    mockFetch({}, false, 404);
+    await expect(api.careUnlink("missing")).rejects.toThrow("404");
   });
 });
 

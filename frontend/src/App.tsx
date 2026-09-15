@@ -3,6 +3,7 @@ import { ClipboardText } from "@phosphor-icons/react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, UploadLimitError, type Analysis, type PlanItem } from "./api";
 import AppLayout from "./components/AppLayout";
+import CheckinDialog from "./components/checkin/CheckinDialog";
 import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
 import DemoIntro from "./components/DemoIntro";
@@ -56,9 +57,17 @@ export default function App() {
     name: string;
     day: number;
     items: PlanItem[];
+    // The therapist's user id when a linked clinician assigned this plan, else null. Gates the
+    // automatic post-tick check-in prompt — a self-made plan gets no such nudge.
+    assignedBy: string | null;
   } | null>(null);
   // Whether this analysis has been ticked off in the plan, so the banner can say so.
   const [planLinked, setPlanLinked] = useState(false);
+  // The check-in dialog, prompted automatically once an ASSIGNED plan's item is ticked off.
+  // `checkinAnalysisId` rides along separately from `planCtx` so the dialog can cite the exact
+  // analysis the tick just linked, rather than re-deriving it from state that may have moved on.
+  const [checkinOpen, setCheckinOpen] = useState(false);
+  const [checkinAnalysisId, setCheckinAnalysisId] = useState<string | null>(null);
   useEffect(() => {
     if (!planId || !planItemId) {
       setPlanCtx(null);
@@ -70,7 +79,12 @@ export default function App() {
       .then((p) => {
         if (cancelled) return;
         const item = p.items.find((it) => it.id === planItemId);
-        setPlanCtx({ name: p.name, day: item?.day_index ?? 1, items: p.items });
+        setPlanCtx({
+          name: p.name,
+          day: item?.day_index ?? 1,
+          items: p.items,
+          assignedBy: p.assigned_by ?? null,
+        });
         // Arriving on an item that is already ticked (a re-record, or a back-button return) must
         // show the linked state rather than claiming it is still outstanding.
         setPlanLinked(!!item?.completed_at);
@@ -82,6 +96,7 @@ export default function App() {
       cancelled = true;
     };
   }, [planId, planItemId]);
+  const assignedByTherapist = !!planCtx?.assignedBy;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   // The analysis id we just reflected into the URL after an upload — so the replay effect below can
@@ -221,6 +236,12 @@ export default function App() {
               analysis_id: data.analysis_id,
             });
             setPlanLinked(true);
+            // Only a THERAPIST-ASSIGNED plan gets the automatic prompt — a self-made plan is the
+            // user's own business, and nudging them to report pain on it would be noise.
+            if (assignedByTherapist) {
+              setCheckinAnalysisId(data.analysis_id);
+              setCheckinOpen(true);
+            }
           } catch {
             // The analysis is saved either way. A failed tick is worth neither an error banner
             // over a successful analysis nor losing the result the user just waited for.
@@ -233,7 +254,15 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t, setSearchParams, canonicalMovement, errorMessage, planId, planItemId]);
+  }, [
+    t,
+    setSearchParams,
+    canonicalMovement,
+    errorMessage,
+    planId,
+    planItemId,
+    assignedByTherapist,
+  ]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -379,6 +408,18 @@ export default function App() {
             {t("plans.studioBackToPlan")}
           </Link>
         </div>
+      )}
+
+      {planId && planItemId && (
+        <CheckinDialog
+          open={checkinOpen}
+          planId={planId}
+          planItemId={planItemId}
+          analysisId={checkinAnalysisId ?? undefined}
+          movementLabel={movementLabel(t, canonicalMovement)}
+          onClose={() => setCheckinOpen(false)}
+          onSubmitted={() => setCheckinOpen(false)}
+        />
       )}
 
       {hasResult && phone ? (

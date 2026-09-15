@@ -166,3 +166,18 @@ def revoke_link(link_id: str, user: CurrentUser = Depends(get_clinician_user)) -
     if "error" in result:
         raise HTTPException(status_code=404, detail="No such care link.")
     return result
+
+
+@router.patch("/flags/{checkin_id}/ack")
+def ack_checkin_flag(checkin_id: str, user: CurrentUser = Depends(get_clinician_user)) -> dict:
+    """Acknowledge one flagged check-in as handled (WP2). ``ack_checkin_flag`` itself is the
+    security boundary -- it only acts on a check-in belonging to a patient actively linked to the
+    caller -- so an unlinked-but-valid check-in id answers the same 404 as a nonexistent one."""
+    cid = _uid(checkin_id)
+    result = clinic.ack_checkin_flag(token=user.token, checkin_id=cid)
+    error = result.get("error")
+    if error == "not_found":
+        raise HTTPException(status_code=404, detail=f"No check-in '{checkin_id}'.")
+    if error == "not_flagged":
+        raise HTTPException(status_code=409, detail="Check-in is not flagged.")
+    return result

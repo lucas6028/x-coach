@@ -428,3 +428,20 @@ def trend(
 def open_flag_rows(checkins: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The full rows behind ``open_flags`` — flagged and not yet acknowledged."""
     return [c for c in checkins if c.get("flagged") and not c.get("acknowledged_at")]
+
+
+# ---------------------------------------------------------------------------------------------
+# Check-in flag acknowledgement (WP2). A thin RPC wrapper, same shape as accept_invite/
+# revoke_link: the RPC itself (ack_checkin_flag, see the migration) is the security boundary --
+# only a clinician actively linked to the check-in's owner may act on it -- this function does not
+# re-check that.
+# ---------------------------------------------------------------------------------------------
+
+
+def ack_checkin_flag(*, token: str, checkin_id: str) -> dict[str, Any]:
+    """Call ``ack_checkin_flag(id)``; return ``{"checkin": {...}}`` or
+    ``{"error": "not_found" | "not_flagged"}``. Idempotent on the Postgres side -- see the
+    migration's docstring for ``ack_checkin_flag``."""
+    client = _user_client(token)
+    resp = client.rpc("ack_checkin_flag", {"p_checkin": checkin_id}).execute()
+    return resp.data or {}

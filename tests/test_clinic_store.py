@@ -382,6 +382,18 @@ class RpcWrapperTests(unittest.TestCase):
         client.rpc.assert_called_once_with("my_clinicians")
         self.assertEqual(rows[0]["display_name"], "a@x.com")
 
+    def test_ack_checkin_flag_calls_the_rpc_with_the_checkin_id(self) -> None:
+        client = self._client({"checkin": {"id": "c1", "acknowledged_at": "t"}})
+        with mock.patch.object(clinic, "_user_client", return_value=client):
+            result = clinic.ack_checkin_flag(token="t", checkin_id="c1")
+        client.rpc.assert_called_once_with("ack_checkin_flag", {"p_checkin": "c1"})
+        self.assertEqual(result["checkin"]["id"], "c1")
+
+    def test_ack_checkin_flag_defaults_to_empty_dict_when_data_is_none(self) -> None:
+        client = self._client(None)
+        with mock.patch.object(clinic, "_user_client", return_value=client):
+            self.assertEqual(clinic.ack_checkin_flag(token="t", checkin_id="c1"), {})
+
     def test_find_patient_matches_by_patient_id(self) -> None:
         client = self._client(
             [{"link_id": "lk1", "patient_id": "p1", "email": "a@x.com", "display_name": None, "accepted_at": "t"}]

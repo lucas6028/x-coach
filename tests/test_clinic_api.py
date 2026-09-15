@@ -25,6 +25,7 @@ from tests.test_plans_store import _FakeDb
 
 PATIENT_ID = "22222222-2222-2222-2222-222222222222"
 LINK_ID = "33333333-3333-3333-3333-333333333333"
+CHECKIN_ID = "44444444-4444-4444-4444-444444444444"
 CLINICIAN = CurrentUser(id="clinician-1", token="ctok")
 PATIENT = CurrentUser(id=PATIENT_ID, token="ptok")
 
@@ -44,6 +45,7 @@ class ClinicGatingTests(unittest.TestCase):
         ("GET", f"/api/clinic/patients/{PATIENT_ID}", None),
         ("POST", f"/api/clinic/patients/{PATIENT_ID}/plans", {"name": "P"}),
         ("DELETE", f"/api/clinic/links/{LINK_ID}", None),
+        ("PATCH", f"/api/clinic/flags/{CHECKIN_ID}/ack", None),
     ]
 
     def setUp(self) -> None:
@@ -58,6 +60,8 @@ class ClinicGatingTests(unittest.TestCase):
             return self.client.post(path, json=body or {})
         if method == "DELETE":
             return self.client.delete(path)
+        if method == "PATCH":
+            return self.client.patch(path, json=body or {})
         raise AssertionError(f"unhandled method {method}")
 
     def test_non_clinician_is_forbidden_on_every_gated_route(self) -> None:

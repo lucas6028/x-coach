@@ -103,6 +103,9 @@ export interface Plan {
   created_at: string;
   updated_at: string;
   items: PlanItem[];
+  /** The clinician's user id when a linked therapist assigned this plan, else null (a self-made
+   *  plan). Drives the "assigned by therapist" badge and the post-tick check-in prompt. */
+  assigned_by?: string | null;
 }
 
 /** A plan as the list page shows it: no items, but the counts a card needs. */
@@ -143,6 +146,50 @@ export interface PlanItemPatch {
   /** true stamps completion; false clears it AND the analysis link. */
   completed?: boolean;
   analysis_id?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Care loop ("clinic"): therapist <-> patient linking + patient check-ins.
+// ---------------------------------------------------------------------------
+
+/** One patient-reported status against a plan (optionally scoped to one item/analysis). Backend
+ *  computes `flagged`/`flag_reasons` server-side — the client never derives a red flag itself. */
+export interface Checkin {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  plan_item_id: string | null;
+  analysis_id: string | null;
+  pain_nrs: number;
+  rpe: number | null;
+  note: string | null;
+  /** The linked analysis' form score, when one was attached — null otherwise. */
+  form_score: number | null;
+  flagged: boolean;
+  flag_reasons: ("pain_high" | "pain_rise" | "form_drop")[];
+  acknowledged_at: string | null;
+  created_at: string;
+}
+
+export interface CheckinCreate {
+  plan_id: string;
+  plan_item_id?: string;
+  analysis_id?: string;
+  /** 0-10, required. */
+  pain_nrs: number;
+  /** 0-10, optional. */
+  rpe?: number;
+  /** <= 500 chars, optional. */
+  note?: string;
+}
+
+/** One therapist linked to the caller, as GET /api/care/clinicians returns it. */
+export interface CareClinician {
+  link_id: string;
+  clinician_id: string;
+  email: string | null;
+  display_name: string | null;
+  accepted_at: string;
 }
 
 // One fault a movement defines, with its 1-hop graph connectivity (0 = no linked
@@ -899,6 +946,48 @@ export const api = {
       `/api/plans/${encodeURIComponent(planId)}/items/${encodeURIComponent(itemId)}`,
       "DELETE"
     ),
+
+  // --- Care loop: check-ins + therapist links -------------------------------
+
+  createCheckin: (body: CheckinCreate) => sendJSON<Checkin>("/api/checkins", "POST", body),
+
+  // `planId` is optional only to match the backend's own query contract; every in-app caller
+  // today always scopes to one plan.
+  listCheckins: (planId?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (planId) params.set("plan_id", planId);
+    if (limit !== undefined) params.set("limit", String(limit));
+    const qs = params.toString();
+    return getJSON<{ checkins: Checkin[] }>(`/api/checkins${qs ? `?${qs}` : ""}`).then(
+      (r) => r.checkins
+    );
+  },
+
+  // Accept a therapist's invite code, linking the caller as their patient. Thrown as ApiError
+  // (carrying the HTTP status), NOT the generic sendJSON Error: the UI maps 404 (bad/expired
+  // code) and 400 (the caller's own code) to distinct, localized copy, and doing that off the
+  // status is more robust than pattern-matching the server's English detail text.
+  async careAccept(code: string): Promise<{ link: unknown }> {
+    const res = await fetch("/api/care/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new ApiError(
+        (detail as { detail?: string }).detail || `Care accept failed (${res.status})`,
+        res.status
+      );
+    }
+    return (await res.json()) as { link: unknown };
+  },
+
+  careClinicians: () =>
+    getJSON<{ clinicians: CareClinician[] }>("/api/care/clinicians").then((r) => r.clinicians),
+
+  careUnlink: (linkId: string) =>
+    sendJSON<{ link: unknown }>(`/api/care/links/${encodeURIComponent(linkId)}`, "DELETE"),
 
   // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
   // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user

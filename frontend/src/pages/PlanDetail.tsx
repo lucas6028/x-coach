@@ -3,12 +3,13 @@ import { ArrowLeft, Moon, Play, Plus, Trash, WarningCircle, X } from "@phosphor-
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import ConfirmDialog from "../components/ConfirmDialog";
+import CheckinDialog from "../components/checkin/CheckinDialog";
 import AddExerciseForm from "../components/plans/AddExerciseForm";
 import PlanCoach from "../components/plans/PlanCoach";
 import PlanItemRow from "../components/plans/PlanItemRow";
 import { LumenAvatar } from "../components/LumenLoader";
-import { api, type NewPlanItem, type Plan, type PlanItem } from "../api";
-import { useI18n } from "../lib/i18n";
+import { api, type Checkin, type NewPlanItem, type Plan, type PlanItem } from "../api";
+import { movementLabel, useI18n } from "../lib/i18n";
 import type { AnalyzableMovement } from "../lib/movements";
 import { useIsMobile, useMediaQuery } from "../lib/useIsMobile";
 import PlanMuscleCoverage from "../components/plans/PlanMuscleCoverage";
@@ -80,6 +81,29 @@ export default function PlanDetail() {
   const [planBusy, setPlanBusy] = useState(false);
   const [itemError, setItemError] = useState("");
   const [deleted, setDeleted] = useState(false);
+
+  // The most recent check-in against this plan, newest-first from the server — only its `flagged`
+  // state and reasons matter here, for the red-flag banner. `null` covers both "not loaded yet"
+  // and "no check-ins exist", which is fine: either way there is nothing to warn about.
+  const [latestCheckin, setLatestCheckin] = useState<Checkin | null>(null);
+  const refreshLatestCheckin = useCallback(() => {
+    api
+      .listCheckins(planId, 1)
+      .then((list) => setLatestCheckin(list[0] ?? null))
+      .catch(() => undefined);
+  }, [planId]);
+  useEffect(() => {
+    refreshLatestCheckin();
+  }, [refreshLatestCheckin]);
+
+  // Which item the check-in dialog is reporting on, or null when it is closed. Carries the item's
+  // own analysis id (if it has one) so a flagged response can be scored against the form_score of
+  // the session that prompted it.
+  const [checkinTarget, setCheckinTarget] = useState<{
+    itemId: string;
+    analysisId?: string;
+    movement: string;
+  } | null>(null);
 
   const load = useCallback(async () => {
     setStatus("loading");
@@ -319,6 +343,25 @@ export default function PlanDetail() {
         <main className="mx-auto max-w-6xl px-4 py-8 lg:px-6 lg:py-12">
           {backLink}
 
+          {/* Fixed copy only — no advice generated here. The care loop's job is to notice and
+              route the reader to their therapist, not to diagnose. */}
+          {latestCheckin?.flagged && (
+            <div className="mt-4 flex flex-col gap-1 rounded-xl border border-danger/30 bg-danger/[0.05] px-3 py-2 text-xs text-danger">
+              <p className="flex items-start gap-1.5 font-medium">
+                <WarningCircle size={14} weight="duotone" className="mt-px shrink-0" />
+                {t("plans.redflag.title")}
+              </p>
+              <p>{t("plans.redflag.body")}</p>
+              {latestCheckin.flag_reasons.length > 0 && (
+                <ul className="list-disc pl-5">
+                  {latestCheckin.flag_reasons.map((reason) => (
+                    <li key={reason}>{t(`checkin.reason.${reason}`)}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <div
             className={
               panelOpen ? "grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]" : undefined
@@ -327,7 +370,14 @@ export default function PlanDetail() {
           <div className="min-w-0">
           <div className="mt-4 flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="font-display text-2xl font-bold text-content">{plan.name}</h1>
+              <h1 className="flex flex-wrap items-center gap-2 font-display text-2xl font-bold text-content">
+                {plan.name}
+                {plan.assigned_by && (
+                  <span className="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10.5px] font-medium text-primary">
+                    {t("plans.assignedByTherapist")}
+                  </span>
+                )}
+              </h1>
               {plan.notes && (
                 <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-muted">{plan.notes}</p>
               )}
@@ -488,6 +538,13 @@ export default function PlanDetail() {
                       busy={busyItem === item.id}
                       onToggle={() => void patchItem(item.id, { completed: !item.completed_at })}
                       onRemove={() => void removeItem(item.id)}
+                      onCheckin={() =>
+                        setCheckinTarget({
+                          itemId: item.id,
+                          analysisId: item.analysis_id ?? undefined,
+                          movement: item.movement,
+                        })
+                      }
                     />
                   ))}
                 </ul>
@@ -586,6 +643,19 @@ export default function PlanDetail() {
           </div>
         </div>
       )}
+
+      <CheckinDialog
+        open={checkinTarget !== null}
+        planId={plan.id}
+        planItemId={checkinTarget?.itemId}
+        analysisId={checkinTarget?.analysisId}
+        movementLabel={checkinTarget ? movementLabel(t, checkinTarget.movement) : undefined}
+        onClose={() => setCheckinTarget(null)}
+        onSubmitted={() => {
+          setCheckinTarget(null);
+          refreshLatestCheckin();
+        }}
+      />
 
       <ConfirmDialog
         open={confirming === "restart"}

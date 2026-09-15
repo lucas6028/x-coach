@@ -755,6 +755,13 @@ const en: Dict = {
   "plans.studioLinked": "Ticked off in your plan.",
   "plans.studioBackToPlan": "Back to plan",
 
+  // Care loop (WP2): the patient-side badge, red-flag banner, and per-item check-in button.
+  "plans.assignedByTherapist": "Assigned by your therapist",
+  "plans.checkin": "Report today's status",
+  "plans.checkinShort": "Check in",
+  "plans.redflag.title": "Your last check-in needs attention.",
+  "plans.redflag.body": "Please pause training and contact your therapist before continuing.",
+
   // Lumen's plan coach (shared by the builder page and the plan detail panel). The analysis tray's
   // chat.* copy is deliberately NOT reused where it names the analysis — this conversation is about
   // a plan, and telling someone to "sign in to chat about this analysis" on the builder is wrong.
@@ -858,6 +865,52 @@ const en: Dict = {
   "settings.deleteAccount": "Delete account",
   "settings.deleteAccountDesc":
     "Removing the login itself isn't available here yet — contact support to delete your account.",
+
+  // My therapist (WP2 care loop) — link a therapist by invite code, and manage existing links.
+  "settings.therapist": "My therapist",
+  "settings.therapist.privacy":
+    "Once linked, your therapist can see your training plans, analysis results and check-ins — but not your videos or your coach conversations. You can unlink at any time.",
+  "settings.therapist.codeLabel": "Invite code",
+  "settings.therapist.codePlaceholder": "Enter the code your therapist gave you",
+  "settings.therapist.link": "Link",
+  "settings.therapist.linking": "Linking…",
+  "settings.therapist.linked": "Linked successfully.",
+  "settings.therapist.invalidCode": "Invite code is invalid or expired.",
+  "settings.therapist.ownCode": "You can't use your own invite code.",
+  "settings.therapist.genericError": "Couldn't link that code. Please try again.",
+  "settings.therapist.listTitle": "Linked therapists",
+  "settings.therapist.empty": "No linked therapists yet.",
+  "settings.therapist.fallbackName": "Therapist",
+  "settings.therapist.linkedOn": "Linked {date}",
+  "settings.therapist.unlink": "Unlink",
+  "settings.therapist.unlinking": "Unlinking…",
+  "settings.therapist.unlinkTitle": "Unlink this therapist?",
+  "settings.therapist.unlinkBody":
+    "They will no longer be able to see your plans, analyses or check-ins.",
+  "settings.therapist.unlinkError": "Couldn't unlink that therapist. Please try again.",
+
+  // Check-in dialog (WP2 care loop) — pain NRS / RPE / note, prompted after a ticked-off plan item.
+  "checkin.title": "Report today's status",
+  "checkin.movementIntro": "How did {movement} feel today?",
+  "checkin.painLabel": "Pain (0–10)",
+  "checkin.painAnchorNone": "0 = No pain",
+  "checkin.painAnchorWorst": "10 = Worst pain",
+  "checkin.painRequired": "Please rate your pain before submitting.",
+  "checkin.rpeLabel": "Perceived effort (RPE, optional)",
+  "checkin.noteLabel": "Note (optional)",
+  "checkin.notePlaceholder": "Anything you want your therapist to know",
+  "checkin.disclaimer":
+    "This check-in is only for you and your therapist to track your status — it isn't a medical diagnosis.",
+  "checkin.skip": "Skip",
+  "checkin.submit": "Submit",
+  "checkin.submitting": "Submitting…",
+  "checkin.error": "Couldn't submit that check-in. Please try again.",
+  "checkin.flaggedTitle": "This check-in needs attention.",
+  "checkin.flaggedBody": "Please pause training and contact your therapist.",
+  "checkin.close": "Close",
+  "checkin.reason.pain_high": "Pain score is high",
+  "checkin.reason.pain_rise": "Pain rose sharply since last time",
+  "checkin.reason.form_drop": "Form score dropped sharply",
 
   // History page (我的紀錄)
   "history.title": "My records",
@@ -1904,6 +1957,13 @@ const zhHant: Dict = {
   "plans.studioLinked": "已在菜單中打勾。",
   "plans.studioBackToPlan": "回到菜單",
 
+  // 照護回饋迴圈（WP2）：患者端徽章、紅旗橫幅、單項回報按鈕
+  "plans.assignedByTherapist": "治療師指派",
+  "plans.checkin": "回報今天狀況",
+  "plans.checkinShort": "回報",
+  "plans.redflag.title": "你上次回報的狀況需要留意。",
+  "plans.redflag.body": "請先暫停訓練並聯絡你的治療師，再繼續訓練。",
+
   // Lumen 排菜單的對話介面（建立頁與菜單詳情共用）
   "plans.coach.role": "幫你排課表、也幫你改",
   "plans.coach.placeholder": "跟 Lumen 說你想怎麼練…",
@@ -1999,6 +2059,50 @@ const zhHant: Dict = {
   "settings.clearError": "無法清除你的分析，請再試一次。",
   "settings.deleteAccount": "刪除帳號",
   "settings.deleteAccountDesc": "目前無法在此移除登入帳號本身，如需刪除帳號請聯絡客服。",
+
+  // 我的治療師（WP2 照護回饋迴圈）—— 用邀請碼連結治療師，並管理已連結的對象
+  "settings.therapist": "我的治療師",
+  "settings.therapist.privacy":
+    "連結後，治療師可以看到你的訓練菜單、分析結果與狀況回報，看不到你的影片與教練對話；你可以隨時解除連結。",
+  "settings.therapist.codeLabel": "邀請碼",
+  "settings.therapist.codePlaceholder": "輸入治療師提供的邀請碼",
+  "settings.therapist.link": "連結",
+  "settings.therapist.linking": "連結中…",
+  "settings.therapist.linked": "連結成功。",
+  "settings.therapist.invalidCode": "邀請碼無效或已過期。",
+  "settings.therapist.ownCode": "不能使用自己的邀請碼。",
+  "settings.therapist.genericError": "沒辦法完成連結，請再試一次。",
+  "settings.therapist.listTitle": "已連結的治療師",
+  "settings.therapist.empty": "尚未連結任何治療師。",
+  "settings.therapist.fallbackName": "治療師",
+  "settings.therapist.linkedOn": "{date} 連結",
+  "settings.therapist.unlink": "解除連結",
+  "settings.therapist.unlinking": "解除連結中…",
+  "settings.therapist.unlinkTitle": "要解除連結這位治療師嗎？",
+  "settings.therapist.unlinkBody": "對方將不再能看到你的訓練菜單、分析結果與狀況回報。",
+  "settings.therapist.unlinkError": "沒辦法解除連結，請再試一次。",
+
+  // 回報對話框（WP2 照護回饋迴圈）—— 疼痛 NRS／RPE／備註，在打勾一項訓練後提示
+  "checkin.title": "回報今天狀況",
+  "checkin.movementIntro": "今天做「{movement}」感覺如何？",
+  "checkin.painLabel": "疼痛程度（0–10）",
+  "checkin.painAnchorNone": "0 = 不痛",
+  "checkin.painAnchorWorst": "10 = 最痛",
+  "checkin.painRequired": "送出前請先評估疼痛程度。",
+  "checkin.rpeLabel": "自覺費力程度（RPE，選填）",
+  "checkin.noteLabel": "備註（選填）",
+  "checkin.notePlaceholder": "任何想讓治療師知道的事",
+  "checkin.disclaimer": "此回報僅供你與治療師追蹤狀況，不是醫療診斷。",
+  "checkin.skip": "略過",
+  "checkin.submit": "送出",
+  "checkin.submitting": "送出中…",
+  "checkin.error": "沒辦法送出這次回報，請再試一次。",
+  "checkin.flaggedTitle": "這次回報的狀況需要留意。",
+  "checkin.flaggedBody": "請先暫停訓練並聯絡你的治療師。",
+  "checkin.close": "關閉",
+  "checkin.reason.pain_high": "疼痛分數偏高",
+  "checkin.reason.pain_rise": "疼痛比上次明顯增加",
+  "checkin.reason.form_drop": "動作分數明顯下降",
 
   // History page (我的紀錄)
   "history.title": "我的紀錄",

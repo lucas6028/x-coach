@@ -58,6 +58,13 @@ _DEFAULT_TESTS = [
     # own two files.
     "tests/test_clinic_store.py",
     "tests/test_clinic_api.py",
+    # WP2 (feat/clinic-checkins): server-side form score, deterministic red flags, and the
+    # session_checkins persistence + router. Same reasoning as the clinic-core comment above --
+    # these four modules (scoring.py, redflags.py, checkins.py, routers/checkins.py) have no other
+    # entry point in this list.
+    "tests/test_scoring_drift.py",
+    "tests/test_redflags.py",
+    "tests/test_checkins_api.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]
