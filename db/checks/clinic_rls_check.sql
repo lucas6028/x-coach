@@ -52,6 +52,10 @@ begin
             '00000000-0000-0000-0000-0000000000b1', 1, 'Squat');
     insert into public.analyses (id, user_id, video_id, result)
     values ('30000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000b1', 'v1', '{}');
+    insert into public.videos (user_id, video_id, storage_key)
+    values ('00000000-0000-0000-0000-0000000000b1', 'v1', 'uploads/b1/v1');
+    insert into public.conversations (user_id, video_id)
+    values ('00000000-0000-0000-0000-0000000000b1', 'v1');
     insert into public.session_checkins (id, user_id, plan_id, pain_nrs)
     values ('40000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000b1',
             '10000000-0000-0000-0000-000000000001', 3);
@@ -184,7 +188,7 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
-\echo '  linked clinician reads everything, writes only what they assigned'
+\echo '  linked clinician reads plans/results/check-ins (not clips or chat), writes only what they assigned'
 :as_c1
 do $$
 declare n int; r jsonb;
@@ -195,6 +199,11 @@ begin
     assert (select count(*) from public.session_checkins where user_id = '00000000-0000-0000-0000-0000000000b1') = 1, 'FAIL: C1 cannot read patient check-ins';
     assert (select count(*) from public.clinic_patients()) = 1, 'FAIL: clinic_patients count';
     assert (select display_name from public.clinic_patients()) = 'Pat', 'FAIL: clinic_patients display name';
+
+    -- No clinician policy on videos or conversations: the analysis result is readable, the clip
+    -- (routers/videos.py resolves it through videos.storage_key, RLS-only) and the chat are not.
+    assert (select count(*) from public.videos        where user_id = '00000000-0000-0000-0000-0000000000b1') = 0, 'FAIL: C1 can read the patient''s video rows (clip reachable)';
+    assert (select count(*) from public.conversations where user_id = '00000000-0000-0000-0000-0000000000b1') = 0, 'FAIL: C1 can read the patient''s coaching chat';
 
     update public.training_plans set name = 'hijack' where id = '10000000-0000-0000-0000-000000000001';
     get diagnostics n = row_count;
