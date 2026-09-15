@@ -45,6 +45,10 @@ After applying, confirm in Table Editor that `videos` and `analyses` exist with 
 (how PostgREST presents a JWT) and raise on any policy that lets the wrong user read or write.
 Connected as `postgres` RLS is bypassed, so a check that does not switch role proves nothing.
 
+No Docker (or `docker pull` failing on the Windows credential helper)? `node db/checks/run_pglite.mjs`
+runs the same steps on PGlite, Postgres compiled to WASM, after a one-time
+`npm install --prefix db/checks/.pglite @electric-sql/pglite` (gitignored).
+
 Note: the table above is missing rows for `20260704000000_conversations.sql` through
 `20260720000000_line_training_summary.sql` (pre-existing gap, not fixed here — see the
 2026-07-25 review). Apply every file in `db/migrations/` in filename order regardless of
