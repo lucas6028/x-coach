@@ -1,3 +1,4 @@
+import { useCallback, useRef, useState } from "react";
 import type { ClinicTrendPoint } from "../../api";
 import { useI18n } from "../../lib/i18n";
 
@@ -13,16 +14,22 @@ interface Props {
 // and `text-danger` reserved for the flagged-point marker — a status, not a value color, and never
 // the ONLY way a flagged point reads: the marker also gets a heavier stroke, and the flag itself is
 // named in the accessible table below.
-const VB_W = 320;
+// The viewBox width tracks the rendered CSS width (one user unit = one px) instead of being a
+// constant. A fixed `viewBox="0 0 320 72"` on a `w-full` svg keeps its own aspect ratio, so in a
+// wide card the whole plot scales to the 72px height and sits as a 320px island in the middle of
+// the panel; `preserveAspectRatio="none"` would fill the width but stretch every dot into an
+// ellipse. Measuring avoids both. 320 stays the pre-measurement fallback (also what jsdom, where
+// clientWidth is 0 and there is no ResizeObserver, renders with).
+const VB_W_FALLBACK = 320;
 const H_FORM = 72;
 const H_PAIN = 40;
 const PAD_X = 6;
 const PAD_Y_FORM = 8;
 const PAD_Y_PAIN = 6;
 
-function xAt(i: number, n: number): number {
-  if (n <= 1) return VB_W / 2;
-  return PAD_X + (i * (VB_W - PAD_X * 2)) / (n - 1);
+function xAt(i: number, n: number, width: number): number {
+  if (n <= 1) return width / 2;
+  return PAD_X + (i * (width - PAD_X * 2)) / (n - 1);
 }
 
 function yAt(value: number, min: number, max: number, height: number, padY: number): number {
@@ -33,6 +40,22 @@ function yAt(value: number, min: number, max: number, height: number, padY: numb
 
 export default function TrendChart({ trend }: Props) {
   const { t, lang } = useI18n();
+
+  const [vbW, setVbW] = useState(VB_W_FALLBACK);
+  const observer = useRef<ResizeObserver | null>(null);
+  // A callback ref, not an effect: the measured element only exists once there are >= 2 points, so
+  // a mount-time effect would run while the empty state is still on screen and never see it.
+  const measure = useCallback((el: HTMLDivElement | null) => {
+    observer.current?.disconnect();
+    observer.current = null;
+    if (!el) return;
+    const apply = (w: number) => setVbW(w > 0 ? Math.round(w) : VB_W_FALLBACK);
+    apply(el.clientWidth);
+    if (typeof ResizeObserver === "undefined") return; // jsdom, and older browsers
+    const ro = new ResizeObserver((entries) => apply(entries[0].contentRect.width));
+    ro.observe(el);
+    observer.current = ro;
+  }, []);
 
   if (trend.length < 2) {
     return (
@@ -49,7 +72,7 @@ export default function TrendChart({ trend }: Props) {
         ? null
         : {
             i,
-            x: xAt(i, n),
+            x: xAt(i, n, vbW),
             y: yAt(p.form_score, 0, 100, H_FORM, PAD_Y_FORM),
             flagged: p.flagged,
           }
@@ -59,27 +82,27 @@ export default function TrendChart({ trend }: Props) {
 
   const painPoints = trend.map((p, i) => ({
     i,
-    x: xAt(i, n),
+    x: xAt(i, n, vbW),
     y: yAt(p.pain_nrs, 0, 10, H_PAIN, PAD_Y_PAIN),
     flagged: p.flagged,
   }));
   const painPath = painPoints.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
   return (
-    <div>
+    <div ref={measure}>
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-faint">
           {t("clinic.formScoreAxis")}
         </p>
         <svg
-          viewBox={`0 0 ${VB_W} ${H_FORM}`}
+          viewBox={`0 0 ${vbW} ${H_FORM}`}
           className="mt-1.5 h-[72px] w-full"
           role="img"
           aria-label={t("clinic.formChartLabel")}
         >
           <line
             x1={PAD_X}
-            x2={VB_W - PAD_X}
+            x2={vbW - PAD_X}
             y1={H_FORM - PAD_Y_FORM}
             y2={H_FORM - PAD_Y_FORM}
             stroke="rgb(var(--c-border))"
@@ -114,14 +137,14 @@ export default function TrendChart({ trend }: Props) {
           {t("clinic.painAxis")}
         </p>
         <svg
-          viewBox={`0 0 ${VB_W} ${H_PAIN}`}
+          viewBox={`0 0 ${vbW} ${H_PAIN}`}
           className="mt-1.5 h-[40px] w-full"
           role="img"
           aria-label={t("clinic.painChartLabel")}
         >
           <line
             x1={PAD_X}
-            x2={VB_W - PAD_X}
+            x2={vbW - PAD_X}
             y1={H_PAIN - PAD_Y_PAIN}
             y2={H_PAIN - PAD_Y_PAIN}
             stroke="rgb(var(--c-border))"
