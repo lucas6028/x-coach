@@ -16,10 +16,11 @@
 -- because everything seeded here appears in the video.
 --
 -- The scenario:
---   Patient A — knee rehab for 20 days, ten check-ins, pain easing 3 -> 1, form score 72 -> 88.
+--   Patient A — knee rehab for 20 days, ten check-ins, pain easing 3 -> 1, form score 72 -> 88;
+--               6 of 9 plan items ticked (this cycle's days 1 and 3).
 --   Patient B — shoulder rehab for 16 days, eight check-ins. Day 7: form score falls >= 20 against
 --               the previous three (rule c), acknowledged by the therapist. Today: pain 7, up 3 from
---               the last report (rules a + b) -> an OPEN red flag on /clinic.
+--               the last report (rules a + b) -> an OPEN red flag on /clinic; 4 of 9 items ticked.
 
 do $$
 declare
@@ -85,6 +86,12 @@ begin
         (v_plan_a, v_a, 1, 0, 'Shoulder Bridge', 2, 10), (v_plan_a, v_a, 1, 1, 'Leg Abduction', 2, 10), (v_plan_a, v_a, 1, 2, 'Squat', 2, 10),
         (v_plan_a, v_a, 3, 0, 'Shoulder Bridge', 2, 10), (v_plan_a, v_a, 3, 1, 'Leg Abduction', 2, 10), (v_plan_a, v_a, 3, 2, 'Lunge', 2, 10),
         (v_plan_a, v_a, 5, 0, 'Squat', 2, 10), (v_plan_a, v_a, 5, 1, 'Lunge', 2, 10), (v_plan_a, v_a, 5, 2, 'Shoulder Bridge', 2, 10);
+    -- Ticks show the CURRENT cycle only (a restart wipes them), so they must NOT add up to the
+    -- whole 20 days of check-ins: patient A is through days 1 and 3 of this week -> 6/9 on screen.
+    update public.plan_items set completed_at = now() - interval '3 days'
+    where plan_id = v_plan_a and day_index = 1;
+    update public.plan_items set completed_at = now() - interval '1 day'
+    where plan_id = v_plan_a and day_index = 3;
 
     insert into public.training_plans (user_id, name, notes, template_key, assigned_by, started_at, created_at, updated_at)
     values (v_b, '肩關節復健', c_marker, 'shoulder_rehab', v_clin, now() - interval '16 days', now() - interval '16 days', now() - interval '16 days')
@@ -93,6 +100,11 @@ begin
         (v_plan_b, v_b, 1, 0, 'Arm Abduction', 2, 10), (v_plan_b, v_b, 1, 1, 'Band Pull Apart', 2, 10), (v_plan_b, v_b, 1, 2, 'Row', 2, 10),
         (v_plan_b, v_b, 3, 0, 'Arm VW', 2, 10), (v_plan_b, v_b, 3, 1, 'Band Pull Apart', 2, 10), (v_plan_b, v_b, 3, 2, 'Arm Abduction', 2, 10),
         (v_plan_b, v_b, 5, 0, 'Row', 2, 10), (v_plan_b, v_b, 5, 1, 'Arm VW', 2, 10), (v_plan_b, v_b, 5, 2, 'Band Pull Apart', 2, 10);
+    -- Patient B is mid-session today (the check-in below is 3 hours old) -> 4/9 on screen.
+    update public.plan_items set completed_at = now() - interval '2 days'
+    where plan_id = v_plan_b and day_index = 1;
+    update public.plan_items set completed_at = now() - interval '3 hours'
+    where plan_id = v_plan_b and day_index = 3 and position = 0;
 
     -- Patient A: steady improvement, never flagged.
     for i in 1..10 loop
