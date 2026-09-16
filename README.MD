@@ -6,7 +6,7 @@
 
 *Squat analysis in the web app: skeleton overlay and fault timeline on the video, rule-detected faults with their cited causes and risks, and Lumen's grounded explanation on the right.*
 
-x-coach is an AI coaching research prototype. It analyzes squat form over a 16-movement biomechanics knowledge graph, connecting video perception, rule-based biomechanics checks, lightweight classifiers, and local retrieval over project knowledge so visual signals can be turned into explainable coaching feedback. (Video analysis is squat-only today; the knowledge graph and in-app Explore browser already span all 16 movements.)
+x-coach is an AI coaching research prototype. It analyzes exercise form over a 16-movement biomechanics knowledge graph, connecting video perception, rule-based biomechanics checks, lightweight classifiers, and local retrieval over project knowledge so visual signals can be turned into explainable coaching feedback. (Video analysis covers 14 of the 16 movements today, all in Beta; the knowledge graph and in-app Explore browser span all 16.)
 
 ## What This Project Does
 
@@ -14,7 +14,7 @@ x-coach is an AI coaching research prototype. It analyzes squat form over a 16-m
 - Builds pose-only and VideoMAE feature representations for labeled squat clips.
 - Trains lightweight video-level classifiers for squat error labels.
 - Builds REHAB24-6 repetition-level skeleton features and correctness classifiers.
-- Detects common squat technique faults with interpretable pose rules.
+- Detects technique faults with interpretable pose rules for 14 movements (Squat, Overhead Press, Push-up, Lunge, Deadlift, Row, Band Pull Apart, Bicep Curl, Arm Abduction, Arm VW, Sit-up, Shoulder Bridge, Leg Abduction, Torso Twist). Every detector is marked Beta; Jumping Jacks and High Knee have detectors that are deliberately not registered because no rule showed signal on labeled data.
 - Builds and queries a local RAG index from project notes, documents, and knowledge-graph content.
 - Provides knowledge-graph utilities for extracting, cleaning, auditing, and querying multi-movement biomechanics concepts (16 movements across 5 flagships + 11 general stubs).
 
@@ -86,4 +86,4 @@ Command details live with the script directories:
 
 ## Project Goal
 
-Support explainable coaching feedback — squat analysis today, over a multi-movement biomechanics knowledge graph — by linking visual signals, structured biomechanics knowledge, and retrieval-based guidance.
+Support explainable coaching feedback — rule-based analysis of 14 movements today, over a 16-movement biomechanics knowledge graph — by linking visual signals, structured biomechanics knowledge, and retrieval-based guidance.

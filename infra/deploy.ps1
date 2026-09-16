@@ -16,6 +16,8 @@
         data        upload the KG and the RAG vector DB to the Azure Files share
         build       wait for the GitHub Actions run that builds and pushes both images
         apps        deploy the two container apps
+        dns         print the DNS records each hostname in customDomains needs
+        domain      add the hostnames, then issue and bind their managed certificates
         update      re-point the existing apps at a freshly built tag
         status      print the FQDN and run the post-deploy health checks
 
@@ -25,6 +27,8 @@
     ./infra/deploy.ps1 -Stage data
     ./infra/deploy.ps1 -Stage build
     ./infra/deploy.ps1 -Stage apps
+    ./infra/deploy.ps1 -Stage dns       # then create the records it prints
+    ./infra/deploy.ps1 -Stage domain
     ./infra/deploy.ps1 -Stage status
 
 .NOTES
@@ -34,7 +38,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('providers', 'infra', 'data', 'build', 'apps', 'update', 'status')]
+    [ValidateSet('providers', 'infra', 'data', 'build', 'apps', 'dns', 'domain', 'update', 'status')]
     [string]$Stage,
 
     [string]$ResourceGroup = 'xcoach-rg',
@@ -95,6 +99,33 @@ function Get-DeploymentOutput {
         throw "Deployment output '$Name' is empty. Run the earlier stages first ('infra', then 'apps')."
     }
     return $value.Trim()
+}
+
+function Get-CustomDomains {
+    # The hostnames live in the parameters file, not in .env: they are infrastructure, not a
+    # secret, and the template needs them on every pass or the ingress drops the binding.
+    $params = Get-Content 'infra/main.parameters.json' -Raw | ConvertFrom-Json
+    $value = $params.parameters.customDomains.value
+    if ($null -eq $value) { return @() }
+    return @($value)
+}
+
+function Test-IsApex {
+    # One dot = apex (xcoach.dev). Mirrors the template's rule for the validation method.
+    param([string]$Hostname)
+    return (($Hostname -split '\.').Count -eq 2)
+}
+
+function Get-BoundHostnames {
+    # Hostnames the frontend ALREADY serves with a certificate. `apps` must re-declare them
+    # as bound, or the redeploy downgrades the binding; before `domain` has run there are
+    # none and the template must not ask for certificates yet.
+    # Joined before parsing: az emits one line per array element, and Windows PowerShell's
+    # ConvertFrom-Json chokes on a multi-line document fed to it line by line.
+    $json = (az containerapp hostname list -n xcoach-frontend -g $ResourceGroup -o json 2>$null) -join "`n"
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($json)) { return @() }
+    $list = $json | ConvertFrom-Json
+    return @($list | Where-Object { $_.bindingType -eq 'SniEnabled' } | ForEach-Object { $_.name })
 }
 
 function Resolve-Tag {
@@ -264,30 +295,147 @@ function Invoke-Apps {
         }
     }
 
+    # Certificates only for hostnames the frontend already serves bound. On a first `apps`
+    # (or a hostname newly added to the parameters file) that is none of them: the template
+    # adds the hostname unbound and `-Stage domain` issues the certificate afterwards.
+    $domains = Get-CustomDomains
+    $bound = Get-BoundHostnames
+    $bind = ($domains.Count -gt 0) -and (@($domains | Where-Object { $bound -notcontains $_ }).Count -eq 0)
+    if ($domains.Count -gt 0 -and -not $bind) {
+        Write-Host "customDomains not yet bound on the frontend; deploying them unbound. Run -Stage domain afterwards." -ForegroundColor Yellow
+        Assert-DnsRecords $domains
+    }
+
+    Invoke-AppsDeployment -Settings $env_ -BackendImage $backendImage -FrontendImage $frontendImage -BindCertificates $bind
+    Assert-LastExit 'Pass 2 (deployApps=true)'
+
+    Invoke-Status
+}
+
+function Invoke-AppsDeployment {
+    param(
+        [hashtable]$Settings,
+        [string]$BackendImage,
+        [string]$FrontendImage,
+        [bool]$BindCertificates
+    )
+    $bindArg = if ($BindCertificates) { 'true' } else { 'false' }
     az deployment group create -g $ResourceGroup -n main -f infra/main.bicep `
         -p '@infra/main.parameters.json' `
         -p location=$Location `
         -p deployApps=true `
-        -p backendImage="$backendImage" `
-        -p frontendImage="$frontendImage" `
-        -p supabaseUrl="$($env_['SUPABASE_URL'])" `
-        -p supabaseAnonKey="$($env_['SUPABASE_ANON_KEY'])" `
-        -p supabaseServiceRoleKey="$($env_['SUPABASE_SERVICE_ROLE_KEY'])" `
-        -p lineChannelId="$($env_['LINE_CHANNEL_ID'])" `
-        -p lineMessagingChannelSecret="$($env_['LINE_MESSAGING_CHANNEL_SECRET'])" `
-        -p lineMessagingAccessToken="$($env_['LINE_MESSAGING_ACCESS_TOKEN'])" `
-        -p lineLiffId="$($env_['LINE_LIFF_ID'])" `
-        -p llmApiKey="$($env_['LLM_API_KEY'])" `
-        -p llmModels="$($env_['LLM_MODELS'])" `
-        -p llmBaseUrl="$($env_['LLM_BASE_URL'])" `
-        -p r2AccountId="$($env_['R2_ACCOUNT_ID'])" `
-        -p r2AccessKeyId="$($env_['R2_ACCESS_KEY_ID'])" `
-        -p r2SecretAccessKey="$($env_['R2_SECRET_ACCESS_KEY'])" `
-        -p r2Bucket="$($env_['R2_BUCKET'])" `
+        -p bindCertificates=$bindArg `
+        -p backendImage="$BackendImage" `
+        -p frontendImage="$FrontendImage" `
+        -p supabaseUrl="$($Settings['SUPABASE_URL'])" `
+        -p supabaseAnonKey="$($Settings['SUPABASE_ANON_KEY'])" `
+        -p supabaseServiceRoleKey="$($Settings['SUPABASE_SERVICE_ROLE_KEY'])" `
+        -p lineChannelId="$($Settings['LINE_CHANNEL_ID'])" `
+        -p lineMessagingChannelSecret="$($Settings['LINE_MESSAGING_CHANNEL_SECRET'])" `
+        -p lineMessagingAccessToken="$($Settings['LINE_MESSAGING_ACCESS_TOKEN'])" `
+        -p jobToken="$($Settings['JOB_TOKEN'])" `
+        -p lineLiffId="$($Settings['LINE_LIFF_ID'])" `
+        -p llmApiKey="$($Settings['LLM_API_KEY'])" `
+        -p llmModels="$($Settings['LLM_MODELS'])" `
+        -p llmBaseUrl="$($Settings['LLM_BASE_URL'])" `
+        -p r2AccountId="$($Settings['R2_ACCOUNT_ID'])" `
+        -p r2AccessKeyId="$($Settings['R2_ACCESS_KEY_ID'])" `
+        -p r2SecretAccessKey="$($Settings['R2_SECRET_ACCESS_KEY'])" `
+        -p r2Bucket="$($Settings['R2_BUCKET'])" `
         -o none
-    Assert-LastExit 'Pass 2 (deployApps=true)'
+}
 
-    Invoke-Status
+function Get-DnsPlan {
+    # One row per record to create at the registrar. Apex hostnames need an A record to the
+    # environment's static IP (a CNAME at the apex is not valid DNS); everything deeper is a
+    # CNAME to the frontend's generated FQDN. Every hostname also proves ownership with a
+    # TXT record at asuid.<hostname>.
+    # Read off the environment itself, not the deployment outputs: a deployment made with
+    # an older template has no frontendDefaultFqdn / customDomainVerificationId output yet.
+    $json = (az containerapp env show -n xcoach-env -g $ResourceGroup `
+        --query '{ip:properties.staticIp,domain:properties.defaultDomain,verify:properties.customDomainConfiguration.customDomainVerificationId}' -o json) -join "`n"
+    Assert-LastExit 'Reading the environment'
+    $envInfo = $json | ConvertFrom-Json
+    $ip = $envInfo.ip
+    $fqdn = "xcoach-frontend.$($envInfo.domain)"
+    $verify = $envInfo.verify
+    $rows = @()
+    foreach ($d in (Get-CustomDomains)) {
+        if (Test-IsApex $d) {
+            $rows += [pscustomobject]@{ Type = 'A';     Name = $d;          Value = $ip }
+        } else {
+            $rows += [pscustomobject]@{ Type = 'CNAME'; Name = $d;          Value = $fqdn }
+        }
+        $rows += [pscustomobject]@{ Type = 'TXT';       Name = "asuid.$d";  Value = $verify }
+    }
+    return $rows
+}
+
+function Assert-DnsRecords {
+    # Ask the public resolvers the same question the platform will. Adding a hostname whose
+    # asuid TXT is missing fails the whole deployment with a validation error that names
+    # neither DNS nor the record, so check up front.
+    param([string[]]$Domains)
+    $plan = Get-DnsPlan
+    $missing = @()
+    foreach ($row in $plan) {
+        $ok = $false
+        try {
+            $answers = @(Resolve-DnsName -Name $row.Name -Type $row.Type -DnsOnly -ErrorAction Stop)
+            switch ($row.Type) {
+                'A'     { $ok = [bool]($answers | Where-Object { $_.IPAddress -eq $row.Value }) }
+                'CNAME' { $ok = [bool]($answers | Where-Object { $_.NameHost -eq $row.Value }) }
+                'TXT'   { $ok = [bool]($answers | Where-Object { ($_.Strings -join '') -eq $row.Value }) }
+            }
+        } catch { $ok = $false }
+        if (-not $ok) { $missing += "$($row.Type) $($row.Name) -> $($row.Value)" }
+    }
+    if ($missing.Count -gt 0) {
+        throw "DNS is not ready; create (or wait for) these records first:`n  " + ($missing -join "`n  ")
+    }
+    Write-Host 'DNS records verified.' -ForegroundColor Green
+}
+
+function Invoke-Dns {
+    Assert-LoggedIn
+    $domains = Get-CustomDomains
+    if ($domains.Count -eq 0) { throw 'customDomains is empty in infra/main.parameters.json.' }
+    Write-Host 'Create these records at the registrar (name.com for xcoach.dev), replacing any A/CNAME the names already have:' -ForegroundColor Cyan
+    Get-DnsPlan | Format-Table -AutoSize | Out-String | Write-Host
+    Write-Host 'If the zone carries a CAA record, it must also allow "0 issue digicert.com".'
+    Write-Host 'Then: ./infra/deploy.ps1 -Stage domain' -ForegroundColor Cyan
+}
+
+function Invoke-Domain {
+    Assert-LoggedIn
+    $env_ = Read-DotEnv $EnvFile
+    $domains = Get-CustomDomains
+    if ($domains.Count -eq 0) { throw 'customDomains is empty in infra/main.parameters.json.' }
+
+    # Re-deploy the apps at the image they run NOW, not at HEAD: this stage changes the
+    # ingress, not the code, and HEAD may have no built image.
+    $backendImage = az containerapp show -n xcoach-backend -g $ResourceGroup --query 'properties.template.containers[0].image' -o tsv
+    Assert-LastExit 'Reading the backend image'
+    $frontendImage = az containerapp show -n xcoach-frontend -g $ResourceGroup --query 'properties.template.containers[0].image' -o tsv
+    Assert-LastExit 'Reading the frontend image'
+
+    Assert-DnsRecords $domains
+
+    # Pass A: hostnames on the frontend, unbound. The platform verifies the asuid TXT here.
+    Write-Host 'Adding the hostnames (unbound) ...' -ForegroundColor Cyan
+    Invoke-AppsDeployment -Settings $env_ -BackendImage $backendImage.Trim() -FrontendImage $frontendImage.Trim() -BindCertificates $false
+    Assert-LastExit 'Adding the hostnames'
+
+    # Pass B: one managed certificate per hostname, then the SNI binding. DigiCert validates
+    # the apex over HTTP against the app itself, so this needs pass A to have gone live.
+    Write-Host 'Issuing and binding the managed certificates (a few minutes) ...' -ForegroundColor Cyan
+    Invoke-AppsDeployment -Settings $env_ -BackendImage $backendImage.Trim() -FrontendImage $frontendImage.Trim() -BindCertificates $true
+    Assert-LastExit 'Binding the certificates'
+
+    foreach ($d in $domains) {
+        Write-Host "https://$d" -ForegroundColor Green
+    }
+    Write-Host 'Now update the three things outside Azure: Supabase Site URL / Redirect URLs, the LIFF endpoint, and the LINE webhook URL (docs/azure-deployment.md).' -ForegroundColor Yellow
 }
 
 function Invoke-Update {
@@ -334,6 +482,8 @@ switch ($Stage) {
     'data'      { Invoke-Data }
     'build'     { Invoke-Build }
     'apps'      { Invoke-Apps }
+    'dns'       { Invoke-Dns }
+    'domain'    { Invoke-Domain }
     'update'    { Invoke-Update }
     'status'    { Invoke-Status }
 }
