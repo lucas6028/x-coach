@@ -272,7 +272,14 @@ export default function App() {
     setAnalysis(null);
     try {
       const row = await api.getStoredAnalysis(id);
-      setAnalysis(row.result);
+      // `result` is stored (and returned) WITHOUT `analysis_id` inside it — the backend writes the
+      // JSONB blob before it knows the row's own id (backend/app/routers/analyze.py sets
+      // `result["analysis_id"]` only on the in-memory response returned right after upload, never
+      // in what gets persisted). The row's own `id` IS that same analysis id, so a replay stitches
+      // it back in — otherwise every reload, history revisit, or clinician "View analysis" link
+      // would silently drop WP4's rehab-mode gate (ChatContext.analysis_id), which only a fresh,
+      // just-uploaded analysis would ever carry.
+      setAnalysis({ ...row.result, analysis_id: row.result.analysis_id ?? row.id });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -338,6 +345,14 @@ export default function App() {
         .sort((a, b) => a.day_index - b.day_index || a.position - b.position)
     : [];
   const nextItem = remaining.find((it) => isAnalyzable(it.movement, movements)) ?? remaining[0];
+
+  // WP4: the fixed safety line at the bottom of a result opened from a THERAPIST-assigned plan.
+  // Never rendered for a self-made plan (`assignedByTherapist` false) or before a result exists.
+  const rehabDisclaimer = assignedByTherapist ? (
+    <p className="mt-3 px-4 text-center text-[11px] leading-relaxed text-muted lg:px-0">
+      {t("plans.studioRehabDisclaimer")}
+    </p>
+  ) : null;
 
   return (
     <AppLayout
@@ -426,16 +441,19 @@ export default function App() {
         // The phone layout (motion_analysis_mobile.png). Chosen here rather than by CSS: both
         // trees mount a <video> and a skeleton canvas, so rendering the two and hiding one would
         // decode the clip twice and run two rAF loops.
-        <StudioMobile
-          analysis={analysis!}
-          videoRef={videoRef}
-          currentTime={currentTime}
-          onTimeUpdate={setCurrentTime}
-          onActiveFault={setActiveFaultId}
-          activeFaultId={activeFaultId}
-          onSeek={seek}
-          onNewSession={newAnalysis}
-        />
+        <>
+          <StudioMobile
+            analysis={analysis!}
+            videoRef={videoRef}
+            currentTime={currentTime}
+            onTimeUpdate={setCurrentTime}
+            onActiveFault={setActiveFaultId}
+            activeFaultId={activeFaultId}
+            onSeek={seek}
+            onNewSession={newAnalysis}
+          />
+          {rehabDisclaimer}
+        </>
       ) : !hasResult ? (
         <DemoIntro
           onBlob={runPoseAnalysis}
@@ -453,35 +471,38 @@ export default function App() {
         // The reference's 12-column split: the clip and its dashboard cards on the left, the
         // coach column on the right. Mobile stacks and scrolls as one page; on desktop each
         // column scrolls independently inside the card.
-        <div className="mt-4 grid min-h-0 flex-1 grid-cols-12 gap-4 overflow-y-auto scrollbar-thin lg:gap-5 lg:overflow-hidden">
-          <div className="col-span-12 flex min-w-0 flex-col gap-4 lg:col-span-8 lg:min-h-0 lg:overflow-y-auto lg:pr-1 scrollbar-thin">
-            <VideoPanel
-              analysis={analysis!}
-              videoRef={videoRef}
-              onTimeUpdate={setCurrentTime}
-              onActiveFault={setActiveFaultId}
-              onSeek={seek}
-              activeFaultId={activeFaultId}
-            />
+        <>
+          <div className="mt-4 grid min-h-0 flex-1 grid-cols-12 gap-4 overflow-y-auto scrollbar-thin lg:gap-5 lg:overflow-hidden">
+            <div className="col-span-12 flex min-w-0 flex-col gap-4 lg:col-span-8 lg:min-h-0 lg:overflow-y-auto lg:pr-1 scrollbar-thin">
+              <VideoPanel
+                analysis={analysis!}
+                videoRef={videoRef}
+                onTimeUpdate={setCurrentTime}
+                onActiveFault={setActiveFaultId}
+                onSeek={seek}
+                activeFaultId={activeFaultId}
+              />
 
-            <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-3">
-              <PreviousSessionsCard currentVideoId={analysis!.video_id} />
-              <KeyMetricsCard analysis={analysis!} />
-              <TipsCard analysis={analysis!} />
+              <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-3">
+                <PreviousSessionsCard currentVideoId={analysis!.video_id} />
+                <KeyMetricsCard analysis={analysis!} />
+                <TipsCard analysis={analysis!} />
+              </div>
             </div>
-          </div>
 
-          {/* One unified "coach chat" column — the grounded fault-card analysis, the knowledge
-              graph below it, and the follow-up conversation, all in one thread. */}
-          <aside className="col-span-12 flex min-h-0 lg:col-span-4 lg:h-full">
-            <CoachTray
-              analysis={analysis!}
-              currentTime={currentTime}
-              onSeek={seek}
-              activeFaultId={activeFaultId}
-            />
-          </aside>
-        </div>
+            {/* One unified "coach chat" column — the grounded fault-card analysis, the knowledge
+                graph below it, and the follow-up conversation, all in one thread. */}
+            <aside className="col-span-12 flex min-h-0 lg:col-span-4 lg:h-full">
+              <CoachTray
+                analysis={analysis!}
+                currentTime={currentTime}
+                onSeek={seek}
+                activeFaultId={activeFaultId}
+              />
+            </aside>
+          </div>
+          {rehabDisclaimer}
+        </>
       )}
     </AppLayout>
   );

@@ -62,8 +62,8 @@ function detail(overrides: Partial<ClinicPatientDetail> = {}): ClinicPatientDeta
     ],
     checkins: [checkin()],
     trend: [
-      { created_at: "2026-09-10T00:00:00Z", form_score: 80, pain_nrs: 2 },
-      { created_at: "2026-09-14T00:00:00Z", form_score: 60, pain_nrs: 7 },
+      { created_at: "2026-09-10T00:00:00Z", form_score: 80, pain_nrs: 2, flagged: false },
+      { created_at: "2026-09-14T00:00:00Z", form_score: 60, pain_nrs: 7, flagged: true },
     ],
     open_flags: [checkin()],
     ...overrides,
@@ -112,7 +112,9 @@ describe("ClinicPatient", () => {
 
   it("shows the trend empty state with fewer than two points", async () => {
     vi.spyOn(api, "clinicPatient").mockResolvedValue(
-      detail({ trend: [{ created_at: "2026-09-14T00:00:00Z", form_score: 60, pain_nrs: 7 }] })
+      detail({
+        trend: [{ created_at: "2026-09-14T00:00:00Z", form_score: 60, pain_nrs: 7, flagged: false }],
+      })
     );
     renderWithProviders(<ClinicPatient />);
     expect(await screen.findByText("Not enough check-ins yet to chart a trend.")).toBeInTheDocument();

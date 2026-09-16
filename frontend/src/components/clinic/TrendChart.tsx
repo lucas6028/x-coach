@@ -3,9 +3,6 @@ import { useI18n } from "../../lib/i18n";
 
 interface Props {
   trend: ClinicTrendPoint[];
-  /** `created_at` of every flagged check-in in this window — the trend series itself carries no
-   *  flag, so the caller (which already has the full check-in rows) passes the set to match on. */
-  flaggedAt: Set<string>;
 }
 
 // Hand-drawn SVG, following components/history/HistoryStats.tsx's Spark/Ring idiom (no chart
@@ -34,7 +31,7 @@ function yAt(value: number, min: number, max: number, height: number, padY: numb
   return height - padY - t * (height - padY * 2);
 }
 
-export default function TrendChart({ trend, flaggedAt }: Props) {
+export default function TrendChart({ trend }: Props) {
   const { t, lang } = useI18n();
 
   if (trend.length < 2) {
@@ -54,7 +51,7 @@ export default function TrendChart({ trend, flaggedAt }: Props) {
             i,
             x: xAt(i, n),
             y: yAt(p.form_score, 0, 100, H_FORM, PAD_Y_FORM),
-            flagged: flaggedAt.has(p.created_at),
+            flagged: p.flagged,
           }
     )
     .filter((p): p is { i: number; x: number; y: number; flagged: boolean } => p !== null);
@@ -64,7 +61,7 @@ export default function TrendChart({ trend, flaggedAt }: Props) {
     i,
     x: xAt(i, n),
     y: yAt(p.pain_nrs, 0, 10, H_PAIN, PAD_Y_PAIN),
-    flagged: flaggedAt.has(p.created_at),
+    flagged: p.flagged,
   }));
   const painPath = painPoints.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ");
 
@@ -170,7 +167,7 @@ export default function TrendChart({ trend, flaggedAt }: Props) {
               <td>{new Date(p.created_at).toLocaleDateString(lang)}</td>
               <td>{p.form_score ?? "—"}</td>
               <td>{p.pain_nrs}</td>
-              <td>{flaggedAt.has(p.created_at) ? t("clinic.flaggedYes") : t("clinic.flaggedNo")}</td>
+              <td>{p.flagged ? t("clinic.flaggedYes") : t("clinic.flaggedNo")}</td>
             </tr>
           ))}
         </tbody>

@@ -572,6 +572,17 @@ describe("api.chatStream", () => {
     expect(JSON.parse(init.body as string)).toEqual({ messages, context });
   });
 
+  it("carries context.analysis_id through to the wire body when the loaded analysis has one", async () => {
+    // WP4: buildChatContext sets this from the analysis, and chatStream must forward it verbatim
+    // — the rehab-mode gate (backend/app/routers/chat.py::_resolve_rehab) reads it server-side.
+    const spy = mockStream(['event: done\ndata: {"model":"m"}\n\n']);
+    const withAnalysisId: ChatContext = { ...context, analysis_id: "an-7" };
+    await api.chatStream(messages, withAnalysisId, collectHandlers().handlers);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { context: ChatContext };
+    expect(body.context.analysis_id).toBe("an-7");
+  });
+
   it("routes an in-band error frame to onError without throwing", async () => {
     mockStream(['event: error\ndata: {"detail":"LLM request failed: reset"}\n\n']);
     const c = collectHandlers();
@@ -861,6 +872,23 @@ describe("api.chatFollowups", () => {
   it("defaults to [] when the body has no questions field", async () => {
     mockFetch({});
     await expect(api.chatFollowups(messages, context)).resolves.toEqual([]);
+  });
+
+  it("keeps analysis_id in the wire body while still stripping detail", async () => {
+    // WP4: analysis_id must survive the `detail`-stripping spread in chatFollowups (detail is the
+    // heavy per-fault payload this fire-and-forget call never uses; analysis_id is a few bytes the
+    // backend needs to gate rehab mode on this endpoint too).
+    const spy = mockFetch({ questions: [] });
+    const withDetail: ChatContext = {
+      ...context,
+      analysis_id: "an-7",
+      detail: { heavy: "payload" },
+    };
+    await api.chatFollowups(messages, withDetail);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { context: ChatContext };
+    expect(body.context.analysis_id).toBe("an-7");
+    expect(body.context.detail).toBeUndefined();
   });
 });
 

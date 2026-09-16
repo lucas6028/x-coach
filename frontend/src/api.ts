@@ -224,6 +224,10 @@ export interface ClinicTrendPoint {
   created_at: string;
   form_score: number | null;
   pain_nrs: number;
+  /** Mirrors the underlying check-in's own `flagged` column (regardless of acknowledgement) —
+   *  computed server-side (services/clinic.py::trend) so TrendChart never re-derives it by
+   *  matching this point's `created_at` against the check-in/open-flag rows itself. */
+  flagged: boolean;
 }
 
 /** The full clinician view of one linked patient: GET /api/clinic/patients/{id}. */
@@ -408,6 +412,12 @@ export interface ChatContext {
   // The full analysis document (detections + retrievals, no `pose`), read server-side by the
   // `get_analysis` tool. Never persisted, and never sent on the followups call.
   detail?: Record<string, unknown>;
+  // WP4: the `analyses.id` this conversation is grounded in, when the loaded analysis has one
+  // (an anonymous or not-yet-persisted upload has none). The backend uses it to look up whether
+  // this analysis is linked to a therapist-assigned plan and, if so, switch the coach into rehab
+  // safety mode (backend/app/routers/chat.py::_resolve_rehab). Sent on every endpoint that takes
+  // this context — the answer stream AND the followups call — so rehab mode applies to both.
+  analysis_id?: string | null;
 }
 
 // Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*

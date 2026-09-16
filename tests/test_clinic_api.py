@@ -230,6 +230,7 @@ class PatientDetailRouterTests(_ClinicianTestCase):
         self.assertEqual(len(body["checkins"]), 1)
         self.assertEqual(len(body["trend"]), 1)
         self.assertEqual(body["trend"][0]["form_score"], 80)
+        self.assertTrue(body["trend"][0]["flagged"])
         self.assertEqual(len(body["open_flags"]), 1)
         lp.assert_called_once_with(token="ctok", user_id=PATIENT_ID)
 

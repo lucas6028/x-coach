@@ -663,7 +663,7 @@ class DetailViewTests(unittest.TestCase):
 
     def test_trend_filters_to_the_window_and_sorts_oldest_first(self) -> None:
         checkins = [
-            _checkin(created_at="2026-09-14T00:00:00+00:00", form_score=80, pain_nrs=2),
+            _checkin(created_at="2026-09-14T00:00:00+00:00", form_score=80, pain_nrs=2, flagged=True),
             _checkin(created_at="2026-07-01T00:00:00+00:00", form_score=10, pain_nrs=9),  # too old
             _checkin(created_at="2026-09-01T00:00:00+00:00", form_score=60, pain_nrs=4),
         ]
@@ -673,6 +673,23 @@ class DetailViewTests(unittest.TestCase):
         ])
         self.assertEqual(rows[0]["form_score"], 60)
         self.assertEqual(rows[0]["pain_nrs"], 4)
+        self.assertEqual(rows[0]["flagged"], False)
+        self.assertEqual(rows[1]["flagged"], True)
+
+    def test_trend_flagged_mirrors_the_checkins_own_flag_regardless_of_acknowledgement(self) -> None:
+        # `flagged` is the check-in's own column, verbatim -- NOT `open_flags`' "flagged and not yet
+        # acknowledged" -- so an acknowledged flag still reads as flagged on the trend chart.
+        checkins = [
+            _checkin(created_at="2026-09-10T00:00:00+00:00", flagged=True, acknowledged_at=None),
+            _checkin(
+                created_at="2026-09-11T00:00:00+00:00",
+                flagged=True,
+                acknowledged_at="2026-09-12T00:00:00+00:00",
+            ),
+            _checkin(created_at="2026-09-12T00:00:00+00:00", flagged=False),
+        ]
+        rows = clinic.trend(checkins, now=_NOW, days=30)
+        self.assertEqual([r["flagged"] for r in rows], [True, True, False])
 
     def test_open_flag_rows_matches_open_flags_count(self) -> None:
         checkins = [

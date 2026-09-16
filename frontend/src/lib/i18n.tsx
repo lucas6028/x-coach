@@ -750,15 +750,31 @@ const en: Dict = {
   "plans.template.quick_core.name": "Quick core session",
   "plans.template.quick_core.desc": "One 15-minute session you can drop into any week.",
 
+  // Rehab templates (WP4): `category: "rehab"`, listed first by GET /api/plans/templates and
+  // grouped under `clinic.rehabTemplates` on both the clinician's picker and the patient's own
+  // Plans page.
+  "plans.template.knee_rehab.name": "Knee rehab",
+  "plans.template.knee_rehab.desc":
+    "Low-load knee and hip strengthening, three short sessions a week.",
+  "plans.template.shoulder_rehab.name": "Shoulder rehab",
+  "plans.template.shoulder_rehab.desc":
+    "Scapular control and shoulder mobility, three short sessions a week.",
+  "plans.template.low_back_core.name": "Low back & core",
+  "plans.template.low_back_core.desc":
+    "Trunk control and a light hip hinge, three short sessions a week.",
+
   // Studio banner when the studio was entered from a plan item
   "plans.studioBanner": "From {plan} · Day {day}",
   "plans.studioLinked": "Ticked off in your plan.",
   "plans.studioBackToPlan": "Back to plan",
+  // WP4: the fixed safety line at the bottom of a result opened from a THERAPIST-assigned plan —
+  // never shown for a self-made plan. See App.tsx's `assignedByTherapist`.
+  "plans.studioRehabDisclaimer":
+    "This analysis is exercise feedback, not a medical diagnosis. If you feel pain or discomfort, stop and contact your therapist.",
 
   // Care loop (WP2): the patient-side badge, red-flag banner, and per-item check-in button.
   "plans.assignedByTherapist": "Assigned by your therapist",
   "plans.checkin": "Report today's status",
-  "plans.checkinShort": "Check in",
   "plans.redflag.title": "Your last check-in needs attention.",
   "plans.redflag.body": "Please pause training and contact your therapist before continuing.",
 
@@ -2020,15 +2036,26 @@ const zhHant: Dict = {
   "plans.template.quick_core.name": "快速核心",
   "plans.template.quick_core.desc": "一次 15 分鐘的核心訓練，可以插進任何一週。",
 
+  // 復健菜單範本（WP4）：`category: "rehab"`，GET /api/plans/templates 排在最前面，在治療師的
+  // 範本選單和患者自己的菜單頁都會歸在「復健菜單」底下。
+  "plans.template.knee_rehab.name": "膝關節復健",
+  "plans.template.knee_rehab.desc": "低負荷的膝、髖肌力訓練，每週三次短時段。",
+  "plans.template.shoulder_rehab.name": "肩關節復健",
+  "plans.template.shoulder_rehab.desc": "肩胛控制與肩關節活動度，每週三次短時段。",
+  "plans.template.low_back_core.name": "下背與核心",
+  "plans.template.low_back_core.desc": "軀幹控制與輕量髖關節鉸鏈，每週三次短時段。",
+
   // 從菜單進入分析工作區時的提示列
   "plans.studioBanner": "來自「{plan}」· 第 {day} 天",
   "plans.studioLinked": "已在菜單中打勾。",
   "plans.studioBackToPlan": "回到菜單",
+  // WP4：從治療師指派的菜單開啟分析結果時，底部固定顯示的安全提示——自己建立的菜單不顯示。
+  "plans.studioRehabDisclaimer":
+    "此分析為動作輔助回饋，不構成醫療診斷；若有疼痛或不適，請暫停並聯絡你的治療師。",
 
   // 照護回饋迴圈（WP2）：患者端徽章、紅旗橫幅、單項回報按鈕
   "plans.assignedByTherapist": "治療師指派",
   "plans.checkin": "回報今天狀況",
-  "plans.checkinShort": "回報",
   "plans.redflag.title": "你上次回報的狀況需要留意。",
   "plans.redflag.body": "請先暫停訓練並聯絡你的治療師，再繼續訓練。",
 

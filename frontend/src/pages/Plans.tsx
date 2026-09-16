@@ -122,6 +122,87 @@ export default function Plans() {
     }
   };
 
+  // Rehab-first grouping (WP4): the same bucketing TemplatePickerDialog applies for a clinician's
+  // own picker. A template with no `category` (an older backend, or one the migration hasn't
+  // tagged yet) reads as "fitness" — never dropped, just bucketed with the rest.
+  const rehabTemplates = templates.filter((tpl) => tpl.category === "rehab");
+  const fitnessTemplates = templates.filter((tpl) => tpl.category !== "rehab");
+
+  const renderTemplateCard = (template: PlanTemplate) => {
+    const days = new Set(template.items.map((i) => i.day_index)).size;
+    // Distinct movements only, and only the first few: the point of the pills is
+    // "what does this train", which repeating "Squat" three times does not answer.
+    // Same cap and same `+n` ending as PlanCard — the full-body template holds nine
+    // distinct movements and would otherwise be all pills.
+    const movements = [...new Set(template.items.map((i) => i.movement))];
+    const shown = movements.slice(0, 4);
+    const overflow = movements.length - shown.length;
+    // Ranked over DISTINCT movements, exactly as PlanCard ranks a plan summary's
+    // `movements` — the two lines then mean the same thing on both cards.
+    const muscles = coverageOf(movements).primary;
+    const busy = customising === template.key;
+    return (
+      <li
+        key={template.key}
+        className="flex h-full min-w-0 flex-col rounded-2xl border border-border-dark bg-surface p-4 shadow-card transition-all hover:border-primary/35 hover:shadow-card-hover focus-within:border-primary/35 focus-within:shadow-card-hover"
+      >
+        <h3 className="truncate font-display text-[15px] font-semibold text-content">
+          {templateText(t, template.key, "name", template.name)}
+        </h3>
+        {/* The same meta line PlanCard draws, down to the icon and `tabular-nums`:
+            it is the single strongest signal that these are the same kind of thing. */}
+        <p className="mt-1 flex items-center gap-1.5 text-xs tabular-nums text-muted">
+          <CalendarBlank size={13} weight="duotone" className="shrink-0" />
+          {t(days === 1 ? "plans.templateItemsOneDay" : "plans.templateItems", {
+            n: template.items.length,
+            days,
+          })}
+        </p>
+        <p className="mt-2 text-xs leading-relaxed text-muted">
+          {templateText(t, template.key, "desc", template.description)}
+        </p>
+
+        <ul className="mt-3 flex flex-wrap gap-1.5">
+          {shown.map((movement) => (
+            <li
+              key={movement}
+              className="inline-flex items-center gap-1 rounded-full bg-content/[0.04] px-2 py-1 text-[11px] font-medium text-muted"
+            >
+              <MovementIcon movement={movement} size={13} />
+              {movementLabel(t, movement)}
+            </li>
+          ))}
+          {overflow > 0 && (
+            <li className="inline-flex items-center rounded-full bg-content/[0.04] px-2 py-1 text-[11px] font-medium text-faint">
+              +{overflow}
+            </li>
+          )}
+        </ul>
+
+        <MuscleSummaryChips muscles={muscles} className="mt-2" />
+
+        <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-4">
+          <button
+            type="button"
+            onClick={() => setCreatingFrom(template.key)}
+            className="inline-flex min-h-[36px] items-center gap-1.5 whitespace-nowrap rounded-full border border-border-dark px-3 py-2 text-xs font-semibold text-content transition-all hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            {t("plans.useTemplate")}
+          </button>
+          <button
+            type="button"
+            onClick={() => void customise(template)}
+            disabled={busy}
+            className="inline-flex min-h-[36px] items-center gap-1.5 whitespace-nowrap rounded-full bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-all hover:bg-primary/15 active:scale-[0.98] disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          >
+            <LumenAvatar size={15} />
+            {busy ? t("plans.creating") : t("plans.customiseWithLumen")}
+          </button>
+        </div>
+      </li>
+    );
+  };
+
   const primaryCta = (
     <Link
       to="/plans/new"
@@ -358,83 +439,33 @@ export default function Plans() {
                   `active:scale`. PlanCard is one link, and the lift is what says so — a card with
                   two actions must not claim to be a single click target, and `:active` on the cell
                   would fire from a mousedown on either button. Hover and focus-within move the
-                  border and the shadow instead, and the real focus rings stay on the buttons. */}
-              <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
-                {templates.map((template) => {
-                  const days = new Set(template.items.map((i) => i.day_index)).size;
-                  // Distinct movements only, and only the first few: the point of the pills is
-                  // "what does this train", which repeating "Squat" three times does not answer.
-                  // Same cap and same `+n` ending as PlanCard — the full-body template holds nine
-                  // distinct movements and would otherwise be all pills.
-                  const movements = [...new Set(template.items.map((i) => i.movement))];
-                  const shown = movements.slice(0, 4);
-                  const overflow = movements.length - shown.length;
-                  // Ranked over DISTINCT movements, exactly as PlanCard ranks a plan summary's
-                  // `movements` — the two lines then mean the same thing on both cards.
-                  const muscles = coverageOf(movements).primary;
-                  const busy = customising === template.key;
-                  return (
-                    <li
-                      key={template.key}
-                      className="flex h-full min-w-0 flex-col rounded-2xl border border-border-dark bg-surface p-4 shadow-card transition-all hover:border-primary/35 hover:shadow-card-hover focus-within:border-primary/35 focus-within:shadow-card-hover"
-                    >
-                      <h3 className="truncate font-display text-[15px] font-semibold text-content">
-                        {templateText(t, template.key, "name", template.name)}
-                      </h3>
-                      {/* The same meta line PlanCard draws, down to the icon and `tabular-nums`:
-                          it is the single strongest signal that these are the same kind of thing. */}
-                      <p className="mt-1 flex items-center gap-1.5 text-xs tabular-nums text-muted">
-                        <CalendarBlank size={13} weight="duotone" className="shrink-0" />
-                        {t(days === 1 ? "plans.templateItemsOneDay" : "plans.templateItems", {
-                          n: template.items.length,
-                          days,
-                        })}
-                      </p>
-                      <p className="mt-2 text-xs leading-relaxed text-muted">
-                        {templateText(t, template.key, "desc", template.description)}
-                      </p>
+                  border and the shadow instead, and the real focus rings stay on the buttons.
 
-                      <ul className="mt-3 flex flex-wrap gap-1.5">
-                        {shown.map((movement) => (
-                          <li
-                            key={movement}
-                            className="inline-flex items-center gap-1 rounded-full bg-content/[0.04] px-2 py-1 text-[11px] font-medium text-muted"
-                          >
-                            <MovementIcon movement={movement} size={13} />
-                            {movementLabel(t, movement)}
-                          </li>
-                        ))}
-                        {overflow > 0 && (
-                          <li className="inline-flex items-center rounded-full bg-content/[0.04] px-2 py-1 text-[11px] font-medium text-faint">
-                            +{overflow}
-                          </li>
-                        )}
-                      </ul>
-
-                      <MuscleSummaryChips muscles={muscles} className="mt-2" />
-
-                      <div className="mt-auto flex flex-wrap items-center gap-1.5 pt-4">
-                        <button
-                          type="button"
-                          onClick={() => setCreatingFrom(template.key)}
-                          className="inline-flex min-h-[36px] items-center gap-1.5 whitespace-nowrap rounded-full border border-border-dark px-3 py-2 text-xs font-semibold text-content transition-all hover:border-primary/40 hover:text-primary active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                        >
-                          {t("plans.useTemplate")}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void customise(template)}
-                          disabled={busy}
-                          className="inline-flex min-h-[36px] items-center gap-1.5 whitespace-nowrap rounded-full bg-primary/10 px-3 py-2 text-xs font-semibold text-primary transition-all hover:bg-primary/15 active:scale-[0.98] disabled:opacity-60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                        >
-                          <LumenAvatar size={15} />
-                          {busy ? t("plans.creating") : t("plans.customiseWithLumen")}
-                        </button>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                  Grouped rehab-first under the same `clinic.rehabTemplates` / `clinic.fitnessTemplates`
+                  headings TemplatePickerDialog uses for the clinician's own picker (WP4) — one
+                  vocabulary for "which bucket is this template in", on both sides of the care loop.
+                  A template with no category (an older backend, or one the migration hasn't tagged
+                  yet) reads as "fitness", the same fallback TemplatePickerDialog applies. */}
+              {rehabTemplates.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+                    {t("clinic.rehabTemplates")}
+                  </h3>
+                  <ul className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
+                    {rehabTemplates.map(renderTemplateCard)}
+                  </ul>
+                </div>
+              )}
+              {fitnessTemplates.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-faint">
+                    {t("clinic.fitnessTemplates")}
+                  </h3>
+                  <ul className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 lg:gap-4">
+                    {fitnessTemplates.map(renderTemplateCard)}
+                  </ul>
+                </div>
+              )}
             </section>
           )}
         </main>

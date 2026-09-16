@@ -133,12 +133,8 @@ export default function ClinicPatient() {
     );
   }
 
-  const { patient, plans, checkins, trend, open_flags } = detail;
+  const { patient, plans, checkins, trend } = detail;
   const name = patient.display_name ?? patient.email ?? t("clinic.unnamed");
-  const flaggedAt = new Set([
-    ...checkins.filter((c) => c.flagged).map((c) => c.created_at),
-    ...open_flags.map((c) => c.created_at),
-  ]);
 
   return (
     <div>
@@ -266,7 +262,7 @@ export default function ClinicPatient() {
           <h2 className="text-sm font-semibold text-content">{t("clinic.trendTitle")}</h2>
         </div>
         <div className="mt-3 rounded-2xl border border-border-dark bg-surface p-4 shadow-card">
-          <TrendChart trend={trend} flaggedAt={flaggedAt} />
+          <TrendChart trend={trend} />
         </div>
       </section>
 

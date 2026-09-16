@@ -410,13 +410,25 @@ def recent_checkins(checkins: list[dict[str, Any]], limit: int = 30) -> list[dic
 def trend(
     checkins: list[dict[str, Any]], *, now: datetime, days: int = 30
 ) -> list[dict[str, Any]]:
-    """``[{created_at, form_score, pain_nrs}]`` for the last ``days`` days, OLDEST first (chart order)."""
+    """``[{created_at, form_score, pain_nrs, flagged}]`` for the last ``days`` days, OLDEST first
+    (chart order).
+
+    ``flagged`` mirrors the check-in's own ``flagged`` column verbatim -- regardless of
+    acknowledgement, unlike ``open_flags``/``open_flag_rows`` above. This is the same criterion the
+    clinician dashboard used to reconstruct client-side, before this field existed: it matched a
+    trend point's ``created_at`` against the union of every flagged check-in and every open-flag
+    row, which (since an open-flag row is always also a flagged check-in) reduces to exactly "this
+    check-in's own ``flagged`` is true". Computing it here removes the need for that timestamp
+    match -- and the theoretical (if practically near-impossible, given check-in timestamps carry
+    sub-second precision) failure mode where two check-ins share one ``created_at``.
+    """
     cutoff = now - timedelta(days=days)
     rows = [
         {
             "created_at": c["created_at"],
             "form_score": c.get("form_score"),
             "pain_nrs": c.get("pain_nrs"),
+            "flagged": bool(c.get("flagged")),
         }
         for c in checkins
         if c.get("created_at") and _parse_ts(c["created_at"]) >= cutoff
