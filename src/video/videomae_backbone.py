@@ -41,15 +41,23 @@ def assert_fc_norm_pretrained(weight: np.ndarray, bias: np.ndarray, model_name: 
         )
 
 
-def load_backbone(model_name: str, device: "torch.device") -> tuple["torch.nn.Module", np.ndarray, np.ndarray, float]:
+def load_backbone(
+    model_name: str, device: "torch.device", revision: str | None = None
+) -> tuple["torch.nn.Module", np.ndarray, np.ndarray, float]:
     """Load the VideoMAE backbone plus the *pretrained* ``fc_norm`` parameters.
 
     ``fc_norm`` exists only on ``VideoMAEForVideoClassification``. Loading
     ``VideoMAEModel`` instead would leave no way to reproduce the classification
     representation, because ``use_mean_pooling=True`` checkpoints set the backbone's
     own ``layernorm`` to ``None``.
+
+    ``revision`` defaults to ``None``, in which case no ``revision=`` kwarg is
+    passed at all (rather than passing ``revision=None`` through to
+    ``from_pretrained``), so every existing caller that does not pin a revision
+    keeps its exact historical (unpinned, "main") behaviour byte-identical.
     """
-    model = VideoMAEForVideoClassification.from_pretrained(model_name)
+    kwargs = {"revision": revision} if revision is not None else {}
+    model = VideoMAEForVideoClassification.from_pretrained(model_name, **kwargs)
     if model.fc_norm is None:
         raise SystemExit(
             f"`{model_name}` has use_mean_pooling=False, so it has no fc_norm and the "
