@@ -3,6 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
+import torch
 
 from unittest import mock
 
@@ -10,6 +11,8 @@ from src.rehab24.videomae_features import (
     FRAMING_VARIANTS,
     assert_fc_norm_pretrained,
     assert_output_dir_matches_variant,
+    assert_resume_provenance_matches,
+    build_bounded_provenance,
     group_rows_by_video,
     sample_clip_starts,
     save_feature,
@@ -227,6 +230,62 @@ class OutputDirVariantGuardTest(unittest.TestCase):
             assert_output_dir_matches_variant(Path(tmp), "full_frame")
             with self.assertRaises(SystemExit):
                 assert_output_dir_matches_variant(Path(tmp), "full_frame_letterbox")
+
+
+class BuildBoundedProvenanceTest(unittest.TestCase):
+    """The bounded (vm16) provenance contract must stamp `revision`; a bundle
+    written before this fix had no `provenance_revision` at all."""
+
+    def test_includes_the_given_revision(self):
+        provenance = build_bounded_provenance(
+            model_name="MCG-NJU/videomae-base-finetuned-kinetics",
+            revision="488eb9a0565f257b32866000305c8178965eb9f6",
+            clip_length=16,
+            frame_stride=2,
+            num_clips=4,
+            device=torch.device("cpu"),
+        )
+        self.assertEqual(provenance["revision"], "488eb9a0565f257b32866000305c8178965eb9f6")
+
+
+class BoundedResumeRevisionGuardTest(unittest.TestCase):
+    """Resume must refuse to add bundles to an arm dir whose stored revision
+    disagrees with the current run's --revision, the same way it already refuses
+    on any other provenance mismatch."""
+
+    def write_existing(self, arm_dir: Path, revision: str) -> None:
+        existing = arm_dir / "train" / "a.npz"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(
+            existing,
+            clip_features=np.zeros(4),
+            provenance_arm=np.asarray("vm16"),
+            provenance_revision=np.asarray(revision),
+        )
+
+    def provenance(self, revision: str) -> dict[str, str]:
+        return build_bounded_provenance(
+            model_name="MCG-NJU/videomae-base-finetuned-kinetics",
+            revision=revision,
+            clip_length=16,
+            frame_stride=2,
+            num_clips=4,
+            device=torch.device("cpu"),
+        )
+
+    def test_refuses_a_bundle_whose_revision_differs(self):
+        with TemporaryDirectory() as tmp:
+            arm_dir = Path(tmp) / "raw" / "vm16"
+            self.write_existing(arm_dir, "488eb9a0565f257b32866000305c8178965eb9f6")
+            with self.assertRaises(RuntimeError):
+                assert_resume_provenance_matches(arm_dir, self.provenance("some-other-revision"))
+
+    def test_accepts_a_bundle_with_the_same_revision(self):
+        with TemporaryDirectory() as tmp:
+            arm_dir = Path(tmp) / "raw" / "vm16"
+            revision = "488eb9a0565f257b32866000305c8178965eb9f6"
+            self.write_existing(arm_dir, revision)
+            assert_resume_provenance_matches(arm_dir, self.provenance(revision))  # must not raise
 
 
 if __name__ == "__main__":
