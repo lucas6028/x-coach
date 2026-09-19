@@ -2,7 +2,11 @@ import unittest
 from unittest import mock
 
 import numpy as np
-import torch
+import pytest
+
+# The lean CI dependency set has no torch; without this the whole module is a
+# collection error rather than a skip.
+torch = pytest.importorskip("torch")
 
 from src.video.vjepa2_backbone import (
     EXPECTED_PARAMETER_COUNT,
