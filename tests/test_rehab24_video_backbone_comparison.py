@@ -18,15 +18,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pytest
+
+# src.rehab24.loso_cross_validation exits at import time without torch, which the lean
+# CI dependency set does not install; without this the whole module is a collection
+# error rather than a skip.
+torch = pytest.importorskip("torch")
 
 from src.rehab24 import loso_cross_validation as loso
 from src.rehab24 import video_backbone_comparison as vbc
 from src.rehab24.dataset import CAMERAS, MANIFEST_FIELDS, load_manifest
-
-try:
-    import torch
-except ImportError:  # pragma: no cover
-    torch = None
 
 
 def write_manifest_and_labels(
