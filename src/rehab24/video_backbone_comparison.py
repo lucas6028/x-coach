@@ -1326,10 +1326,16 @@ def gate_model_identity(run_dir: Path) -> dict:
         audit = json.load(path.open(encoding="utf-8"))
         provenance = audit.get("provenance", {})
         expected = ARM_MODEL_CONFIG[arm]
+        # Bundles stamp their provenance as ``provenance_<key>`` (the raw-bundle
+        # contract) and materialize copies those names verbatim, so look the bare key
+        # up under both spellings. The first real run failed this gate on every arm
+        # with ``actual: None`` because only the bare spelling was tried.
+        def _lookup(key: str):
+            return provenance.get(key, provenance.get(f"provenance_{key}"))
         mismatches = {
-            key: {"expected": value, "actual": provenance.get(key)}
+            key: {"expected": value, "actual": _lookup(key)}
             for key, value in expected.items()
-            if provenance.get(key) != value
+            if _lookup(key) != value
         }
         # Compared against the MEASURED dimension (the actual array shape recorded by
         # materialize), not ``expected_dim`` -- that field is the arm's declared config
