@@ -38,9 +38,16 @@ from typing import Sequence
 import cv2
 import numpy as np
 
+from src.rehab24.clip_sampling import (  # noqa: F401 - sample_clip_starts re-exported for existing callers/tests
+    assert_resume_provenance_matches,
+    build_bounded_clips,
+    decode_frames_at_indices,
+    sample_clip_starts,
+    sha256_of_files,
+)
 from src.rehab24.dataset import DEFAULT_DATA_ROOT, DEFAULT_PROCESSED_ROOT, load_manifest, resolve_data_path
 from src.rehab24.videomae_boxes import BOX_SOURCE, box_for_video, load_index
-from src.video.squat_video_variants import apply_variant
+from src.video.squat_video_variants import apply_variant, letterbox_to_square
 from src.video.variant_geometry import BOX_VARIANTS, DEFAULT_MARGIN, Box
 from src.video.videomae_backbone import (  # noqa: F401 - assert_fc_norm_pretrained is re-exported
     assert_fc_norm_pretrained,
@@ -147,16 +154,6 @@ def transform_frames(frames: list[np.ndarray], variant: str, box: Box | None) ->
     return apply_variant(frames, variant, box)
 
 
-def sample_clip_starts(first_frame: int, last_frame: int, clip_length: int, frame_stride: int, num_clips: int) -> list[int]:
-    start = max(first_frame - 1, 0)
-    stop = max(last_frame, start + 1)
-    effective_length = 1 + frame_stride * (clip_length - 1)
-    max_start = max(stop - effective_length, start)
-    if num_clips <= 1:
-        return [(start + max_start) // 2]
-    return np.linspace(start, max_start, num=num_clips, dtype=int).tolist()
-
-
 def read_clip_frames(
     cap: cv2.VideoCapture,
     start_frame: int,
@@ -257,6 +254,141 @@ def extract_repetition_features(
     return bundle
 
 
+#: ``--sampler bounded`` writes only this variant: the plan's vm16/vj64/vj16 triple
+#: is compared on one fixed geometry, not a free per-arm choice (validation plan,
+#: "Dataset, exclusions and sampling").
+BOUNDED_VARIANT = "full_frame_letterbox"
+SAMPLER_LEGACY = "legacy"
+SAMPLER_BOUNDED = "bounded"
+SAMPLERS = (SAMPLER_LEGACY, SAMPLER_BOUNDED)
+#: The only arm this extractor may write under ``--sampler bounded`` -- V-JEPA 2's
+#: arms live in ``src.rehab24.vjepa2_features`` instead.
+BOUNDED_ARM = "vm16"
+
+#: Hashed (in this fixed order) into ``provenance_code_fingerprint`` for every
+#: bounded-sampler bundle. Any later edit to the sampler, the VideoMAE backbone or
+#: this extractor changes the fingerprint of every bundle written afterwards --
+#: deliberate, so the resume-provenance check (plan Reproducibility gate) can tell
+#: an old bundle from a new one even when every other setting is unchanged.
+_MODULE_DIR = Path(__file__).resolve().parent
+BOUNDED_FINGERPRINT_FILES = (
+    _MODULE_DIR / "clip_sampling.py",
+    _MODULE_DIR.parent / "video" / "videomae_backbone.py",
+    Path(__file__).resolve(),
+)
+
+
+def extract_bounded_repetition_features(
+    backbone: torch.nn.Module,
+    processor: VideoMAEImageProcessor,
+    cap: cv2.VideoCapture,
+    total_frames: int,
+    first_frame: int,
+    last_frame: int,
+    clip_length: int,
+    frame_stride: int,
+    num_clips: int,
+    device: torch.device,
+    fc_norm_weight: np.ndarray,
+    fc_norm_bias: np.ndarray,
+    fc_norm_eps: float,
+    sample_id: str = "",
+    video_path: str = "",
+) -> dict[str, np.ndarray]:
+    """One repetition's bundle under the repetition-bounded sampler (arm ``vm16``).
+
+    Unlike :func:`extract_repetition_features`, every emitted index is guaranteed
+    inside ``[first_index, min(last_index, total_frames - 1)]`` -- the defect this
+    sampler exists to close (plan Background). Frames are decoded once per unique
+    index needed across the repetition's clips (``decode_frames_at_indices``),
+    then letterboxed to square before the ``VideoMAEImageProcessor`` resizes and
+    centre-crops them to 224, exactly as ``full_frame_letterbox`` already does in
+    :func:`transform_frames`. ``sample_id``/``video_path`` are optional and used
+    only to name the repetition in a decode-failure message.
+    """
+    clips, first_index, last_index = build_bounded_clips(
+        first_frame, last_frame, total_frames, clip_length, frame_stride, num_clips
+    )
+    needed_indices = {int(index) for clip in clips for index in clip["frame_indices"].tolist()}
+    decoded = decode_frames_at_indices(
+        cap, needed_indices, total_frames, context=f"sample={sample_id!r} video={video_path!r}"
+    )
+
+    legacy_clips: list[np.ndarray] = []
+    corrected_clips: list[np.ndarray] = []
+    clip_starts: list[int] = []
+    frame_index_rows: list[np.ndarray] = []
+    unique_counts: list[int] = []
+    padding_fractions: list[float] = []
+
+    for clip in clips:
+        indices = clip["frame_indices"]
+        frames = [letterbox_to_square(decoded[int(index)]) for index in indices]
+        legacy, corrected = encode_clip(
+            backbone=backbone,
+            processor=processor,
+            frames=frames,
+            device=device,
+            fc_norm_weight=fc_norm_weight,
+            fc_norm_bias=fc_norm_bias,
+            fc_norm_eps=fc_norm_eps,
+        )
+        legacy_clips.append(legacy)
+        corrected_clips.append(corrected)
+        clip_starts.append(int(clip["start"]))
+        frame_index_rows.append(indices)
+        unique_counts.append(int(clip["unique_frame_count"]))
+        padding_fractions.append(float(clip["padding_fraction"]))
+
+    return {
+        # The mandatory `clip_features` key is the corrected pooling -- the legacy
+        # vector is kept only under its own suffixed key (raw bundle contract).
+        "clip_features": np.stack(corrected_clips, axis=0),
+        "clip_features_legacy_first_token": np.stack(legacy_clips, axis=0),
+        "clip_starts": np.asarray(clip_starts, dtype=np.int64),
+        "frame_indices": np.stack(frame_index_rows, axis=0),
+        "unique_frame_count": np.asarray(unique_counts, dtype=np.int64),
+        "padding_fraction": np.asarray(padding_fractions, dtype=np.float32),
+        "first_index": np.asarray(first_index, dtype=np.int64),
+        "last_index": np.asarray(last_index, dtype=np.int64),
+        "total_frames": np.asarray(total_frames, dtype=np.int64),
+    }
+
+
+def build_bounded_provenance(
+    model_name: str,
+    revision: str,
+    clip_length: int,
+    frame_stride: int,
+    num_clips: int,
+    device: "torch.device",
+) -> dict[str, str]:
+    """Provenance for a ``--sampler bounded`` (``vm16``) run -- the raw bundle contract.
+
+    ``revision`` is required (not defaulted to ``None``) so a bounded run can never
+    write a bundle silently missing the pinned checkpoint identity the comparison
+    depends on -- the gap that produced un-stamped ``vm16`` bundles before this fix.
+    """
+    return {
+        "model_name": model_name,
+        "revision": revision,
+        "arm": BOUNDED_ARM,
+        "clip_length": str(clip_length),
+        "frame_stride": str(frame_stride),
+        "num_clips": str(num_clips),
+        "resolution": "224",
+        "pooling": "mean_pool_fc_norm",
+        "output_field": "clip_features",
+        "sampler": SAMPLER_BOUNDED,
+        "variant": BOUNDED_VARIANT,
+        "dtype": "float32",
+        "transformers_version": transformers.__version__,
+        "torch_version": torch.__version__,
+        "device": str(device),
+        "code_fingerprint": sha256_of_files(BOUNDED_FINGERPRINT_FILES),
+    }
+
+
 def save_feature(path: Path, row: dict[str, str], bundle: dict[str, np.ndarray], provenance: dict[str, str]) -> None:
     """Write one repetition's bundle, atomically.
 
@@ -340,6 +472,81 @@ def assert_output_dir_matches_variant(output_dir: Path, variant: str, temporal: 
         )
 
 
+def run_bounded_extraction(args: argparse.Namespace, device: "torch.device") -> None:
+    """``--sampler bounded`` extraction: writes the ``vm16`` raw-bundle contract.
+
+    A separate path from the legacy loop rather than a branch threaded through it:
+    the legacy loop's variant/box/temporal machinery does not apply here (this
+    sampler always writes ``full_frame_letterbox`` with no temporal transform), and
+    keeping them apart means neither path can silently regress the other under
+    `tests/test_videomae_features_extraction.py`, whose legacy-path assertions must
+    keep passing unchanged.
+    """
+    arm_dir = args.run_dir / "raw" / args.arm
+    provenance = build_bounded_provenance(
+        model_name=args.model_name,
+        revision=args.revision,
+        clip_length=args.clip_length,
+        frame_stride=args.frame_stride,
+        num_clips=args.num_clips,
+        device=device,
+    )
+    assert_resume_provenance_matches(arm_dir, provenance)
+
+    print(f"Loading VideoMAE model `{args.model_name}`@`{args.revision}` on {device}...")
+    processor = VideoMAEImageProcessor.from_pretrained(args.model_name, revision=args.revision)
+    backbone, fc_weight, fc_bias, fc_eps = load_backbone(args.model_name, device, revision=args.revision)
+    print(f"fc_norm loaded from checkpoint (weight mean={fc_weight.mean():.4f}, bias mean={fc_bias.mean():.4f})")
+
+    rows = load_manifest(args.manifest)
+    if args.limit is not None:
+        rows = rows[: args.limit]
+    if args.num_chunks > 1:
+        rows = [row for index, row in enumerate(rows) if index % args.num_chunks == args.chunk_index]
+        print(f"Chunk {args.chunk_index + 1}/{args.num_chunks}: {len(rows)} manifest rows")
+
+    written = 0
+    skipped = 0
+    for video_index, (video_path, video_rows) in enumerate(group_rows_by_video(rows), start=1):
+        pending = [
+            row
+            for row in video_rows
+            if args.overwrite or not (arm_dir / row["split"] / f"{row['sample_id']}.npz").exists()
+        ]
+        skipped += len(video_rows) - len(pending)
+        if not pending:
+            continue
+
+        cap = cv2.VideoCapture(str(resolve_data_path(args.data_root, video_path)))
+        try:
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            for row in pending:
+                bundle = extract_bounded_repetition_features(
+                    backbone=backbone,
+                    processor=processor,
+                    cap=cap,
+                    total_frames=total_frames,
+                    first_frame=int(row["first_frame"]),
+                    last_frame=int(row["last_frame"]),
+                    clip_length=args.clip_length,
+                    frame_stride=args.frame_stride,
+                    num_clips=args.num_clips,
+                    device=device,
+                    fc_norm_weight=fc_weight,
+                    fc_norm_bias=fc_bias,
+                    fc_norm_eps=fc_eps,
+                    sample_id=row["sample_id"],
+                    video_path=video_path,
+                )
+                save_feature(arm_dir / row["split"] / f"{row['sample_id']}.npz", row, bundle, provenance)
+                written += 1
+        finally:
+            cap.release()
+        print(f"[{video_index}] {video_path}: wrote {len(pending)} repetitions (total {written})")
+
+    print(f"Wrote {written} `{args.arm}` bounded-sampler VideoMAE feature bundles ({skipped} already present) under {arm_dir}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Extract REHAB24-6 repetition-level VideoMAE features (both pooling modes).")
     parser.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
@@ -370,6 +577,13 @@ def main() -> None:
         help="Reorder the frames of every clip after the pixel transform. Each arm needs its own --output-dir.",
     )
     parser.add_argument("--model-name", type=str, default="MCG-NJU/videomae-base-finetuned-kinetics")
+    parser.add_argument(
+        "--revision",
+        type=str,
+        default=None,
+        help="Pinned HF revision/commit hash for --model-name. REQUIRED with --sampler bounded (stamped as "
+        "provenance_revision); ignored (legacy from_pretrained() behaviour, unpinned) otherwise.",
+    )
     parser.add_argument("--clip-length", type=int, default=16)
     parser.add_argument("--frame-stride", type=int, default=2)
     parser.add_argument("--num-clips", type=int, default=4)
@@ -378,9 +592,41 @@ def main() -> None:
     parser.add_argument("--chunk-index", type=int, default=0, help="Which chunk to process (0-based).")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--device", type=str, default=None, help="cuda, cpu, or auto.")
+    parser.add_argument(
+        "--sampler",
+        choices=SAMPLERS,
+        default=SAMPLER_LEGACY,
+        help="`legacy` (default) is the historical, unbounded-at-video-end sampler and unchanged output "
+        "format. `bounded` writes the repetition-bounded raw-bundle-contract format used by the "
+        "VideoMAE/V-JEPA 2 comparison (notes/rehab24_videomae_vjepa2_validation_plan.md) and needs --run-dir.",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Comparison run directory; bundles land at <run-dir>/raw/<arm>/<split>/. Required with --sampler bounded.",
+    )
+    parser.add_argument("--arm", choices=(BOUNDED_ARM,), default=BOUNDED_ARM, help="Only `vm16` is produced here.")
     args = parser.parse_args()
 
     device = resolve_device(args.device)
+
+    if args.sampler == SAMPLER_BOUNDED:
+        if args.run_dir is None:
+            raise SystemExit("--sampler bounded needs --run-dir (bundles land at <run-dir>/raw/<arm>/<split>/).")
+        if args.revision is None:
+            raise SystemExit(
+                "--sampler bounded needs --revision (the pinned HF snapshot hash for --model-name), so every "
+                "vm16 bundle records the exact checkpoint identity the comparison depends on."
+            )
+        if args.variant != "full_frame" or args.temporal != TEMPORAL_NONE:
+            raise SystemExit(
+                "--sampler bounded always writes the `full_frame_letterbox` variant with no temporal "
+                "transform; do not pass --variant or --temporal with it."
+            )
+        run_bounded_extraction(args, device)
+        return
+
     assert_output_dir_matches_variant(args.output_dir, args.variant, args.temporal)
 
     box_index = None

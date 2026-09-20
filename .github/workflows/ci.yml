@@ -44,6 +44,11 @@ jobs:
 
       # Run the deterministic suite. The heavy (torch / opencv / mediapipe) and the
       # data-dependent integration modules are skipped - see requirements-ci.txt.
+      #
+      # This list is historical and must not grow: a NEW test module that needs the heavy
+      # stack declares it itself with `pytest.importorskip("torch")` (or "cv2") above its
+      # `src.` imports, which skips the module here and still runs it locally. The entries
+      # below stay because some of them are ignored for reasons other than importability.
       - name: Run tests
         run: |
           python -m pytest tests/ -v \

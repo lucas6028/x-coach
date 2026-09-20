@@ -227,6 +227,96 @@ python scripts/rehab24/videomae_temporal_control.py analyze     --arm frame_iden
 python scripts/rehab24/videomae_temporal_control.py paired
 ```
 
+### VideoMAE vs V-JEPA 2 frozen-feature comparison
+
+Pre-registration: `notes/rehab24_videomae_vjepa2_validation_plan.md`. Extraction and
+evaluation are two separate CLIs sharing one `--run-dir`; extraction must produce
+`raw/<arm>/` before `compare_video_backbones.py` can materialize anything.
+
+#### Extraction (produces `raw/<arm>/<split>/<sample_id>.npz`)
+
+All three arms use the repetition-bounded sampler (`src.rehab24.clip_sampling`):
+every frame index is clamped inside `[first_index, min(last_index, total_frames - 1)]`,
+closing the defect in the historical (unbounded-at-video-end) VideoMAE extractor.
+`vm16` and `vj16` share `clip_length=16, frame_stride=2`, so they draw
+byte-identical `frame_indices`; `vj64` uses `clip_length=64` (same stride/clip
+count). Run on `.venv-cuda` (GPU) or `.venv` (CPU, slow):
+
+```bash
+# vm16 -- VideoMAE, bounded sampler, writes into the shared run dir. --revision
+# pins the checkpoint snapshot this comparison was validated against (resolved
+# from the local HF cache: ~/.cache/huggingface/hub/models--MCG-NJU--videomae-base-
+# finetuned-kinetics/snapshots/<hash>) and is REQUIRED with --sampler bounded.
+.venv-cuda/Scripts/python.exe scripts/rehab24/extract_videomae_features.py \
+  --sampler bounded --arm vm16 --device cuda \
+  --revision 488eb9a0565f257b32866000305c8178965eb9f6 \
+  --run-dir data/REHAB24-6/processed/video_backbone_comparison/<run_id> \
+  --num-chunks 3 --chunk-index 0   # repeat for chunk-index 1 and 2
+
+# vj16 -- V-JEPA 2, the exact vm16 frame indices (16 frames, stride 2).
+.venv-cuda/Scripts/python.exe scripts/rehab24/extract_vjepa2_features.py \
+  --arm vj16 --device cuda \
+  --run-dir data/REHAB24-6/processed/video_backbone_comparison/<run_id> \
+  --num-chunks 3 --chunk-index 0
+
+# vj64 -- V-JEPA 2 at its native clip length (64 frames, stride 2), batch size 1.
+.venv-cuda/Scripts/python.exe scripts/rehab24/extract_vjepa2_features.py \
+  --arm vj64 --device cuda \
+  --run-dir data/REHAB24-6/processed/video_backbone_comparison/<run_id> \
+  --num-chunks 3 --chunk-index 0
+
+# Pilot / smoke test any of the three (writes real bundles; point --run-dir at a
+# scratch directory, not the real run, for a smoke test):
+.venv-cuda/Scripts/python.exe scripts/rehab24/extract_vjepa2_features.py \
+  --arm vj16 --limit 2 --run-dir /tmp/smoke --timing-json /tmp/smoke/timing_vj16.json \
+  --save-examples /tmp/smoke/examples
+```
+
+Resume is automatic (existing bundles are skipped) and refuses to continue a run
+whose stored `provenance_*` disagrees with the current invocation -- use a new
+`--run-dir` or `--overwrite` instead of silently mixing two configurations.
+`check_vm16_against_history` (`src.rehab24.vjepa2_features`) is the reproducibility
+gate: for repetitions where every `vm16` clip has `padding_fraction == 0` (i.e.
+clamping never fired), it compares the new `clip_features` against
+`data/REHAB24-6/processed/videomae_raw_full_frame_letterbox/<split>/<id>.npz` and
+reports max relative L2 and min cosine.
+
+#### Evaluation
+
+Run in this order -- `init` must be committed before any feature exists:
+
+```bash
+# 1. Freeze the manifest audit, LOSO fold lists (with hashes) and run config.
+#    Safe to run before any extraction; only reads the manifest and labels.
+python scripts/rehab24/compare_video_backbones.py init \
+  --run-dir data/REHAB24-6/processed/video_backbone_comparison/<run_id>
+
+# 2. Raw per-clip bundles -> `video_feature` bundles (mean over clips). Refuses on
+#    missing/duplicate ids, non-finite vectors, a dim mismatch against the arm's
+#    expected dimension, or a provenance disagreement within the arm.
+python scripts/rehab24/compare_video_backbones.py materialize --arm vm16 \
+  --run-dir data/REHAB24-6/processed/video_backbone_comparison/<run_id>
+# repeat for vj64 and vj16
+
+# 3. Frozen MLP readout (3 seeds) + torch-only L2 logistic control (deterministic,
+#    1 fit per fold). Add --nulls for the 3 label-shuffled diagnostic runs and
+#    --no-p10-training for the P10-excluded-from-training sensitivity.
+python scripts/rehab24/compare_video_backbones.py evaluate --arm vm16 --device cpu \
+  --nulls --no-p10-training \
+  --run-dir data/REHAB24-6/processed/video_backbone_comparison/<run_id>
+# repeat for vj64 and vj16
+
+# 4. Paired-subject statistics (primary vj64-vm16 contrast, the 4-test Holm
+#    secondary family, descriptive strata) and gates.json -> summary.json.
+python scripts/rehab24/compare_video_backbones.py report \
+  --run-dir data/REHAB24-6/processed/video_backbone_comparison/<run_id>
+```
+
+Every classifier fit reuses `loso_cross_validation.train_one_fold` unchanged; this
+module only adds the frozen fold manifest, the raw-to-materialized conversion, the
+logistic control and the paired-subject inference (exact sign-flip test, subject
+bootstrap CI, Holm correction, gates).
+
 Fuse skeleton and VideoMAE features:
 
 ```bash
