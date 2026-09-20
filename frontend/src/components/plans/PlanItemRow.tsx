@@ -1,4 +1,4 @@
-import { Check, ChartBar, Lock, Trash, VideoCamera } from "@phosphor-icons/react";
+import { Check, ChartBar, ClipboardText, Lock, Trash, VideoCamera } from "@phosphor-icons/react";
 import { Link } from "react-router-dom";
 import MovementArt from "../movements/MovementArt";
 import { movementLabel, useI18n } from "../../lib/i18n";
@@ -14,6 +14,10 @@ interface Props {
   busy: boolean;
   onToggle: () => void;
   onRemove: () => void;
+  /** Opens the check-in dialog for THIS item. Present on every card, assigned or self-made —
+   *  reporting a session's pain/effort is useful whether or not a therapist is watching. Absent
+   *  callers (e.g. an older story that hasn't wired it up yet) simply get no button. */
+  onCheckin?: () => void;
 }
 
 // One exercise inside a day, as a CARD led by the movements-library figure. It was a thin
@@ -39,6 +43,7 @@ export default function PlanItemRow({
   busy,
   onToggle,
   onRemove,
+  onCheckin,
 }: Props) {
   const { t } = useI18n();
   const label = movementLabel(t, item.movement);
@@ -153,6 +158,21 @@ export default function PlanItemRow({
             <Lock size={13} weight="duotone" className="shrink-0" />
             <span className="truncate">{t("plans.tickOnlyLabel")}</span>
           </span>
+        )}
+
+        {/* Present on every card, assigned or self-made — reporting how a session felt is not
+            gated on having a therapist watching. A 36px icon button, same footprint as remove
+            below it, rather than a fourth SLOT competing with the primary action for width. */}
+        {onCheckin && (
+          <button
+            type="button"
+            onClick={onCheckin}
+            aria-label={t("plans.checkin")}
+            title={t("plans.checkin")}
+            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-faint transition-colors hover:bg-primary/10 hover:text-primary motion-safe:active:scale-95 ${FOCUS}`}
+          >
+            <ClipboardText size={15} weight="duotone" />
+          </button>
         )}
 
         {/* Quiet, but a real 36px target — it was a 22px `p-1` glyph, which is under the floor for

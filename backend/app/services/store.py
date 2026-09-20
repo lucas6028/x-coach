@@ -63,6 +63,26 @@ def is_admin(*, token: str, user_id: str) -> bool:
     return bool(resp.data)
 
 
+def is_clinician(*, token: str, user_id: str) -> bool:
+    """Return whether ``user_id`` holds the 'clinician' role, queried as the user (RLS-scoped).
+
+    Same shape and reasoning as ``is_admin``: the ``user_roles`` SELECT policy lets any
+    authenticated user read the table, so a user can learn whether they themselves are a
+    clinician without a service_role key. A patchable seam -- the unit tests replace
+    ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("user_roles")
+        .select("user_id")
+        .eq("user_id", user_id)
+        .eq("role", "clinician")
+        .limit(1)
+        .execute()
+    )
+    return bool(resp.data)
+
+
 def count_admins(*, token: str) -> int:
     """Return how many users currently hold the 'admin' role.
 
@@ -119,21 +139,44 @@ def admin_list_users(*, token: str) -> list[dict[str, Any]]:
     return resp.data or []
 
 
+def _set_role(*, token: str, user_id: str, role: str, grant: bool) -> None:
+    """Grant or revoke ONE role row for ``user_id``, written as the caller (RLS-scoped).
+
+    ``user_roles`` is now keyed on the COMPOSITE ``(user_id, role)`` (the clinic migration re-keyed
+    it so one user can hold both 'admin' and 'clinician'), so the upsert's ``on_conflict`` must name
+    both columns -- ``on_conflict="user_id"`` alone would collide with a role the user already holds
+    and either fail or clobber it -- and the delete must filter on ``role`` too, or revoking one role
+    would delete every role row the user has. Shared by ``set_user_role`` and
+    ``set_clinician_role`` so the two can never drift apart on this point.
+    """
+    client = _user_client(token)
+    if grant:
+        client.table("user_roles").upsert(
+            {"user_id": user_id, "role": role}, on_conflict="user_id,role"
+        ).execute()
+    else:
+        client.table("user_roles").delete().eq("user_id", user_id).eq("role", role).execute()
+
+
 def set_user_role(*, token: str, user_id: str, make_admin: bool) -> None:
     """Grant or revoke the 'admin' role for ``user_id``, written as the caller (RLS-scoped).
 
     Writes to ``user_roles`` are gated in Postgres by the ``is_admin(auth.uid())`` INSERT/DELETE
     policies, so only an admin's write lands even though the endpoint already checks ``get_admin_user``.
-    ``make_admin`` → upsert the role row (idempotent on ``user_id``); otherwise → delete it. A patchable
-    seam — the unit tests replace ``_user_client``.
+    A patchable seam — the unit tests replace ``_user_client``.
     """
-    client = _user_client(token)
-    if make_admin:
-        client.table("user_roles").upsert(
-            {"user_id": user_id, "role": "admin"}, on_conflict="user_id"
-        ).execute()
-    else:
-        client.table("user_roles").delete().eq("user_id", user_id).execute()
+    _set_role(token=token, user_id=user_id, role="admin", grant=make_admin)
+
+
+def set_clinician_role(*, token: str, user_id: str, make_clinician: bool) -> None:
+    """Grant or revoke the 'clinician' role for ``user_id``, written as the caller (RLS-scoped).
+
+    Same semantics as ``set_user_role``, for the other role. An admin writes this (there is no
+    ``is_clinician(auth.uid())`` write policy on ``user_roles`` -- only ``is_admin`` may write the
+    table), so only ``routers/admin.py`` calls it. A patchable seam — the unit tests replace
+    ``_user_client``.
+    """
+    _set_role(token=token, user_id=user_id, role="clinician", grant=make_clinician)
 
 
 def persist_analysis(
@@ -197,8 +240,15 @@ def persist_analysis(
     return str(rows[0]["id"]) if rows else ""
 
 
-def list_analyses(*, token: str, limit: int = 50, offset: int = 0) -> dict[str, Any]:
-    """Return the caller's analyses (newest first) as ``{"total", "items"}`` for the history page."""
+def list_analyses(*, token: str, user_id: str, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    """Return the caller's analyses (newest first) as ``{"total", "items"}`` for the history page.
+
+    ``user_id`` is REQUIRED and filtered explicitly, not left to RLS: the clinic migration adds an
+    ``analyses_clinician_select`` policy so a linked clinician's own JWT can also see a PATIENT's
+    analyses (deliberately, for the clinic dashboard) -- without this predicate, a clinician's own
+    "我的紀錄" page would list their patients' analyses too. See the migration's note on this exact
+    point.
+    """
     limit = max(1, min(limit, 200))
     offset = max(0, offset)
     client = _user_client(token)
@@ -208,6 +258,7 @@ def list_analyses(*, token: str, limit: int = 50, offset: int = 0) -> dict[str, 
             "id, video_id, source, view_type, fault_count, movement, created_at",
             count="exact",
         )
+        .eq("user_id", user_id)
         .order("created_at", desc=True)
         .range(offset, offset + limit - 1)
         .execute()

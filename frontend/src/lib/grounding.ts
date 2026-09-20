@@ -49,5 +49,8 @@ export function buildChatContext(analysis: Analysis): ChatContext {
       detections: analysis.detections,
       retrievals: analysis.retrievals,
     },
+    // WP4: forwarded so the backend can gate rehab mode (see ChatContext.analysis_id). Absent for
+    // an anonymous or not-yet-persisted upload, same as `analysis.analysis_id` itself.
+    analysis_id: analysis.analysis_id ?? undefined,
   };
 }

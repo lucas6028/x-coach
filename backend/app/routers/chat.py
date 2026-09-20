@@ -17,6 +17,7 @@ from starlette.concurrency import run_in_threadpool
 
 from backend.app.auth import CurrentUser, get_current_user
 from backend.app.services import chat as chat_service
+from backend.app.services import plans as plans_store
 from backend.app.settings import followup_chat_model, get_settings, resolve_chat_model
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -74,6 +75,14 @@ class ChatContext(BaseModel):
     # the prompt unless a tool returns part of it, so its cost is request body size, not tokens.
     detail: dict[str, Any] | None = None
 
+    # The `analyses.id` (NOT `video_id`, a different id -- see services/store.py::persist_analysis)
+    # this conversation is grounded in. WP4-only: used solely to look up whether this analysis is
+    # linked to a therapist-assigned plan (services/plans.py::analysis_in_assigned_plan), which gates
+    # the rehab safety block in the system prompt (see `_resolve_rehab` below). Optional and never
+    # persisted (same as `detail`): absent from a client predating WP4, or when this analysis was
+    # never linked to any plan item -- either way rehab mode simply stays off.
+    analysis_id: str | None = None
+
 
 class ChatRequest(BaseModel):
     # The conversation so far, oldest first; the last entry is the new user turn.
@@ -82,6 +91,26 @@ class ChatRequest(BaseModel):
     # The user's chosen model (a provider model slug). Validated against the server allowlist; an
     # unknown/absent value falls back to the configured default.
     model: str | None = None
+
+
+def _resolve_rehab(*, analysis_id: str | None, user: CurrentUser) -> bool:
+    """Whether ``analysis_id`` is linked to a therapist-assigned plan (WP4's rehab-mode gate).
+
+    A LOOKUP FAILURE MUST DEFAULT TO FALSE AND NEVER BREAK THE CHAT: this runs inline in the request
+    path, well before either endpoint's own stream/response starts, so an exception here (a bad id
+    shape, a transient Supabase error) would otherwise 500 a request that has nothing at all to do
+    with rehab mode for most callers. The extra safety framing is a nice-to-have on top of an
+    already-working chat, not a precondition for it -- same fail-open posture as
+    ``suggest_followups`` taking an empty list over a broken chip rather than a failed request.
+    """
+    if not analysis_id:
+        return False
+    try:
+        return plans_store.analysis_in_assigned_plan(
+            token=user.token, user_id=user.id, analysis_id=analysis_id
+        )
+    except Exception:  # noqa: BLE001 — see the docstring: this lookup must never break the chat.
+        return False
 
 
 @router.post("/chat")
@@ -107,6 +136,12 @@ async def chat(
 
     messages = [m.model_dump() for m in body.messages]
     context = body.context.model_dump()
+    # WP4: resolved off the event loop, same reasoning as `resolve_chat_model` just below -- it is a
+    # synchronous Supabase round-trip when an `analysis_id` is given, and `_resolve_rehab` itself
+    # never raises, so this can never turn into a 500 for callers that never populate the field.
+    context["rehab"] = await run_in_threadpool(
+        _resolve_rehab, analysis_id=body.context.analysis_id, user=user
+    )
     # ``resolve_chat_model`` reads the admin overrides, which can do a synchronous Supabase round-trip
     # on a cold cache — run it in a threadpool so it never blocks the event loop.
     model = await run_in_threadpool(resolve_chat_model, body.model)  # allow-list guard.
@@ -150,9 +185,15 @@ async def chat_followups(
     # ``followup_chat_model`` reads the admin overrides (a possible cold-cache Supabase round-trip),
     # so resolve it off the event loop before the best-effort suggestion call.
     model = await run_in_threadpool(followup_chat_model)  # fast, server-pinned; independent of answer
+    context = body.context.model_dump()
+    # Same WP4 rehab gate as the answer endpoint (see `chat` above) -- a suggested follow-up should
+    # never coach around a fault the user hasn't been told about, on a plan a therapist owns.
+    context["rehab"] = await run_in_threadpool(
+        _resolve_rehab, analysis_id=body.context.analysis_id, user=user
+    )
     questions = chat_service.suggest_followups(
         messages=[m.model_dump() for m in body.messages],
-        context=body.context.model_dump(),
+        context=context,
         model=model,
     )
     return FollowupsResponse(questions=questions)

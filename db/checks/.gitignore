@@ -1,0 +1,2 @@
+# PGlite install for run_pglite.mjs (npm install --prefix db/checks/.pglite @electric-sql/pglite)
+.pglite/

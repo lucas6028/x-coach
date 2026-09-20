@@ -182,6 +182,44 @@ describe("Plans — templates", () => {
     expect(within(pills).getByText("+2")).toBeInTheDocument();
   });
 
+  it("groups rehab templates first, under the same headings the clinician's picker uses", async () => {
+    vi.mocked(api.planTemplates).mockResolvedValue([
+      { ...template, key: "quick_core", name: "Quick core session", category: "fitness" },
+      {
+        key: "knee_rehab",
+        name: "Knee rehab",
+        description: "Low-load knee work.",
+        category: "rehab",
+        items: [{ day_index: 1, movement: "Squat", sets: 3, reps: 10 }],
+      },
+    ]);
+    renderWithProviders(<Plans />);
+
+    const rehabHeading = await screen.findByText("Rehab plans");
+    const fitnessHeading = screen.getByText("General training");
+    // Rehab-first: the "Rehab plans" heading precedes "General training" in document order.
+    expect(
+      rehabHeading.compareDocumentPosition(fitnessHeading) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    const rehabSection = rehabHeading.closest("div") as HTMLElement;
+    expect(within(rehabSection).getByText("Knee rehab")).toBeInTheDocument();
+    expect(within(rehabSection).queryByText("Quick core session")).not.toBeInTheDocument();
+
+    const fitnessSection = fitnessHeading.closest("div") as HTMLElement;
+    expect(within(fitnessSection).getByText("Quick core session")).toBeInTheDocument();
+  });
+
+  it("buckets a template with no category under 'General training'", async () => {
+    vi.mocked(api.planTemplates).mockResolvedValue([{ ...template, category: undefined }]);
+    renderWithProviders(<Plans />);
+
+    expect(await screen.findByText("Quick core session")).toBeInTheDocument();
+    expect(screen.queryByText("Rehab plans")).not.toBeInTheDocument();
+    const fitnessSection = screen.getByText("General training").closest("div") as HTMLElement;
+    expect(within(fitnessSection).getByText("Quick core session")).toBeInTheDocument();
+  });
+
   it("disables only the Lumen action while that template is being created", async () => {
     // Held open deliberately: the busy state exists to stop a double-fire, so it has to be
     // observable while the request is still in flight.

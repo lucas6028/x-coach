@@ -40,6 +40,14 @@ interface AuthValue {
   /** Re-run the admin-role probe for the current user (used to recover from a transient probe error
    *  without a full reload). No-op when logged out. */
   refreshAdmin: () => void;
+  /** Whether the signed-in user holds the clinician role (false when logged out). Probed once per
+   *  session, mirroring `isAdmin` exactly — same UX-gating-only guarantee (the server re-checks on
+   *  every /api/clinic/* call). */
+  isClinician: boolean;
+  /** Status of the clinician-role probe for the current user ("ready" also covers logged-out). */
+  clinicianState: "loading" | "ready" | "error";
+  /** Re-run the clinician-role probe for the current user. No-op when logged out. */
+  refreshClinician: () => void;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   /** Returns whether the account still needs email confirmation (no session yet). */
   signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
@@ -69,6 +77,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Admin role, resolved once per signed-in user (keyed on user id below), not per component mount.
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminState, setAdminState] = useState<"loading" | "ready" | "error">("ready");
+  // Clinician role, resolved the same way and on the same trigger as isAdmin above (see refreshAdmin).
+  const [isClinician, setIsClinician] = useState(false);
+  const [clinicianState, setClinicianState] = useState<"loading" | "ready" | "error">("ready");
   // True only while the silent LINE token→session exchange is in flight (see auto-login effect).
   const [lineAuthenticating, setLineAuthenticating] = useState(false);
 
@@ -123,6 +134,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshAdmin();
   }, [refreshAdmin]);
+
+  // Same probe, same guard, for the clinician role — a separate id ref because the two probes are
+  // independent in-flight requests and must not invalidate each other.
+  const probeIdRefClinician = useRef(0);
+  const refreshClinician = useCallback(() => {
+    if (!userId) {
+      setIsClinician(false);
+      setClinicianState("ready");
+      return;
+    }
+    const probeId = ++probeIdRefClinician.current;
+    setClinicianState("loading");
+    api
+      .clinicStatus()
+      .then((res) => {
+        if (probeId !== probeIdRefClinician.current) return;
+        setIsClinician(res.is_clinician);
+        setClinicianState("ready");
+      })
+      .catch(() => {
+        if (probeId !== probeIdRefClinician.current) return;
+        setIsClinician(false);
+        setClinicianState("error");
+      });
+  }, [userId]);
+
+  useEffect(() => {
+    refreshClinician();
+  }, [refreshClinician]);
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
     const { error } = await requireClient().auth.signInWithPassword({ email, password });
@@ -270,6 +310,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       adminState,
       refreshAdmin,
+      isClinician,
+      clinicianState,
+      refreshClinician,
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,
@@ -283,6 +326,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isAdmin,
       adminState,
       refreshAdmin,
+      isClinician,
+      clinicianState,
+      refreshClinician,
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,

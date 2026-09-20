@@ -86,8 +86,10 @@ Project knowledge graph at `graphify-out/` (graph.json + GRAPH_REPORT.md; no wik
   cheaper and faster.
 - `graphify path "<A>" "<B>"` for relationships; `graphify explain "<concept>"` for one
   concept; `GRAPH_REPORT.md` only for broad architecture review.
-- After modifying code, run `graphify update .` (AST-only, no API cost). Note the graph
-  is scoped to the project proper (memory `graphify-graph-scoped`).
+- After modifying code, run `graphify update .` (AST-only, no API cost). **It re-pulls the
+  vendored dirs the graph was scoped to exclude** — verified 2026-09-16, 2030 → 13717 nodes —
+  so treat later query hits under `.agents/` as expected noise (memory `graphify-graph-scoped`).
+  `graphify-out/` is untracked, so this never reaches a commit.
 
 ## Experiment notes (`notes/`) — mandatory
 

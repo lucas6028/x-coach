@@ -17,8 +17,14 @@ const { mockAuth } = vi.hoisted(() => ({
 }));
 vi.mock("../lib/supabase", () => ({ isSupabaseConfigured: true, supabase: { auth: mockAuth } }));
 
-const { adminStatus } = vi.hoisted(() => ({ adminStatus: vi.fn() }));
-vi.mock("../api", () => ({ api: { adminStatus } }));
+const { adminStatus, clinicStatus } = vi.hoisted(() => ({
+  adminStatus: vi.fn(),
+  // AuthProvider probes the clinician role alongside the admin role on the same trigger (signed-in
+  // identity change) — a partial mock without this makes `api.clinicStatus()` a TypeError the
+  // moment a real session resolves, unrelated to what this file is actually testing.
+  clinicStatus: vi.fn().mockResolvedValue({ is_clinician: false }),
+}));
+vi.mock("../api", () => ({ api: { adminStatus, clinicStatus } }));
 
 import { AuthProvider, useAuth } from "../lib/auth";
 

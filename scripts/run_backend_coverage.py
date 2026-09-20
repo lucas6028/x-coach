@@ -51,6 +51,25 @@ _DEFAULT_TESTS = [
     # table it guards being honest, and the explicit default list above is the only thing that
     # runs it under `--fail-under` without a caller remembering to name it by hand.
     "tests/test_movement_muscles.py",
+    # Clinic core (WP1, feat/clinic-core): store.py's clinician-role seams are covered by
+    # test_backend.py, but services/clinic.py, routers/clinic.py and routers/care.py have no other
+    # entry point in this list -- leaving them out drops those three modules to ~20-40% (import-time
+    # only) and sinks the whole gate, exactly as the training-plans comment above describes for its
+    # own two files.
+    "tests/test_clinic_store.py",
+    "tests/test_clinic_api.py",
+    # WP2 (feat/clinic-checkins): server-side form score, deterministic red flags, and the
+    # session_checkins persistence + router. Same reasoning as the clinic-core comment above --
+    # these four modules (scoring.py, redflags.py, checkins.py, routers/checkins.py) have no other
+    # entry point in this list.
+    "tests/test_scoring_drift.py",
+    "tests/test_redflags.py",
+    "tests/test_checkins_api.py",
+    # WP5 (feat/line-push-reminders): the LINE push helper and the nightly care-loop job. Same
+    # reasoning as the WP2 comment above -- services/line_bot.push and routers/jobs.py have no
+    # other entry point in this list.
+    "tests/test_line_push.py",
+    "tests/test_jobs_daily.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

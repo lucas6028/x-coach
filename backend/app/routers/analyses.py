@@ -25,7 +25,7 @@ def list_my_analyses(
     user: CurrentUser = Depends(get_current_user),
 ) -> dict:
     """List the caller's analyses (newest first): ``{"total", "items": [summary rows]}``."""
-    return store.list_analyses(token=user.token, limit=limit, offset=offset)
+    return store.list_analyses(token=user.token, user_id=user.id, limit=limit, offset=offset)
 
 
 @router.delete("/analyses")

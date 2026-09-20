@@ -186,6 +186,93 @@ class CreateAndReadTests(_PlansTestCase):
         plan = self._plan()
         self.assertEqual(plan["items"], [])
 
+    def test_create_defaults_assigned_by_to_none(self) -> None:
+        # A self-authored plan (the ordinary path): `assigned_by` stays null.
+        plan = self._plan()
+        self.assertIsNone(plan["assigned_by"])
+
+    def test_create_stamps_the_assigning_clinician(self) -> None:
+        # The clinic "assign a plan" path (routers/clinic.py): the owner stays the patient
+        # (`user_id`), but `assigned_by` records who prescribed it.
+        plan = self._plan(user="patient-1", assigned_by="clinician-1")
+        self.assertEqual(plan["user_id"], "patient-1")
+        self.assertEqual(plan["assigned_by"], "clinician-1")
+
+
+class PlanIsAssignedTests(_PlansTestCase):
+    """`plan_is_assigned` — the WP4 rehab-mode gate the plan agent reads before its first round."""
+
+    def test_true_for_a_therapist_assigned_plan(self) -> None:
+        plan = self._plan(assigned_by="clinician-1")
+        self.assertTrue(
+            plans_store.plan_is_assigned(token="tok", plan_id=plan["id"], user_id="u1")
+        )
+
+    def test_false_for_a_self_authored_plan(self) -> None:
+        plan = self._plan()
+        self.assertFalse(
+            plans_store.plan_is_assigned(token="tok", plan_id=plan["id"], user_id="u1")
+        )
+
+    def test_false_when_the_plan_belongs_to_someone_else(self) -> None:
+        # Same-shape ownership check as `plan_exists`: a plan id alone must not answer for a caller
+        # who does not own it, even if it happens to be assigned.
+        plan = self._plan(user="u1", assigned_by="clinician-1")
+        self.assertFalse(
+            plans_store.plan_is_assigned(token="tok", plan_id=plan["id"], user_id="other")
+        )
+
+    def test_false_for_a_plan_that_does_not_exist(self) -> None:
+        self.assertFalse(
+            plans_store.plan_is_assigned(token="tok", plan_id=str(uuid.uuid4()), user_id="u1")
+        )
+
+
+class AnalysisInAssignedPlanTests(_PlansTestCase):
+    """`analysis_in_assigned_plan` — the WP4 rehab-mode gate the analysis chat reads."""
+
+    def _link(self, *, user: str, assigned_by: str | None) -> str:
+        """Create a plan (optionally assigned) for ``user``, tick its one item with a fresh analysis
+        id, and return that analysis id."""
+        plan = self._plan(user=user, assigned_by=assigned_by, items=[{"day_index": 1, "movement": "Squat"}])
+        item_id = plan["items"][0]["id"]
+        analysis_id = str(uuid.uuid4())
+        plans_store.update_item(
+            token="tok",
+            user_id=user,
+            plan_id=plan["id"],
+            item_id=item_id,
+            fields={"analysis_id": analysis_id},
+        )
+        return analysis_id
+
+    def test_true_when_the_linked_plan_is_assigned(self) -> None:
+        analysis_id = self._link(user="u1", assigned_by="clinician-1")
+        self.assertTrue(
+            plans_store.analysis_in_assigned_plan(token="tok", user_id="u1", analysis_id=analysis_id)
+        )
+
+    def test_false_when_the_linked_plan_is_self_authored(self) -> None:
+        analysis_id = self._link(user="u1", assigned_by=None)
+        self.assertFalse(
+            plans_store.analysis_in_assigned_plan(token="tok", user_id="u1", analysis_id=analysis_id)
+        )
+
+    def test_false_when_no_item_links_this_analysis(self) -> None:
+        self.assertFalse(
+            plans_store.analysis_in_assigned_plan(
+                token="tok", user_id="u1", analysis_id=str(uuid.uuid4())
+            )
+        )
+
+    def test_false_when_the_linking_item_belongs_to_someone_else(self) -> None:
+        # A stray/foreign analysis id naming another user's plan item must not flip rehab mode on
+        # for THIS caller's conversation -- the first read is filtered on user_id too.
+        analysis_id = self._link(user="other", assigned_by="clinician-1")
+        self.assertFalse(
+            plans_store.analysis_in_assigned_plan(token="tok", user_id="u1", analysis_id=analysis_id)
+        )
+
     def test_create_raises_when_the_insert_returns_nothing(self) -> None:
         # A silent empty insert would otherwise surface as a KeyError deep in the router.
         with mock.patch.object(_Query, "execute", return_value=_Resp([])):

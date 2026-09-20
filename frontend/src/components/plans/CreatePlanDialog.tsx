@@ -10,6 +10,11 @@ interface Props {
   /** The template's localized name, prefilled into the name field so the common case is one click
    *  from "use this" to a created plan. */
   templateName?: string;
+  /** WP3: the clinician dashboard's assign flow. When set, submitting calls
+   *  `api.clinicAssignPlan(forPatient.id, …)` instead of `api.createPlan` — the new plan is owned
+   *  by the patient, not the caller — and the dialog's copy reads "Assign to {name}". Omitted for
+   *  every other caller, which keeps the plain self-service create flow unchanged. */
+  forPatient?: { id: string; name: string };
   onCancel: () => void;
   onCreated: (planId: string) => void;
 }
@@ -22,6 +27,7 @@ export default function CreatePlanDialog({
   open,
   templateKey,
   templateName,
+  forPatient,
   onCancel,
   onCreated,
 }: Props) {
@@ -69,11 +75,14 @@ export default function CreatePlanDialog({
     setBusy(true);
     setError("");
     try {
-      const plan = await api.createPlan({
+      const body = {
         name: trimmed,
         notes: notes.trim() || null,
         ...(templateKey ? { template_key: templateKey } : {}),
-      });
+      };
+      const plan = forPatient
+        ? await api.clinicAssignPlan(forPatient.id, body)
+        : await api.createPlan(body);
       onCreated(plan.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -96,7 +105,7 @@ export default function CreatePlanDialog({
         className="relative w-full max-w-md rounded-2xl border border-border-dark bg-surface p-5 shadow-card-hover"
       >
         <h2 id={titleId} className="font-display text-lg font-bold text-content">
-          {t("plans.createTitle")}
+          {forPatient ? t("clinic.assignTitle", { name: forPatient.name }) : t("plans.createTitle")}
         </h2>
 
         <label htmlFor={nameId} className="mt-4 block text-xs font-medium text-muted">

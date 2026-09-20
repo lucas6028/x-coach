@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { api, ChatError, UploadLimitError, type ChatContext, type ChatMessage } from "../api";
+import {
+  api,
+  ApiError,
+  ChatError,
+  UploadLimitError,
+  type ChatContext,
+  type ChatMessage,
+} from "../api";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.spyOn(globalThis, "fetch").mockResolvedValue({
@@ -154,6 +161,32 @@ describe("api.setUserRole", () => {
   });
 });
 
+describe("api.setUserClinician", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("PUTs the make_clinician flag to the per-user role endpoint", async () => {
+    const spy = mockFetch({ ok: true });
+    const result = await api.setUserClinician("u2", true);
+    expect(result).toEqual({ ok: true });
+    expect(spy.mock.calls[0][0]).toBe("/api/admin/users/u2/role");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ make_clinician: true });
+  });
+
+  it("can revoke, including on the caller's own row (no self-guard)", async () => {
+    const spy = mockFetch({ ok: true });
+    await api.setUserClinician("u1", false);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ make_clinician: false });
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 500);
+    await expect(api.setUserClinician("u2", true)).rejects.toThrow("500");
+  });
+});
+
 describe("api.videoFileUrl", () => {
   it("returns the correct URL string", () => {
     expect(api.videoFileUrl("vid_001")).toBe("/api/video-file/vid_001");
@@ -267,6 +300,175 @@ describe("api.deleteAnalysis", () => {
   });
 });
 
+describe("api.createCheckin", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("POSTs the check-in body as-is and returns the parsed Checkin", async () => {
+    const body = { plan_id: "p1", plan_item_id: "i1", analysis_id: "an-7", pain_nrs: 4, rpe: 6 };
+    const returned = { id: "c1", flagged: false, flag_reasons: [] };
+    const spy = mockFetch(returned);
+    const result = await api.createCheckin(body);
+    expect(result).toEqual(returned);
+    expect(spy.mock.calls[0][0]).toBe("/api/checkins");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it("throws with the backend detail on a 404 (bad plan/item)", async () => {
+    mockFetch({ detail: "Plan not found." }, false, 404);
+    await expect(api.createCheckin({ plan_id: "x", pain_nrs: 0 })).rejects.toThrow(
+      "Plan not found."
+    );
+  });
+});
+
+describe("api.listCheckins", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("builds the query string from plan_id and limit, and unwraps checkins", async () => {
+    const spy = mockFetch({ checkins: [{ id: "c1" }] });
+    const result = await api.listCheckins("p1", 5);
+    expect(result).toEqual([{ id: "c1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/checkins?plan_id=p1&limit=5");
+  });
+
+  it("omits params that are not given", async () => {
+    const spy = mockFetch({ checkins: [] });
+    await api.listCheckins();
+    expect(spy.mock.calls[0][0]).toBe("/api/checkins");
+  });
+});
+
+describe("api.careAccept", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("POSTs the code and returns the link", async () => {
+    const spy = mockFetch({ link: { id: "l1" } });
+    const result = await api.careAccept("ABC123");
+    expect(result).toEqual({ link: { id: "l1" } });
+    expect(spy.mock.calls[0][0]).toBe("/api/care/accept");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ code: "ABC123" });
+  });
+
+  it("throws an ApiError carrying the HTTP status on a 404 (bad/expired code)", async () => {
+    mockFetch({ detail: "Invite code is invalid or expired." }, false, 404);
+    await expect(api.careAccept("BAD")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 404,
+      message: "Invite code is invalid or expired.",
+    });
+    mockFetch({ detail: "Invite code is invalid or expired." }, false, 404);
+    await expect(api.careAccept("BAD")).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("throws an ApiError with status 400 for the caller's own code", async () => {
+    mockFetch({ detail: "own code" }, false, 400);
+    await expect(api.careAccept("MINE")).rejects.toMatchObject({ status: 400 });
+  });
+});
+
+describe("api.careClinicians / careUnlink", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("careClinicians GETs and unwraps the clinicians list", async () => {
+    const spy = mockFetch({ clinicians: [{ link_id: "l1" }] });
+    const result = await api.careClinicians();
+    expect(result).toEqual([{ link_id: "l1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/care/clinicians");
+  });
+
+  it("careUnlink DELETEs the link by id", async () => {
+    const spy = mockFetch({ link: { id: "l1" } });
+    await api.careUnlink("l1");
+    expect(spy.mock.calls[0][0]).toBe("/api/care/links/l1");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+
+  it("careUnlink throws on a 404", async () => {
+    mockFetch({}, false, 404);
+    await expect(api.careUnlink("missing")).rejects.toThrow("404");
+  });
+});
+
+describe("api clinic functions (WP3)", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("clinicStatus GETs the status endpoint", async () => {
+    const spy = mockFetch({ is_clinician: true });
+    const result = await api.clinicStatus();
+    expect(result).toEqual({ is_clinician: true });
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/status");
+  });
+
+  it("clinicPatients GETs and unwraps the patients list", async () => {
+    const spy = mockFetch({ patients: [{ patient_id: "p1" }] });
+    const result = await api.clinicPatients();
+    expect(result).toEqual([{ patient_id: "p1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/patients");
+  });
+
+  it("clinicPatient encodes the id into the path", async () => {
+    const spy = mockFetch({ patient: { patient_id: "p 1" } });
+    await api.clinicPatient("p 1");
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/patients/p%201");
+  });
+
+  it("clinicPatient throws with a message that starts with the status code on a 404", async () => {
+    mockFetch({}, false, 404);
+    await expect(api.clinicPatient("missing")).rejects.toThrow(/^404/);
+  });
+
+  it("clinicCreateInvite POSTs with no body and returns the invite row", async () => {
+    const body = { id: "i1", invite_code: "AB12CD", status: "pending", created_at: "x", expires_at: "y" };
+    const spy = mockFetch(body);
+    const result = await api.clinicCreateInvite();
+    expect(result).toEqual(body);
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/invites");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+    expect(init.body).toBeUndefined();
+  });
+
+  it("clinicInvites GETs and unwraps the invites list", async () => {
+    const spy = mockFetch({ invites: [{ id: "i1" }] });
+    const result = await api.clinicInvites();
+    expect(result).toEqual([{ id: "i1" }]);
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/invites");
+  });
+
+  it("clinicRevokeLink DELETEs the link by id (an invite's id is its link id)", async () => {
+    const spy = mockFetch({ link: { id: "l1" } });
+    await api.clinicRevokeLink("l1");
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/links/l1");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+
+  it("clinicAssignPlan POSTs the plan body to the patient-scoped route", async () => {
+    const spy = mockFetch({ id: "pl1", items: [] });
+    await api.clinicAssignPlan("patient-1", { name: "Week 1", template_key: "quick_core" });
+    const [url, init] = [spy.mock.calls[0][0], spy.mock.calls[0][1] as RequestInit];
+    expect(url).toBe("/api/clinic/patients/patient-1/plans");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(init.body as string)).toEqual({ name: "Week 1", template_key: "quick_core" });
+  });
+
+  it("clinicAckFlag PATCHes the flag route and returns the updated check-in", async () => {
+    const spy = mockFetch({ checkin: { id: "c1", acknowledged_at: "x" } });
+    const result = await api.clinicAckFlag("c1");
+    expect(result).toEqual({ checkin: { id: "c1", acknowledged_at: "x" } });
+    expect(spy.mock.calls[0][0]).toBe("/api/clinic/flags/c1/ack");
+    expect((spy.mock.calls[0][1] as RequestInit).method).toBe("PATCH");
+  });
+
+  it("clinicAckFlag surfaces the server's 409 detail for an already-clear check-in", async () => {
+    mockFetch({ detail: "Check-in is not flagged." }, false, 409);
+    await expect(api.clinicAckFlag("c1")).rejects.toThrow("Check-in is not flagged.");
+  });
+});
+
 describe("api.analyzeUpload", () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -368,6 +570,17 @@ describe("api.chatStream", () => {
     await api.chatStream(messages, context, c.handlers);
     const init = spy.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(init.body as string)).toEqual({ messages, context });
+  });
+
+  it("carries context.analysis_id through to the wire body when the loaded analysis has one", async () => {
+    // WP4: buildChatContext sets this from the analysis, and chatStream must forward it verbatim
+    // — the rehab-mode gate (backend/app/routers/chat.py::_resolve_rehab) reads it server-side.
+    const spy = mockStream(['event: done\ndata: {"model":"m"}\n\n']);
+    const withAnalysisId: ChatContext = { ...context, analysis_id: "an-7" };
+    await api.chatStream(messages, withAnalysisId, collectHandlers().handlers);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { context: ChatContext };
+    expect(body.context.analysis_id).toBe("an-7");
   });
 
   it("routes an in-band error frame to onError without throwing", async () => {
@@ -659,6 +872,23 @@ describe("api.chatFollowups", () => {
   it("defaults to [] when the body has no questions field", async () => {
     mockFetch({});
     await expect(api.chatFollowups(messages, context)).resolves.toEqual([]);
+  });
+
+  it("keeps analysis_id in the wire body while still stripping detail", async () => {
+    // WP4: analysis_id must survive the `detail`-stripping spread in chatFollowups (detail is the
+    // heavy per-fault payload this fire-and-forget call never uses; analysis_id is a few bytes the
+    // backend needs to gate rehab mode on this endpoint too).
+    const spy = mockFetch({ questions: [] });
+    const withDetail: ChatContext = {
+      ...context,
+      analysis_id: "an-7",
+      detail: { heavy: "payload" },
+    };
+    await api.chatFollowups(messages, withDetail);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(init.body as string) as { context: ChatContext };
+    expect(body.context.analysis_id).toBe("an-7");
+    expect(body.context.detail).toBeUndefined();
   });
 });
 

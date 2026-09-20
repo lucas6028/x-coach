@@ -138,12 +138,48 @@ def _plan_coverage(plan: dict[str, Any] | None) -> dict[str, Any]:
     return result
 
 
-def _system_prompt(*, lang: str, plan_scoped: bool) -> str:
+# WP4 rehab mode: appended to the system prompt (in the conversation's own language, the same way
+# lang_line/scope_line already switch) whenever the plan scoped to this conversation was assigned by
+# a therapist rather than built by the user themselves -- see `_plan_chat_stream_inner`, which is the
+# only caller that ever passes `rehab=True`. Kept as one block rather than woven into RULES so the
+# ordinary (non-rehab) prompt stays byte-identical to before this feature existed.
+_REHAB_BLOCK_ZH = (
+    "\n復健模式 — 這份菜單是治療師指派的：\n"
+    "- 你是在協助一位使用治療師指派菜單的患者。\n"
+    "- 絕不做出診斷或說出病名。\n"
+    "- 絕不更改菜單的動作、組數、次數或安排的日子 — 只有治療師能調整；如果使用者要求變更，婉拒並說明原因。\n"
+    "- 鼓勵使用者按表操課、注意動作品質。\n"
+    "- 如果使用者提到疼痛、頭暈、腫脹或症狀惡化，請他立刻停止動作並聯繫治療師。\n"
+    "- 你仍然可以說明動作怎麼做、回答一般問題。\n\n"
+)
+_REHAB_BLOCK_EN = (
+    "\nREHAB MODE — this plan was assigned by the user's therapist:\n"
+    "- You are supporting a patient on a plan their therapist assigned.\n"
+    "- NEVER diagnose or name a medical condition.\n"
+    "- NEVER change the plan's movements, sets, reps, or days — only the therapist may; refuse and "
+    "say so if the user asks.\n"
+    "- Encourage adherence and good form.\n"
+    "- If the user mentions pain, dizziness, swelling, or worsening symptoms, tell them to stop and "
+    "contact their therapist immediately.\n"
+    "- You may still explain movements and answer general questions.\n\n"
+)
+
+# The refusal every write tool returns verbatim on an assigned plan (see _PlanDispatcher.dispatch) —
+# one fixed string, not localized: the model reads it as a tool result, not user-facing prose, and
+# is instructed (via the rehab block above) to explain the refusal itself in the user's language.
+REHAB_WRITE_REFUSAL = "This plan was assigned by your therapist; ask them to change it."
+
+
+def _system_prompt(*, lang: str, plan_scoped: bool, rehab: bool = False) -> str:
     """Lumen's system prompt: persona, honesty rules, and the movement catalog.
 
     ``plan_scoped`` tells the model whether it is in BUILDER mode (no plan yet — the common case for
     ``/plans/new``) or editing an existing one (``/plans/:id``), so it knows whether ``create_plan``
     is even on the table without having to call ``get_plan`` first to find out.
+
+    ``rehab`` is WP4's gate: true only when the scoped plan's ``assigned_by`` is set (a therapist
+    assigned it). It can only be true together with ``plan_scoped`` — builder mode has no plan yet,
+    so nothing to have been assigned — but that invariant lives in the caller, not here.
     """
     lang_line = (
         "Reply in Traditional Chinese (繁體中文), the way a Taiwanese fitness app actually talks — "
@@ -157,13 +193,17 @@ def _system_prompt(*, lang: str, plan_scoped: bool) -> str:
         if plan_scoped
         else "No plan exists yet in this conversation: you are in BUILDER mode."
     )
+    rehab_block = ""
+    if rehab:
+        rehab_block = _REHAB_BLOCK_ZH if lang == "zh-Hant" else _REHAB_BLOCK_EN
     return (
         "You are Lumen, x-coach's AI training coach. You build and edit the user's training plan "
         "(訓練菜單) by calling the tools available to you. You NEVER claim a change you did not make "
         "through a tool, and you NEVER re-list the whole plan in prose unless asked — it is already "
         "shown next to this chat.\n\n"
         f"{lang_line}\n\n"
-        f"{scope_line}\n\n"
+        f"{scope_line}\n"
+        f"{rehab_block}\n"
         "RULES:\n"
         "- A plan is a REUSABLE TEMPLATE of relative day slots, Day 1 through Day 7 — not dated "
         "calendar days.\n"
@@ -348,12 +388,29 @@ class _PlanDispatcher:
     ``dispatch`` bound method is handed to ``chat_service._run_tool_loop`` as the ``dispatch``
     callable, so every tool call in the same turn (including a create followed by an add, in the
     SAME round-trip) shares the one pinned id.
+
+    ``rehab`` is WP4's gate (see ``_system_prompt``): when true, every WRITE tool refuses instead of
+    running — see ``_WRITE_TOOLS`` and ``dispatch``. A conversation can only ever be scoped to an
+    ALREADY-assigned plan (a clinician's own assignment flow does not go through this dispatcher at
+    all), so ``rehab`` never flips true mid-conversation; it is fixed once, at construction, exactly
+    like ``token``/``user_id``.
     """
 
-    def __init__(self, *, token: str, user_id: str, plan_id: str | None) -> None:
+    # The write tools this gate covers. Deliberately NOT ``create_plan``: a rehab-mode conversation
+    # is by definition already scoped to the assigned plan (``rehab`` can only be true when
+    # ``plan_id`` is set — see the module's `_plan_chat_stream_inner`), so `_create_plan`'s own
+    # "already exists" refusal already covers it; adding it here too would just be a second,
+    # untested path to the same outcome. ``get_plan`` is deliberately absent: read-only tools must
+    # keep working so Lumen can still explain what the plan contains.
+    _WRITE_TOOLS = frozenset({"add_item", "update_item", "remove_item", "update_plan"})
+
+    def __init__(
+        self, *, token: str, user_id: str, plan_id: str | None, rehab: bool = False
+    ) -> None:
         self.token = token
         self.user_id = user_id
         self.plan_id = plan_id
+        self.rehab = rehab
 
     def dispatch(self, name: str, args: dict[str, Any]) -> chat_service._ToolResult:
         """Run one plan tool call. NEVER RAISES — see ``chat_service._run_tool`` for why this
@@ -361,8 +418,16 @@ class _PlanDispatcher:
         deliberately does not guard the ``dispatch`` call) and kill the stream after the HTTP 200 is
         already committed. Any tool method may raise (a malformed args shape, a store call failing
         against a plan deleted mid-conversation); this is the one boundary that turns that into an
-        ``{"error": ...}`` payload the model can read and recover from."""
+        ``{"error": ...}`` payload the model can read and recover from.
+
+        THE REHAB REFUSAL RUNS BEFORE ANY HANDLER, for every write tool — see ``_WRITE_TOOLS``. It
+        performs NO store call: the refusal is a pure gate, so there is nothing here to undo if the
+        model retries. The refusal payload has the same shape as any other tool error (``frame_plan``
+        omitted), which is what keeps the client from redrawing a preview that never changed.
+        """
         try:
+            if self.rehab and name in self._WRITE_TOOLS:
+                return self._result({"error": REHAB_WRITE_REFUSAL})
             handler = {
                 "get_plan": self._get_plan,
                 "create_plan": self._create_plan,
@@ -624,8 +689,16 @@ def _plan_chat_stream_inner(
     model: str,
     lang: str,
 ) -> Iterator[str]:
-    dispatcher = _PlanDispatcher(token=token, user_id=user_id, plan_id=plan_id)
-    system = _system_prompt(lang=lang, plan_scoped=plan_id is not None)
+    # WP4: a plan scoped to this conversation may have been assigned by a therapist. Resolved once,
+    # up front — the system prompt needs to know before the model's first round, not after a tool
+    # call reveals it — and reused for both the prompt's rehab block and the dispatcher's write gate,
+    # so the two can never disagree about which mode this conversation is in. Never true in builder
+    # mode: there is no plan yet for anyone to have assigned.
+    rehab = plan_id is not None and plans_store.plan_is_assigned(
+        token=token, plan_id=plan_id, user_id=user_id
+    )
+    dispatcher = _PlanDispatcher(token=token, user_id=user_id, plan_id=plan_id, rehab=rehab)
+    system = _system_prompt(lang=lang, plan_scoped=plan_id is not None, rehab=rehab)
     yield from chat_service._run_tool_loop(
         messages=messages,
         system=system,

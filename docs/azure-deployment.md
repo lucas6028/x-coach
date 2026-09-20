@@ -282,7 +282,8 @@ az deployment group create -g $RG -f infra/main.bicep \
     -p llmApiKey=$LLM_API_KEY \
     -p r2SecretAccessKey=$R2_SECRET_ACCESS_KEY \
     -p lineMessagingChannelSecret=$LINE_MESSAGING_CHANNEL_SECRET \
-    -p lineMessagingAccessToken=$LINE_MESSAGING_ACCESS_TOKEN
+    -p lineMessagingAccessToken=$LINE_MESSAGING_ACCESS_TOKEN \
+    -p jobToken=$JOB_TOKEN
 ```
 
 frontend 會拿到指向 backend 內部 FQDN 的 `BACKEND_ORIGIN`。nginx 在容器啟動時把它代入設定檔
@@ -343,6 +344,15 @@ az containerapp update -n xcoach-frontend -g $RG --image ghcr.io/lucas6028/x-coa
 
 `SUPABASE_SERVICE_ROLE_KEY` 是最需要小心的一個：它的存在只是為了讓 LINE LIFF 橋接能鑄出一個登入
 連結，絕不用於資料存取。它不能進到 frontend image，也不能出現在任何 build arg。
+
+`JOB_TOKEN` 是夜間 care-loop job（`POST /api/jobs/daily`，見 `backend/app/routers/jobs.py`）用來
+驗證呼叫者的共用密鑰，走的路徑跟 `lineMessagingAccessToken` 完全一樣：`infra/main.bicep` 裡是一個
+`@secure()` 參數 → Container Apps 的 `job-token` secret → `JOB_TOKEN` 環境變數；`infra/deploy.ps1`
+跟其他密鑰一樣從 `.env` 讀出來傳給範本（手動部署則見上面那行 `-p jobToken=$JOB_TOKEN`）。留空會讓端點回 503。另外還需要兩個 **GitHub
+repository secret**（跟 image 建置那三個 `VITE_*` secret不同層級，是給觸發 cron 的
+`.github/workflows/daily-jobs.yml` 用的）：`DAILY_JOB_API_BASE_URL`（前端的公開網址，`/api` 會被
+nginx 代理到 backend）與 `JOB_TOKEN`（必須跟這裡部署的 `JOB_TOKEN` 完全一致）。兩個 secret 只要有
+一個是空的，workflow 就會印一行訊息然後直接跳過，不會失敗。
 
 ## 自訂網域與 TLS：xcoach.dev
 

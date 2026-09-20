@@ -22,7 +22,9 @@ export default function AdminUsers() {
   const [rows, setRows] = useState<AdminUserRow[] | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  const [rowError, setRowError] = useState<{ id: string; kind: "admin" | "clinician"; message: string } | null>(
+    null
+  );
 
   const load = () => {
     setStatus("loading");
@@ -37,7 +39,7 @@ export default function AdminUsers() {
 
   useEffect(load, []);
 
-  const onToggle = async (row: AdminUserRow) => {
+  const onToggleAdmin = async (row: AdminUserRow) => {
     setPendingId(row.id);
     setRowError(null);
     try {
@@ -45,7 +47,23 @@ export default function AdminUsers() {
       const res = await api.listAdminUsers();
       setRows(res.users);
     } catch (e) {
-      setRowError({ id: row.id, message: e instanceof Error ? e.message : String(e) });
+      setRowError({ id: row.id, kind: "admin", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  // Unlike admin, there is no self-guard here: an admin may grant or revoke clinician on their own
+  // row, since the backend imposes no such restriction for this role.
+  const onToggleClinician = async (row: AdminUserRow) => {
+    setPendingId(row.id);
+    setRowError(null);
+    try {
+      await api.setUserClinician(row.id, !row.is_clinician);
+      const res = await api.listAdminUsers();
+      setRows(res.users);
+    } catch (e) {
+      setRowError({ id: row.id, kind: "clinician", message: e instanceof Error ? e.message : String(e) });
     } finally {
       setPendingId(null);
     }
@@ -103,21 +121,42 @@ export default function AdminUsers() {
                     <td className="px-4 py-3 text-right tabular-nums text-content">{row.analyses_count}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-content">{row.conversations_count}</td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => void onToggle(row)}
-                        disabled={isSelf || pending}
-                        aria-label={row.is_admin ? t("admin.users.revokeAdmin") : t("admin.users.makeAdmin")}
-                        className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                          row.is_admin
-                            ? "border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20"
-                            : "border-border-dark bg-content/[0.02] text-faint hover:bg-content/[0.05]"
-                        }`}
-                      >
-                        {row.is_admin ? <CheckCircle size={14} weight="fill" /> : <XCircle size={14} />}
-                        {row.is_admin ? t("admin.users.revokeAdmin") : t("admin.users.makeAdmin")}
-                      </button>
-                      {rowError?.id === row.id && (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => void onToggleAdmin(row)}
+                          disabled={isSelf || pending}
+                          aria-label={row.is_admin ? t("admin.users.revokeAdmin") : t("admin.users.makeAdmin")}
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                            row.is_admin
+                              ? "border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20"
+                              : "border-border-dark bg-content/[0.02] text-faint hover:bg-content/[0.05]"
+                          }`}
+                        >
+                          {row.is_admin ? <CheckCircle size={14} weight="fill" /> : <XCircle size={14} />}
+                          {row.is_admin ? t("admin.users.revokeAdmin") : t("admin.users.makeAdmin")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void onToggleClinician(row)}
+                          disabled={pending}
+                          aria-label={
+                            row.is_clinician ? t("admin.users.revokeClinician") : t("admin.users.makeClinician")
+                          }
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                            row.is_clinician
+                              ? "border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20"
+                              : "border-border-dark bg-content/[0.02] text-faint hover:bg-content/[0.05]"
+                          }`}
+                        >
+                          {row.is_clinician ? <CheckCircle size={14} weight="fill" /> : <XCircle size={14} />}
+                          {row.is_clinician ? t("admin.users.revokeClinician") : t("admin.users.makeClinician")}
+                        </button>
+                      </div>
+                      {rowError?.id === row.id && rowError.kind === "admin" && (
+                        <p className="mt-1 text-[11px] text-danger">{t("admin.users.updateError")}</p>
+                      )}
+                      {rowError?.id === row.id && rowError.kind === "clinician" && (
                         <p className="mt-1 text-[11px] text-danger">{t("admin.users.updateError")}</p>
                       )}
                     </td>

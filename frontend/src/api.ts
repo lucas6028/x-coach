@@ -103,6 +103,9 @@ export interface Plan {
   created_at: string;
   updated_at: string;
   items: PlanItem[];
+  /** The clinician's user id when a linked therapist assigned this plan, else null (a self-made
+   *  plan). Drives the "assigned by therapist" badge and the post-tick check-in prompt. */
+  assigned_by?: string | null;
 }
 
 /** A plan as the list page shows it: no items, but the counts a card needs. */
@@ -122,6 +125,10 @@ export interface PlanTemplate {
   name: string;
   description: string;
   items: Array<{ day_index: number; movement: string; sets: number; reps: number }>;
+  /** "rehab" | "fitness", added server-side alongside this feature. Absent on an older backend or
+   *  a template the migration hasn't tagged yet — every caller treats a missing category as
+   *  "fitness" rather than failing to bucket it. */
+  category?: "rehab" | "fitness";
 }
 
 export interface NewPlanItem {
@@ -143,6 +150,105 @@ export interface PlanItemPatch {
   /** true stamps completion; false clears it AND the analysis link. */
   completed?: boolean;
   analysis_id?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Care loop ("clinic"): therapist <-> patient linking + patient check-ins.
+// ---------------------------------------------------------------------------
+
+/** One patient-reported status against a plan (optionally scoped to one item/analysis). Backend
+ *  computes `flagged`/`flag_reasons` server-side — the client never derives a red flag itself. */
+export interface Checkin {
+  id: string;
+  user_id: string;
+  plan_id: string;
+  plan_item_id: string | null;
+  analysis_id: string | null;
+  pain_nrs: number;
+  rpe: number | null;
+  note: string | null;
+  /** The linked analysis' form score, when one was attached — null otherwise. */
+  form_score: number | null;
+  flagged: boolean;
+  flag_reasons: ("pain_high" | "pain_rise" | "form_drop")[];
+  acknowledged_at: string | null;
+  /** The clinician who acknowledged the flag, when it has been. Optional: the plain check-in
+   *  endpoints existed before the clinician dashboard did, and every fixture built against the
+   *  old shape stays valid without it. */
+  acknowledged_by?: string | null;
+  created_at: string;
+}
+
+export interface CheckinCreate {
+  plan_id: string;
+  plan_item_id?: string;
+  analysis_id?: string;
+  /** 0-10, required. */
+  pain_nrs: number;
+  /** 0-10, optional. */
+  rpe?: number;
+  /** <= 500 chars, optional. */
+  note?: string;
+}
+
+/** One therapist linked to the caller, as GET /api/care/clinicians returns it. */
+export interface CareClinician {
+  link_id: string;
+  clinician_id: string;
+  email: string | null;
+  display_name: string | null;
+  accepted_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Clinician dashboard (WP3): the therapist-side view of the care loop above.
+// ---------------------------------------------------------------------------
+
+/** One linked patient's dashboard row, as GET /api/clinic/patients (and the `patient` field of
+ *  GET /api/clinic/patients/{id}) returns it. Every aggregation is computed server-side. */
+export interface ClinicPatientSummary {
+  link_id: string;
+  patient_id: string;
+  display_name: string | null;
+  email: string | null;
+  accepted_at: string;
+  last_checkin_at: string | null;
+  /** 0..1, or null when there is nothing to compute adherence from yet. */
+  adherence_7d: number | null;
+  open_flags: number;
+  inactive_7d: boolean;
+}
+
+/** One point of GET /api/clinic/patients/{id}'s 30-day `trend` series, oldest first. */
+export interface ClinicTrendPoint {
+  created_at: string;
+  form_score: number | null;
+  pain_nrs: number;
+  /** Mirrors the underlying check-in's own `flagged` column (regardless of acknowledgement) —
+   *  computed server-side (services/clinic.py::trend) so TrendChart never re-derives it by
+   *  matching this point's `created_at` against the check-in/open-flag rows itself. */
+  flagged: boolean;
+}
+
+/** The full clinician view of one linked patient: GET /api/clinic/patients/{id}. */
+export interface ClinicPatientDetail {
+  patient: ClinicPatientSummary;
+  plans: PlanSummary[];
+  /** Up to 30 rows, newest first. */
+  checkins: Checkin[];
+  trend: ClinicTrendPoint[];
+  /** The flagged, unacknowledged rows — a subset of `checkins` when they fall in the same 30, but
+   *  not bounded by that window itself. */
+  open_flags: Checkin[];
+}
+
+/** One invite row, as POST/GET /api/clinic/invites return it. */
+export interface ClinicInvite {
+  id: string;
+  invite_code: string;
+  status: string;
+  created_at: string;
+  expires_at: string;
 }
 
 // One fault a movement defines, with its 1-hop graph connectivity (0 = no linked
@@ -306,6 +412,12 @@ export interface ChatContext {
   // The full analysis document (detections + retrievals, no `pose`), read server-side by the
   // `get_analysis` tool. Never persisted, and never sent on the followups call.
   detail?: Record<string, unknown>;
+  // WP4: the `analyses.id` this conversation is grounded in, when the loaded analysis has one
+  // (an anonymous or not-yet-persisted upload has none). The backend uses it to look up whether
+  // this analysis is linked to a therapist-assigned plan and, if so, switch the coach into rehab
+  // safety mode (backend/app/routers/chat.py::_resolve_rehab). Sent on every endpoint that takes
+  // this context — the answer stream AND the followups call — so rehab mode applies to both.
+  analysis_id?: string | null;
 }
 
 // Callbacks the streaming chat client drives as SSE frames arrive. `onError` carries an *in-band*
@@ -453,6 +565,7 @@ export interface AdminUserRow {
   analyses_count: number;
   conversations_count: number;
   is_admin: boolean;
+  is_clinician: boolean;
 }
 export interface AdminUsersResponse {
   users: AdminUserRow[];
@@ -768,6 +881,19 @@ export const api = {
     return (await res.json()) as { ok: boolean };
   },
 
+  // Grant/revoke another user's clinician role (admin-only). Unlike admin, no self-guard: an admin
+  // may grant or revoke clinician on their own row.
+  async setUserClinician(userId: string, makeClinician: boolean): Promise<{ ok: boolean }> {
+    const url = `/api/admin/users/${encodeURIComponent(userId)}/role`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ make_clinician: makeClinician }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
+    return (await res.json()) as { ok: boolean };
+  },
+
   // The movements the pipeline can actually analyse, derived server-side from the detector
   // registry. Backs the /movements cards and the studio selector.
   getMovements: () =>
@@ -885,6 +1011,84 @@ export const api = {
       `/api/plans/${encodeURIComponent(planId)}/items/${encodeURIComponent(itemId)}`,
       "DELETE"
     ),
+
+  // --- Care loop: check-ins + therapist links -------------------------------
+
+  createCheckin: (body: CheckinCreate) => sendJSON<Checkin>("/api/checkins", "POST", body),
+
+  // `planId` is optional only to match the backend's own query contract; every in-app caller
+  // today always scopes to one plan.
+  listCheckins: (planId?: string, limit?: number) => {
+    const params = new URLSearchParams();
+    if (planId) params.set("plan_id", planId);
+    if (limit !== undefined) params.set("limit", String(limit));
+    const qs = params.toString();
+    return getJSON<{ checkins: Checkin[] }>(`/api/checkins${qs ? `?${qs}` : ""}`).then(
+      (r) => r.checkins
+    );
+  },
+
+  // Accept a therapist's invite code, linking the caller as their patient. Thrown as ApiError
+  // (carrying the HTTP status), NOT the generic sendJSON Error: the UI maps 404 (bad/expired
+  // code) and 400 (the caller's own code) to distinct, localized copy, and doing that off the
+  // status is more robust than pattern-matching the server's English detail text.
+  async careAccept(code: string): Promise<{ link: unknown }> {
+    const res = await fetch("/api/care/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ code }),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new ApiError(
+        (detail as { detail?: string }).detail || `Care accept failed (${res.status})`,
+        res.status
+      );
+    }
+    return (await res.json()) as { link: unknown };
+  },
+
+  careClinicians: () =>
+    getJSON<{ clinicians: CareClinician[] }>("/api/care/clinicians").then((r) => r.clinicians),
+
+  careUnlink: (linkId: string) =>
+    sendJSON<{ link: unknown }>(`/api/care/links/${encodeURIComponent(linkId)}`, "DELETE"),
+
+  // --- Clinician dashboard (WP3) ---------------------------------------------
+  // Every route but `clinicStatus` is clinician-only server-side (403 otherwise); `clinicStatus`
+  // itself answers truthfully for any signed-in caller, the same split as `adminStatus`.
+
+  clinicStatus: () => getJSON<{ is_clinician: boolean }>("/api/clinic/status"),
+
+  clinicPatients: () =>
+    getJSON<{ patients: ClinicPatientSummary[] }>("/api/clinic/patients").then((r) => r.patients),
+
+  // 404 for a patient id the caller isn't linked to. Thrown by `getJSON` as a plain Error whose
+  // message starts with the status code (it is generated client-side, not the server's English
+  // detail), so callers branch on `err.message.startsWith("404")` rather than needing an ApiError.
+  clinicPatient: (id: string) =>
+    getJSON<ClinicPatientDetail>(`/api/clinic/patients/${encodeURIComponent(id)}`),
+
+  clinicCreateInvite: () => sendJSON<ClinicInvite>("/api/clinic/invites", "POST"),
+
+  clinicInvites: () =>
+    getJSON<{ invites: ClinicInvite[] }>("/api/clinic/invites").then((r) => r.invites),
+
+  // Revokes an accepted link OR a still-pending invite — an invite's id IS its link id.
+  clinicRevokeLink: (linkId: string) =>
+    sendJSON<{ link: unknown }>(`/api/clinic/links/${encodeURIComponent(linkId)}`, "DELETE"),
+
+  // Assign a plan to a linked patient: same body as `createPlan`, but the new plan is owned by the
+  // patient and stamped `assigned_by` = the caller. 404 if the caller isn't linked to `patientId`.
+  clinicAssignPlan: (
+    patientId: string,
+    body: { name: string; notes?: string | null; template_key?: string; items?: NewPlanItem[] }
+  ) => sendJSON<Plan>(`/api/clinic/patients/${encodeURIComponent(patientId)}/plans`, "POST", body),
+
+  // Acknowledge one flagged check-in. 404 if it doesn't exist (or isn't the caller's patient's),
+  // 409 if it isn't flagged.
+  clinicAckFlag: (checkinId: string) =>
+    sendJSON<{ checkin: Checkin }>(`/api/clinic/flags/${encodeURIComponent(checkinId)}/ack`, "PATCH"),
 
   // Grounded follow-up chat about an analysis, streamed as Server-Sent Events (requires a signed-in
   // session; 401 otherwise). `messages` is the conversation so far, oldest first, with the new user

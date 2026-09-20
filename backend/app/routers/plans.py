@@ -59,11 +59,19 @@ class TemplateItem(BaseModel):
 class PlanTemplate(BaseModel):
     """A built-in starting point. ``name``/``description`` are English fallbacks; the frontend
     renders its own localized strings off ``key`` and sends the user-visible name back on create,
-    so a plan created in Chinese is stored in Chinese."""
+    so a plan created in Chinese is stored in Chinese.
+
+    ``category`` (WP4) lets the picker group the conservative, therapist-style routines separately
+    from the self-serve ones -- it is metadata about the TEMPLATE, never copied onto the plan or
+    its items, so it has no bearing on ``_build_plan_items`` or the ``assigned_by`` column a
+    clinician-assigned plan actually carries. Defaults to ``"fitness"`` so every template literal
+    that predates WP4 needs no edit.
+    """
 
     key: str
     name: str
     description: str
+    category: Literal["rehab", "fitness"] = "fitness"
     items: list[TemplateItem]
 
 
@@ -75,7 +83,65 @@ def _t(day: int, movement: str, sets: int, reps: int) -> TemplateItem:
 # a user who starts from a template can run the whole thing through the studio -- the two catalog
 # movements without a detector (Jumping Jacks, High Knee) are addable by hand but are not put in
 # anyone's path by default.
+#
+# The three "rehab" templates (WP4) are deliberately FIRST and deliberately conservative: 2 sets
+# instead of the fitness templates' 3-4, and only movements a clinician would recognise as low-load
+# strengthening/mobility work. They exist so a therapist assigning a plan through the clinic
+# dashboard (``POST /api/clinic/patients/{id}/plans``, which reuses this same ``TEMPLATES`` list via
+# ``_build_plan_items``) has a conservative starting point rather than having to hand-build one from
+# the fitness catalog every time.
 TEMPLATES: list[PlanTemplate] = [
+    PlanTemplate(
+        key="knee_rehab",
+        name="Knee rehab",
+        description="Low-load knee and hip strengthening, three short sessions a week.",
+        category="rehab",
+        items=[
+            _t(1, "Shoulder Bridge", 2, 10),
+            _t(1, "Leg Abduction", 2, 10),
+            _t(1, "Squat", 2, 10),
+            _t(3, "Shoulder Bridge", 2, 10),
+            _t(3, "Leg Abduction", 2, 10),
+            _t(3, "Lunge", 2, 10),
+            _t(5, "Squat", 2, 10),
+            _t(5, "Lunge", 2, 10),
+            _t(5, "Shoulder Bridge", 2, 10),
+        ],
+    ),
+    PlanTemplate(
+        key="shoulder_rehab",
+        name="Shoulder rehab",
+        description="Scapular control and shoulder mobility, three short sessions a week.",
+        category="rehab",
+        items=[
+            _t(1, "Arm Abduction", 2, 10),
+            _t(1, "Band Pull Apart", 2, 10),
+            _t(1, "Row", 2, 10),
+            _t(3, "Arm VW", 2, 10),
+            _t(3, "Band Pull Apart", 2, 10),
+            _t(3, "Arm Abduction", 2, 10),
+            _t(5, "Row", 2, 10),
+            _t(5, "Arm VW", 2, 10),
+            _t(5, "Band Pull Apart", 2, 10),
+        ],
+    ),
+    PlanTemplate(
+        key="low_back_core",
+        name="Low back & core",
+        description="Trunk control and a light hip hinge, three short sessions a week.",
+        category="rehab",
+        items=[
+            _t(1, "Shoulder Bridge", 2, 10),
+            _t(1, "Sit-up", 2, 10),
+            _t(1, "Torso Twist", 2, 10),
+            _t(3, "Deadlift", 2, 8),
+            _t(3, "Shoulder Bridge", 2, 10),
+            _t(3, "Torso Twist", 2, 10),
+            _t(5, "Sit-up", 2, 10),
+            _t(5, "Shoulder Bridge", 2, 10),
+            _t(5, "Deadlift", 2, 8),
+        ],
+    ),
     PlanTemplate(
         key="full_body_starter",
         name="Full-body starter",
@@ -258,12 +324,15 @@ def list_plans(user: CurrentUser = Depends(get_current_user)) -> dict:
     return {"plans": plans_store.list_plans(token=user.token, user_id=user.id)}
 
 
-@router.post("/plans", status_code=201)
-def create_plan(
-    body: CreatePlanBody,
-    user: CurrentUser = Depends(get_current_user),
-) -> dict:
-    """Create a plan, either empty, from explicit items, or copied from a built-in template."""
+def _build_plan_items(body: CreatePlanBody) -> list[dict[str, Any]]:
+    """Turn a create-plan body into the item rows ``plans_store.create_plan`` expects: either a
+    copy of a built-in template's items, or the caller's own explicit items.
+
+    Shared by ``POST /api/plans`` and ``POST /api/clinic/patients/{id}/plans`` (the clinician
+    assign-a-plan route) so the template lookup, the 400 for an unknown key, and movement
+    canonicalization live in exactly one place -- two independent copies of this would have to be
+    kept in lockstep by hand every time a template gains a rule.
+    """
     items: list[dict[str, Any]]
     if body.template_key is not None:
         template = _TEMPLATES_BY_KEY.get(body.template_key)
@@ -295,14 +364,22 @@ def create_plan(
             }
             for it in body.items
         ]
+    return items
 
+
+@router.post("/plans", status_code=201)
+def create_plan(
+    body: CreatePlanBody,
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """Create a plan, either empty, from explicit items, or copied from a built-in template."""
     return plans_store.create_plan(
         token=user.token,
         user_id=user.id,
         name=body.name.strip(),
         notes=body.notes,
         template_key=body.template_key,
-        items=items,
+        items=_build_plan_items(body),
     )
 
 
@@ -482,8 +559,21 @@ def update_item(
         # could pin someone else's analysis id onto its own plan item. It leaks nothing on its own
         # (reading that analysis still goes through the RLS-scoped GET), but a plan item claiming
         # an analysis its owner cannot open is a broken link we can cheaply refuse.
+        #
+        # The row's OWN `user_id` must also equal the caller: the clinic migration's
+        # `analyses_clinician_select` policy lets a linked clinician's JWT read `get_analysis` on a
+        # PATIENT's analysis too (so the clinician dashboard can open a report), which means
+        # `get_analysis(...) is not None` alone no longer proves ownership. Without this a
+        # clinician editing a patient's plan item (via `PATCH /api/clinic/...`, out of WP1's scope,
+        # or simply this same endpoint if a clinician ever reached it) could link an analysis that
+        # is the PATIENT's, not the caller's own -- harmless today since only the caller's own plan
+        # items are reachable here, but the invariant this check exists for ("an analysis_id on an
+        # item was verified to belong to whoever wrote it") stops being true without it.
         resolved = str(uuid.UUID(analysis_id)) if _is_uuid(analysis_id) else None
-        if resolved is None or store.get_analysis(token=user.token, analysis_id=resolved) is None:
+        analysis_row = (
+            store.get_analysis(token=user.token, analysis_id=resolved) if resolved else None
+        )
+        if analysis_row is None or str(analysis_row.get("user_id")) != user.id:
             raise HTTPException(status_code=400, detail=f"No analysis '{analysis_id}'.")
         fields["analysis_id"] = resolved
 
