@@ -101,14 +101,13 @@ def run_daily_job(
 
     client = line_bot._service_client()
 
+    # Gather FIRST, claim second. `claim_job_run` burns the day permanently, so claiming before the
+    # reads means one transient Supabase failure costs that day's reminders entirely: the 502 tells
+    # the workflow to retry, and the retry gets `already_ran`. Reading first narrows the
+    # unrecoverable window to the pushes themselves, which is as far as an at-most-once design can
+    # go without per-message state. The claim is still the one atomic gate, so two concurrent runs
+    # can both read but only one sends.
     try:
-        if not force:
-            claim_response = client.rpc(
-                "claim_job_run", {"p_job": _JOB_NAME, "p_run_date": date_str}
-            ).execute()
-            if getattr(claim_response, "data", None) is not True:
-                return {"ran": False, "reason": "already_ran", "date": date_str}
-
         reminder_rows = _rpc_rows(
             client, "daily_patient_reminders", {"p_since": since.isoformat()}
         )
@@ -117,6 +116,13 @@ def run_daily_job(
             "daily_clinician_summaries",
             {"p_since": since.isoformat(), "p_now": now.isoformat()},
         )
+
+        if not force:
+            claim_response = client.rpc(
+                "claim_job_run", {"p_job": _JOB_NAME, "p_run_date": date_str}
+            ).execute()
+            if getattr(claim_response, "data", None) is not True:
+                return {"ran": False, "reason": "already_ran", "date": date_str}
     except Exception as exc:  # noqa: BLE001 — a scheduler call must degrade to a clear 502, never a 500.
         logger.exception("daily job: RPC call failed")
         raise HTTPException(status_code=502, detail="Daily job failed.") from exc

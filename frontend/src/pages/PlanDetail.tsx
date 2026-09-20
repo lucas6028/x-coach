@@ -650,7 +650,14 @@ export default function PlanDetail() {
         planItemId={checkinTarget?.itemId}
         analysisId={checkinTarget?.analysisId}
         movementLabel={checkinTarget ? movementLabel(t, checkinTarget.movement) : undefined}
-        onClose={() => setCheckinTarget(null)}
+        // Refresh on CLOSE, not only on submit: a flagged check-in keeps the dialog open on its
+        // warning panel and deliberately never fires `onSubmitted`, so this is the only moment the
+        // banner can learn about the one check-in it most needs to show. The extra read after a
+        // skip/cancel is one `limit=1` row.
+        onClose={() => {
+          setCheckinTarget(null);
+          refreshLatestCheckin();
+        }}
         onSubmitted={() => {
           setCheckinTarget(null);
           refreshLatestCheckin();

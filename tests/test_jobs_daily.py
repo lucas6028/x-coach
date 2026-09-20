@@ -132,8 +132,12 @@ class JobsDailyRunTests(unittest.TestCase):
         self.assertEqual(body["reason"], "already_ran")
         self.assertIn("date", body)
         push_mock.assert_not_called()
-        # Only the claim RPC ran -- no reminders/summaries fetched once already claimed today.
-        self.assertEqual([c[0] for c in client.calls], ["claim_job_run"])
+        # The two reads run BEFORE the claim (see the router's ordering comment), so the claim is
+        # the last call; nothing is pushed once it comes back false.
+        self.assertEqual(
+            [c[0] for c in client.calls],
+            ["daily_patient_reminders", "daily_clinician_summaries", "claim_job_run"],
+        )
 
     def test_force_skips_the_claim(self) -> None:
         resp, client, push_mock = self._post(
@@ -227,6 +231,20 @@ class JobsDailyRunTests(unittest.TestCase):
              mock.patch.object(line_bot, "push", return_value=True):
             resp = self.client.post("/api/jobs/daily", headers={"X-Job-Token": _TOKEN})
         self.assertEqual(resp.status_code, 502)
+
+    def test_a_failed_read_leaves_the_day_unclaimed(self) -> None:
+        """`claim_job_run` burns the day permanently, so a transient read failure must not reach it.
+
+        Claiming first meant one flaky Supabase call cost that day's reminders outright: the 502
+        tells the workflow to retry, and the retry would have found the day already claimed.
+        """
+        client = _NoTableClient(_default_rpc_data(), raise_on={"daily_clinician_summaries"})
+        with mock.patch.object(jobs_router, "get_settings", return_value=_settings()), \
+             mock.patch.object(line_bot, "_service_client", return_value=client), \
+             mock.patch.object(line_bot, "push", return_value=True):
+            resp = self.client.post("/api/jobs/daily", headers={"X-Job-Token": _TOKEN})
+        self.assertEqual(resp.status_code, 502)
+        self.assertNotIn("claim_job_run", [c[0] for c in client.calls])
 
     def test_claim_rpc_error_is_502(self) -> None:
         client = _NoTableClient(_default_rpc_data(), raise_on={"claim_job_run"})

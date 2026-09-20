@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "./renderWithProviders";
 import { api, type Checkin, type Plan, type PlanItem } from "../api";
@@ -89,6 +89,30 @@ describe("PlanDetail — red-flag banner", () => {
     renderWithProviders(<PlanDetail />);
     await screen.findByRole("tabpanel");
     expect(screen.queryByText(/needs attention/i)).not.toBeInTheDocument();
+  });
+
+  // A flagged check-in keeps the dialog open on its warning panel and never fires `onSubmitted`
+  // (components.CheckinDialog.test.tsx pins that), so the page has to pick the new state up when
+  // the dialog closes. Without that, the banner for the one check-in that matters most only
+  // appeared after a reload.
+  it("shows the banner after a flagged check-in, once the dialog is closed", async () => {
+    const flagged = checkin();
+    vi.spyOn(api, "listCheckins")
+      .mockResolvedValueOnce([]) // initial load: nothing to warn about
+      .mockResolvedValue([flagged]); // after the check-in was recorded
+    vi.spyOn(api, "createCheckin").mockResolvedValue(flagged);
+
+    renderWithProviders(<PlanDetail />);
+    await userEvent.click(await screen.findByRole("button", { name: /report today's status/i }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "8" }));
+    await userEvent.click(within(dialog).getByRole("button", { name: /^submit$/i }));
+    // Still open, on its own warning — the page banner cannot have refreshed yet.
+    expect(await screen.findByText(/this check-in needs attention/i)).toBeInTheDocument();
+
+    const closeButtons = screen.getAllByRole("button", { name: /close/i });
+    await userEvent.click(closeButtons[closeButtons.length - 1]);
+    expect(await screen.findByText(/your last check-in needs attention/i)).toBeInTheDocument();
   });
 
   it("opens the check-in dialog from the item's report button", async () => {
