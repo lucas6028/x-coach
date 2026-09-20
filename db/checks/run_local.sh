@@ -13,7 +13,10 @@ root="$(cd "$here/../.." && pwd)"
 name="xcoach-migration-check"
 
 docker rm -f "$name" >/dev/null 2>&1 || true
-docker run -d --name "$name" -e POSTGRES_PASSWORD=postgres postgres:16-alpine >/dev/null
+# `trust`, not a password: the container publishes no ports and is only ever reached through
+# `docker exec` below, so there is nothing for a password to protect -- and no password-shaped
+# literal for a secret scanner to flag.
+docker run -d --name "$name" -e POSTGRES_HOST_AUTH_METHOD=trust postgres:16-alpine >/dev/null
 trap 'docker rm -f "$name" >/dev/null 2>&1 || true' EXIT
 
 # TCP, not the socket: the image's init phase runs a socket-only server, so 127.0.0.1 answering
