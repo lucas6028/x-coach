@@ -268,8 +268,15 @@ Descriptive only, never tested and never quoted as a headline:
   branch calibrates to a near-constant, so this measures what averaging with a branch
   that carries no information, plus re-thresholding, does to the pose score. Report
   `fused_perm − nlf_cal` and `fused_perm − nlf`. If the mean `fused_perm − nlf_cal` over
-  the three runs exceeds +0.01, the pipeline is audited for a leak before the primary is
-  read.
+  the three runs exceeds +0.01, a fixed audit runs before the primary is read. The audit
+  adds a constant-branch arm `fused_const`, in which the second branch is the fold's
+  validation positive rate for every row: it can carry no information, so
+  `fused_const − nlf_cal` isolates what halving the probability scale and re-thresholding
+  do. It then reruns the permuted control on 20 further permutation seeds (1001–1020,
+  model seeds assigned cyclically 42, 7, 1234). The audit clears if the mean
+  `fused_perm − fused_const` over those 20 runs is at most +0.01. Otherwise the pipeline
+  is treated as leaking and row 0 of the interpretation table applies until it is
+  repaired. There is no manual override.
 - Both P10 sensitivities: P10 scored as a held-out subject, and P10 removed from training
   using `folds_no_p10.json`.
 - **Historical-baseline check** (never blocks). Rerun the stock
@@ -293,7 +300,7 @@ repaired and the repair is logged.
 | Inert trainer change | A/B at one commit: exporting trainer against the unmodified trainer, both arms, all folds and seeds, bit-identical held-out probabilities and thresholds | Pending |
 | Validation export integrity | One validation row per validation-subject sample per arm, fold and seed; `person_id` equals the fold's validation subject; `find_best_threshold` on the exported validation probabilities returns the stored threshold | Pending |
 | Fold purity | Platt parameters and fused thresholds use only the fold's validation subject; the held-out subject's rows never reach a fit; asserted in code and unit-tested | Pending |
-| Degenerate-share identity | At `nlf` share 1.0 the fused probabilities are bitwise equal to the calibrated `nlf` probabilities, and at share 0.0 to calibrated `vm16`; wherever the Platt slope is positive, the calibrated ranking equals the raw ranking on validation and held-out rows | Pending |
+| Degenerate-share identity | At `nlf` share 1.0 the fused probabilities are bitwise equal to the calibrated `nlf` probabilities, and at share 0.0 to calibrated `vm16`; wherever the Platt slope is positive, calibration produces zero rank inversions on validation and held-out rows, and the calibrated ranking equals the raw ranking over rows whose raw probability lies strictly inside the calibrator's clip range (1e-6, 1 − 1e-6); rows outside it are counted and reported | Pending |
 | Fused OOF integrity | One fused prediction per sample and seed; branches aligned by `sample_id`, never by row order; branch labels agree; held-out subject equals `test_subject` | Pending |
 | Position reproduction | `position_rule_loso` returns 0.7309; 61 mixed and 34 interleaved sessions; every arm's position-balanced statistic covers exactly 34 sessions with zero unmatched rows | Pending |
 
@@ -325,11 +332,21 @@ update `scripts/rehab24/README.md` with the verified commands.
 
 ## Deviations from the plan
 
-None at drafting time. Three differences from the identity plan's fusion clause are
-registered here, not deviations of this plan: `vm16` stands in for the historical
-`full_frame_letterbox` features, the `nlf_cal` guard is added, and the position control is
-added. Log every later change with its date, reason, whether held-out scores were already
-visible, and its effect on interpretation.
+Three differences from the identity plan's fusion clause are registered here, not
+deviations of this plan: `vm16` stands in for the historical `full_frame_letterbox`
+features, the `nlf_cal` guard is added, and the position control is added. Log every later
+change with its date, reason, whether held-out scores were already visible, and its effect
+on interpretation.
+
+Amendments made after the plan commit (`6a9338e2`) and before any registered fit. No fused
+score and no full-cohort branch score existed when they were made.
+
+| Date | Item | Change | Reason | Effect on interpretation |
+| --- | --- | --- | --- | --- |
+| 2026-09-20 | Degenerate-share identity gate | Ranking equality is required only over rows inside the calibrator's clip range; zero rank inversions is required over all rows; clipped rows are counted | `late_fusion.logit` clips at 1e-6, so two distinct saturated probabilities tie after calibration and strict equality would fail for a harmless reason | None; the gate still fails on any reordering |
+| 2026-09-20 | Inert trainer change gate | The unmodified side of the A/B is the trainer file as of commit `6a9338e2`, loaded from git; every A/B cell and every fit must run on a clean tree, at the commit `init` recorded, on CPU | The first implementation compared the new trainer with its export flag off and on, which shows only that the flag is inert | None; this is the comparison the gate already described |
+| 2026-09-20 | Uninformative-branch audit | When the +0.01 trigger fires, the report withholds the primary, verdict and secondaries on disk until the audit clears. The audit is now a fixed procedure with a numeric rule (constant-branch arm, 20 further permutation seeds, clear at mean `fused_perm − fused_const` ≤ +0.01) and no manual override | The plan named a trigger but not what the audit was. On the synthetic test cohort the control reached +0.0139 with no leak, because halving the probability scale changes which threshold candidates win; a constant branch reproduces that effect without any information | None on the primary; a leak now has an objective definition |
+| 2026-09-20 | Implementation smoke | Before the code was committed, `init`, the feature check and a one-fold A/B (subject P1, seed 42, both branches, 4 fits) were run to validate the code, then the run directory was deleted | Code validation | The smoke compared held-out probabilities for bit-identity only; no metric was computed from them. The registered run starts from a fresh `init` after the code commit |
 
 ## Not supported
 
@@ -354,16 +371,28 @@ feature integrity → trainer A/B → refit both branches with validation export
 export and purity gates → fuse → remaining gates → report. Held-out fused scores are not
 opened before the gates that precede them pass.
 
-Proposed commands, to be confirmed once implemented:
+Commands, in order. The CLI refuses to run on uncommitted protocol files, and this note is
+one of them: from `init` until both `fuse` calls finish, no commit, branch switch or edit
+to this note may happen, or the run needs a new run id. Deviations that arise during the
+run are logged in the run's `deviations.json` and copied into the results note.
 
 ```powershell
 .venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py init --run-id <run_id>
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py features --run-id <run_id>
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py ab-check --run-id <run_id>
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py baseline-check --run-id <run_id>
 .venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id <run_id> --arm nlf
 .venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id <run_id> --arm vm16
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id <run_id> --arm nlf --no-p10-training
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id <run_id> --arm vm16 --no-p10-training
 .venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fuse --run-id <run_id>
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fuse --run-id <run_id> --no-p10-training
 .venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py gates --run-id <run_id>
 .venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py report --run-id <run_id>
 ```
+
+`baseline-check` is the historical-baseline check and never blocks. The exact flags are
+those of `scripts/rehab24/README.md`, which is verified against the CLI.
 
 Artifacts under `data/REHAB24-6/processed/pose_video_fusion/<run_id>/`: `run_config.json`,
 `folds.json`, `oof/<arm>/seed<seed>.csv`, `oof_val/<arm>/seed<seed>.csv`,
