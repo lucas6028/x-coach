@@ -22,6 +22,7 @@ preserving.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import types
 import unittest
@@ -150,6 +151,24 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("consecutive days", prompt)
         self.assertIn("coverage a tool result just reported", prompt)
 
+    def test_rehab_block_absent_by_default(self) -> None:
+        prompt = plan_agent._system_prompt(lang="en", plan_scoped=True)
+        self.assertNotIn("REHAB MODE", prompt)
+
+    def test_rehab_block_present_in_english_when_assigned(self) -> None:
+        prompt = plan_agent._system_prompt(lang="en", plan_scoped=True, rehab=True)
+        self.assertIn("REHAB MODE", prompt)
+        self.assertIn("NEVER diagnose", prompt)
+        self.assertIn("only the therapist may", prompt)
+        self.assertIn("contact their therapist", prompt)
+
+    def test_rehab_block_present_in_zh_hant_when_assigned(self) -> None:
+        prompt = plan_agent._system_prompt(lang="zh-Hant", plan_scoped=True, rehab=True)
+        self.assertIn("復健模式", prompt)
+        self.assertIn("絕不做出診斷", prompt)
+        self.assertIn("只有治療師能調整", prompt)
+        self.assertIn("聯繫治療師", prompt)
+
 
 class PlanToolsShapeTests(unittest.TestCase):
     def test_exactly_the_six_tools(self) -> None:
@@ -171,8 +190,10 @@ class _DispatcherTestCase(unittest.TestCase):
         self.addCleanup(patcher.stop)
         patcher.start()
 
-    def _dispatcher(self, plan_id: str | None = None) -> plan_agent._PlanDispatcher:
-        return plan_agent._PlanDispatcher(token="tok", user_id="u1", plan_id=plan_id)
+    def _dispatcher(
+        self, plan_id: str | None = None, rehab: bool = False
+    ) -> plan_agent._PlanDispatcher:
+        return plan_agent._PlanDispatcher(token="tok", user_id="u1", plan_id=plan_id, rehab=rehab)
 
     def _create(self, dispatcher: plan_agent._PlanDispatcher, **overrides) -> dict:
         args = {"name": "My week", "items": [{"day_index": 1, "movement": "Squat"}]}
@@ -600,6 +621,67 @@ class PlanCoverageTests(_DispatcherTestCase):
         self.assertGreater(len(body["coverage"]["gaps"]), 0)
 
 
+class RehabModeTests(_DispatcherTestCase):
+    """WP4: every write tool refuses on an assigned plan, and performs NO write."""
+
+    def _assigned(self) -> tuple[plan_agent._PlanDispatcher, str]:
+        plan = plans_store.create_plan(
+            token="tok",
+            user_id="u1",
+            name="Knee rehab",
+            assigned_by="clinician-1",
+            items=[{"day_index": 1, "movement": "Squat"}],
+        )
+        item_id = plan["items"][0]["id"]
+        d = plan_agent._PlanDispatcher(token="tok", user_id="u1", plan_id=plan["id"], rehab=True)
+        return d, item_id
+
+    def test_add_item_refuses_and_writes_nothing(self) -> None:
+        d, _item_id = self._assigned()
+        before = copy.deepcopy(self.db.tables)
+        out = d.dispatch("add_item", {"day_index": 2, "movement": "Row"})
+        self.assertIsNone(out.payload)
+        self.assertEqual(json.loads(out.text)["error"], plan_agent.REHAB_WRITE_REFUSAL)
+        self.assertEqual(self.db.tables, before)
+
+    def test_update_item_refuses_and_writes_nothing(self) -> None:
+        d, item_id = self._assigned()
+        before = copy.deepcopy(self.db.tables)
+        out = d.dispatch("update_item", {"item_id": item_id, "sets": 5})
+        self.assertIsNone(out.payload)
+        self.assertEqual(json.loads(out.text)["error"], plan_agent.REHAB_WRITE_REFUSAL)
+        self.assertEqual(self.db.tables, before)
+
+    def test_remove_item_refuses_and_writes_nothing(self) -> None:
+        d, item_id = self._assigned()
+        before = copy.deepcopy(self.db.tables)
+        out = d.dispatch("remove_item", {"item_id": item_id})
+        self.assertIsNone(out.payload)
+        self.assertEqual(json.loads(out.text)["error"], plan_agent.REHAB_WRITE_REFUSAL)
+        self.assertEqual(self.db.tables, before)
+
+    def test_update_plan_refuses_and_writes_nothing(self) -> None:
+        d, _item_id = self._assigned()
+        before = copy.deepcopy(self.db.tables)
+        out = d.dispatch("update_plan", {"name": "Renamed"})
+        self.assertIsNone(out.payload)
+        self.assertEqual(json.loads(out.text)["error"], plan_agent.REHAB_WRITE_REFUSAL)
+        self.assertEqual(self.db.tables, before)
+
+    def test_get_plan_still_works_on_an_assigned_plan(self) -> None:
+        d, _item_id = self._assigned()
+        out = d.dispatch("get_plan", {})
+        self.assertEqual(json.loads(out.text)["plan"]["name"], "Knee rehab")
+
+    def test_an_unassigned_plan_behaves_as_before(self) -> None:
+        d = self._dispatcher(rehab=False)
+        out = d.dispatch("create_plan", {"name": "W", "items": [{"day_index": 1, "movement": "Squat"}]})
+        self.assertIsNotNone(out.payload)
+        out = d.dispatch("add_item", {"day_index": 2, "movement": "Row"})
+        self.assertIsNotNone(out.payload)
+        self.assertEqual(len(out.payload["plan"]["items"]), 2)
+
+
 # ------------------------------------------------------------------------------------ loop + frames
 
 
@@ -716,6 +798,28 @@ class LoopFrameTests(unittest.TestCase):
         self.assertEqual(tool_dones[0]["plan"]["id"], plan["id"])
         done = next(d for e, d in events if e == "done")
         self.assertEqual(done["plan_id"], plan["id"])
+
+    def test_rehab_mode_is_detected_from_an_assigned_plan_and_gates_a_write_tool(self) -> None:
+        plan = plans_store.create_plan(
+            token="tok",
+            user_id="u1",
+            name="Knee rehab",
+            assigned_by="clinician-1",
+            items=[{"day_index": 1, "movement": "Squat"}],
+        )
+        add_args = json.dumps({"day_index": 2, "movement": "Row"})
+        fake, calls = self._turns(
+            ([], [{"id": "c1", "name": "add_item", "arguments": add_args}]),
+            (["Ask your therapist to adjust it."], []),
+        )
+        events = self._run(fake, plan_id=plan["id"], lang="en")
+        # the rehab block reached the system prompt, in the requested language
+        self.assertIn("REHAB MODE", calls[0]["messages"][0]["content"])
+        tool_dones = [d for e, d in events if e == "tool_done"]
+        self.assertNotIn("plan", tool_dones[0])  # refused: no frame plan shipped
+        # and the underlying store call never ran: the plan still has exactly its one seed item.
+        stored = plans_store.get_plan(token="tok", plan_id=plan["id"], user_id="u1")
+        self.assertEqual(len(stored["items"]), 1)
 
     def test_lang_switches_the_prompt_language(self) -> None:
         fake, calls = self._turns((["ok"], []))

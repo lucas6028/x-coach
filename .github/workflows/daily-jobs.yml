@@ -1,0 +1,41 @@
+# Nightly care-loop job: LINE reminders to patients who have not checked in on their assigned plan
+# today, plus a one-line summary to each clinician (see backend/app/routers/jobs.py and
+# db/migrations/20260927000000_daily_jobs.sql). The endpoint is idempotent per Asia/Taipei date,
+# so a retry or a manual run on the same day does not push twice unless `force` is set.
+#
+# Secrets: DAILY_JOB_API_BASE_URL (the public app URL; /api is proxied to the backend) and
+# JOB_TOKEN (must equal the backend's JOB_TOKEN). Until both exist the job skips instead of failing.
+name: daily-jobs
+
+on:
+  schedule:
+    - cron: "0 12 * * *" # 20:00 Asia/Taipei
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run even if today's job already ran"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger the daily care-loop job
+        env:
+          API_BASE_URL: ${{ secrets.DAILY_JOB_API_BASE_URL }}
+          JOB_TOKEN: ${{ secrets.JOB_TOKEN }}
+          FORCE: ${{ inputs.force && '1' || '0' }}
+        run: |
+          if [ -z "$API_BASE_URL" ] || [ -z "$JOB_TOKEN" ]; then
+            echo "DAILY_JOB_API_BASE_URL or JOB_TOKEN is not set; skipping."
+            exit 0
+          fi
+          # Scale-to-zero cold starts can take a while; the endpoint's per-day claim makes the
+          # retries safe.
+          curl --fail-with-body -sS --retry 3 --retry-delay 20 --max-time 120 \
+            -X POST "$API_BASE_URL/api/jobs/daily?force=$FORCE" \
+            -H "X-Job-Token: $JOB_TOKEN"

@@ -4,6 +4,7 @@ import {
   GearSix,
   MagnifyingGlass,
   Sparkle,
+  Stethoscope,
   UserCircle,
   X,
   type Icon,
@@ -13,18 +14,22 @@ import { useI18n } from "../../lib/i18n";
 import GeneralPane from "./GeneralPane";
 import ModelPane from "./ModelPane";
 import AccountPane from "./AccountPane";
+import TherapistSection from "./TherapistSection";
 
-type SectionId = "general" | "account" | "model";
+type SectionId = "general" | "account" | "model" | "therapist";
 
 // Two groups, as in the reference rail: the account's own settings, then what the user customises
 // about the app. Every x-coach setting fits one of the two — we don't carry Claude's Billing/Usage
-// categories, and an empty pane reads worse than a shorter rail.
+// categories, and an empty pane reads worse than a shorter rail. "My therapist" (the WP2 care
+// loop's invite/link/unlink UI) sits beside Account: it is account-level data-sharing, not
+// something the user customises about the app itself.
 const GROUPS: { labelKey: string; items: { id: SectionId; labelKey: string; Icon: Icon }[] }[] = [
   {
     labelKey: "settings.groupSettings",
     items: [
       { id: "general", labelKey: "settings.general", Icon: GearSix },
       { id: "account", labelKey: "settings.account", Icon: UserCircle },
+      { id: "therapist", labelKey: "settings.therapist", Icon: Stethoscope },
     ],
   },
   {
@@ -178,6 +183,7 @@ export default function SettingsDialog({ onClose }: { onClose: () => void }) {
           <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-10 pt-16 sm:px-8 sm:pb-12 sm:pt-20">
             {section === "general" && <GeneralPane user={user} />}
             {section === "account" && <AccountPane />}
+            {section === "therapist" && <TherapistSection />}
             {section === "model" && <ModelPane />}
           </div>
         </div>

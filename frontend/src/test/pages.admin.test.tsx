@@ -88,6 +88,7 @@ const SAMPLE_USERS: AdminUserRow[] = [
     analyses_count: 4,
     conversations_count: 2,
     is_admin: true,
+    is_clinician: false,
   },
   {
     id: "u2",
@@ -97,6 +98,7 @@ const SAMPLE_USERS: AdminUserRow[] = [
     analyses_count: 3,
     conversations_count: 1,
     is_admin: false,
+    is_clinician: true,
   },
 ];
 
@@ -511,6 +513,45 @@ describe("AdminUsers", () => {
     const revoke = await screen.findByRole("button", { name: "Revoke admin" });
     expect(revoke).toBeDisabled();
   });
+
+  it("renders the clinician toggle state from is_clinician", async () => {
+    renderAdmin("/admin/users");
+    // u1 (self) is not a clinician yet; u2 already is.
+    expect(await screen.findByRole("button", { name: "Make clinician" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Revoke clinician" })).toBeInTheDocument();
+  });
+
+  it("grants clinician on a user with {make_clinician: true}", async () => {
+    const setClinician = vi.spyOn(api, "setUserClinician").mockResolvedValue({ ok: true });
+    renderAdmin("/admin/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Make clinician" }));
+    await waitFor(() => expect(setClinician).toHaveBeenCalledWith("u1", true));
+  });
+
+  it("revokes clinician on a user with {make_clinician: false}", async () => {
+    const setClinician = vi.spyOn(api, "setUserClinician").mockResolvedValue({ ok: true });
+    renderAdmin("/admin/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke clinician" }));
+    await waitFor(() => expect(setClinician).toHaveBeenCalledWith("u2", false));
+  });
+
+  it("surfaces an inline row error when the clinician toggle fails", async () => {
+    vi.spyOn(api, "setUserClinician").mockRejectedValue(new Error("nope"));
+    renderAdmin("/admin/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Revoke clinician" }));
+    expect(await screen.findByText("Couldn't update this user's role.")).toBeInTheDocument();
+  });
+
+  // Unlike the admin toggle, the signed-in admin's own row is NOT self-guarded for clinician: the
+  // button stays enabled and the click goes through.
+  it("allows the signed-in admin to toggle clinician on their own row", async () => {
+    const setClinician = vi.spyOn(api, "setUserClinician").mockResolvedValue({ ok: true });
+    renderAdmin("/admin/users");
+    const makeClinician = await screen.findByRole("button", { name: "Make clinician" });
+    expect(makeClinician).not.toBeDisabled();
+    fireEvent.click(makeClinician);
+    await waitFor(() => expect(setClinician).toHaveBeenCalledWith("u1", true));
+  });
 });
 
 describe("Admin settings pages", () => {
@@ -822,6 +863,7 @@ describe("AdminUsers error / empty / toggle-failure", () => {
         analyses_count: 0,
         conversations_count: 0,
         is_admin: false,
+        is_clinician: false,
       },
     ];
     vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: edge });

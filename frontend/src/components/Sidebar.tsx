@@ -8,6 +8,7 @@ import {
   GearSix,
   Plus,
   ShieldCheck,
+  UsersThree,
   VideoCamera,
   X,
   type Icon,
@@ -61,7 +62,7 @@ export default function Sidebar({
   onToggle,
 }: Props) {
   const { t } = useI18n();
-  const { isAdmin, user, lineAuthenticating } = useAuth();
+  const { isAdmin, isClinician, user, lineAuthenticating } = useAuth();
   const { pathname } = useLocation();
   // Shared shell: highlight whichever destination the current route matches.
   const onStudio = pathname === "/app";
@@ -71,6 +72,10 @@ export default function Sidebar({
   const onPlans = pathname === "/plans" || pathname.startsWith("/plans/");
   const onSettings = pathname === "/settings";
   const onAdmin = pathname === "/admin";
+  // WP3: the therapist's own dashboard, gated the same UX-only way as the Admin link below — the
+  // active state covers the whole /clinic subtree (the patient detail and invite pages), same as
+  // /plans covers /plans/<id>.
+  const onClinic = pathname === "/clinic" || pathname.startsWith("/clinic/");
 
   // The Admin link is admin-only UX gating (the /admin page + backend re-check are the real
   // defence). `isAdmin` is resolved once per session by AuthProvider, so switching pages no longer
@@ -201,6 +206,15 @@ export default function Sidebar({
           >
             <Cell icon={GearSix} text={t("nav.settings")} active={onSettings} />
           </Link>
+          {isClinician && (
+            <Link
+              to="/clinic"
+              title={t("clinic.nav")}
+              className={`${cell} ${onClinic ? cellActive : cellIdle}`}
+            >
+              <Cell icon={UsersThree} text={t("clinic.nav")} active={onClinic} />
+            </Link>
+          )}
           {isAdmin && (
             <Link
               to="/admin"

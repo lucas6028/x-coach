@@ -3,6 +3,7 @@ import { ClipboardText } from "@phosphor-icons/react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, UploadLimitError, type Analysis, type PlanItem } from "./api";
 import AppLayout from "./components/AppLayout";
+import CheckinDialog from "./components/checkin/CheckinDialog";
 import VideoPanel from "./components/VideoPanel";
 import CoachTray from "./components/CoachTray";
 import DemoIntro from "./components/DemoIntro";
@@ -56,9 +57,17 @@ export default function App() {
     name: string;
     day: number;
     items: PlanItem[];
+    // The therapist's user id when a linked clinician assigned this plan, else null. Gates the
+    // automatic post-tick check-in prompt — a self-made plan gets no such nudge.
+    assignedBy: string | null;
   } | null>(null);
   // Whether this analysis has been ticked off in the plan, so the banner can say so.
   const [planLinked, setPlanLinked] = useState(false);
+  // The check-in dialog, prompted automatically once an ASSIGNED plan's item is ticked off.
+  // `checkinAnalysisId` rides along separately from `planCtx` so the dialog can cite the exact
+  // analysis the tick just linked, rather than re-deriving it from state that may have moved on.
+  const [checkinOpen, setCheckinOpen] = useState(false);
+  const [checkinAnalysisId, setCheckinAnalysisId] = useState<string | null>(null);
   useEffect(() => {
     if (!planId || !planItemId) {
       setPlanCtx(null);
@@ -70,7 +79,12 @@ export default function App() {
       .then((p) => {
         if (cancelled) return;
         const item = p.items.find((it) => it.id === planItemId);
-        setPlanCtx({ name: p.name, day: item?.day_index ?? 1, items: p.items });
+        setPlanCtx({
+          name: p.name,
+          day: item?.day_index ?? 1,
+          items: p.items,
+          assignedBy: p.assigned_by ?? null,
+        });
         // Arriving on an item that is already ticked (a re-record, or a back-button return) must
         // show the linked state rather than claiming it is still outstanding.
         setPlanLinked(!!item?.completed_at);
@@ -82,6 +96,7 @@ export default function App() {
       cancelled = true;
     };
   }, [planId, planItemId]);
+  const assignedByTherapist = !!planCtx?.assignedBy;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   // The analysis id we just reflected into the URL after an upload — so the replay effect below can
@@ -221,6 +236,12 @@ export default function App() {
               analysis_id: data.analysis_id,
             });
             setPlanLinked(true);
+            // Only a THERAPIST-ASSIGNED plan gets the automatic prompt — a self-made plan is the
+            // user's own business, and nudging them to report pain on it would be noise.
+            if (assignedByTherapist) {
+              setCheckinAnalysisId(data.analysis_id);
+              setCheckinOpen(true);
+            }
           } catch {
             // The analysis is saved either way. A failed tick is worth neither an error banner
             // over a successful analysis nor losing the result the user just waited for.
@@ -233,7 +254,15 @@ export default function App() {
       setLoading(false);
       setStatusMsg("");
     }
-  }, [t, setSearchParams, canonicalMovement, errorMessage, planId, planItemId]);
+  }, [
+    t,
+    setSearchParams,
+    canonicalMovement,
+    errorMessage,
+    planId,
+    planItemId,
+    assignedByTherapist,
+  ]);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -243,7 +272,14 @@ export default function App() {
     setAnalysis(null);
     try {
       const row = await api.getStoredAnalysis(id);
-      setAnalysis(row.result);
+      // `result` is stored (and returned) WITHOUT `analysis_id` inside it — the backend writes the
+      // JSONB blob before it knows the row's own id (backend/app/routers/analyze.py sets
+      // `result["analysis_id"]` only on the in-memory response returned right after upload, never
+      // in what gets persisted). The row's own `id` IS that same analysis id, so a replay stitches
+      // it back in — otherwise every reload, history revisit, or clinician "View analysis" link
+      // would silently drop WP4's rehab-mode gate (ChatContext.analysis_id), which only a fresh,
+      // just-uploaded analysis would ever carry.
+      setAnalysis({ ...row.result, analysis_id: row.result.analysis_id ?? row.id });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -309,6 +345,14 @@ export default function App() {
         .sort((a, b) => a.day_index - b.day_index || a.position - b.position)
     : [];
   const nextItem = remaining.find((it) => isAnalyzable(it.movement, movements)) ?? remaining[0];
+
+  // WP4: the fixed safety line at the bottom of a result opened from a THERAPIST-assigned plan.
+  // Never rendered for a self-made plan (`assignedByTherapist` false) or before a result exists.
+  const rehabDisclaimer = assignedByTherapist ? (
+    <p className="mt-3 px-4 text-center text-[11px] leading-relaxed text-muted lg:px-0">
+      {t("plans.studioRehabDisclaimer")}
+    </p>
+  ) : null;
 
   return (
     <AppLayout
@@ -381,20 +425,35 @@ export default function App() {
         </div>
       )}
 
+      {planId && planItemId && (
+        <CheckinDialog
+          open={checkinOpen}
+          planId={planId}
+          planItemId={planItemId}
+          analysisId={checkinAnalysisId ?? undefined}
+          movementLabel={movementLabel(t, canonicalMovement)}
+          onClose={() => setCheckinOpen(false)}
+          onSubmitted={() => setCheckinOpen(false)}
+        />
+      )}
+
       {hasResult && phone ? (
         // The phone layout (motion_analysis_mobile.png). Chosen here rather than by CSS: both
         // trees mount a <video> and a skeleton canvas, so rendering the two and hiding one would
         // decode the clip twice and run two rAF loops.
-        <StudioMobile
-          analysis={analysis!}
-          videoRef={videoRef}
-          currentTime={currentTime}
-          onTimeUpdate={setCurrentTime}
-          onActiveFault={setActiveFaultId}
-          activeFaultId={activeFaultId}
-          onSeek={seek}
-          onNewSession={newAnalysis}
-        />
+        <>
+          <StudioMobile
+            analysis={analysis!}
+            videoRef={videoRef}
+            currentTime={currentTime}
+            onTimeUpdate={setCurrentTime}
+            onActiveFault={setActiveFaultId}
+            activeFaultId={activeFaultId}
+            onSeek={seek}
+            onNewSession={newAnalysis}
+          />
+          {rehabDisclaimer}
+        </>
       ) : !hasResult ? (
         <DemoIntro
           onBlob={runPoseAnalysis}
@@ -412,35 +471,38 @@ export default function App() {
         // The reference's 12-column split: the clip and its dashboard cards on the left, the
         // coach column on the right. Mobile stacks and scrolls as one page; on desktop each
         // column scrolls independently inside the card.
-        <div className="mt-4 grid min-h-0 flex-1 grid-cols-12 gap-4 overflow-y-auto scrollbar-thin lg:gap-5 lg:overflow-hidden">
-          <div className="col-span-12 flex min-w-0 flex-col gap-4 lg:col-span-8 lg:min-h-0 lg:overflow-y-auto lg:pr-1 scrollbar-thin">
-            <VideoPanel
-              analysis={analysis!}
-              videoRef={videoRef}
-              onTimeUpdate={setCurrentTime}
-              onActiveFault={setActiveFaultId}
-              onSeek={seek}
-              activeFaultId={activeFaultId}
-            />
+        <>
+          <div className="mt-4 grid min-h-0 flex-1 grid-cols-12 gap-4 overflow-y-auto scrollbar-thin lg:gap-5 lg:overflow-hidden">
+            <div className="col-span-12 flex min-w-0 flex-col gap-4 lg:col-span-8 lg:min-h-0 lg:overflow-y-auto lg:pr-1 scrollbar-thin">
+              <VideoPanel
+                analysis={analysis!}
+                videoRef={videoRef}
+                onTimeUpdate={setCurrentTime}
+                onActiveFault={setActiveFaultId}
+                onSeek={seek}
+                activeFaultId={activeFaultId}
+              />
 
-            <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-3">
-              <PreviousSessionsCard currentVideoId={analysis!.video_id} />
-              <KeyMetricsCard analysis={analysis!} />
-              <TipsCard analysis={analysis!} />
+              <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-3">
+                <PreviousSessionsCard currentVideoId={analysis!.video_id} />
+                <KeyMetricsCard analysis={analysis!} />
+                <TipsCard analysis={analysis!} />
+              </div>
             </div>
-          </div>
 
-          {/* One unified "coach chat" column — the grounded fault-card analysis, the knowledge
-              graph below it, and the follow-up conversation, all in one thread. */}
-          <aside className="col-span-12 flex min-h-0 lg:col-span-4 lg:h-full">
-            <CoachTray
-              analysis={analysis!}
-              currentTime={currentTime}
-              onSeek={seek}
-              activeFaultId={activeFaultId}
-            />
-          </aside>
-        </div>
+            {/* One unified "coach chat" column — the grounded fault-card analysis, the knowledge
+                graph below it, and the follow-up conversation, all in one thread. */}
+            <aside className="col-span-12 flex min-h-0 lg:col-span-4 lg:h-full">
+              <CoachTray
+                analysis={analysis!}
+                currentTime={currentTime}
+                onSeek={seek}
+                activeFaultId={activeFaultId}
+              />
+            </aside>
+          </div>
+          {rehabDisclaimer}
+        </>
       )}
     </AppLayout>
   );

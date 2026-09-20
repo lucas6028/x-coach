@@ -3,6 +3,11 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
+import pytest
+
+# src.rehab24.clip_sampling decodes video with OpenCV, which the lean CI dependency
+# set does not install; without this the whole module is a collection error.
+pytest.importorskip("cv2")
 
 from src.rehab24.clip_sampling import (
     assert_resume_provenance_matches,

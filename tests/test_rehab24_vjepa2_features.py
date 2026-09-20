@@ -3,7 +3,13 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import numpy as np
-import torch
+import pytest
+
+# The lean CI dependency set has neither torch nor OpenCV, and src.rehab24 needs
+# both here (vjepa2_features -> torch, videomae_features -> cv2). Without these the
+# whole module is a collection error rather than a skip.
+torch = pytest.importorskip("torch")
+pytest.importorskip("cv2")
 
 from src.rehab24.vjepa2_features import (
     ARM_CLIP_LENGTH,

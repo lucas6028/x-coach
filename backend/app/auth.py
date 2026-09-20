@@ -110,6 +110,21 @@ def get_admin_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser
     return user
 
 
+def get_clinician_user(user: CurrentUser = Depends(get_current_user)) -> CurrentUser:
+    """Clinician-gated auth: require a valid session AND the 'clinician' role, else 403.
+
+    Mirrors ``get_admin_user`` exactly -- see its docstring for why the check is delegated to
+    ``store`` (RLS-scoped, re-verified server-side on every request) rather than trusted from the
+    token or the frontend.
+    """
+    if not store.is_clinician(token=user.token, user_id=user.id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Clinician privileges are required.",
+        )
+    return user
+
+
 def get_optional_user(authorization: str | None = Header(default=None)) -> CurrentUser | None:
     """Optional auth: return the user if a (well-formed) token is present, else ``None``.
 

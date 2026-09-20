@@ -18,15 +18,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
+import pytest
+
+# src.rehab24.loso_cross_validation exits at import time without torch, which the lean
+# CI dependency set does not install; without this the whole module is a collection
+# error rather than a skip.
+torch = pytest.importorskip("torch")
 
 from src.rehab24 import loso_cross_validation as loso
 from src.rehab24 import video_backbone_comparison as vbc
 from src.rehab24.dataset import CAMERAS, MANIFEST_FIELDS, load_manifest
-
-try:
-    import torch
-except ImportError:  # pragma: no cover
-    torch = None
 
 
 def write_manifest_and_labels(
@@ -656,7 +657,7 @@ class ModelIdentityDimGateTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.run_dir = Path(self.tmp.name) / "run"
 
-    def _write_audit(self, arm: str, measured_dim: int) -> None:
+    def _write_audit(self, arm: str, measured_dim: int, provenance: dict | None = None) -> None:
         path = vbc.materialize_audit_path(self.run_dir, arm)
         path.parent.mkdir(parents=True, exist_ok=True)
         expected = vbc.ARM_MODEL_CONFIG[arm]
@@ -666,12 +667,30 @@ class ModelIdentityDimGateTests(unittest.TestCase):
                     "arm": arm,
                     "expected_dim": vbc.ARM_DIMS[arm],
                     "measured_dim": measured_dim,
-                    "provenance": dict(expected),
+                    "provenance": dict(expected) if provenance is None else provenance,
                     "problems": [],
                     "passed": True,
                 },
                 handle,
             )
+
+    def test_prefixed_provenance_keys_as_written_by_real_bundles_pass(self):
+        # Real bundles stamp ``provenance_<key>``; the first full run failed this gate
+        # on every arm with ``actual: None`` because the test audits above used bare
+        # keys and the gate only tried the bare spelling.
+        prefixed = {f"provenance_{k}": v for k, v in vbc.ARM_MODEL_CONFIG["vj16"].items()}
+        self._write_audit("vj16", vbc.ARM_DIMS["vj16"], provenance=prefixed)
+        gate = vbc.gate_model_identity(self.run_dir)
+        self.assertEqual(gate["evidence"]["per_arm"]["vj16"]["status"], "pass")
+
+    def test_prefixed_provenance_with_wrong_model_name_fails(self):
+        prefixed = {f"provenance_{k}": v for k, v in vbc.ARM_MODEL_CONFIG["vj16"].items()}
+        prefixed["provenance_model_name"] = "facebook/vjepa2-vitl-fpc16-256"
+        self._write_audit("vj16", vbc.ARM_DIMS["vj16"], provenance=prefixed)
+        gate = vbc.gate_model_identity(self.run_dir)
+        evidence = gate["evidence"]["per_arm"]["vj16"]
+        self.assertEqual(evidence["status"], "fail")
+        self.assertIn("model_name", evidence["evidence"])
 
     def test_measured_dim_matching_expected_passes(self):
         self._write_audit("vm16", vbc.ARM_DIMS["vm16"])

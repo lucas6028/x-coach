@@ -9,6 +9,13 @@ from tempfile import TemporaryDirectory
 from unittest import mock
 
 import numpy as np
+import pytest
+
+# src.rehab24.videomae_features decodes video with OpenCV and runs the extractor on
+# torch, neither of which the lean CI dependency set installs; without these the
+# whole module is a collection error rather than a skip.
+pytest.importorskip("cv2")
+pytest.importorskip("torch")
 
 from src.rehab24.videomae_features import (
     STATIC_FRAME_INDEX,

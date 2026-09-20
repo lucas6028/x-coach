@@ -333,6 +333,7 @@ function Invoke-AppsDeployment {
         -p lineChannelId="$($Settings['LINE_CHANNEL_ID'])" `
         -p lineMessagingChannelSecret="$($Settings['LINE_MESSAGING_CHANNEL_SECRET'])" `
         -p lineMessagingAccessToken="$($Settings['LINE_MESSAGING_ACCESS_TOKEN'])" `
+        -p jobToken="$($Settings['JOB_TOKEN'])" `
         -p lineLiffId="$($Settings['LINE_LIFF_ID'])" `
         -p llmApiKey="$($Settings['LLM_API_KEY'])" `
         -p llmModels="$($Settings['LLM_MODELS'])" `

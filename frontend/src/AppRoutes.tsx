@@ -18,6 +18,10 @@ import AdminUsers from "./pages/admin/AdminUsers";
 import AdminSettingsLlm from "./pages/admin/AdminSettingsLlm";
 import AdminSettingsRag from "./pages/admin/AdminSettingsRag";
 import AdminSettingsAnalyze from "./pages/admin/AdminSettingsAnalyze";
+import ClinicLayout from "./pages/clinic/ClinicLayout";
+import ClinicPatients from "./pages/clinic/ClinicPatients";
+import ClinicPatient from "./pages/clinic/ClinicPatient";
+import ClinicInvite from "./pages/clinic/ClinicInvite";
 import Games from "./pages/Games";
 import LiffDiag from "./pages/LiffDiag";
 import RequireAuth from "./components/RequireAuth";
@@ -128,6 +132,21 @@ export default function AppRoutes() {
           </RequireAuth>
         }
       />
+      {/* WP3: the clinician dashboard, gated the same way /plans and /history are — a signed-in
+          session — with an additional clinician-role gate inside ClinicLayout itself (mirroring
+          /admin's split between route-level auth and in-page role gating). */}
+      <Route
+        path="/clinic"
+        element={
+          <RequireAuth>
+            <ClinicLayout />
+          </RequireAuth>
+        }
+      >
+        <Route index element={<ClinicPatients />} />
+        <Route path="patients/:patientId" element={<ClinicPatient />} />
+        <Route path="invite" element={<ClinicInvite />} />
+      </Route>
       <Route path="/admin/login" element={<AdminLogin />} />
       <Route
         path="/admin"

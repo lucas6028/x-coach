@@ -17,7 +17,7 @@ from backend.app.services.store import _user_client
 
 # Every column of a plan, and of its items, that the API returns. Spelled out rather than "*" so a
 # column added later (or an internal one) does not silently start appearing in API responses.
-_PLAN_COLUMNS = "id, name, notes, template_key, started_at, created_at, updated_at"
+_PLAN_COLUMNS = "id, name, notes, template_key, started_at, created_at, updated_at, assigned_by"
 _ITEM_COLUMNS = (
     "id, plan_id, day_index, position, movement, sets, reps, notes, completed_at, "
     "analysis_id, created_at"
@@ -123,12 +123,19 @@ def create_plan(
     notes: str | None = None,
     template_key: str | None = None,
     items: list[dict[str, Any]] | None = None,
+    assigned_by: str | None = None,
 ) -> dict[str, Any]:
     """Insert a plan and, in one more round trip, its initial items; return the plan with items.
 
     ``items`` is how a built-in template lands as a real, independently editable plan: the
     template's rows are COPIED in at creation, so a later edit to the template in code never
     mutates a plan the user already owns (the migration's `template_key` note).
+
+    ``user_id`` stays the OWNER (the patient, for a clinician-assigned plan) -- ``assigned_by`` is
+    the clinician who created it, or ``None`` for a plan the owner built themselves. This is what
+    the clinic migration's ``training_plans_clinician_insert`` policy checks
+    (``assigned_by = auth.uid()``): a clinician's own JWT can only insert a plan it stamps as its
+    own assignment, never a plan pretending to be the patient's self-authored one.
 
     The item insert is a single batched call. If it fails the plan row survives as an empty plan
     rather than being rolled back -- PostgREST has no cross-request transaction, and an empty plan
@@ -143,6 +150,7 @@ def create_plan(
                 "name": name,
                 "notes": notes,
                 "template_key": template_key,
+                "assigned_by": assigned_by,
             }
         )
         .execute()
@@ -272,6 +280,69 @@ def plan_exists(*, token: str, plan_id: str, user_id: str) -> bool:
         .execute()
     )
     return bool(resp.data or [])
+
+
+def plan_is_assigned(*, token: str, plan_id: str, user_id: str) -> bool:
+    """Whether the caller's plan was assigned by a therapist (``assigned_by`` is set).
+
+    The WP4 rehab-mode gate for the plan agent: ``plan_agent._plan_chat_stream_inner`` calls this
+    once, before building the system prompt, so it can tell the model (and the dispatcher's
+    mutating tools) whether it is looking at a plan the CALLER may freely edit or one only a
+    therapist may change. Same predicate shape as ``plan_exists`` -- filtered on both ``id`` and
+    ``user_id`` -- for the same reason: RLS already scopes the row, but the explicit predicate is
+    what turns "not yours" into a clean ``False`` here instead of leaking through as a KeyError on
+    an empty ``resp.data``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("training_plans")
+        .select("assigned_by")
+        .eq("id", plan_id)
+        .eq("user_id", user_id)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return bool(rows and rows[0].get("assigned_by"))
+
+
+def analysis_in_assigned_plan(*, token: str, user_id: str, analysis_id: str) -> bool:
+    """Whether ``analysis_id`` is linked (via a completed plan item) to a plan a THERAPIST assigned.
+
+    The WP4 rehab-mode gate for the analysis chat (``routers/chat.py``): an analysis reached through
+    a plan item that was ticked off against a clinician-assigned plan should get the same safety
+    framing the plan agent gives that plan directly, even though the chat endpoint never threads a
+    ``plan_id`` of its own -- it only ever sees the analysis.
+
+    TWO READS, BOTH EXPLICITLY FILTERED ON ``user_id`` -- not left to RLS alone, the same posture
+    ``list_analyses`` documents for the clinician-select policy. The first proves the CALLER is the
+    one who linked this analysis to a plan item (a stray/foreign ``analysis_id`` naming someone
+    else's item must not flip rehab mode on for this caller's conversation); the second proves the
+    CALLER also owns the plan(s) those items belong to. Without the second filter, a plan id read off
+    someone else's item could be used to probe an unrelated plan's ``assigned_by`` -- harmless as an
+    information leak (it is only a boolean), but not a check this function's own ownership story
+    would justify making.
+    """
+    client = _user_client(token)
+    items_resp = (
+        client.table("plan_items")
+        .select("plan_id")
+        .eq("analysis_id", analysis_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    plan_ids = {row["plan_id"] for row in (items_resp.data or []) if row.get("plan_id")}
+    if not plan_ids:
+        return False
+
+    plans_resp = (
+        client.table("training_plans")
+        .select("assigned_by")
+        .in_("id", list(plan_ids))
+        .eq("user_id", user_id)
+        .execute()
+    )
+    return any(row.get("assigned_by") for row in (plans_resp.data or []))
 
 
 def add_item(

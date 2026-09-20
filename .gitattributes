@@ -1,0 +1,2 @@
+# Shell scripts run under bash (Git Bash on Windows too); a CRLF checkout breaks them.
+db/checks/*.sh text eol=lf

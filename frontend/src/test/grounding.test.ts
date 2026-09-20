@@ -97,6 +97,17 @@ describe("buildChatContext", () => {
     expect(ctx.quality).toEqual({});
   });
 
+  it("includes analysis_id when the analysis carries one, and omits it when absent", () => {
+    // WP4: the backend's rehab-mode gate (chat.py::_resolve_rehab) reads ChatContext.analysis_id.
+    const withId = buildChatContext(make({ analysis_id: "an-7" }));
+    expect(withId.analysis_id).toBe("an-7");
+
+    // An anonymous or not-yet-persisted upload has no analysis_id at all — absence must pass
+    // through as absence, the same idiom `movement` already follows just below.
+    const withoutId = buildChatContext(make({}));
+    expect(withoutId.analysis_id).toBeUndefined();
+  });
+
   it("passes the analysis movement through verbatim, without inventing a default when absent", () => {
     const withMovement = buildChatContext(make({ movement: "Push-up" }));
     expect(withMovement.movement).toBe("Push-up");
