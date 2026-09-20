@@ -71,8 +71,10 @@ server {
         add_header Cache-Control "no-cache";
     }
 
-    # SPA fallback: react-router owns every other path.
+    # SPA fallback: react-router owns every other path. No `$uri/` here: public/ ships
+    # directories that share a name with a route (public/movements/ vs /movements), and a
+    # directory match 301s to the slashed URL and then 403s for want of an index file.
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files $uri /index.html;
     }
 }
