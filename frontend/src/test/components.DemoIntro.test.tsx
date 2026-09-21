@@ -79,6 +79,49 @@ describe("DemoIntro", () => {
     expect(screen.queryByText(/Drop a squat video/i)).not.toBeInTheDocument();
   });
 
+  it("shows a progress bar, the phase and the seconds left while an upload analysis runs", () => {
+    renderWithProviders(
+      <DemoIntro
+        onBlob={vi.fn()}
+        onError={vi.fn()}
+        loading={true}
+        statusMsg="Extracting pose…"
+        progress={{ phase: "extract", fraction: 0.42, remainingSec: 12 }}
+        error=""
+        {...movementProps}
+      />
+    );
+    expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "42");
+    expect(screen.getByText("Reading your pose… 42% · about 12s left")).toBeInTheDocument();
+    // The live region keeps its stable name: a caption that counts up must not be what a screen
+    // reader re-announces several times a second.
+    expect(screen.getByRole("status")).toHaveAttribute("aria-label", "Extracting pose…");
+  });
+
+  it("quotes no seconds for the server phase, which has nothing measured behind it", () => {
+    renderWithProviders(
+      <DemoIntro
+        onBlob={vi.fn()}
+        onError={vi.fn()}
+        loading={true}
+        statusMsg="Extracting pose…"
+        progress={{ phase: "server", fraction: 0.9, remainingSec: null }}
+        error=""
+        {...movementProps}
+      />
+    );
+    expect(screen.getByText("Almost done… 90%")).toBeInTheDocument();
+    expect(screen.queryByText(/left/)).toBeNull();
+  });
+
+  it("keeps the wait indeterminate when there is no progress to show", () => {
+    renderWithProviders(
+      <DemoIntro onBlob={vi.fn()} onError={vi.fn()} loading={true} statusMsg="Loading…" error="" {...movementProps} />
+    );
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+  });
+
   it("shows the Lumen scan loader while the movement catalog is still loading", () => {
     renderWithProviders(
       <DemoIntro

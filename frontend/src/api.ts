@@ -798,6 +798,36 @@ function uploadLimitError(status: number, body: unknown): UploadLimitError | nul
   );
 }
 
+// fetch cannot observe request-body progress, so an upload that wants a progress bar goes through
+// XMLHttpRequest instead. Resolves to a real Response so the caller's status/body handling is the
+// same code on both transports; rejects only when no HTTP response arrived at all, like fetch.
+function postFormWithProgress(
+  url: string,
+  form: FormData,
+  headers: Record<string, string>,
+  onUploadProgress: (p: number) => void
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    for (const [name, value] of Object.entries(headers)) xhr.setRequestHeader(name, value);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onUploadProgress(e.loaded / e.total);
+    };
+    // Fires when the last byte has been SENT, which is before the server answers — the moment the
+    // wait turns from "uploading" into "analysing".
+    xhr.upload.onload = () => onUploadProgress(1);
+    xhr.onload = () => {
+      // The Response constructor refuses a body on a null-body status.
+      const nullBody = xhr.status === 204 || xhr.status === 205 || xhr.status === 304;
+      resolve(new Response(nullBody ? null : xhr.responseText, { status: xhr.status }));
+    };
+    xhr.onerror = () => reject(new TypeError("Network request failed"));
+    xhr.onabort = () => reject(new TypeError("Network request aborted"));
+    xhr.send(form);
+  });
+}
+
 // Both chat endpoints get the conversation with `tools` removed. The records are a rendering and
 // persistence concern only: the backend's ChatMessage is {role, content}, so Pydantic would drop
 // them anyway — but relying on implicit stripping still re-uploads the whole array every turn, and
@@ -1247,7 +1277,10 @@ export const api = {
     pose: PoseJson,
     video: Blob,
     thumbnail?: Blob | null,
-    reps?: RepsPlan
+    reps?: RepsPlan,
+    // Upload byte progress, 0..1. Supplying it moves the request onto XMLHttpRequest — see
+    // `postFormWithProgress`. Omitted, the request stays on fetch.
+    onUploadProgress?: (p: number) => void
   ): Promise<Analysis> {
     const form = new FormData();
     form.append("movement", movement);
@@ -1260,11 +1293,10 @@ export const api = {
     const ext = video.type.includes("mp4") ? "mp4" : "webm";
     form.append("file", video, `capture.${ext}`);
     if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
-    const res = await fetch("/api/analyze/pose", {
-      method: "POST",
-      body: form,
-      headers: await authHeader(),
-    });
+    const headers = await authHeader();
+    const res = onUploadProgress
+      ? await postFormWithProgress("/api/analyze/pose", form, headers, onUploadProgress)
+      : await fetch("/api/analyze/pose", { method: "POST", body: form, headers });
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
       const limit = uploadLimitError(res.status, detail);

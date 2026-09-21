@@ -2,6 +2,7 @@ import { Brain, Graph, PersonSimpleRun, Sparkle, WarningCircle, type Icon } from
 import { motion, useReducedMotion } from "motion/react";
 import { movementLabel, useI18n } from "../lib/i18n";
 import CaptureStudio from "./CaptureStudio";
+import type { AnalysisProgress } from "../lib/analysisProgress";
 import type { PoseTier } from "../lib/poseTier";
 import { LumenLoader } from "./LumenLoader";
 import WhileYouWait, { hasMovementGuide } from "./WhileYouWait";
@@ -11,6 +12,9 @@ interface Props {
   onError: (msg: string) => void;
   loading: boolean;
   statusMsg: string;
+  /** Measured progress of an upload analysis; null/omitted for waits with nothing to measure, which
+   *  keep the plain `statusMsg` caption. */
+  progress?: AnalysisProgress | null;
   error: string;
   movement: string;
   /** Non-empty when the requested movement is KNOWN not to be analyzable; the dropzone stays
@@ -41,6 +45,7 @@ export default function DemoIntro({
   onError,
   loading,
   statusMsg,
+  progress,
   error,
   movement,
   movementError,
@@ -50,6 +55,15 @@ export default function DemoIntro({
 }: Props) {
   const { t } = useI18n();
   const reduce = useReducedMotion();
+  // Phase-named so the wait says what it is doing, with seconds only where they were measured —
+  // the server phase reports none (see lib/analysisProgress).
+  let caption = statusMsg;
+  if (loading && progress) {
+    caption = t(`app.progress.${progress.phase}`, { pct: Math.round(progress.fraction * 100) });
+    if (progress.remainingSec !== null) {
+      caption += ` · ${t("app.progress.eta", { sec: progress.remainingSec })}`;
+    }
+  }
   // The guide only replaces the "what comes back" card once an analysis is actually running AND the
   // catalog has confirmed the movement — see the note on the right column below. Hoisted because
   // the column's width depends on it too: the guide is a reading panel and gets more room than the
@@ -86,11 +100,15 @@ export default function DemoIntro({
               // loader carries its own navy stage, so no wrapper card is needed. The same loader
               // also covers the brief window before GET /api/movements settles, so the dropzone
               // never appears against an unconfirmed movement.
-              <LumenLoader variant="scan" caption={statusMsg} />
+              <LumenLoader
+                variant="scan"
+                caption={caption}
+                label={statusMsg}
+                progress={loading && progress ? progress.fraction : undefined}
+              />
             ) : (
-              // Extraction-progress bar is a deferred follow-up (SP1 Task 9 note): the studio is
-              // never busy here — DemoIntro's own `loading` branch above already covers the
-              // whole waiting state with Lumen.
+              // The studio is never busy here — DemoIntro's own `loading` branch above already
+              // covers the whole waiting state with Lumen, progress bar included.
               // `movement` is forwarded so the dropzone inside names what is being uploaded
               // ("Drop a Push-up video…") rather than a hardcoded squat.
               <CaptureStudio

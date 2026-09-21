@@ -21,9 +21,17 @@ const STEP_KEYS = ["loader.step1", "loader.step2", "loader.step3"] as const;
 export function LumenLoader({
   variant = "scan",
   caption,
+  progress,
+  label,
 }: {
   variant?: "scan" | "dots";
   caption?: string;
+  /** Accessible name for the stage, when it should differ from the visible caption — a caption
+   *  that counts up must not be the live region's name. Defaults to the caption. */
+  label?: string;
+  /** 0..1. When supplied, the scan stage gains a determinate bar above the caption; omitted, the
+   *  wait stays indeterminate (the catalog fetch, a history replay). */
+  progress?: number;
 }) {
   const { t } = useI18n();
   const [i, setI] = useState(0);
@@ -46,7 +54,7 @@ export function LumenLoader({
     );
 
   return (
-    <div className="lm-scan-wrap" role="status" aria-label={caption || t("loader.aria")}>
+    <div className="lm-scan-wrap" role="status" aria-label={label || caption || t("loader.aria")}>
       <div className="lm-stage">
         <div className="lm-glow" />
         {/* Speed lines sweep backwards behind Lumen; purely decorative, so they sit outside the
@@ -77,7 +85,26 @@ export function LumenLoader({
           </span>
         </div>
       </div>
-      {caption && <p className="lm-caption">{caption}</p>}
+      {progress !== undefined && (
+        <div
+          className="lm-progress"
+          role="progressbar"
+          aria-label={label || t("loader.aria")}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+        >
+          <div style={{ width: `${Math.min(100, Math.max(0, progress * 100))}%` }} />
+        </div>
+      )}
+      {/* With a bar, the caption is a percentage that changes several times a second. Inside a
+          role="status" live region that would be read out on every change, so it is hidden from
+          assistive tech there — the progressbar above carries the same number, on demand. */}
+      {caption && (
+        <p className="lm-caption" aria-hidden={progress !== undefined || undefined}>
+          {caption}
+        </p>
+      )}
     </div>
   );
 }

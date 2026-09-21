@@ -201,7 +201,11 @@ const en: Dict = {
 
   // App shell
   "app.loading": "Loading {id}…",
-  "app.analysing": "Extracting pose & analysing… (this can take ~20s)",
+  "app.analysing": "Extracting pose & analysing…",
+  "app.progress.extract": "Reading your pose… {pct}%",
+  "app.progress.upload": "Uploading video… {pct}%",
+  "app.progress.server": "Almost done… {pct}%",
+  "app.progress.eta": "about {sec}s left",
   "tab.coaching": "Coaching",
   "tab.graph": "Knowledge Graph",
 
@@ -1512,7 +1516,11 @@ const zhHant: Dict = {
 
   // App shell
   "app.loading": "載入 {id} 中…",
-  "app.analysing": "擷取姿態並分析中…（約需 20 秒）",
+  "app.analysing": "擷取姿態並分析中…",
+  "app.progress.extract": "擷取姿態中… {pct}%",
+  "app.progress.upload": "上傳影片中… {pct}%",
+  "app.progress.server": "即將完成… {pct}%",
+  "app.progress.eta": "約剩 {sec} 秒",
   "tab.coaching": "教練回饋",
   "tab.graph": "知識圖譜",
 

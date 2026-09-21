@@ -7,11 +7,13 @@ import { AuthProvider } from "../lib/auth";
 import App from "../App";
 import { api, UploadLimitError } from "../api";
 import { mockAnalysis } from "./fixtures";
+import { installFakeXhr } from "./fakeXhr";
 
 // The upload path now extracts pose client-side before hitting the API (CaptureStudio ->
 // runPoseAnalysis -> extractPoseWithReps -> api.analyzePose). extractPoseWithReps's real
 // implementation needs a real <video>/WASM pipeline that jsdom can't run — stub it so these tests
-// exercise the new request path (api.analyzePose against the mocked fetch below) instead. The stub
+// exercise the new request path (api.analyzePose against the fake XMLHttpRequest below — the
+// analyze POST rides XHR for upload progress; every other call is still fetch) instead. The stub
 // returns the same { pose, reps } shape the real two-pass extractor resolves to (Task 6).
 vi.mock("../lib/poseExtract", () => ({
   extractPoseWithReps: vi.fn().mockResolvedValue({
@@ -108,10 +110,13 @@ describe("App — analysis loaded", () => {
       status: 200,
       json: async () => mockAnalysis,
     } as Response);
+    // The analyze POST itself rides XMLHttpRequest (upload progress); fetch still serves the rest.
+    const { requests } = installFakeXhr({ body: mockAnalysis });
 
     renderApp();
     await uploadAClip();
     await waitFor(() => expect(screen.getAllByText(/valgus angle 0\.35/)[0]).toBeInTheDocument());
+    expect(requests.map((r) => r.url)).toEqual(["/api/analyze/pose"]);
   });
 
   it("shows an error message when an upload fails", async () => {
@@ -121,6 +126,7 @@ describe("App — analysis loaded", () => {
       statusText: "Error",
       json: async () => ({ detail: "Server error" }),
     } as Response);
+    installFakeXhr({ status: 500, body: { detail: "Server error" } });
 
     renderApp();
 
@@ -198,6 +204,7 @@ describe("App — upload reflects the analysis in the URL", () => {
       status: 200,
       json: async () => ({ ...mockAnalysis, analysis_id: "bb718ecf" }),
     } as Response);
+    installFakeXhr({ body: { ...mockAnalysis, analysis_id: "bb718ecf" } });
 
     renderAppWithLocation();
     await uploadAClip();
@@ -220,6 +227,7 @@ describe("App — upload reflects the analysis in the URL", () => {
       status: 200,
       json: async () => mockAnalysis, // anonymous: nothing persisted, no analysis_id
     } as Response);
+    installFakeXhr({ body: mockAnalysis });
 
     renderAppWithLocation();
     await uploadAClip();
@@ -236,6 +244,7 @@ describe("App — new analysis reset", () => {
       status: 200,
       json: async () => ({ ...mockAnalysis, analysis_id: "bb718ecf" }),
     } as Response);
+    installFakeXhr({ body: { ...mockAnalysis, analysis_id: "bb718ecf" } });
 
     const user = userEvent.setup();
     renderAppWithLocation();

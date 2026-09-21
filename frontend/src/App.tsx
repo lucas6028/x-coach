@@ -12,6 +12,7 @@ import StudioMobile from "./components/mobile/StudioMobile";
 import KeyMetricsCard from "./components/studio/KeyMetricsCard";
 import PreviousSessionsCard from "./components/studio/PreviousSessionsCard";
 import TipsCard from "./components/studio/TipsCard";
+import { createProgressTracker, type AnalysisProgress } from "./lib/analysisProgress";
 import { captureThumbnail } from "./lib/thumbnail";
 import { loadAnalysisTier, saveAnalysisTier, type PoseTier } from "./lib/poseTier";
 import { DEFAULT_MAX_REPS } from "./lib/repSpans";
@@ -30,6 +31,8 @@ export default function App() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
+  // Null outside an upload analysis — the history-replay wait has nothing to measure.
+  const [progress, setProgress] = useState<AnalysisProgress | null>(null);
   const [error, setError] = useState<string>("");
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
@@ -199,18 +202,22 @@ export default function App() {
     setError("");
     setAnalysis(null);
     setStatusMsg(t("app.analysing"));
+    setProgress({ phase: "extract", fraction: 0, remainingSec: null });
+    const tracker = createProgressTracker(setProgress);
     try {
       // MediaPipe is a cold path: defer its WASM graph until the user explicitly supplies video.
       const { extractPoseWithReps } = await import("./lib/poseExtract");
       const { pose, reps } = await extractPoseWithReps(
-        blob, chosenTier, canonicalMovement, DEFAULT_MAX_REPS
+        blob, chosenTier, canonicalMovement, DEFAULT_MAX_REPS, tracker.extract
       );
       // Captured from the same blob the browser just decoded for MediaPipe, so it costs one
       // extra seek. Resolves to null on any failure — a missing thumbnail never blocks analysis.
       const thumbnail = await captureThumbnail(blob);
       // The user's selected movement, not a hardcoded "Squat". `analyzePose` has taken a movement
       // since the client-capture path landed; this is the caller that finally supplies a real one.
-      const data = await api.analyzePose(canonicalMovement, pose, blob, thumbnail, reps);
+      const data = await api.analyzePose(
+        canonicalMovement, pose, blob, thumbnail, reps, tracker.upload
+      );
       setAnalysis(data);
       // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
       // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;
@@ -251,6 +258,8 @@ export default function App() {
     } catch (e) {
       setError(errorMessage(e));
     } finally {
+      tracker.stop();
+      setProgress(null);
       setLoading(false);
       setStatusMsg("");
     }
@@ -460,6 +469,7 @@ export default function App() {
           onError={setError}
           loading={loading}
           statusMsg={statusMsg}
+          progress={progress}
           error={error}
           movement={canonicalMovement}
           movementError={movementError}

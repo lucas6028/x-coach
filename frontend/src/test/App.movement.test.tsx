@@ -78,7 +78,9 @@ describe("studio movement selection", () => {
         null,
         // Fifth arg is the rep plan extractPoseWithReps returns (Task 10) — the mock above
         // supplies one on every call, so a 4-arg expectation would under-match the real call.
-        expect.anything()
+        expect.anything(),
+        // Sixth arg is the upload-progress callback feeding the studio progress bar.
+        expect.any(Function)
       )
     );
   });
@@ -153,7 +155,9 @@ describe("studio movement selection", () => {
           null,
           // Fifth arg is the rep plan extractPoseWithReps returns (Task 10) — the mock above
           // supplies one on every call, so a 4-arg expectation would under-match the real call.
-          expect.anything()
+          expect.anything(),
+          // Sixth arg is the upload-progress callback feeding the studio progress bar.
+          expect.any(Function)
         )
       );
     }
@@ -185,7 +189,7 @@ describe("studio movement selection", () => {
     await userEvent.upload(input, new File(["x"], "clip.mp4", { type: "video/mp4" }));
     await vi.waitFor(() =>
       expect(analyze).toHaveBeenCalledWith(
-        "Push-up", expect.anything(), expect.anything(), null, expect.anything()
+        "Push-up", expect.anything(), expect.anything(), null, expect.anything(), expect.any(Function)
       )
     );
   });
