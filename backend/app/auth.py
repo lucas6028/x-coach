@@ -15,12 +15,15 @@ Two dependencies:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, status
 
 from backend.app.services import store
 from backend.app.settings import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,17 @@ def _extract_bearer(authorization: str | None) -> str | None:
     if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
         return None
     return parts[1].strip()
+
+
+def _is_auth_outage(exc: Exception) -> bool:
+    """True when Supabase Auth could not be reached, as opposed to it rejecting the token.
+
+    supabase-py wraps every transport failure (timeout, DNS, connection reset) and every
+    gateway-class status (502/503/504/52x) in ``AuthRetryableError``; a rejected token is an
+    ``AuthApiError``. Matched by class name so this module keeps no import-time dependency on
+    the auth package, whose import path has moved between supabase-py releases.
+    """
+    return any(cls.__name__ == "AuthRetryableError" for cls in type(exc).__mro__)
 
 
 def _verify(token: str) -> CurrentUser:
@@ -65,6 +79,16 @@ def _verify(token: str) -> CurrentUser:
     try:
         response = client.auth.get_user(token)
     except Exception as exc:  # noqa: BLE001 — any failure here means the token isn't usable.
+        # Logged because the 401 alone is undiagnosable: an expired token and an Auth outage
+        # both land here, and the access log only ever shows the status code.
+        logger.warning("Supabase token validation failed: %r", exc, exc_info=True)
+        if _is_auth_outage(exc):
+            # The token was never judged. A 401 would send a validly signed-in client off to
+            # re-authenticate over what is really a transient upstream failure.
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Authentication service is temporarily unavailable.",
+            ) from exc
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token.",

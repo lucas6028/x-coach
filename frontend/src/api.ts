@@ -729,6 +729,15 @@ async function authHeader(): Promise<Record<string, string>> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+// Forces a token refresh rather than trusting the cached session. Null when there is nothing to
+// retry with (auth off, signed out, or the refresh itself failed) so the caller keeps its 401.
+async function refreshedAuthHeader(): Promise<Record<string, string> | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.auth.refreshSession();
+  const token = data.session?.access_token;
+  return !error && token ? { Authorization: `Bearer ${token}` } : null;
+}
+
 async function getJSON<T>(url: string): Promise<T> {
   const headers = await authHeader();
   // Only pass an init object when we actually have a token, so public reads stay header-free.
@@ -1293,10 +1302,18 @@ export const api = {
     const ext = video.type.includes("mp4") ? "mp4" : "webm";
     form.append("file", video, `capture.${ext}`);
     if (thumbnail) form.append("thumbnail", thumbnail, "thumb.jpg");
-    const headers = await authHeader();
-    const res = onUploadProgress
-      ? await postFormWithProgress("/api/analyze/pose", form, headers, onUploadProgress)
-      : await fetch("/api/analyze/pose", { method: "POST", body: form, headers });
+    const send = (headers: Record<string, string>) =>
+      onUploadProgress
+        ? postFormWithProgress("/api/analyze/pose", form, headers, onUploadProgress)
+        : fetch("/api/analyze/pose", { method: "POST", body: form, headers });
+    let res = await send(await authHeader());
+    // The token is read before the body goes out but judged after it has arrived, so a slow
+    // upload can outlive it. One forced refresh and one resend — a 401 that survives a fresh
+    // token is a real one.
+    if (res.status === 401) {
+      const fresh = await refreshedAuthHeader();
+      if (fresh) res = await send(fresh);
+    }
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
       const limit = uploadLimitError(res.status, detail);

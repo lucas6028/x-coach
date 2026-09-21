@@ -1243,14 +1243,14 @@ def _auth_settings(*, configured: bool = True):
     )
 
 
-def _fake_supabase(*, user=None, raises: bool = False):
+def _fake_supabase(*, user=None, raises: bool = False, error: Exception | None = None):
     """A fake ``supabase`` module whose ``create_client(...).auth.get_user`` is controllable."""
     module = types.ModuleType("supabase")
 
     def create_client(url, key):
         client = mock.Mock()
         if raises:
-            client.auth.get_user.side_effect = RuntimeError("invalid token")
+            client.auth.get_user.side_effect = error or RuntimeError("invalid token")
         else:
             client.auth.get_user.return_value = types.SimpleNamespace(user=user)
         return client
@@ -1304,6 +1304,42 @@ class VerifyTests(unittest.TestCase):
             with self.assertRaises(HTTPException) as ctx:
                 auth._verify("bad")
         self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_get_user_error_is_logged(self) -> None:
+        fake = _fake_supabase(raises=True)
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()), mock.patch.dict(
+            sys.modules, {"supabase": fake}
+        ):
+            with self.assertLogs(auth.logger, level="WARNING") as logs:
+                with self.assertRaises(HTTPException):
+                    auth._verify("bad")
+        self.assertIn("invalid token", logs.output[0])
+
+    def test_rejected_token_is_401(self) -> None:
+        from supabase_auth.errors import AuthApiError
+
+        fake = _fake_supabase(raises=True, error=AuthApiError("token is expired", 403, "bad_jwt"))
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()), mock.patch.dict(
+            sys.modules, {"supabase": fake}
+        ):
+            with self.assertLogs(auth.logger, level="WARNING"):
+                with self.assertRaises(HTTPException) as ctx:
+                    auth._verify("stale")
+        self.assertEqual(ctx.exception.status_code, 401)
+
+    def test_auth_outage_is_503_not_401(self) -> None:
+        # The real class, not a lookalike: the name match in _is_auth_outage is only worth
+        # anything if it holds against what supabase-py actually raises on a timeout.
+        from supabase_auth.errors import AuthRetryableError
+
+        fake = _fake_supabase(raises=True, error=AuthRetryableError("timed out", 0))
+        with mock.patch.object(auth, "get_settings", return_value=_auth_settings()), mock.patch.dict(
+            sys.modules, {"supabase": fake}
+        ):
+            with self.assertLogs(auth.logger, level="WARNING"):
+                with self.assertRaises(HTTPException) as ctx:
+                    auth._verify("tok")
+        self.assertEqual(ctx.exception.status_code, 503)
 
     def test_no_user_is_401(self) -> None:
         fake = _fake_supabase(user=None)
