@@ -317,7 +317,102 @@ module only adds the frozen fold manifest, the raw-to-materialized conversion, t
 logistic control and the paired-subject inference (exact sign-flip test, subject
 bootstrap CI, Holm correction, gates).
 
-Fuse skeleton and VideoMAE features:
+### Calibrated late fusion of NLF pose and VideoMAE
+
+Pre-registration: `notes/rehab24_nlf_videomae_late_fusion_validation_plan.md`. Logic in
+`src/rehab24/pose_video_fusion.py`; seeds, margin, arm paths, the fold/manifest hashes and
+the pinned pre-change trainer are constants there, so committing that file freezes the
+protocol. No extraction: the `nlf` branch reads `nlf_parametric_3d2d_skeleton_features`,
+the `vm16` branch reads the `20260918_vjepa2_vs_videomae` run's `features/vm16`, and the
+folds are that run's `folds.json` copied byte for byte. CPU only, and there is no device
+option (~2-5 s per fit).
+
+**The protocol is frozen from `init` until both fuses (step 6 and step 7) are done.**
+Commit the plan and the code before `init`. From then on the plan note and every file in
+`PROTOCOL_FILES` (the plan, this CLI, every project module the run imports) stay
+untouched: `init`, `ab-check`, `fit` and `fuse` refuse to start while any of them is
+modified or untracked, or while HEAD is not the commit `init` recorded. Any commit or
+branch switch in between therefore forces a new run id. A deviation that comes up during
+the run is not written into the plan; it goes to `<run_dir>/deviations.json` and into the
+results note afterwards. The frozen-protocol gate checks the same things again from the
+stamps, and fails a fit or A/B cell that has no stamp at all. If a refusal lists a file
+whose line endings alone changed, `git add <file>` refreshes its index entry.
+
+PowerShell, from the repo root (this machine has no bare `python`):
+
+```powershell
+$RUN = "<run_id>"   # -> data/REHAB24-6/processed/pose_video_fusion/<run_id>/
+
+# 1. Assert the three frozen hashes, tie the labels file to the hash-frozen manifest,
+#    copy the folds, write run_config.json (git commit, clean/dirty state).
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py init --run-id $RUN
+
+# 2. Id-by-id diff of both feature directories against the manifest (not a file count).
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py features --run-id $RUN
+
+# 3. Trainer A/B. A = train_one_fold as committed at the plan commit 6a9338e2, read with
+#    `git show` (commit and blob SHA-256 recorded per cell); B = the working-tree trainer
+#    with the validation export on. Bit-identical held-out probabilities and thresholds
+#    on every arm x fold x seed (120 fits). For vm16 it also compares against the stored
+#    20260918 OOF: never blocks, a mismatch is appended to deviations.json.
+#    Smoke: add --seeds 42 --test-subjects 1
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py ab-check --run-id $RUN
+
+# 4. Refit each branch on the frozen folds, 3 seeds. Held-out rows -> oof/<arm>/,
+#    validation rows (best checkpoint) -> oof_val/<arm>/. Then the same again for the
+#    P10-removed sensitivity (folds_no_p10.json -> oof/<arm>_nop10/, oof_val/<arm>_nop10/).
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id $RUN --arm nlf
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id $RUN --arm vm16
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id $RUN --arm nlf --no-p10-training
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fit --run-id $RUN --arm vm16 --no-p10-training
+
+# 5. Historical-baseline check. NEVER BLOCKS. The stock LOSO command on the nlf features,
+#    seed 42, manifest order, compared fold by fold (balanced accuracy and threshold) with
+#    correctness_loso_nlf_parametric_3d2d.json (mean 0.66836). The frozen-fold `nlf` arm
+#    above uses sorted sample order and is not expected to match that file; this rerun is.
+#    A miss is appended to deviations.json and the 0.668 figure stays context.
+.venv\Scripts\python.exe -m src.rehab24.loso_cross_validation --feature-dir data/REHAB24-6/processed/nlf_parametric_3d2d_skeleton_features --seed 42 --device cpu --summary-output data/REHAB24-6/processed/pose_video_fusion/$RUN/historical_nlf_seed42.json
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py baseline-check --run-id $RUN --rerun-summary data/REHAB24-6/processed/pose_video_fusion/$RUN/historical_nlf_seed42.json
+
+# 6. The registered rule per fold and seed: Platt per branch on the validation subject,
+#    unweighted mean, threshold on validation. Writes fused, nlf_cal (share 1.0),
+#    vm16_cal (share 0.0), fused_tuned, fused_perm{101,202,303} and calibration.json,
+#    which records the person ids and id hash of the rows each calibration was fitted on.
+#    calibration.json holds Platt parameters, thresholds and provenance, no score.
+#    Then the leak audit -> leak_audit.json (below). Refuses until gates 1-4 pass; prints
+#    no held-out score.
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fuse --run-id $RUN
+
+# 7. The same rule on the P10-removed refits -> oof/<arm>_nop10/ and
+#    calibration_nop10.json. It leaves the main fuse and its leak audit untouched.
+#    The protocol freeze ends after this command.
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py fuse --run-id $RUN --no-p10-training
+
+# 8. The eight blocking gates -> gates.json, then the report -> summary.json.
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py gates --run-id $RUN
+.venv\Scripts\python.exe scripts/rehab24/run_pose_video_fusion.py report --run-id $RUN
+```
+
+`report` keeps every primary, secondary and verdict out of `summary.json` (verdict row 0)
+in two cases: a gate has not passed, or the leak audit does not release them. The audit is
+a fixed procedure inside `fuse`, with no manual override:
+
+- Trigger: the mean `fused_perm - nlf_cal` over the three registered permuted runs
+  exceeds +0.01. If it does not, nothing else runs and outcomes are released.
+- If it fires, `fuse` writes `oof_audit/fused_const/` (the second branch is the fold's
+  validation positive rate on every row: no information, same halving of the probability
+  scale) and twenty more permuted runs, permutation seeds 1001-1020 with model seeds 42,
+  7, 1234 assigned cyclically. It clears if the mean `fused_perm - fused_const` over those
+  twenty is at most +0.01; otherwise the pipeline is treated as leaking.
+- `leak_audit.json` holds deltas against `nlf_cal` and `fused_const` only. `report`
+  recomputes the audit from disk and requires the stored file to match, so a re-fuse, an
+  edited OOF file or an edited record all withhold the outcomes until `fuse` is rerun.
+
+Validation rows live in `oof_val/`, never in `oof/<arm>/seed<seed>.csv`: the comparison
+module's OOF gate flags duplicate sample ids and rows whose `person_id` is not their
+`test_subject`, and every validation row is both.
+
+Fuse skeleton and VideoMAE features (early concatenation):
 
 ```bash
 python scripts/rehab24/fuse_features.py
