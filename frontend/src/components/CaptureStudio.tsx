@@ -3,6 +3,7 @@ import ComplexitySelector from "./ComplexitySelector";
 import RecordPanel from "./RecordPanel";
 import UploadDropzone from "./UploadDropzone";
 import { useI18n } from "../lib/i18n";
+import { useIsMobile } from "../lib/useIsMobile";
 import { loadAnalysisTier, saveAnalysisTier, type PoseTier } from "../lib/poseTier";
 
 type Mode = "upload" | "record";
@@ -36,6 +37,7 @@ export default function CaptureStudio({
   initialMode?: Mode;
 }) {
   const { t } = useI18n();
+  const mobile = useIsMobile();
   const [mode, setMode] = useState<Mode>(initialMode);
   const [ownTier, setOwnTier] = useState<PoseTier>(() => loadAnalysisTier());
   const controlled = controlledTier !== undefined;
@@ -85,7 +87,13 @@ export default function CaptureStudio({
       {mode === "upload" ? (
         <UploadDropzone onFile={(file) => onBlob(file, tier)} movement={movement} />
       ) : (
+        // On a phone the camera goes fullscreen — the header, this page's copy and the bottom nav
+        // otherwise leave the preview half off-screen. Keyed on `mobile` because the fullscreen
+        // and inline layouts are different trees: a flip must restart the camera, not strand it.
         <RecordPanel
+          key={mobile ? "fullscreen" : "inline"}
+          fullscreen={mobile}
+          onClose={() => setMode("upload")}
           onRecorded={(blob) => onBlob(blob, tier)}
           onError={(msg) => {
             setMode("upload");

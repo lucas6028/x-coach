@@ -1,5 +1,7 @@
 /* c8 ignore start — camera + MediaRecorder + WASM overlay glue, unrunnable under jsdom */
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { X } from "@phosphor-icons/react";
 import { CameraError, getCameraStream } from "../lib/camera";
 import { LIVE_OVERLAY_TIER } from "../lib/poseTier";
 import { POSE_CONNECTIONS } from "../lib/pose";
@@ -14,9 +16,17 @@ function pickMime(): string {
 export default function RecordPanel({
   onRecorded,
   onError,
+  fullscreen = false,
+  onClose,
 }: {
   onRecorded: (blob: Blob) => void;
   onError: (msg: string) => void;
+  /** Phone layout: the camera covers the whole viewport instead of sitting in the page flow.
+   *  Read once per mount — the two layouts are different trees, so the caller must remount
+   *  (key) this panel when it flips, or the new <video> never gets the stream. */
+  fullscreen?: boolean;
+  /** Fullscreen only: leave the camera without recording. */
+  onClose?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -132,18 +142,52 @@ export default function RecordPanel({
     setRecording(false);
   };
 
+  const recordButton = (
+    <button
+      onClick={recording ? stop : start}
+      className="rounded-full bg-primary px-6 py-3 font-medium text-white active:translate-y-px"
+    >
+      {recording ? "停止並分析" : "開始錄影"}
+    </button>
+  );
+
+  if (fullscreen) {
+    // Phone: the page header, the studio copy and the bottom nav together push the preview below
+    // the fold, so the camera takes the whole viewport instead. Portalled to <body> because the
+    // studio sits inside a motion-transformed (and glass, i.e. backdrop-filtered) ancestor, either
+    // of which would turn `fixed` into "fixed to that ancestor". `object-contain` on BOTH the video
+    // and the canvas keeps the skeleton registered to the letterboxed picture — they share one
+    // intrinsic size, so they letterbox identically. 100dvh, not inset-0's 100vh, so the record
+    // button is not hidden under a mobile browser's URL bar.
+    return createPortal(
+      <div className="fixed inset-x-0 top-0 z-[60] h-[100dvh] touch-none bg-black">
+        <video ref={videoRef} className="h-full w-full object-contain" muted playsInline />
+        <canvas
+          ref={canvasRef}
+          className="pointer-events-none absolute inset-0 h-full w-full object-contain"
+        />
+        <button
+          onClick={onClose}
+          aria-label="關閉相機"
+          className="absolute left-4 top-[max(env(safe-area-inset-top),1rem)] flex h-10 w-10 items-center justify-center rounded-full bg-black/50 text-white active:scale-95"
+        >
+          <X size={20} weight="bold" />
+        </button>
+        <div className="absolute inset-x-0 bottom-[max(env(safe-area-inset-bottom),1.5rem)] flex justify-center">
+          {recordButton}
+        </div>
+      </div>,
+      document.body,
+    );
+  }
+
   return (
     <div className="flex flex-col items-center gap-4">
       <div className="relative w-full max-w-md overflow-hidden rounded-xl bg-black">
         <video ref={videoRef} className="w-full" muted playsInline />
         <canvas ref={canvasRef} className="pointer-events-none absolute inset-0 h-full w-full" />
       </div>
-      <button
-        onClick={recording ? stop : start}
-        className="rounded-full bg-primary px-6 py-3 font-medium text-white active:translate-y-px"
-      >
-        {recording ? "停止並分析" : "開始錄影"}
-      </button>
+      {recordButton}
     </div>
   );
 }
