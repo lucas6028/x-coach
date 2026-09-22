@@ -19,6 +19,7 @@ vi.mock("../pages/Login", () => ({ default: () => <div>login page</div> }));
 vi.mock("../pages/History", () => ({ default: () => <div>history page</div> }));
 vi.mock("../pages/Movements", () => ({ default: () => <div>movements page</div> }));
 vi.mock("../pages/MovementDetail", () => ({ default: () => <div>movement detail page</div> }));
+vi.mock("../pages/KnowledgeGraph", () => ({ default: () => <div>knowledge graph page</div> }));
 vi.mock("../pages/Plans", () => ({ default: () => <div>plans page</div> }));
 vi.mock("../pages/PlanDetail", () => ({ default: () => <div>plan detail page</div> }));
 vi.mock("../pages/Settings", () => ({ default: () => <div>settings page</div> }));
@@ -70,6 +71,14 @@ describe("AppRoutes — public routes", () => {
   it("serves a movement's detail page to a signed-out visitor", () => {
     renderAnonymousAt("/movements/Overhead%20Press");
     expect(screen.getByText("movement detail page")).toBeInTheDocument();
+    expect(screen.queryByText("login page")).not.toBeInTheDocument();
+  });
+
+  // /graph browses the same knowledge graph GET /api/knowledge/* already serves unauthenticated —
+  // just the whole thing instead of a per-fault 1-hop slice. Nothing on it is user-specific.
+  it("serves the knowledge graph page to a signed-out visitor", () => {
+    renderAnonymousAt("/graph");
+    expect(screen.getByText("knowledge graph page")).toBeInTheDocument();
     expect(screen.queryByText("login page")).not.toBeInTheDocument();
   });
 

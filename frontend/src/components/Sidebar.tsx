@@ -6,6 +6,7 @@ import {
   ClockCounterClockwise,
   GameController,
   GearSix,
+  Graph,
   Plus,
   ShieldCheck,
   UsersThree,
@@ -68,6 +69,7 @@ export default function Sidebar({
   const onStudio = pathname === "/app";
   const onHistory = pathname === "/history";
   const onMovements = pathname === "/movements";
+  const onGraph = pathname === "/graph";
   // The detail route lights the same entry as the list — /plans/<id> is still "Plans".
   const onPlans = pathname === "/plans" || pathname.startsWith("/plans/");
   const onSettings = pathname === "/settings";
@@ -175,6 +177,13 @@ export default function Sidebar({
             className={`${cell} ${onMovements ? cellActive : cellIdle}`}
           >
             <Cell icon={Barbell} text={t("nav.movements")} active={onMovements} />
+          </Link>
+          <Link
+            to="/graph"
+            title={t("nav.graph")}
+            className={`${cell} ${onGraph ? cellActive : cellIdle}`}
+          >
+            <Cell icon={Graph} text={t("nav.graph")} active={onGraph} />
           </Link>
           {/* Plans sits between the movement library and the history: the library is where you
               pick what to train, a plan is when you train it, and the history is what came out. */}

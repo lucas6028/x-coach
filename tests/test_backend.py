@@ -628,6 +628,21 @@ class KnowledgeServiceTests(_TempConfigBase):
         self.assertEqual(out, rows)
         lf.assert_called_once_with(graph_file=self.kg_file, movement="Overhead Press")
 
+    def test_full_graph_passthrough(self) -> None:
+        # Exercises the real (unmocked) service body: it must pass config.KG_GRAPH_FILE, the
+        # patched temp path here, NOT the module-level DEFAULT_GRAPH_FILE the graph_retrieval
+        # helper defaults to — that default would silently read the real 2000+ node graph in tests.
+        payload = {"counts": {"nodes": 0, "edges": 0}}
+        with mock.patch.object(knowledge, "dump_full_graph", return_value=payload) as dg:
+            out = knowledge.full_graph(movement="Squat", label="Fault")
+        self.assertEqual(out, payload)
+        dg.assert_called_once_with(graph_file=self.kg_file, movement="Squat", label="Fault")
+
+    def test_full_graph_defaults(self) -> None:
+        with mock.patch.object(knowledge, "dump_full_graph", return_value={}) as dg:
+            knowledge.full_graph()
+        dg.assert_called_once_with(graph_file=self.kg_file, movement=None, label=None)
+
 
 # --------------------------------------------------------------------- routers
 
@@ -1004,6 +1019,23 @@ class KnowledgeRouterTests(_TempConfigBase):
         # empty query violates min_length=1
         resp = self.client.get("/api/knowledge/graph", params={"query": ""})
         self.assertEqual(resp.status_code, 422)
+
+    def test_full_endpoint(self) -> None:
+        payload = {"counts": {"nodes": 1, "edges": 0}, "nodes": [], "edges": []}
+        with mock.patch.object(knowledge, "full_graph", return_value=payload) as fg:
+            resp = self.client.get("/api/knowledge/full")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), payload)
+        # `movement`/`label` both default to None when the query params are omitted.
+        fg.assert_called_once_with(movement=None, label=None)
+
+    def test_full_endpoint_forwards_filters(self) -> None:
+        with mock.patch.object(knowledge, "full_graph", return_value={}) as fg:
+            resp = self.client.get(
+                "/api/knowledge/full", params={"movement": "Squat", "label": "Fault"}
+            )
+        self.assertEqual(resp.status_code, 200)
+        fg.assert_called_once_with(movement="Squat", label="Fault")
 
     def test_faults_endpoint(self) -> None:
         rows = [{"name": "Knee Valgus", "connectivity": 3}, {"name": "Bar Drift", "connectivity": 0}]

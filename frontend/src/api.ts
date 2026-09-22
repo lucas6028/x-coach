@@ -58,6 +58,36 @@ export interface SubgraphEdge {
   relation: string;
   direction?: string;
 }
+// One node/edge in the FULL knowledge graph dump (GET /api/knowledge/full), as opposed to the
+// per-fault 1-hop SubgraphNode/SubgraphEdge above — `movement` and unfiltered `counts` are what a
+// browse-everything page needs and a single-seed retrieval never carries.
+export interface FullGraphNode {
+  node_id: string;
+  name: string;
+  label: string;
+  movement: string;
+}
+export interface FullGraphEdge {
+  source: string;
+  target: string;
+  relation: string;
+}
+export interface FullGraphResponse {
+  graph_file: string;
+  movement: string | null;
+  label: string | null;
+  counts: {
+    nodes: number;
+    edges: number;
+    labels: Record<string, number>;
+    relations: Record<string, number>;
+    movements: Record<string, number>;
+  };
+  total: { nodes: number; edges: number };
+  nodes: FullGraphNode[];
+  edges: FullGraphEdge[];
+}
+
 export interface RagResult {
   rank: number;
   score: number;
@@ -961,6 +991,17 @@ export const api = {
     getJSON<{ movement: string; faults: MovementFault[] }>(
       `/api/knowledge/faults?movement=${encodeURIComponent(movement)}`
     ),
+
+  // The whole knowledge graph (optionally server-side filtered), for the /graph browse-everything
+  // page. The page fetches this once unfiltered and does the rest of its filtering client-side, so
+  // `params` is rarely used today, but the server-side filter is kept for a future deep link.
+  fullGraph: (params?: { movement?: string; label?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.movement) qs.set("movement", params.movement);
+    if (params?.label) qs.set("label", params.label);
+    const suffix = qs.toString();
+    return getJSON<FullGraphResponse>(`/api/knowledge/full${suffix ? `?${suffix}` : ""}`);
+  },
 
   // Library demo clips only — uploads are not reachable here (they need an ownership check).
   videoFileUrl: (videoId: string) => `/api/video-file/${videoId}`,

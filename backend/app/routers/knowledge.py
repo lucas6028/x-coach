@@ -26,6 +26,15 @@ def graph(
     )
 
 
+@router.get("/full")
+def full(
+    movement: str | None = Query(None),
+    label: str | None = Query(None),
+) -> dict:
+    """Every node + edge in the KG (optionally filtered), for the /graph browse-everything page."""
+    return knowledge.full_graph(movement=movement, label=label)
+
+
 @router.get("/faults")
 def faults(movement: str = Query(..., min_length=1)) -> dict:
     """The complete fault list for a movement (name + 1-hop graph connectivity), for the

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.knowledge.graph_retrieval import list_movement_faults, retrieve_graph_context
+from src.knowledge.graph_retrieval import dump_full_graph, list_movement_faults, retrieve_graph_context
 from src.knowledge.rag_vector_db import query_vector_db
 
 from backend.app import config
@@ -28,6 +28,11 @@ def movement_faults(movement: str) -> list[dict[str, Any]]:
     movement-scoped fault list for the Explore browser (a hop-limited graph query would omit
     faults not directly linked to the movement root)."""
     return list_movement_faults(graph_file=config.KG_GRAPH_FILE, movement=movement)
+
+
+def full_graph(*, movement: str | None = None, label: str | None = None) -> dict[str, Any]:
+    """Every KG node + edge (optionally filtered), for the /graph browse-everything page."""
+    return dump_full_graph(graph_file=config.KG_GRAPH_FILE, movement=movement, label=label)
 
 
 def rag_snippets(query: str, *, top_k: int = 5) -> dict[str, Any]:

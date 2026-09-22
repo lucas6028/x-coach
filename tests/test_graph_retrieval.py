@@ -18,7 +18,9 @@ from src.knowledge.graph_retrieval import (
     collect_edges_for_seed,
     compact_key,
     build_lookup,
+    dump_full_graph,
     list_movement_faults,
+    load_graph,
     normalize_query,
     rank_nodes,
     resolve_nodes,
@@ -211,6 +213,73 @@ class ScopedRetrievalTests(unittest.TestCase):
         result = retrieve_graph_context("knee valgus", graph_file=self.graph_file, hops=1, movement=None)
         self.assertIn("Squat:Knee Valgus", result["matched_nodes"])
         self.assertIn("Lunge:Knee Valgus", result["matched_nodes"])
+
+
+class DumpFullGraphTests(unittest.TestCase):
+    """Covers dump_full_graph on the v3-shaped fixture (_build_v3_graph): 4 nodes, 3 edges —
+    two movements sharing a fault name, plus one shared node 1 hop from the Squat side."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.graph_file = self.tmp / "kg_v3.graphml"
+        nx.write_graphml(_build_v3_graph(), self.graph_file)
+
+    def test_unfiltered_counts_match_whole_graph(self):
+        result = dump_full_graph(self.graph_file)
+        graph = load_graph(self.graph_file)
+        self.assertEqual(result["counts"]["nodes"], graph.number_of_nodes())
+        self.assertEqual(result["counts"]["edges"], graph.number_of_edges())
+        self.assertEqual(
+            result["total"], {"nodes": graph.number_of_nodes(), "edges": graph.number_of_edges()}
+        )
+
+    def test_every_node_has_exactly_the_four_keys(self):
+        result = dump_full_graph(self.graph_file)
+        for node in result["nodes"]:
+            self.assertEqual(set(node.keys()), {"node_id", "name", "label", "movement"})
+
+    def test_every_edge_has_exactly_the_three_keys(self):
+        result = dump_full_graph(self.graph_file)
+        for edge in result["edges"]:
+            self.assertEqual(set(edge.keys()), {"source", "target", "relation"})
+
+    def test_movement_filter_keeps_scoped_nodes_and_one_hop_shared_neighbours(self):
+        result = dump_full_graph(self.graph_file, movement="Squat")
+        node_ids = {n["node_id"] for n in result["nodes"]}
+        # Both Squat-scoped nodes, plus the shared Cause node reached from Squat:Narrow Stance —
+        # but NOT the Lunge-scoped node with the same fault name.
+        self.assertEqual(node_ids, {"Squat:Knee Valgus", "Squat:Narrow Stance", "Pelvic Control"})
+        edge_pairs = {(e["source"], e["target"]) for e in result["edges"]}
+        self.assertEqual(
+            edge_pairs,
+            {
+                ("Squat:Knee Valgus", "Squat:Narrow Stance"),
+                ("Squat:Narrow Stance", "Pelvic Control"),
+            },
+        )
+        # Lunge:Knee Valgus -> Pelvic Control is dropped: one endpoint isn't kept.
+        self.assertNotIn(("Lunge:Knee Valgus", "Pelvic Control"), edge_pairs)
+
+    def test_label_filter_keeps_only_that_label(self):
+        result = dump_full_graph(self.graph_file, label="Fault")
+        node_ids = {n["node_id"] for n in result["nodes"]}
+        self.assertEqual(node_ids, {"Squat:Knee Valgus", "Lunge:Knee Valgus"})
+        # Neither Fault node is connected to the other, so every edge is dropped.
+        self.assertEqual(result["edges"], [])
+
+    def test_output_is_deterministic(self):
+        first = dump_full_graph(self.graph_file, movement="Squat")
+        second = dump_full_graph(self.graph_file, movement="Squat")
+        self.assertEqual(first, second)
+
+    def test_cached_graph_is_not_mutated(self):
+        before = load_graph(self.graph_file)
+        before_nodes, before_edges = before.number_of_nodes(), before.number_of_edges()
+        dump_full_graph(self.graph_file, movement="Squat", label="Fault")
+        after = load_graph(self.graph_file)
+        self.assertEqual(after.number_of_nodes(), before_nodes)
+        self.assertEqual(after.number_of_edges(), before_edges)
 
 
 def _build_movement_faults_graph() -> nx.MultiDiGraph:

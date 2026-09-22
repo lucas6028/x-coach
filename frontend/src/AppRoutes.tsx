@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import History from "./pages/History";
 import MovementDetail from "./pages/MovementDetail";
 import Movements from "./pages/Movements";
+import KnowledgeGraph from "./pages/KnowledgeGraph";
 import PlanBuilder from "./pages/PlanBuilder";
 import PlanDetail from "./pages/PlanDetail";
 import Plans from "./pages/Plans";
@@ -87,6 +88,10 @@ export default function AppRoutes() {
           The param is the canonical movement name, percent-encoded; an unknown one redirects to
           the library. Pinned by src/test/AppRoutes.test.tsx. */}
       <Route path="/movements/:movement" element={<MovementDetail />} />
+      {/* PUBLIC for the same reason as /movements above: it browses the same knowledge graph
+          GET /api/knowledge/* already serves unauthenticated, just the whole thing rather than a
+          per-fault 1-hop slice. Nothing here is user-specific. Pinned by src/test/AppRoutes.test.tsx. */}
+      <Route path="/graph" element={<KnowledgeGraph />} />
       {/* GATED, unlike /movements above. A plan is one user's own data — its name, its exercises
           and its progress — so both the list and the detail sit behind RequireAuth alongside
           /history, and the API answers 401 without a session regardless. */}

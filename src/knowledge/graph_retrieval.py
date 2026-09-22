@@ -353,6 +353,94 @@ def retrieve_graph_context(
     }
 
 
+def dump_full_graph(
+    graph_file: Path = DEFAULT_GRAPH_FILE,
+    *,
+    movement: str | None = None,
+    label: str | None = None,
+) -> dict[str, Any]:
+    """Dump the WHOLE knowledge graph (optionally filtered), for a browse-everything view rather
+    than the seed-and-hop retrieval above. Read-only over the shared cached graph — builds plain
+    lists/sets instead of mutating it.
+
+    Filtering: `movement`, when given, keeps every node scoped to that movement plus any `shared`
+    node reachable in exactly one hop from a kept movement node (not every shared node in the
+    graph). `label`, when given, additionally restricts to that node label. An edge survives iff
+    both endpoints survive. Output is sorted so repeated calls are byte-identical.
+    """
+    graph = load_graph(graph_file)
+    total_nodes = graph.number_of_nodes()
+    total_edges = graph.number_of_edges()
+
+    if movement is not None:
+        movement_nodes = {
+            node_id
+            for node_id, attrs in graph.nodes(data=True)
+            if str(attrs.get("movement")) == movement
+        }
+        shared_neighbors: set[str] = set()
+        for node_id in movement_nodes:
+            for _, target in graph.out_edges(node_id):
+                if str(graph.nodes[target].get("movement")) == "shared":
+                    shared_neighbors.add(target)
+            for source, _ in graph.in_edges(node_id):
+                if str(graph.nodes[source].get("movement")) == "shared":
+                    shared_neighbors.add(source)
+        kept_ids = movement_nodes | shared_neighbors
+    else:
+        kept_ids = set(graph.nodes())
+
+    if label is not None:
+        kept_ids = {node_id for node_id in kept_ids if str(graph.nodes[node_id].get("label")) == label}
+
+    nodes_payload = [
+        {
+            "node_id": node_id,
+            "name": str(graph.nodes[node_id].get("name", node_id)),
+            "label": str(graph.nodes[node_id].get("label", "Unknown")),
+            "movement": str(graph.nodes[node_id].get("movement", "")),
+        }
+        for node_id in kept_ids
+    ]
+    nodes_payload.sort(key=lambda n: (n["label"], n["name"]))
+
+    edges_payload = [
+        {
+            "source": str(source),
+            "target": str(target),
+            "relation": str(attrs.get("type", "RELATED_TO")),
+        }
+        for source, target, attrs in graph.edges(data=True)
+        if source in kept_ids and target in kept_ids
+    ]
+    edges_payload.sort(key=lambda e: (e["source"], e["relation"], e["target"]))
+
+    labels_count: dict[str, int] = defaultdict(int)
+    movements_count: dict[str, int] = defaultdict(int)
+    for node in nodes_payload:
+        labels_count[node["label"]] += 1
+        movements_count[node["movement"]] += 1
+    relations_count: dict[str, int] = defaultdict(int)
+    for edge in edges_payload:
+        relations_count[edge["relation"]] += 1
+
+    return {
+        "graph_file": str(graph_file),
+        "movement": movement,
+        "label": label,
+        "counts": {
+            "nodes": len(nodes_payload),
+            "edges": len(edges_payload),
+            "labels": dict(labels_count),
+            "relations": dict(relations_count),
+            "movements": dict(movements_count),
+        },
+        "total": {"nodes": total_nodes, "edges": total_edges},
+        "nodes": nodes_payload,
+        "edges": edges_payload,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Retrieve graph context from the multi-movement sports knowledge graph.")
     parser.add_argument("query", type=str, help="Node or concept to retrieve from the knowledge graph.")
