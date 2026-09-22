@@ -11,7 +11,8 @@ describe("Landing page", () => {
 
   it("renders the hero heading with key phrase", () => {
     renderWithProviders(<Landing />);
-    expect(screen.getByText(/trace to the joint/i)).toBeInTheDocument();
+    // Slogan changed in da5c8517 (landing.hero.titleAccent in src/lib/i18n.tsx).
+    expect(screen.getByText(/improve with evidence/i)).toBeInTheDocument();
   });
 
   it("renders the hero sub-copy", () => {
