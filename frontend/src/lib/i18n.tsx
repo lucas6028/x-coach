@@ -314,8 +314,8 @@ const en: Dict = {
   "landing.cta.open": "Open the demo",
 
   // Landing — hero
-  "landing.hero.titlePre": "Coaching cues you can ",
-  "landing.hero.titleAccent": "trace to the joint",
+  "landing.hero.titlePre": "Understand your movement. ",
+  "landing.hero.titleAccent": "Improve with evidence",
   "landing.hero.titlePost": ".",
   "landing.hero.sub":
     "x-coach reads a squat, push-up or overhead-press video, locates the fault, traces its cause in a biomechanics knowledge graph spanning 16 movements, and explains the fix.",
@@ -1624,8 +1624,8 @@ const zhHant: Dict = {
   "landing.cta.open": "開啟示範",
 
   // Landing — hero
-  "landing.hero.titlePre": "每個訓練提示，都能",
-  "landing.hero.titleAccent": "追溯到關節",
+  "landing.hero.titlePre": "看懂動作，",
+  "landing.hero.titleAccent": "讓改善有依據",
   "landing.hero.titlePost": "。",
   "landing.hero.sub":
     "x-coach 會分析深蹲、伏地挺身和肩上推舉影片，找出動作問題，從涵蓋 16 種動作的知識圖譜找原因，再告訴你怎麼改善。",
