@@ -102,6 +102,11 @@ export default function StudioMobile({
   const reps = analysis.detections.find((d) => typeof d.rep_count === "number")?.rep_count;
   const q = analysis.quality;
 
+  // Faults whose rule cites a paper, one entry per fault: `merge_by_fault` already collapses
+  // repeats on the per-rep path, this guards the whole-clip fallback where it does not run.
+  const papers = analysis.detections.filter(
+    (d, i, all) => d.citation && all.findIndex((o) => o.fault_id === d.fault_id) === i
+  );
   const cites = analysis.detections.flatMap((d) => {
     const r = byFault.get(d.fault_id);
     return [...summaryCategory(r, "causes"), ...summaryCategory(r, "corrections")];
@@ -296,7 +301,7 @@ export default function StudioMobile({
           title={t("mobile.research")}
           subtitle={t("mobile.researchSub")}
         >
-          {cites.length === 0 ? (
+          {cites.length === 0 && papers.length === 0 ? (
             <p className="text-[12px] leading-relaxed text-[#59648f]">{t("studio.tipsNone")}</p>
           ) : (
             <ul className="space-y-1.5">
@@ -304,6 +309,20 @@ export default function StudioMobile({
                 <li key={c} className="flex gap-2 text-[12px] leading-relaxed text-[#59648f]">
                   <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-primary" />
                   {c}
+                </li>
+              ))}
+            </ul>
+          )}
+          {/* One entry per detected fault that cites a paper: the fault, the finding, the reference. */}
+          {papers.length > 0 && (
+            <ul className={`space-y-2 ${cites.length ? "mt-3 border-t border-[#ececf8] pt-3" : ""}`}>
+              {papers.map((d) => (
+                <li key={d.fault_id} className="text-[11px] leading-relaxed">
+                  <span className="block font-semibold text-[#1e2142]">{faultLabel(t, d.fault_name)}</span>
+                  {d.citation_support && (
+                    <span className="block text-[#59648f]">{d.citation_support}</span>
+                  )}
+                  <span className="block text-[10px] text-[#9aa0b8]">{d.citation}</span>
                 </li>
               ))}
             </ul>

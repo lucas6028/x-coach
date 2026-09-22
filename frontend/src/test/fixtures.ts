@@ -15,6 +15,10 @@ export const mockDetection: Detection = {
   peak_frame: 50,
   phase: "descent",
   evidence: { primary_label: "valgus angle", primary_value: 0.35 },
+  citation:
+    "Ford KR, et al. (2015). An evidence-based review of hip-focused neuromuscular exercise interventions to address dynamic lower extremity valgus.",
+  citation_support:
+    "Knee abduction moment predicted future ACL injury risk with 73% specificity and 78% sensitivity.",
 };
 
 export const mockRetrieval: Retrieval = {

@@ -135,6 +135,22 @@ export default function FaultCard({
           {snippet}
         </p>
       )}
+
+      {/* The paper the rule's threshold comes from: the finding first, the reference under it.
+          This is what separates the verdict from an opinion, so it sits on the card, not a hop away. */}
+      {d.citation && (
+        <div className="mt-3 border-t border-border-dark/60 pt-2.5">
+          <span className="block text-[10px] font-semibold uppercase tracking-wide text-faint">
+            {t("feedback.citation")}
+          </span>
+          {d.citation_support && (
+            <p className="mt-0.5 text-[11px] leading-relaxed text-content">{d.citation_support}</p>
+          )}
+          <p className="mt-1 text-[10px] leading-relaxed text-muted" data-testid="fault-citation">
+            {d.citation}
+          </p>
+        </div>
+      )}
     </button>
   );
 }

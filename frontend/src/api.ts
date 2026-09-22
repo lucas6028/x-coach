@@ -32,6 +32,11 @@ export interface Detection {
   peak_frame: number;
   phase: string;
   evidence: Record<string, number | string>;
+  /** The literature the rule was built from (`PoseRuleDetection.citation`) and the one-line
+   *  finding it rests on (`citation_support`). Optional for the same reason as `rep_index`:
+   *  older stored analyses predate the fields. Empty string means the rule cites nothing. */
+  citation?: string;
+  citation_support?: string;
   /** Per-rep attribution (`PoseRuleDetection`, src/pose/pose_rule_detector.py:105-107), the seam
    *  that makes "第 2 rep 膝蓋幾度" answerable via the backend's `get_analysis` tool. Optional,
    *  same as `movement` above: analyses predating per-rep detection carry no per-rep attribution at

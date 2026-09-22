@@ -158,6 +158,25 @@ describe("StudioMobile — disclosure rows", () => {
     expect(screen.getAllByText("Drive knees out").length).toBe(2);
   });
 
+  // The rule's own paper sits under the KG bullets: the finding it rests on, then the reference.
+  it("lists each detected fault's paper under the research row", async () => {
+    renderStudio();
+    openRow("Based on research");
+    expect(screen.getByText(/ACL injury risk with 73% specificity/)).toBeInTheDocument();
+    expect(screen.getByText(/Ford KR, et al\. \(2015\)/)).toBeInTheDocument();
+  });
+
+  // The whole-clip fallback path can report the same fault twice; its paper is listed once.
+  it("lists a fault's paper once even when it was detected on several reps", async () => {
+    const d = mockAnalysis.detections[0];
+    renderStudio({
+      ...mockAnalysis,
+      detections: [d, { ...d, start_time: 4, end_time: 5 }],
+    });
+    openRow("Based on research");
+    expect(screen.getAllByText(/Ford KR, et al\. \(2015\)/)).toHaveLength(1);
+  });
+
   it("says so when the knowledge graph returned no cue", async () => {
     renderStudio(mockCleanAnalysis);
     openRow("Based on research");

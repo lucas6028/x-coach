@@ -158,6 +158,7 @@ const en: Dict = {
   "feedback.cause": "Cause",
   "feedback.risk": "Risk",
   "feedback.cue": "Cue",
+  "feedback.citation": "Evidence",
   "feedback.phaseTag": "during {phase} phase",
 
   // Severity
@@ -1473,6 +1474,7 @@ const zhHant: Dict = {
   "feedback.cause": "原因",
   "feedback.risk": "風險",
   "feedback.cue": "提示",
+  "feedback.citation": "文獻依據",
   "feedback.phaseTag": "（{phase}階段）",
 
   // Severity
