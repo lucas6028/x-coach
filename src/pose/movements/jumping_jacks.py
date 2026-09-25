@@ -40,6 +40,8 @@
 #
 # Design spec `docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md`. Measurements:
 # `notes/jumping-jacks-rule-validation.md`, harness `src/egoexo/jumping_jacks_validation.py`.
+# Re-search 2026-09-25: all three stay withdrawn; every jumping-jack valgus/landing hit is a warm-up
+# before a drop jump, and no cadence source states a fault. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 5.
 #
 # ---------------------------------------------------------------------------------------
 # THE VARIANT MATCHES, THE LABELS ARE THE RICHEST IN THE PROGRAMME, AND THEY ARE ABOUT

@@ -41,6 +41,9 @@
 #
 # Design spec `docs/superpowers/specs/2026-08-10-high-knee-detector-design.md`. Measurements:
 # `notes/high-knee-rule-validation.md`, harness `src/egoexo/high_knee_validation.py`.
+# Re-search 2026-09-25: all four stay withdrawn (three are measured refutations). Alberton 2015
+# (PMC4723158) instructs 90 deg hip/knee flexion for running in place -- a protocol target, and
+# it does not unsilence rule_insufficient_knee_lift. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 5.
 #
 # ---------------------------------------------------------------------------------------
 # THE CORPUS JUDGES THIS EXERCISE RICHLY AND JUDGES DIFFERENT FAULTS. THAT IS JUMPING JACKS'

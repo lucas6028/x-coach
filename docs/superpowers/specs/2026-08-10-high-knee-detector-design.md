@@ -459,6 +459,9 @@ that is fully roll-, view- and scale-invariant, because it is counted in time ra
 in space. It is not built, because this programme implements the parent spec's roster and does not
 author new rules. It is recorded because the evidence for it is already in the module.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §5): all four stay withdrawn. No running-in-place source states a trunk or pelvic tolerance, and no
+cadence source defines a fault.
+
 ---
 
 ## 8. Testing

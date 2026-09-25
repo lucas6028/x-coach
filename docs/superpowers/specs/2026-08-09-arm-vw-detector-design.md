@@ -430,6 +430,9 @@ disjunct is **absent**, exactly as the impingement arc is absent from `arm_abduc
 that puts a number on the W, or a metric that captures the A-P component the frontal reading
 loses. Neither is invented here.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §2.3): still withdrawn. Nakamura 2016 (PMC4852525) places its W position at 20° of abduction (robbery
+exercise, behind a reference marker), which argues against any 75° floor.
+
 ---
 
 ## 7. `lr_vw_asymmetry` SHIPS — and it is the first asymmetry rule in this project to GATE on view

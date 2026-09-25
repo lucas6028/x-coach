@@ -12,6 +12,7 @@ from src.pose.movements.arm_abduction import (
     arm_abduction_compute_raw,
     rule_contralateral_trunk_lean,
     rule_lr_asymmetry,
+    rule_raised_above_shoulder_height,
     rule_shoulder_shrug,
 )
 from src.pose.movements.base import CoreFrame, RuleContext, run_detector
@@ -336,9 +337,53 @@ class ShoulderShrugSilenceTest(unittest.TestCase):
     def test_it_is_registered_rather_than_absent(self) -> None:
         """Silent, not withdrawn -- the parent spec and the code stay in 1:1 correspondence so an
         auditor gets "yes, accounted for, and here is why it says nothing". Contrast the
-        impingement-arc rule, which is ABSENT from the module entirely."""
+        impingement-arc rule AS WRITTEN, which is ABSENT from the module entirely."""
         self.assertIn(rule_shoulder_shrug, ARM_ABDUCTION_DETECTOR.rules)
-        self.assertEqual(len(ARM_ABDUCTION_DETECTOR.rules), 3)
+        self.assertEqual(len(ARM_ABDUCTION_DETECTOR.rules), 4)
+
+
+class RaisedAboveShoulderHeightSilenceTest(unittest.TestCase):
+    """`rule_raised_above_shoulder_height` -- the 2026-09-25 cited rewrite of the withdrawn
+    impingement-arc rule (Kolber 2014: lateral raises above 90 deg) -- is registered and
+    PERMANENTLY SILENT, because MediaPipe over-reads elevation magnitude toward firing.
+
+    Same discipline as ShoulderShrugSilenceTest: every silence assertion is paired with proof that
+    the fixture is one a live > 90 deg rule would fire on, AND that the frames reached the rules.
+    """
+
+    def _overhead_clip(self) -> list[dict]:
+        """Both arms raised to 140 deg, one 25 deg behind -- far past shoulder height, and
+        asymmetric enough that `rule_lr_asymmetry` demonstrably fires on the same core."""
+        return _rep(n=40, peak_deg=140.0, left_offset_deg=25.0)
+
+    def test_the_fixture_is_well_past_the_cited_90_degrees(self) -> None:
+        core = _core(self._overhead_clip())
+        peak = max(
+            max(frame.m("left_arm_elevation_deg"), frame.m("right_arm_elevation_deg"))
+            for frame in core
+            if frame.valid
+        )
+        self.assertGreater(peak, 90.0)
+
+    def test_it_is_silent_where_another_rule_fires(self) -> None:
+        core = _core(self._overhead_clip())
+        ctx = _ctx()
+        self.assertNotEqual(
+            rule_lr_asymmetry(core, ctx), [], "control: the frames did reach the rules"
+        )
+        self.assertEqual(rule_raised_above_shoulder_height(core, ctx), [])
+
+    def test_it_is_silent_on_every_reachable_view(self) -> None:
+        core = _core(self._overhead_clip())
+        for view in ("front", "rear", "rear_oblique", "front_oblique", "side", "unknown"):
+            with self.subTest(view=view):
+                self.assertEqual(
+                    rule_raised_above_shoulder_height(core, _ctx(view_type=view)), []
+                )
+
+    def test_it_is_registered_rather_than_absent(self) -> None:
+        """Cited now, so silent rather than withdrawn: registered, like the shrug rule."""
+        self.assertIn(rule_raised_above_shoulder_height, ARM_ABDUCTION_DETECTOR.rules)
 
 
 class TrunkLeanRuleTest(unittest.TestCase):

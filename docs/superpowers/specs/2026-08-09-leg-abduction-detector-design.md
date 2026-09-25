@@ -423,6 +423,10 @@ Node-presence predicts the outcome in **2 of the 5 decisions taken here**. The o
 (`Pelvic Hiking`). So a missing node was a reliable signal that a rule should not exist, and a
 present node said nothing at all about whether it would.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §4.3–4.5): both stay withdrawn. Lee 2013 supports only the direction of the external-rotation→TFL claim
+(side-lying, isometric, no tolerance); nothing found tests the hip-flexion half; tempo sources give
+protocol values, not fault thresholds.
+
 ---
 
 ## 8. Measured on 210 labeled repetitions, through the real `run_detector`

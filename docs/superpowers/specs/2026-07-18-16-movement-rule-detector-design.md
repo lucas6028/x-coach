@@ -2,6 +2,10 @@
 
 **Status:** design spec (foundation for detector implementation) · **Date:** 2026-07-18
 **Author:** Claude Fable 5 (x-coach) · **Rules:** 70 across 16 canonical movements
+**Re-search 2026-09-25:** every withdrawn rule was searched again; none is reinstated live. One —
+the Arm Abduction impingement arc — was REWRITTEN to the rule its new source states and registered
+permanently silent (`arm_abd_raised_above_shoulder_height`, below). Per-rule verdicts,
+sources and queries: `2026-09-25-withdrawn-rules-literature-research.md`.
 
 ---
 
@@ -258,6 +262,10 @@ between shoulders and hips), so it is marked honestly below.
 > (a) a base-of-support reference MediaPipe can resolve and (b) a citation that measures bar
 > displacement with a number. Neither exists today. This is a withdrawal pending a decision, not
 > a silent deletion.
+>
+> **Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §1.2): still withdrawn. No study states a forward-drift
+> threshold; Edington 2018 (PMC6162543) moved the bar from navicular to 3rd MTP and measured no
+> difference in lumbar shear or compression, a null on this rule's lever-arm rationale.
 
 #### Hips Rise Faster Than Shoulders (Stiff-Leg / Segment Split)
 
@@ -539,6 +547,9 @@ needed for left/right asymmetry.
 > (a) a base-of-support reference that MediaPipe can actually resolve and (b) its own
 > citation. Until both exist, the rule is a forward-head cue only. This is a withdrawal
 > pending a decision, not a silent reinterpretation.
+>
+> **Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §1.1): still withdrawn. No peer-reviewed study measures the
+> horizontal bar position at overhead-press lockout with a number.
 - **biomechanical_rationale**: A forward-head / kyphotic overhead posture reduces the
   scapular upward rotation and shoulder flexion available and narrows the subacromial
   space, both cutting achievable overhead ROM and raising impingement risk; fatigue in
@@ -960,6 +971,9 @@ Rep phases: **setup/bottom** (arms extended at sides, `elbow_angle`≈170–180�
 > **The KG node is not the gap.** `Bicep Curl:Wrist Flexion Under Load` resolves with a
 > non-empty `corrections` bucket (`Wrists In Line With Forearms`). The node stays; nothing in
 > the detector points at it.
+>
+> **Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §2.1): still withdrawn. No curl study states a wrist-flexion
+> fault or threshold; the only numbers found are descriptive group means in a preprint.
 
 ---
 
@@ -1112,6 +1126,25 @@ Rep phases: **setup/bottom** (arms adducted at sides, `arm_elevation_angle`≈0�
 > movement in this spec got an incomplete-ROM rule; Arm Abduction got "raised too high" instead
 > and now has no ROM rule at all. Filling that gap needs a source that puts a number on
 > insufficient abduction. **No rule was invented to fill it.**
+>
+> **Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §2.2): as written, still withdrawn. A REWRITE now has a primary
+> source: Kolber 2014 (JSCR 28(4):1081-9) associates lateral raises above 90° with impingement
+> characteristics in recreational weight-trainers. The rule is REWRITTEN to that finding — see
+> **Raised above shoulder height** directly below — and registered PERMANENTLY SILENT: the
+> elevation magnitude it needs is over-read by MediaPipe (mean 20.6° per rep, median peak 157.4°
+> vs 130.1° on the markers, design spec §2.4), toward firing. The arc form above stays withdrawn.
+> Incomplete Elevation is still unsourced.
+
+#### Raised above shoulder height (2026-09-25 rewrite of the impingement-arc rule)
+- **fault_id**: `arm_abd_raised_above_shoulder_height` (function `rule_raised_above_shoulder_height`)
+- **fault_name**: Arm raised above shoulder height
+- **description**: The arms are raised past 90° of abduction (above shoulder level) during a lateral raise.
+- **detection_heuristic**: peak `angle(hip, shoulder, elbow)` per arm over the rep `> 90°` — the heuristic a live rule would use. The registered rule is permanently silent and computes nothing (see status).
+- **observability**: low as a magnitude — MediaPipe's elevation angle errs by a mean 20.6° (p90 43.8°) against markers even on the front camera, and reads high. A left/right *difference* survives this error; an absolute cut does not.
+- **biomechanical_rationale**: Kolber et al. found clinical characteristics of subacromial impingement associated with performing lateral raises above 90° in recreational weight-trainers, and recommend keeping the raise at or below 90°. The paper also pairs the risk with internal rotation above 90°, which pose landmarks cannot see.
+- **citation**: Kolber MJ, Cheatham SW, Salamh PA, Hanney WJ. "Characteristics of shoulder impingement in the recreational weight-training population." *J Strength Cond Res* 2014;28(4):1081–1089. DOI 10.1519/JSC.0000000000000250, PMID 24077379.
+- **citation_support**: "A significant association existed between clinical characteristics of SIS (p ≤ 0.004) and both lateral deltoid raises and upright rows above 90°. … Avoiding performance of lateral deltoid raises and upright rows beyond an angle of 90° … may serve as a useful means to mitigate characteristics associated with SIS." (Verified — Europe PMC abstract record.) Limits: cross-sectional; "above 90°" was self-reported by questionnaire; young male trainees doing weighted raises.
+- **status**: registered, PERMANENTLY SILENT — cited fault, measured sensing failure (the `rule_shoulder_shrug` treatment). Licensing it to fire needs MediaPipe vs Fit3D `joints3d_25` peak elevation on `side_lateral_raise`, rep by rep at the 90° cut. On mocap that movement's median peak is 97.1°, so even a perfect sensor would fire on more than half of its reps.
 
 #### Contralateral trunk lean
 - **fault_id**: `contralateral_trunk_lean`
@@ -1445,6 +1478,9 @@ brief isometric hold → return to V. Rep phases: **V/protraction-elevation** �
 > Withdrawn rather than registered-silent because the sensor reads frontal-plane elevation angles
 > perfectly well; it is the **number** that has no source and the **quantity** that does not
 > capture what this section meant by the W. Same treatment as the Arm Abduction impingement arc.
+>
+> **Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §2.3): still withdrawn, and the nearest source contradicts a
+> floor: Nakamura 2016 (PMC4852525) places its W position at 20° of abduction.
 
 #### Left/right asymmetry
 - **fault_id**: `lr_vw_asymmetry`

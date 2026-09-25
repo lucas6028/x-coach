@@ -312,6 +312,10 @@ perfectly measurable — `segment_reps` produces rep windows and phases carry fr
 wrong with the *sensor*. What is missing is a source that puts a number on it, and a proxy the
 source did not already null out.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §3.1): still withdrawn, and stronger. Barbado's own Discussion says the fastest cadence "could be used in
+young physically active individuals ... without impairing trunk motion control", and his
+"1 repetition/1 s" is the full cycle, not the concentric phase.
+
 ---
 
 ## 6. `situp_excessive_rom` is WITHDRAWN — and the decisive reason is the knowledge graph
@@ -355,6 +359,11 @@ real fault for the curl-up variant, and Mandroukas's own EMG result (RA activity
 35–40°) is a genuine argument that the extra range buys little. What is missing is a source stating
 a threshold, a graph node that does not mean the opposite, and — before either — a decision about
 **which sit-up the app ships** (§10).
+
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §3.2): still withdrawn. CORRECTION to (a) and to the closing paragraph: Mandroukas's Methods use 35–40° only
+as the curl-up's protocol endpoint and record no measured trunk angle or angle-resolved EMG, so the
+Discussion's "more than 35–40°" is not an observed result of that study. Juker
+1998 (psoas 15–35% MVC in sit-ups vs <10% in the curl-up) is input for the §10 variant decision.
 
 ---
 

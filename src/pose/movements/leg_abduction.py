@@ -25,6 +25,8 @@
 #
 # AND ONE SUB-CLAUSE: the parent spec's shipped rule is a DISJUNCTION of pelvic tilt and trunk
 # lean, and only the trunk-lean disjunct is implemented. See PELVIC_TILT_DISJUNCT_NOT_IMPLEMENTED.
+# Re-search 2026-09-25: both withdrawals and the sub-clause stand -- only side-lying EMG directions and
+# protocol tempos exist, no fault thresholds. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 4.3-4.5.
 #
 # ---------------------------------------------------------------------------------------
 # THE SUPPORT LIMB IS THIS MODULE'S VERTICAL, AND THAT IS WHAT UNBLOCKS GROUP E HERE.
