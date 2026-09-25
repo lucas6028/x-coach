@@ -1,5 +1,7 @@
 # 模型融合閘門實驗：0.5（取樣對照）與 G（互補性）結果
 
+> **Superseded (2026-09-19) for experiments 0.5–0.5c:** see [threshold_audit_results.en.md](threshold_audit_results.en.md). Its main findings: the MeTRAbs-vs-NLF reversal compared frame-level uncorrected MAE with per-camera-oracle rep-level flip. With both matched, only squat keeps the reversal, and all three NLF − MeTRAbs sweep intervals include zero, so the comparison is undetermined. "Verdict follows Pearson r" is not supported. The shrinkage reversal appears only under central-range (q20–q80) threshold weighting. Experiment G is not re-examined there.
+
 規劃見 `notes/model_fusion_plan.md`。本文件記錄兩個閘門實驗的**實測結果**。
 兩者都只用磁碟上既有的預測 npz，**沒有任何新推論**。
 
