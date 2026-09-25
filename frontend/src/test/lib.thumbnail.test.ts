@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { THUMBNAIL_MAX_EDGE, thumbnailSize, thumbnailTime, withTimeout } from "../lib/thumbnail";
+import { THUMBNAIL_MAX_EDGE, isBlankFrame, thumbnailSize, thumbnailTime, withTimeout } from "../lib/thumbnail";
 
 describe("thumbnailSize", () => {
   it("leaves a small frame alone", () => {
@@ -54,5 +54,35 @@ describe("withTimeout", () => {
     const assertion = expect(result).rejects.toThrow("timed out");
     await vi.advanceTimersByTimeAsync(5000);
     await assertion;
+  });
+});
+
+describe("isBlankFrame", () => {
+  const rgba = (...pixels: [number, number, number, number][]) => new Uint8ClampedArray(pixels.flat());
+
+  it("flags the solid black frame iPhone Safari recordings stored", () => {
+    expect(isBlankFrame(rgba([0, 0, 0, 255], [0, 0, 0, 255], [0, 0, 0, 255]))).toBe(true);
+  });
+
+  it("flags the transparent canvas a draw that did nothing leaves behind", () => {
+    expect(isBlankFrame(new Uint8ClampedArray(4 * 16))).toBe(true);
+  });
+
+  it("flags any single flat colour, not only black", () => {
+    expect(isBlankFrame(rgba([128, 128, 128, 255], [129, 127, 128, 255]))).toBe(true);
+  });
+
+  // A dim scene is still a real frame: sensor noise spreads its values, and "dark" alone must not
+  // throw away a thumbnail recorded in a badly lit gym.
+  it("keeps a dark frame that has any real variation", () => {
+    expect(isBlankFrame(rgba([3, 4, 2, 255], [9, 6, 5, 255], [1, 2, 3, 255]))).toBe(false);
+  });
+
+  it("keeps a frame whose variation is in one channel only", () => {
+    expect(isBlankFrame(rgba([0, 0, 0, 255], [0, 0, 40, 255]))).toBe(false);
+  });
+
+  it("treats an empty buffer as blank", () => {
+    expect(isBlankFrame(new Uint8ClampedArray(0))).toBe(true);
   });
 });

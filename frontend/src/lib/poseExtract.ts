@@ -349,6 +349,10 @@ export async function extractPoseWithReps(
   } finally {
     coarseLandmarker.close();
     URL.revokeObjectURL(url);
+    // Release the decoder, not just the URL: the thumbnail capture opens a second element on the
+    // same clip right after this returns, and iOS caps how many video decoders a page may hold.
+    video.removeAttribute("src");
+    video.load();
   }
 }
 /* c8 ignore stop */
