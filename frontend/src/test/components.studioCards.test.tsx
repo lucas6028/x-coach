@@ -85,9 +85,9 @@ describe("KeyMetricsCard", () => {
     expect(screen.getByText("0.35")).toBeInTheDocument();
   });
 
-  it("fills the remaining cells with clip quality, always three wide", () => {
+  it("fills the remaining rows with clip quality, always three rows", () => {
     const { container } = renderWithProviders(<KeyMetricsCard analysis={mockAnalysis} />);
-    expect(container.querySelectorAll(".grid > div")).toHaveLength(3);
+    expect(container.querySelectorAll("ul > li")).toHaveLength(3);
     expect(screen.getByText("92%")).toBeInTheDocument(); // valid frames
     expect(screen.getByText("88%")).toBeInTheDocument(); // lower-body visibility
   });
@@ -119,7 +119,7 @@ describe("KeyMetricsCard", () => {
     expect(screen.getByText("260 / 270 extracted")).toBeInTheDocument();
     // The BAR has to agree with the number: a 96% figure over a 29% bar is a card contradicting
     // itself, and only the styling carries that — hence the width assertion.
-    const bars = container.querySelectorAll(".grid > div .h-full");
+    const bars = container.querySelectorAll("ul > li .h-full");
     expect((bars[1] as HTMLElement).style.width).toBe("96%");
   });
 

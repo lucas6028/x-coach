@@ -17,7 +17,7 @@ interface Cell {
 // The real equivalent is the detector's own primary evidence: each detection names the metric it
 // measured (`primary_label`), the value it read and the threshold it breached. Those cells come
 // first; any remaining slots are filled with clip-quality figures, so the panel is always three
-// cells wide and every number in it was actually measured.
+// rows long and every number in it was actually measured.
 function cellsFor(analysis: Analysis, t: TFunc): Cell[] {
   const cells: Cell[] = [];
 
@@ -89,15 +89,17 @@ export default function KeyMetricsCard({ analysis }: { analysis: Analysis }) {
 
   return (
     <StudioCard icon={<ChartBar size={14} weight="bold" />} title={t("studio.keyMetrics")} index={1}>
-      <div className="grid grid-cols-3 gap-3">
+      <ul className="flex flex-col gap-2">
         {cells.map((m, i) => (
-          <div key={i} className="glass-control rounded-xl p-3 text-center">
-            <div className="mb-1 truncate text-[9px] font-semibold uppercase leading-none tracking-wide text-[#63709f]">
-              {m.label}
-            </div>
-            <div className="mb-0.5 truncate text-[15px] font-extrabold text-[#1e2142]">{m.value}</div>
-            <div className="mb-2 h-[22px] text-[8px] font-medium leading-tight text-[#63709f]">
-              {m.sub}
+          <li key={i} className="glass-control rounded-xl px-3 py-2.5">
+            <div className="mb-1.5 flex items-baseline justify-between gap-3">
+              <div className="min-w-0">
+                <div className="truncate text-[10px] font-semibold uppercase leading-tight tracking-wide text-[#63709f]">
+                  {m.label}
+                </div>
+                <div className="truncate text-[10px] font-medium leading-tight text-[#63709f]">{m.sub}</div>
+              </div>
+              <div className="shrink-0 text-[15px] font-extrabold text-[#1e2142]">{m.value}</div>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-[#f0f1f8]">
               <div
@@ -105,9 +107,9 @@ export default function KeyMetricsCard({ analysis }: { analysis: Analysis }) {
                 style={{ width: `${Math.round(Math.min(1, Math.max(0, m.fill)) * 100)}%` }}
               />
             </div>
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </StudioCard>
   );
 }
