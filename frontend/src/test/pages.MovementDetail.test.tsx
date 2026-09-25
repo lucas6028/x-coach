@@ -161,6 +161,28 @@ describe("MovementDetail — common mistakes", () => {
     expect(screen.getByText("Think about spreading the floor apart.")).toBeInTheDocument();
   });
 
+  it("keeps each fault's paper collapsed until the card is opened", async () => {
+    vi.spyOn(api, "graph").mockResolvedValue({ results: [] });
+    renderAt("/movements/Squat");
+    await userEvent.click(screen.getByRole("tab", { name: "Common mistakes" }));
+    await screen.findByRole("heading", { name: "Knees caving in", level: 3 });
+    expect(screen.queryByTestId("mistake-citation")).not.toBeInTheDocument();
+
+    // The same paper squat.py's rule cites, which is what the studio shows when it detects this.
+    await userEvent.click(screen.getByRole("button", { name: /Knees caving in/ }));
+    expect(screen.getByText("Evidence")).toBeInTheDocument();
+    expect(screen.getByTestId("mistake-citation")).toHaveTextContent(/^Ford KR/);
+  });
+
+  it("shows the paper even when the graph traversal fails", async () => {
+    vi.spyOn(api, "graph").mockRejectedValue(new Error("offline"));
+    renderAt("/movements/Squat");
+    await userEvent.click(screen.getByRole("tab", { name: "Common mistakes" }));
+    await userEvent.click(await screen.findByRole("button", { name: /Heels lifting off the floor/ }));
+    expect(await screen.findByText("Couldn't load the linked concepts.")).toBeInTheDocument();
+    expect(screen.getByTestId("mistake-citation")).toHaveTextContent(/^Mata AJ/);
+  });
+
   it("fetches a fault's causes, risks and cues only when it is opened, by its detector's kg_query", async () => {
     const graph = vi.spyOn(api, "graph").mockResolvedValue({
       results: [

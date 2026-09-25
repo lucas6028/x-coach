@@ -87,6 +87,13 @@ landmarks, so the spec rates the fault unobservable. `pushup_compute_raw` also r
 ankles, so a clip framed from the knees up invalidates every frame and silences *all* push-up
 rules at once.
 
+After editing any rule's `citation=`, regenerate the copy the movement detail page's
+common-mistakes tab reads (`tests/test_fault_citations.py` fails until you do):
+
+```bash
+python scripts/pose/export_fault_citations.py   # writes frontend/src/lib/faultCitations.json
+```
+
 ## Evaluation And Analysis
 
 ```bash

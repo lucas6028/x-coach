@@ -838,6 +838,18 @@ function MistakeCard({
               )}
             </div>
           )}
+          {/* The paper `why` paraphrases, the one the studio names when it detects this fault.
+              Local, so it shows whatever the graph traversal above is doing. */}
+          {mistake.citation && (
+            <div className="mt-3 border-t border-border-dark/60 pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-faint">
+                {t("feedback.citation")}
+              </p>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-muted" data-testid="mistake-citation">
+                {mistake.citation}
+              </p>
+            </div>
+          )}
         </div>
       )}
 

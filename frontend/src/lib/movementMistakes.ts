@@ -28,6 +28,7 @@
 // The keys are the canonical English movement names, matching the backend, the KG and ?movement=.
 
 import type { Lang } from "./i18n";
+import FAULT_CITATIONS from "./faultCitations.json";
 
 /** A wrong / correct illustration pair for one fault, as paths under `public/`. */
 export interface MistakeArt {
@@ -48,6 +49,11 @@ export interface Mistake {
   /** Why the fault matters, in one sentence, derived from the rule's cited `citation_support`. */
   why: Record<Lang, string>;
   fixes: Record<Lang, readonly string[]>;
+  /** The reference the detector's rule cites (`build_detection(citation=...)`), the same paper the
+   *  studio's FaultCard shows for a real detection of this fault. Read from `faultCitations.json`,
+   *  which `scripts/pose/export_fault_citations.py` generates from the detector source and
+   *  `tests/test_fault_citations.py` keeps current. Absent when the rule cites nothing. */
+  citation?: string;
   /** The wrong / correct pair, for the faults one has been drawn for. Absent means the card
    *  renders without the visual pair rather than with a placeholder body — the same optionality
    *  `movementDetail`'s `plate` and `demo` use. Adding a pair is one `art(...)` call. */
@@ -78,6 +84,8 @@ interface Copy {
   fixes: readonly string[];
 }
 
+const citations: Record<string, string | undefined> = FAULT_CITATIONS;
+
 /** `drawn` is the pair, and it is a trailing argument rather than a field inside one of the two
  *  Copy objects because the drawing is not copy: one picture serves both languages. It stays
  *  trailing and optional so the (id, kgQuery) header of every call keeps the one rigid shape
@@ -89,6 +97,7 @@ const mistake = (id: string, kgQuery: string, en: Copy, zh: Copy, drawn?: Mistak
   subtitle: { en: en.subtitle, "zh-Hant": zh.subtitle },
   why: { en: en.why, "zh-Hant": zh.why },
   fixes: { en: en.fixes, "zh-Hant": zh.fixes },
+  ...(citations[id] ? { citation: citations[id] } : {}),
   ...(drawn ? { art: drawn } : {}),
 });
 
