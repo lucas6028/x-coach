@@ -45,14 +45,15 @@ from src.pose.movements import shoulder_bridge  # noqa: E402,F401
 from src.pose.movements import leg_abduction  # noqa: E402,F401
 from src.pose.movements import torso_twist  # noqa: E402,F401
 # NO `jumping_jacks` IMPORT, AND THAT IS DELIBERATE. `src/pose/movements/jumping_jacks.py` exists,
-# is tested, and defines `JUMPING_JACKS_DETECTOR` -- but every one of its rules is permanently
-# silent or withdrawn, so registering it would offer users an analysis that can never report a
-# fault. See that module's closing block; design spec
-# docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md section 7.4.
+# is tested, and defines `JUMPING_JACKS_DETECTOR`. Until 2026-09-26 every one of its rules was
+# silent or withdrawn; since then `rule_incomplete_leg_rom` is live, and registering the movement
+# is a SEPARATE, still-open decision (its only live rule carries a card on 51.4% of correctly
+# judged clips). See that module's closing block and notes/egoexo-silent-rules-full-archive.md.
 #
 # NO `high_knee` IMPORT EITHER, FOR THE SAME REASON AND ON THE SAME EVIDENCE STANDARD.
 # `src/pose/movements/high_knee.py` exists, is tested, and defines `HIGH_KNEE_DETECTOR` -- one rule
-# permanently silent, four withdrawn. Two of the four withdrawals are measurements rather than
+# live since 2026-09-26 (knee lift, at a data-derived 65.6 deg; registering is a separate, open
+# decision), four withdrawn. Two of the four withdrawals are measurements rather than
 # arguments: the trunk rules' reference axis (the support limb) sits 6.4-14.2 deg off the trunk
 # during normal marching, against thresholds of 10-15 deg, and three SIMULTANEOUS cameras disagree
 # about pelvic obliquity by 1.9-12.9 deg against a 5-8 deg threshold. See that module's closing

@@ -3,13 +3,16 @@ import unittest
 
 import numpy as np
 
-from src.pose.movements.base import run_detector
+from src.pose.movements.base import CoreFrame, run_detector
 from src.pose.movements.registry import list_detectors
 from src.pose.movements.high_knee import (
     HIGH_KNEE_DETECTOR,
     HIGH_KNEE_METRIC_KEYS,
     KNEE_LIFT_CITED_A_SKIP,
+    KNEE_LIFT_HIP_FLEXION_DEG,
     KNEE_LIFT_IMPLEMENTED_B_SKIP,
+    KNEE_LIFT_THRESHOLD,
+    KNEE_LIFT_VIEW_GATE,
     high_knee_assign_phases,
     high_knee_compute_raw,
     rule_insufficient_knee_lift,
@@ -331,30 +334,142 @@ class PhaseTest(unittest.TestCase):
         self.assertEqual(phases[1], "unknown")
 
 
-class SilentKneeLiftRuleTest(unittest.TestCase):
+def _drive(
+    peak: float,
+    other: float = -1.0,
+    gate: float = 0.30,
+    frames: int = 10,
+) -> list[CoreFrame]:
+    """One knee drive as CoreFrames carrying the metrics EXACTLY: the left thigh rises from
+    hanging to `peak` and back, the right stays at `other`, and `anterior_axis_length` is `gate`
+    on every frame. Exact metrics keep boundary tests off float-ulp noise."""
+    core = []
+    for i in range(frames):
+        phase = math.sin(math.pi * i / (frames - 1))
+        # The middle frame carries `peak` EXACTLY: -1 + (peak + 1) does not round-trip in floats,
+        # and an even frame count never samples the crest.
+        left = peak if i == frames // 2 else -1.0 + (peak + 1.0) * phase * 0.999
+        core.append(
+            CoreFrame(
+                frame_index=i, time=i / 30.0, phase="peak", valid=True, lower_body_visibility=0.95,
+                metrics={
+                    "thigh_elevation_left": left,
+                    "thigh_elevation_right": other,
+                    "thigh_elevation_difference": left - other,
+                    "anterior_axis_length": gate,
+                },
+            )
+        )
+    return core
+
+
+class LiveKneeLiftRuleTest(unittest.TestCase):
+    """LIVE SINCE 2026-09-26 at a data-derived 65.6 deg (notes/egoexo-silent-rules-full-archive.md).
+    Every firing case has a companion on the same path that must NOT fire."""
+
     def setUp(self) -> None:
-        self.ctx = RuleContextFactory()
+        self.ctx = RuleContextFactory().build()
 
-    def test_it_never_fires_even_on_a_drive_far_below_both_cuts(self) -> None:
-        core = run_detector(
-            HIGH_KNEE_DETECTOR, drive_clip(peak_elevation=-0.95), 30.0, "side", 0.9,
-            max_reps=None,
-        ).core
-        self.assertEqual(rule_insufficient_knee_lift(core, self.ctx.build()), [])
+    def fired(self, core) -> bool:
+        return bool(rule_insufficient_knee_lift(core, self.ctx))
 
-    def test_the_metric_it_would_have_read_is_computed_and_correct(self) -> None:
+    def test_a_low_drive_fires_and_a_high_one_does_not(self) -> None:
+        self.assertTrue(self.fired(_drive(-0.6)))    # ~53 deg of hip flexion
+        self.assertFalse(self.fired(_drive(-0.3)))   # ~73 deg
+
+    def test_the_cut_is_strict_and_sits_at_65_6_degrees(self) -> None:
+        self.assertFalse(self.fired(_drive(KNEE_LIFT_THRESHOLD)))
+        self.assertTrue(self.fired(_drive(KNEE_LIFT_THRESHOLD - 1e-3)))
+
+    def test_it_reads_the_driving_leg(self) -> None:
+        """The driving leg is whichever thigh is higher; a low support leg is not a low drive."""
+        self.assertFalse(self.fired(_drive(-0.9, other=-0.2)))
+        self.assertTrue(self.fired(_drive(-0.9, other=-0.8)))
+
+    def test_it_reads_the_peak_of_the_drive_not_its_mean(self) -> None:
+        core = _drive(-0.9)
+        low = self.fired(core)
+        core[5] = CoreFrame(
+            frame_index=5, time=5 / 30.0, phase="peak", valid=True, lower_body_visibility=0.95,
+            metrics={**core[5].metrics, "thigh_elevation_left": -0.2},
+        )
+        self.assertTrue(low)
+        self.assertFalse(self.fired(core))
+
+    def test_the_view_gate_silences_a_camera_that_cannot_see_the_lift(self) -> None:
+        """A frontal camera cannot see thigh elevation; the gate is the module's own
+        `anterior_axis_length`, strict, at the largest frontal value EgoExo showed (0.170)."""
+        self.assertFalse(self.fired(_drive(-0.6, gate=KNEE_LIFT_VIEW_GATE)))
+        self.assertFalse(self.fired(_drive(-0.6, gate=0.05)))
+        self.assertTrue(self.fired(_drive(-0.6, gate=KNEE_LIFT_VIEW_GATE + 1e-3)))
+
+    def test_no_gate_reading_is_silence_not_a_pass(self) -> None:
+        self.assertFalse(self.fired(_drive(-0.6, gate=math.nan)))
+
+    def test_too_few_usable_frames_is_no_verdict(self) -> None:
+        core = _drive(-0.6, frames=5)
+        self.assertFalse(rule_insufficient_knee_lift(core, RuleContextFactory().build(min_frames=6)))
+        self.assertTrue(rule_insufficient_knee_lift(core, RuleContextFactory().build(min_frames=5)))
+
+    def test_evidence_is_in_degrees_and_severity_ramps_to_45(self) -> None:
+        (detection,) = rule_insufficient_knee_lift(_drive(-0.6), self.ctx)
+        self.assertEqual(detection.fault_id, "hk_insufficient_knee_lift")
+        self.assertAlmostEqual(
+            detection.evidence["primary_value"], math.degrees(math.acos(0.6)), places=1
+        )
+        self.assertEqual(detection.evidence["primary_threshold"], KNEE_LIFT_HIP_FLEXION_DEG)
+        self.assertGreater(detection.severity, 0.0)
+        self.assertLess(detection.severity, 1.0)
+        (floor,) = rule_insufficient_knee_lift(_drive(-0.8), self.ctx)  # ~37 deg, past 45
+        self.assertEqual(floor.severity, 1.0)
+        self.assertEqual(detection.retrieval_mode, "kg")
+
+    def test_end_to_end_side_view_low_drill_fires_high_drill_and_frontal_do_not(self) -> None:
+        low = run_detector(HIGH_KNEE_DETECTOR, drive_clip(peak_elevation=-0.7), 30.0, "side", 0.9)
+        high = run_detector(HIGH_KNEE_DETECTOR, drive_clip(peak_elevation=-0.2), 30.0, "side", 0.9)
+        # foot_length shrunk: the camera looks down the line of travel, so the gate closes.
+        frontal = run_detector(
+            HIGH_KNEE_DETECTOR, drive_clip(peak_elevation=-0.7, foot_length=0.01), 30.0, "front", 0.9
+        )
+        self.assertTrue(low.analyzed and high.analyzed and frontal.analyzed, "non-vacuity")
+        self.assertEqual([d.fault_id for d in low.detections], ["hk_insufficient_knee_lift"])
+        self.assertEqual(high.detections, [])
+        self.assertEqual(frontal.detections, [])
+
+    def test_a_motionless_side_view_clip_fires_at_full_severity(self) -> None:
+        """PINS AN INHERITED, DELIBERATELY UNREPAIRED FAILURE (see `tests/test_situp.py`'s test of
+        the same shape): jitter on a subject standing still segments into reps, both thighs hang,
+        and the rule reports a maximally severe low knee lift. The repair is framework-level;
+        WHEN IT LANDS THIS TEST SHOULD FAIL."""
+        frames = [
+            high_knee_frame(
+                left_elevation=-1.0 + 0.004 * (1 + math.sin(i / 3.0)),
+                right_elevation=-1.0 + 0.004 * (1 + math.cos(i / 3.0)),
+                frame_index=i,
+            )
+            for i in range(60)
+        ]
+        result = run_detector(HIGH_KNEE_DETECTOR, frames, 30.0, "side", 0.9)
+        self.assertEqual([d.fault_id for d in result.detections], ["hk_insufficient_knee_lift"])
+        self.assertEqual(result.detections[0].severity, 1.0)
+
+    def test_the_metric_it_reads_is_computed_and_correct(self) -> None:
         raw = high_knee_compute_raw([high_knee_frame(left_elevation=-0.62)], 30.0)[0]
         self.assertAlmostEqual(raw["thigh_elevation_left"], -0.62, places=5)
 
-    def test_both_of_the_specs_disagreeing_cuts_are_kept_where_they_are(self) -> None:
-        """THE POINT OF THIS RULE IS THAT THE SPEC SUPPLIES TWO NUMBERS AND THEY DISAGREE. Pinning
-        both, and pinning that they differ, is what stops a later edit from quietly picking one
-        and calling it settled."""
+    def test_the_shipped_cut_is_pinned_and_the_specs_two_are_kept(self) -> None:
+        """The shipped 65.6 deg is data-derived and the user's decision; pinning it means a quiet
+        retune has to change a test that says why. The spec's two disagreeing numbers stay pinned
+        too -- the validation harness still replays them."""
+        self.assertEqual(KNEE_LIFT_HIP_FLEXION_DEG, 65.6)
+        self.assertAlmostEqual(KNEE_LIFT_THRESHOLD, -math.cos(math.radians(65.6)), places=9)
+        self.assertEqual(KNEE_LIFT_VIEW_GATE, 0.170)
         self.assertAlmostEqual(KNEE_LIFT_CITED_A_SKIP, -math.cos(math.radians(45.0)), places=6)
         self.assertAlmostEqual(KNEE_LIFT_IMPLEMENTED_B_SKIP, 0.0, places=6)
-        self.assertLess(KNEE_LIFT_CITED_A_SKIP, KNEE_LIFT_IMPLEMENTED_B_SKIP)
+        self.assertLess(KNEE_LIFT_CITED_A_SKIP, KNEE_LIFT_THRESHOLD)
+        self.assertLess(KNEE_LIFT_THRESHOLD, KNEE_LIFT_IMPLEMENTED_B_SKIP)
 
-    def test_the_silent_rule_is_present_rather_than_absent(self) -> None:
+    def test_the_rule_is_present(self) -> None:
         self.assertIn(rule_insufficient_knee_lift, HIGH_KNEE_DETECTOR.rules)
 
 
@@ -377,16 +492,18 @@ class WithdrawnRulesTest(unittest.TestCase):
         raw = high_knee_compute_raw([high_knee_frame()], 30.0)[0]
         self.assertNotIn("trunk_lean_forward", raw)
 
-    def test_no_rule_produces_any_detection_at_all(self) -> None:
-        """The claim the non-registration rests on: with one rule silent and four withdrawn, the
-        detector cannot report a fault on any input."""
+    def test_only_the_live_rule_ever_produces_a_detection(self) -> None:
+        """Four withdrawn rules leave nothing behind: across drives from hanging to above hip
+        height, the only fault this detector reports is the live knee-lift one, and only below
+        its cut."""
         for peak in (-0.99, -0.70, -0.20, 0.10):
             with self.subTest(peak=peak):
                 result = run_detector(
                     HIGH_KNEE_DETECTOR, drive_clip(peak_elevation=peak), 30.0, "side", 0.9,
                     max_reps=None,
                 )
-                self.assertEqual(result.detections, [])
+                expected = ["hk_insufficient_knee_lift"] if peak < KNEE_LIFT_THRESHOLD else []
+                self.assertEqual([d.fault_id for d in result.detections], expected)
 
 
 class SegmentationTest(unittest.TestCase):

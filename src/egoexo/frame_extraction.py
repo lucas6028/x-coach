@@ -1,14 +1,16 @@
-"""Pure helpers for pulling one movement's action frames out of ``frames_open``.
+"""Pure helpers for pulling movements' action frames out of ``frames_open``.
 
-The archive is a single gzip stream split into 3 GiB parts named ``frames_open.tar.gz.aa``,
-``.ab``, ``.ac``, ... On this machine ``.ac`` has never been downloaded while ``.ad`` has, so the
-parts on disk are ``{aa, ab, ad}``. A gzip stream cannot be resumed across a hole: only the
-CONTIGUOUS PREFIX from ``.aa`` decodes, and appending ``.ad`` after the hole would feed the
-decompressor bytes from the wrong offset. :func:`contiguous_prefix` therefore stops at the first
-gap instead of taking everything the glob returns.
+The archive is a single gzip stream split into 21 parts, ``frames_open.tar.gz.aa`` .. ``.au``
+(20 x 3 GiB + 2,895,783,140 bytes, ~66 GB; all from one Hugging Face commit, 2025-02-18). For
+months this machine held only ``{aa, ab, ad}`` -- 3 of 21 parts, not "all but ``.ac``" as earlier
+docstrings and notes said. A gzip stream cannot be resumed across a hole: only the CONTIGUOUS
+PREFIX from ``.aa`` decodes, and appending a part after a hole would feed the decompressor bytes
+from the wrong offset. :func:`contiguous_prefix` therefore stops at the first gap instead of
+taking everything the glob returns, and :func:`completeness_problems` is what a run that needs the
+WHOLE archive checks, so that a prefix can never pass for the full set.
 
 Everything here is I/O-free except :func:`concatenated_parts`, which only opens the files it is
-handed, so the interesting logic is unit-testable without the 6.4 GiB archive.
+handed, so the interesting logic is unit-testable without the archive.
 """
 from __future__ import annotations
 
@@ -152,3 +154,44 @@ def build_plan(rows: Sequence[dict], views: Sequence[str]) -> ExtractionPlan:
             by_record.setdefault((record, view), []).append((first, last, row["sample_id"]))
             expected[f"{row['sample_id']}__{view}"] = last - first + 1
     return ExtractionPlan(by_record=by_record, expected=expected)
+
+
+def movement_slug(action_name: str) -> str:
+    """Directory-safe name for an EgoExo ``action_name``: ``"High Knee"`` -> ``"high_knee"``."""
+    return re.sub(r"[^a-z0-9]+", "_", action_name.lower()).strip("_")
+
+
+def completeness_problems(
+    expected: dict[str, int],
+    written: dict[str, int],
+    truncated_at: str | None,
+    parts_on_disk: Sequence[Path],
+    *,
+    frame_tolerance: int = 1,
+) -> list[str]:
+    """Why an extraction that needed the WHOLE archive did not get it; empty when it did.
+
+    The streaming extractor treats a decompressor error as "the data ran out", which was right
+    while only a prefix existed and is exactly wrong once the full set is expected: a corrupt or
+    short part would silently yield fewer actions. This turns each way that can happen into a
+    stated problem:
+
+    - the stream ended in an error (``truncated_at``) instead of at the tar end marker;
+    - a part sits on disk AFTER a gap, so it was never read;
+    - a planned (action, view) pair got fewer frames than its window.
+
+    ``frame_tolerance`` is one frame because :func:`build_plan` takes BOTH window endpoints
+    (``ExtractionPlan``'s docstring): the extra endpoint can fall one past a record's last frame.
+    """
+    problems: list[str] = []
+    if truncated_at is not None:
+        problems.append(f"stream ended early: {truncated_at}")
+    prefix = {p.name for p in contiguous_prefix(parts_on_disk)}
+    unread = sorted(p.name for p in parts_on_disk if p.name not in prefix)
+    if unread:
+        problems.append(f"parts after a gap were never read: {unread}")
+    for key in sorted(expected):
+        got = written.get(key, 0)
+        if got < expected[key] - frame_tolerance:
+            problems.append(f"short pair {key}: {got} of {expected[key]} frames")
+    return problems

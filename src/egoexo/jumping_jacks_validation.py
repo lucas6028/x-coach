@@ -52,6 +52,40 @@ WITHDRAWN_VALGUS_CUT = 0.82
 # The single EgoExo criterion that any shipped rule models. Design spec section 2.2.
 FOOT_SPLIT_CRITERION = "Perform the jump by opening and closing your feet."
 
+# WHAT EACH FLAGGED ACTION'S COMMENTS SAY WENT WRONG, for every action with at least one FALSE vote
+# on FOOT_SPLIT_CRITERION. Read from the free-text comments ONLY, on 2026-09-26, BEFORE any frame
+# of these actions had been decoded (pre-registration,
+# docs/superpowers/specs/2026-09-26-egoexo-silent-rule-separability-prereg.md). The criterion reads
+# "opening AND CLOSING", and widest stance can see only the first half, so the label is split by
+# what the annotator complained about:
+#   width     -- the feet did not spread far enough (the only fault `jj_incomplete_leg_rom` models)
+#   pattern   -- a front-back scissor jump or crossed feet instead of a lateral split: a DIFFERENT
+#                movement that a frontal width ratio will also read as narrow
+#   closing   -- the feet did not come back together (invisible to widest stance)
+#   ambiguous -- "not performed by opening and closing" with no direction given
+#   other     -- the comment names another fault, or nothing
+FOOT_SPLIT_COMMENT_CATEGORY = {
+    # strict-majority FALSE (the primary label's 12 positives)
+    "3HqdZ6_action_9": "other",       # start position, smoothness, pauses
+    "3HqdZ6_action_14": "ambiguous",  # "not performed by opening and closing both feet"
+    "9jZICf_action_4": "pattern",     # "jump to the sides, not front and back"
+    "AXQTck_action_11": "pattern",    # "left and right jumps have turned into front and back"
+    "RHNgmh_action_4": "other",       # "completely inconsistent"; arm and trunk coaching
+    "S71IRz_action_5": "ambiguous",   # "feet are not performing the opening and closing"
+    "SlgE27_action_8": "ambiguous",   # "does not jump by opening and closing both feet"
+    "dYRk2k_action_8": "width",       # "the feet were not spread apart"
+    "gwBuNO_action_3": "width",       # "range of motion for leg exercises is too small"
+    "gwBuNO_action_11": "closing",    # "the legs did not close when jumping"
+    "hOmM1K_action_8": "pattern",     # "not a front-back leg crossing movement"
+    "iPH0PP_action_4": "other",       # "Movement error"
+    # one FALSE vote of two (added by the any-false secondary label)
+    "85O2Ni_action_9": "pattern",     # "do not cross your feet"
+    "9jZICf_action_13": "pattern",    # "alternating legs forward and backward"
+    "gwBuNO_action_5": "closing",     # "feet are not fully closed"
+    "hOmM1K_action_3": "pattern",     # "laterally instead of alternating front and back"
+    "hOmM1K_action_12": "pattern",    # "lateral jump instead of a forward-backward jump"
+}
+
 # The three third-person cameras. They film SIMULTANEOUSLY, which is what makes cross-view
 # disagreement on one action pure projection error rather than performance variation.
 EXO_VIEWS = ("exo_l", "exo_m", "exo_r")
@@ -335,10 +369,11 @@ def evaluate_view(frames: list[dict], fps: float, view_type: str) -> dict:
         "fallback": result.fallback,
         "cadence_hz": cadence_hz(len(result.reps), span, fps),
         "fired": sorted(fired_ids(result.detections)),
-        # WHAT THE RULES WOULD HAVE SAID. Both are silent/withdrawn, so `fired` is empty on every
-        # pair by construction and an agreement statistic computed from it would be a tautology.
-        # These are the verdicts the parent spec's own cuts produce on the same windows, which is
-        # the quantity the cross-camera comparison is actually about.
+        # WHAT THE RULES WOULD HAVE SAID. The valgus rule is withdrawn, so only these verdicts
+        # exist for it. The leg-ROM rule is live since 2026-09-26, and `fired` carries it; this
+        # reconstruction must agree with `fired` on every segmented pair (it did on 354 of 356;
+        # the 2 others were whole-clip fallback pairs, where the live rule scores the whole clip
+        # and this per-rep reconstruction has no reps to read).
         "would_fire": sorted(
             ([  "jj_incomplete_leg_rom"] if rom_hits else [])
             + (["jj_knee_valgus_landing"] if valgus_hits else [])

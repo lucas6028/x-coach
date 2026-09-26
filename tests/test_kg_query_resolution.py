@@ -51,14 +51,12 @@ MODULE_MOVEMENTS = {
 # without touching this file -- while letting `test_queries_were_actually_found` stay a real
 # assertion for every module that does emit detections.
 ALL_SILENT_MODULES = {
-    # Jumping Jacks: two rules permanently silent, three withdrawn, detector not registered.
-    # See src/pose/movements/jumping_jacks.py and
-    # docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md.
-    "jumping_jacks.py",
-    # High Knee: one rule permanently silent, four withdrawn, detector not registered. See
-    # src/pose/movements/high_knee.py and
-    # docs/superpowers/specs/2026-08-10-high-knee-detector-design.md.
-    "high_knee.py",
+    # Jumping Jacks LEFT this set on 2026-09-26: `rule_incomplete_leg_rom` is live, so the module
+    # now emits a `kg`-mode detection ("Incomplete Foot Split") and falls under the gates above.
+    # notes/egoexo-silent-rules-full-archive.md.
+    # High Knee LEFT this set on 2026-09-26 too: `rule_insufficient_knee_lift` is live and emits a
+    # `kg`-mode detection ("Insufficient Knee Lift"). The set is now empty; it stays so the next
+    # all-silent module has a documented place to go.
 }
 
 

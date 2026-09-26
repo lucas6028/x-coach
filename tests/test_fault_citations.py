@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import unittest
 
-from src.pose.fault_citations import OUTPUT_JSON, all_citations, module_citations
-from tests.test_movement_mistakes_roster import _authored_roster
+from src.pose.fault_citations import (
+    MOVEMENTS_DIR, OUTPUT_JSON, all_citations, module_citations, registered_modules,
+)
+from tests.test_movement_mistakes_roster import REGISTERED, _authored_roster
 
 REGENERATE = r".venv\Scripts\python.exe scripts/pose/export_fault_citations.py"
 
@@ -34,6 +36,21 @@ class ExportedFileTests(unittest.TestCase):
         # section, which is allowed -- but it should be a decision, so it fails here first.
         card_ids = {fault_id for entries in _authored_roster().values() for fault_id, _ in entries}
         self.assertEqual(card_ids - set(all_citations()), set())
+
+
+class RegisteredScopeTests(unittest.TestCase):
+    """Only registered movements reach the page, so only their citations are exported."""
+
+    def test_the_registry_parse_names_exactly_the_registered_modules(self) -> None:
+        self.assertEqual(registered_modules(), {module for _, module in REGISTERED})
+
+    def test_an_unregistered_live_rule_is_not_exported(self) -> None:
+        """Jumping Jacks has a live, cited rule since 2026-09-26 and no registration. The source
+        DOES carry the citation (the companion assertion), and the export must still omit it:
+        the page has no Jumping Jacks card to hang it on."""
+        source = (MOVEMENTS_DIR / "jumping_jacks.py").read_text(encoding="utf-8")
+        self.assertIn("jj_incomplete_leg_rom", module_citations(source))
+        self.assertNotIn("jj_incomplete_leg_rom", all_citations())
 
 
 class ModuleCitationsTests(unittest.TestCase):
