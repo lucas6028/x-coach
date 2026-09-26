@@ -612,6 +612,8 @@ def rule_forward_head(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleD
          speaks to bar position.
     The sub-criterion is withdrawn PENDING A SPEC DECISION, not silently reinterpreted; it is
     recorded as an open question in the spec's §8 status notes.
+    Re-search 2026-09-25: no peer-reviewed study measures lockout bar position with a number, so the
+    sub-criterion stays withdrawn. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 1.1.
 
     HARD VIEW GATE (deliberately not a confidence multiplier): the cue is a PURE horizontal
     offset, and its direction is meaningless unless the subject's facing is known. Outside a

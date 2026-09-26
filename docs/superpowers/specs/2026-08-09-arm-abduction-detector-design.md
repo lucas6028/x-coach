@@ -347,6 +347,14 @@ movement in the parent spec got an incomplete-ROM rule; Arm Abduction got "raise
 instead and has no ROM rule at all. Whether the rule set wants one is a spec question needing a
 source that puts a number on insufficient abduction. **No rule is invented here to fill it.**
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §2.2): as written, still withdrawn. A rewrite has a primary source: Kolber 2014 (JSCR 28(4):1081-9, PMID
+24077379) associates lateral raises above 90° with impingement characteristics. The rule was
+REWRITTEN to that finding as `rule_raised_above_shoulder_height` and registered PERMANENTLY SILENT:
+the citation now holds, and what remains is §2.4's measured sensing failure — MediaPipe over-reads
+elevation magnitude by a mean 20.6° per rep, toward firing. Caveats of the source: cross-sectional,
+questionnaire-reported angle, weighted-raise trainees. The arc form stays withdrawn; Incomplete
+Elevation remains unsourced.
+
 ---
 
 ## 5. `contralateral_trunk_lean` SHIPS — and why this is not the wrist-flexion case

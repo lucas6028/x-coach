@@ -135,7 +135,10 @@ class SystemPromptTests(unittest.TestCase):
         self.assertIn("Squat", prompt)
         self.assertIn("Overhead Press", prompt)
         self.assertIn("Jumping Jacks", prompt)
-        self.assertIn("not yet analysable", prompt)
+        self.assertIn("High Knee", prompt)
+        # Registered 2026-09-26: the prompt must no longer tell the model they cannot be analysed.
+        self.assertNotIn("not yet analysable", prompt)
+        self.assertNotIn("cannot be analysed in the studio yet", prompt)
 
     def test_movements_are_listed_with_their_primary_muscles(self) -> None:
         prompt = plan_agent._system_prompt(lang="en", plan_scoped=False)

@@ -112,7 +112,7 @@ describe("isAnalyzable", () => {
   });
 
   it("rejects a catalog movement with no detector", () => {
-    // Jumping Jacks and High Knee are plannable but tick-only.
+    // Absent from this test's `analyzable` fixture, standing in for a movement with no detector.
     expect(isAnalyzable("Jumping Jacks", analyzable)).toBe(false);
   });
 });

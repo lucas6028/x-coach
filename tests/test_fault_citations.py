@@ -11,8 +11,10 @@ from __future__ import annotations
 import json
 import unittest
 
-from src.pose.fault_citations import OUTPUT_JSON, all_citations, module_citations
-from tests.test_movement_mistakes_roster import _authored_roster
+from src.pose.fault_citations import (
+    MOVEMENTS_DIR, OUTPUT_JSON, all_citations, module_citations, registered_modules,
+)
+from tests.test_movement_mistakes_roster import REGISTERED, _authored_roster
 
 REGENERATE = r".venv\Scripts\python.exe scripts/pose/export_fault_citations.py"
 
@@ -34,6 +36,32 @@ class ExportedFileTests(unittest.TestCase):
         # section, which is allowed -- but it should be a decision, so it fails here first.
         card_ids = {fault_id for entries in _authored_roster().values() for fault_id, _ in entries}
         self.assertEqual(card_ids - set(all_citations()), set())
+
+
+class RegisteredScopeTests(unittest.TestCase):
+    """Only registered movements reach the page, so only their citations are exported."""
+
+    def test_the_registry_parse_names_exactly_the_registered_modules(self) -> None:
+        self.assertEqual(registered_modules(), {module for _, module in REGISTERED})
+
+    def test_an_unregistered_live_rule_is_not_exported(self) -> None:
+        """A module holding a live, cited rule is still left out until registry.py imports it --
+        the page has no card to hang the citation on. (Jumping Jacks and High Knee were exactly
+        this until 2026-09-26; the case is now built synthetically.) The companion is the same
+        module, imported: its citation then appears."""
+        import tempfile
+        from pathlib import Path
+
+        rule = 'build_detection(fault_id="x_fault", citation="Paper (2020).")\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "alpha.py").write_text(rule, encoding="utf-8")
+            (root / "registry.py").write_text("x = 1\n", encoding="utf-8")
+            self.assertNotIn("x_fault", all_citations(root))
+            (root / "registry.py").write_text(
+                "from src.pose.movements import alpha  # noqa\n", encoding="utf-8"
+            )
+            self.assertIn("x_fault", all_citations(root))
 
 
 class ModuleCitationsTests(unittest.TestCase):

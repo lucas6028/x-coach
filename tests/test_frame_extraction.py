@@ -1,6 +1,6 @@
 """Pure helpers of the EgoExo frame extractor.
 
-The 6.4 GiB archive is not in the repository, which is exactly why this logic was written to be
+The ~66 GB archive is not in the repository, which is exactly why this logic was written to be
 testable without it: the part-ordering walk, the member-path filter and the window plan are all
 pure functions.
 """
@@ -11,7 +11,9 @@ from pathlib import Path
 
 from src.egoexo.frame_extraction import (
     build_plan,
+    completeness_problems,
     contiguous_prefix,
+    movement_slug,
     parse_member_path,
     part_suffix_order,
 )
@@ -117,6 +119,52 @@ class BuildPlanTest(unittest.TestCase):
         plan = build_plan(self._rows(), ("exo_r",))
         self.assertEqual(plan.lookup("nope", "exo_r", 6), [])
         self.assertEqual(plan.lookup("recA", "ego_l", 105), [])
+
+
+class CompletenessProblemsTest(unittest.TestCase):
+    """A run that needs the WHOLE archive must not pass on a prefix. Each case pairs a failing
+    input with a passing companion on the same path, so a helper that returned [] everywhere, or
+    flagged everything, would fail one of the two."""
+
+    PARTS = [Path(f"frames_open.tar.gz.a{c}") for c in "abcd"]
+
+    def test_a_clean_full_run_has_no_problems(self) -> None:
+        self.assertEqual(
+            completeness_problems({"s__exo_m": 11}, {"s__exo_m": 11}, None, self.PARTS), []
+        )
+
+    def test_a_stream_error_is_a_problem_not_an_end_of_data(self) -> None:
+        problems = completeness_problems(
+            {"s__exo_m": 11}, {"s__exo_m": 11}, "EOFError: truncated", self.PARTS
+        )
+        self.assertEqual(len(problems), 1)
+        self.assertIn("stream ended early", problems[0])
+
+    def test_a_part_after_a_gap_is_reported_as_unread(self) -> None:
+        holed = [p for p in self.PARTS if not p.name.endswith(".ac")]
+        problems = completeness_problems({}, {}, None, holed)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("frames_open.tar.gz.ad", problems[0])
+
+    def test_a_short_or_missing_pair_is_reported_and_one_frame_is_tolerated(self) -> None:
+        expected = {"a__exo_m": 11, "b__exo_m": 11, "c__exo_m": 11}
+        written = {"a__exo_m": 10, "b__exo_m": 9}  # a: the inclusive-endpoint frame; c: absent
+        problems = completeness_problems(expected, written, None, self.PARTS)
+        self.assertEqual(
+            problems,
+            ["short pair b__exo_m: 9 of 11 frames", "short pair c__exo_m: 0 of 11 frames"],
+        )
+
+
+class MovementSlugTest(unittest.TestCase):
+    def test_action_names_become_directory_names(self) -> None:
+        self.assertEqual(movement_slug("High Knee"), "high_knee")
+        self.assertEqual(movement_slug("Jumping Jacks"), "jumping_jacks")
+        self.assertEqual(
+            movement_slug("Side Knee Raise And Abdominal Muscles Contract"),
+            "side_knee_raise_and_abdominal_muscles_contract",
+        )
+        self.assertEqual(movement_slug("Kneeling pushing-ups"), "kneeling_pushing_ups")
 
 
 if __name__ == "__main__":

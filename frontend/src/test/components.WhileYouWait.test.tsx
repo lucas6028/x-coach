@@ -1,9 +1,18 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import WhileYouWait, { hasMovementGuide } from "../components/WhileYouWait";
 import { renderWithProviders } from "./renderWithProviders";
 import { movementDetail } from "../lib/movementDetail";
 import { movementMistakes } from "../lib/movementMistakes";
+
+// A pass-through spy, so ONE test can stand in for a movement with steps but no rules. Since
+// 2026-09-26 no catalog movement is like that (Jumping Jacks and High Knee were the last), but
+// the branch is still reachable by a movement designed ahead of its detector. Every other test
+// in this file reads the real content through it.
+vi.mock("../lib/movementMistakes", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/movementMistakes")>();
+  return { ...actual, movementMistakes: vi.fn(actual.movementMistakes) };
+});
 
 // The panel reads the real content modules rather than a fixture: its whole point is that it shows
 // the SAME steps and mistakes the movement detail page shows, so pinning it against invented data
@@ -30,14 +39,23 @@ describe("WhileYouWait", () => {
     expect(screen.queryByText(movementDetail("Squat")!.steps[0].text.en)).not.toBeInTheDocument();
   });
 
-  // Two movements in the catalog are deliberately left with zero registered detector rules, so
-  // they have steps but nothing to warn about. The panel drops the tab strip rather than offering
-  // a tab that opens an empty list.
+  // A movement with steps but no registered rules has nothing to warn about. The panel drops the
+  // tab strip rather than offering a tab that opens an empty list.
   it("drops the tab strip for a movement with steps but no registered rules", () => {
-    expect(movementMistakes("Jumping Jacks")).toHaveLength(0);
-    renderWithProviders(<WhileYouWait movement="Jumping Jacks" />);
-    expect(screen.queryAllByRole("tab")).toHaveLength(0);
-    expect(screen.getByText(movementDetail("Jumping Jacks")!.steps[0].text.en)).toBeInTheDocument();
+    const spy = vi.mocked(movementMistakes);
+    const real = spy.getMockImplementation()!;
+    spy.mockImplementation(() => []);
+    try {
+      renderWithProviders(<WhileYouWait movement="Jumping Jacks" />);
+      expect(screen.queryAllByRole("tab")).toHaveLength(0);
+      expect(
+        screen.getByText(movementDetail("Jumping Jacks")!.steps[0].text.en)
+      ).toBeInTheDocument();
+    } finally {
+      spy.mockImplementation(real);
+    }
+    // Non-vacuity: without the stub, the same movement now DOES show the tabs.
+    expect(movementMistakes("Jumping Jacks").length).toBeGreaterThan(0);
   });
 
   it("links out to the movement's own detail page", () => {

@@ -22,6 +22,8 @@
 #                                  patellofemoral pain rather than bridging, and MEASURED on
 #                                  repetitions human annotators judged CORRECT the spec's own
 #                                  ratio already sits at or below its own fire threshold
+# Re-search 2026-09-25: both stay withdrawn. A pelvic number exists only for the SINGLE-leg bridge
+# (Butowicz 2016, 10 deg); nothing measures valgus in bridging. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 4.
 #
 # ---------------------------------------------------------------------------------------
 # THE LABELED DATA MATCHES THE VARIANT -- AND THE PIXELS IT LABELS ARE MOSTLY UNREACHABLE.

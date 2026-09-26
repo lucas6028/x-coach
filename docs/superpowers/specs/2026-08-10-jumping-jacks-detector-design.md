@@ -574,6 +574,10 @@ so "arm tension 8-27%" is the two ends of a range spanning two different exercis
 movement; this is the milder cousin — a node seeded from a **blend**, of which one component is
 correct, and the correct component is the one the shipped rule uses.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §5): all three stay withdrawn. Every jumping-jack valgus or landing hit uses the jumping jack as a
+warm-up before a drop jump; the only left/right measure (Gabis 2020) is cross-rep and has no
+cut-off.
+
 ---
 
 ### 7.4 And so the detector is not registered

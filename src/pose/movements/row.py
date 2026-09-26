@@ -39,6 +39,8 @@
 # constants; construction 2 is computable but measures a DIFFERENT quantity than the one the
 # rule names. The spec wrote a proxy requiring a landmark its own detection model (§3) does
 # not provide.
+# Re-search 2026-09-25: no source validates a spinal-flexion proxy from shoulder/hip/ear landmarks
+# alone; still architectural. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 1.3.
 #
 # NOT SUBSTITUTED, DELIBERATELY. Two monocular signals do carry some trunk-shape information --
 # trunk-length foreshortening (dist(shoulder_mid, hip_mid) shrinking as the spine flexes) and

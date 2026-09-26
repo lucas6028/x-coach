@@ -9,10 +9,10 @@ user's own data. ``GET /api/plans/templates`` is public for the same reason ``GE
 is -- it is a static catalog describing what the feature offers, and gating it would leave a
 signed-out visitor unable to see the thing they are being asked to sign in for.
 
-The movement of every item is validated against ``src/pose/movements/catalog.py`` (all sixteen),
-NOT against the detector registry (fourteen): a user may plan Jumping Jacks even though no video
-of one can be analysed yet. Which items can be analysed is the frontend's business, decided from
-``GET /api/movements``.
+The movement of every item is validated against ``src/pose/movements/catalog.py``, NOT against
+the detector registry: a movement can be designed (and planned) before it can be analysed. Since
+2026-09-26 both lists hold all sixteen. Which items can be analysed is the frontend's business,
+decided from ``GET /api/movements``.
 """
 
 from __future__ import annotations
@@ -80,9 +80,9 @@ def _t(day: int, movement: str, sets: int, reps: int) -> TemplateItem:
 
 
 # The built-in templates. Every movement here is one the detector registry can actually analyse, so
-# a user who starts from a template can run the whole thing through the studio -- the two catalog
-# movements without a detector (Jumping Jacks, High Knee) are addable by hand but are not put in
-# anyone's path by default.
+# a user who starts from a template can run the whole thing through the studio. Jumping Jacks and
+# High Knee (registered 2026-09-26, one Beta rule each) are addable by hand and not yet in any
+# template.
 #
 # The three "rehab" templates (WP4) are deliberately FIRST and deliberately conservative: 2 sets
 # instead of the fitness templates' 3-4, and only movements a clinician would recognise as low-load

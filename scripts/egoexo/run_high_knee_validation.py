@@ -28,14 +28,11 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from src.egoexo.high_knee_validation import (  # noqa: E402
-    BACK_STRAIGHT_CRITERION, EXO_VIEWS, KNEE_LIFT_COMMENT_DISCLOSED, STABILITY_CRITERION,
-    WITHDRAWN_PELVIC_DROP_CUT_DEG, criterion_failure_rates, cross_camera_spread, evaluate_view,
-    floor_discarded, knee_lift_comment_labels, load_judgements, load_pose_frames, pearson,
+    BACK_STRAIGHT_CRITERION, EXO_VIEWS, GATED_VIEWS, KNEE_LIFT_COMMENT_DISCLOSED,
+    STABILITY_CRITERION, WITHDRAWN_PELVIC_DROP_CUT_DEG, criterion_failure_rates,
+    cross_camera_spread, evaluate_view, floor_discarded, knee_lift_comment_labels,
+    load_judgements, load_pose_frames, pearson,
 )
-
-# The two cameras whose `anterior_axis_length` says they can see a sagittal quantity at all. Which
-# these are is DISCOVERED (the gate separates them with no overlap), not assumed from their names.
-GATED_VIEWS = ("exo_l", "exo_r")
 
 
 def _median(values):

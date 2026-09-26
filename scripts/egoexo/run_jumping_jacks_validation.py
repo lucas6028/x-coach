@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"reps found / lost to the floor   {summary['reps_found_total']} / "
           f"{summary['reps_lost_to_the_floor']}")
     print(f"detections actually emitted      {summary['detections_emitted']} "
-          f"(every rule is silent or withdrawn)")
+          f"(jj_incomplete_leg_rom is live; the rest are silent or withdrawn)")
     print("--- what the PARENT SPEC's cuts would have said on the same windows ---")
     print(f"jj_incomplete_leg_rom pair rate   {summary['leg_rom_fire_rate']:.3f}")
     print(f"jj_knee_valgus_landing pair rate  {summary['valgus_fire_rate']:.3f}")

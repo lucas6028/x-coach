@@ -25,6 +25,8 @@
 #
 # One live rule ties Sit-up for the thinnest detector in this registry. Design spec
 # `docs/superpowers/specs/2026-08-10-torso-twist-detector-design.md`, sections 5-7.
+# Re-search 2026-09-25: both stay withdrawn; Europe PMC has zero Russian-twist titles, and no source
+# states a tempo or a pelvis-vs-thorax ratio. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md sections 3.3-3.5.
 #
 # ---------------------------------------------------------------------------------------
 # FOUR ARTIFACTS IN THIS PROJECT NAME "TORSO TWIST" AND THEY DESCRIBE FOUR DIFFERENT EXERCISES.

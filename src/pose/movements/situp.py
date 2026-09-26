@@ -23,6 +23,9 @@
 #
 # One live rule is the thinnest detector in this registry and it is the honest outcome. Design
 # spec sections 5, 6 and 10.
+# Re-search 2026-09-25: both withdrawals stand and got stronger -- Barbado says his fastest cadence did
+# NOT impair trunk control, and Mandroukas's 35-40 deg is his curl-up PROTOCOL endpoint, not an
+# angle-resolved EMG result. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md sections 3.1-3.2.
 #
 # ---------------------------------------------------------------------------------------
 # THIS IS THE FIRST MOVEMENT WHOSE SUBJECT IS HORIZONTAL AND WHOSE SPEC RULES NEED A WORLD

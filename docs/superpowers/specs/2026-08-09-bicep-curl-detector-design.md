@@ -133,6 +133,9 @@ today.
 non-empty `corrections` bucket (`Wrists In Line With Forearms`). The node stays; nothing in
 this detector points at it.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §2.1): still withdrawn. No curl study states a wrist-flexion fault or number; the only values found are
+descriptive group means in a preprint (Chua 2024, arXiv 2402.11421).
+
 ---
 
 ## 4. Detector design

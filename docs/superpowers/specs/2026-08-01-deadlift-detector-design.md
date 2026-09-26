@@ -329,6 +329,11 @@ bar-path fault? It would need (a) a base-of-support reference MediaPipe can actu
 (b) a citation that measures bar displacement with a number. Neither exists today. This is a
 withdrawal pending a decision, not a silent deletion.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §1.2): still withdrawn. No study states a forward-drift threshold. Edington 2018 (PMC6162543) measured no
+lumbar shear/compression difference between navicular and 3rd-MTP bar positions (a null on the
+lever-arm rationale); Hancock 2012's displacement numbers (search-agent report) are imposed-condition means, posterior in
+sign, and referenced to landmarks MediaPipe cannot resolve.
+
 ---
 
 ## 6. KG retrieval — measured, not assumed

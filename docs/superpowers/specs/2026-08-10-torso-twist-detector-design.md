@@ -403,6 +403,9 @@ permanently silent, so presence again predicted nothing.
 actively misleading**, because it faithfully describes a *different movement pattern*. Sit-up
 refused an **inverted** seed; this module refuses a **wrong-axis** one, on the same reasoning.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §3.3–3.5): both stay withdrawn. Europe PMC returns zero Russian-twist titles; no source states a tempo ceiling
+or a pelvis-vs-thorax rotation ratio.
+
 ---
 
 ## 8. Measured

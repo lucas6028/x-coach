@@ -9,6 +9,14 @@ vi.mock("../lib/auth", () => ({ useAuth: vi.fn() }));
 import { useAuth } from "../lib/auth";
 import MovementDetail from "../pages/MovementDetail";
 
+// A pass-through spy, so ONE test can stand in for a movement with no registered rule: since
+// 2026-09-26 no catalog movement is like that. Every other test reads the real content.
+vi.mock("../lib/movementMistakes", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/movementMistakes")>();
+  return { ...actual, movementMistakes: vi.fn(actual.movementMistakes) };
+});
+import { movementMistakes } from "../lib/movementMistakes";
+
 const navigate = vi.fn();
 vi.mock("react-router-dom", async () => {
   const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
@@ -271,11 +279,24 @@ describe("MovementDetail — common mistakes", () => {
   });
 
   it("says a movement with no detector has nothing to watch for", async () => {
-    // Jumping Jacks is in the catalog but has no registered detector — every rule of its detector
-    // is permanently silent or withdrawn — so the honest answer is that there is nothing to list.
+    // A movement with no registered rule has nothing to list, and the honest answer says so. No
+    // catalog movement is like that since 2026-09-26, so the mistakes lookup is stubbed empty.
+    const spy = vi.mocked(movementMistakes);
+    const real = spy.getMockImplementation()!;
+    spy.mockImplementation(() => []);
+    try {
+      renderAt("/movements/Jumping%20Jacks");
+      await userEvent.click(screen.getByRole("tab", { name: "Common mistakes" }));
+      expect(await screen.findByText(/no fault checks yet/)).toBeInTheDocument();
+    } finally {
+      spy.mockImplementation(real);
+    }
+  });
+
+  it("lists the live rule for a movement registered in 2026-09", async () => {
     renderAt("/movements/Jumping%20Jacks");
     await userEvent.click(screen.getByRole("tab", { name: "Common mistakes" }));
-    expect(await screen.findByText(/no fault checks yet/)).toBeInTheDocument();
+    expect(await screen.findByText("Feet not jumping wide enough")).toBeInTheDocument();
   });
 });
 

@@ -9,6 +9,7 @@ from src.pose.movements.jumping_jacks import (
     JUMPING_JACKS_DETECTOR,
     JUMPING_JACKS_METRIC_KEYS,
     LEG_ROM_MILD_RATIO,
+    LEG_ROM_SEVERE_RATIO,
     jumping_jacks_assign_phases,
     jumping_jacks_compute_raw,
     rule_incomplete_arm_rom,
@@ -344,25 +345,120 @@ class PhaseTest(unittest.TestCase):
         self.assertEqual(phases[1], "unknown")
 
 
-class SilentLegRomRuleTest(unittest.TestCase):
-    """PERMANENTLY SILENT, and silenced by the labeled data rather than by an argument."""
+def _rep(widths: list[float], phase: str = "open") -> list[CoreFrame]:
+    """One repetition's CoreFrames with the given per-frame stance widths."""
+    return _core([jack_frame(stance_ratio=w, frame_index=i) for i, w in enumerate(widths)], phase)
 
-    def test_it_never_fires_even_on_a_repetition_far_below_the_specs_cut(self) -> None:
-        core = _core([jack_frame(stance_ratio=0.5, frame_index=i) for i in range(20)])
-        self.assertEqual(rule_incomplete_leg_rom(core, _ctx()), [])
 
-    def test_the_metric_it_would_have_read_is_computed_and_correct(self) -> None:
-        """SILENT IS NOT BROKEN -- and here the metric is also the rep signal, so it has to work
-        regardless."""
+class LiveLegRomRuleTest(unittest.TestCase):
+    """LIVE SINCE 2026-09-26 (notes/egoexo-silent-rules-full-archive.md). Every firing case has a
+    companion on the same path that must NOT fire, so a rule that fired always, or never, fails."""
+
+    def test_a_narrow_repetition_fires_and_a_wide_one_does_not(self) -> None:
+        narrow = rule_incomplete_leg_rom(_rep([0.3, 0.7, 1.15, 0.7, 0.3]), _ctx())
+        wide = rule_incomplete_leg_rom(_rep([0.3, 0.9, 1.6, 0.9, 0.3]), _ctx())
+        self.assertEqual([d.fault_id for d in narrow], ["jj_incomplete_leg_rom"])
+        self.assertEqual(wide, [])
+
+    def test_it_reads_the_widest_frame_of_the_repetition(self) -> None:
+        """One frame past the cut is a full enough jack, however narrow the rest of the rep --
+        the validated quantity is the rep's MAXIMUM stance, not its mean."""
+        self.assertEqual(rule_incomplete_leg_rom(_rep([0.3, 1.0, 1.35, 1.0, 0.3]), _ctx()), [])
+        self.assertTrue(rule_incomplete_leg_rom(_rep([0.3, 1.0, 1.25, 1.0, 0.3]), _ctx()))
+
+    def test_the_cut_is_strict(self) -> None:
+        """Built from CoreFrames carrying the metric EXACTLY -- a landmark-built 1.3 lands a float
+        ulp either side of the cut, which would let a `<=` mutation through unnoticed."""
+
+        def exact(widest: float) -> list[CoreFrame]:
+            return [
+                CoreFrame(frame_index=i, time=i / 30.0, phase="open", valid=True,
+                          lower_body_visibility=0.95,
+                          metrics={"stance_width_ratio": w, "hands_above_head_ratio": 0.5})
+                for i, w in enumerate([0.3, widest, widest, 0.3])
+            ]
+
+        self.assertEqual(rule_incomplete_leg_rom(exact(LEG_ROM_MILD_RATIO), _ctx()), [])
+        self.assertTrue(rule_incomplete_leg_rom(exact(1.29), _ctx()))
+
+    def test_it_scores_the_whole_repetition_not_the_open_phase(self) -> None:
+        """The deliberate departure from the scope the silent docstring recorded: `open` is set by
+        the CLIP's 70th percentile, so a narrow rep can hold no `open` frame at all. A rule scoped
+        to `open` would be silent on exactly that rep."""
+        no_open = _rep([0.3, 0.7, 1.1, 0.7, 0.3], phase="closing")
+        self.assertTrue(rule_incomplete_leg_rom(no_open, _ctx()))
+
+    def test_too_few_valid_frames_is_no_verdict(self) -> None:
+        widths = [0.3, 0.7, 1.1, 0.7, 0.3]
+        self.assertEqual(rule_incomplete_leg_rom(_rep(widths), _ctx(min_frames=6)), [])
+        self.assertTrue(rule_incomplete_leg_rom(_rep(widths), _ctx(min_frames=5)))
+
+    def test_evidence_and_severity(self) -> None:
+        (detection,) = rule_incomplete_leg_rom(_rep([0.3, 0.8, 1.15, 0.8, 0.3]), _ctx())
+        self.assertAlmostEqual(detection.evidence["primary_value"], 1.15, places=3)
+        self.assertEqual(detection.evidence["primary_threshold"], LEG_ROM_MILD_RATIO)
+        # (1.3 - 1.15) / (1.3 - 1.0) = 0.5 on the rule-level ramp.
+        self.assertAlmostEqual(detection.severity, 0.5, places=3)
+        self.assertEqual(detection.retrieval_mode, "kg")
+        self.assertEqual(detection.observability, "medium")
+        (floor,) = rule_incomplete_leg_rom(_rep([0.3, 0.6, 0.9, 0.6, 0.3]), _ctx())
+        self.assertEqual(floor.severity, 1.0)
+        self.assertEqual(LEG_ROM_SEVERE_RATIO, 1.0)
+
+    def test_end_to_end_a_narrow_clip_is_carded_and_a_wide_one_is_not(self) -> None:
+        narrow = run_detector(
+            JUMPING_JACKS_DETECTOR, jack_clip(reps=3, open_stance_ratio=1.1), 30.0, "front", 0.8
+        )
+        wide = run_detector(
+            JUMPING_JACKS_DETECTOR, jack_clip(reps=3, open_stance_ratio=1.6), 30.0, "front", 0.8
+        )
+        self.assertTrue(narrow.analyzed and wide.analyzed, "non-vacuity: both must segment")
+        self.assertEqual([d.fault_id for d in narrow.detections], ["jj_incomplete_leg_rom"])
+        self.assertEqual(wide.detections, [])
+
+    def test_a_motionless_clip_fires_this_rule_at_full_severity(self) -> None:
+        """PINS A KNOWN, INHERITED, DELIBERATELY UNREPAIRED FAILURE -- read this before "fixing" it.
+
+        `segment_reps` has no noise floor (see `tests/test_situp.py`'s test of the same name), so
+        a subject standing still with the feet together -- stance ~0.2 plus jitter -- segments
+        into reps, and each rep's widest stance sits far below 1.3: a maximally severe card for a
+        clip with no jumping in it. Every whole-rep "not enough travel" rule inherits this; the
+        honest repairs are framework-level. WHEN ONE LANDS THIS TEST SHOULD FAIL.
+        """
+        frames = [
+            jack_frame(stance_ratio=0.2 + 0.004 * math.sin(i / 3.0), frame_index=i)
+            for i in range(60)
+        ]
+        result = run_detector(JUMPING_JACKS_DETECTOR, frames, 30.0, "front", 0.8)
+        self.assertIsNone(result.fallback, "the jitter is segmented, not sent to the fallback")
+        self.assertEqual([d.fault_id for d in result.detections], ["jj_incomplete_leg_rom"])
+        self.assertEqual(result.detections[0].severity, 1.0)
+
+    def test_the_whole_clip_fallback_scores_the_whole_clip(self) -> None:
+        """When segmentation finds no rep, `run_detector` hands the rule the WHOLE clip, and the
+        rule reads that clip's widest stance. This is why two EgoExo clips (`q6ITZM_action_6`,
+        both side cameras) fire live while the per-rep validation reconstruction, which has no
+        reps to read there, records nothing. A bit-exact constant signal forces the fallback."""
+        narrow = [jack_frame(stance_ratio=0.2, frame_index=i) for i in range(60)]
+        wide = [jack_frame(stance_ratio=1.6, frame_index=i) for i in range(60)]
+        narrow_result = run_detector(JUMPING_JACKS_DETECTOR, narrow, 30.0, "front", 0.8)
+        wide_result = run_detector(JUMPING_JACKS_DETECTOR, wide, 30.0, "front", 0.8)
+        self.assertEqual(narrow_result.fallback, "no_reps_detected")
+        self.assertEqual(wide_result.fallback, "no_reps_detected")
+        self.assertEqual([d.fault_id for d in narrow_result.detections], ["jj_incomplete_leg_rom"])
+        self.assertEqual(wide_result.detections, [])
+
+    def test_the_metric_it_reads_is_computed_and_correct(self) -> None:
         narrow = jumping_jacks_compute_raw([jack_frame(stance_ratio=0.9)], 30.0)[0]
         wide = jumping_jacks_compute_raw([jack_frame(stance_ratio=1.7)], 30.0)[0]
         self.assertLess(narrow["stance_width_ratio"], LEG_ROM_MILD_RATIO)
         self.assertGreater(wide["stance_width_ratio"], LEG_ROM_MILD_RATIO)
 
     def test_the_specs_cut_is_kept_where_it_is_rather_than_moved(self) -> None:
-        """The measured correct population sits BELOW 1.3, so a cut fitted to it could be
-        manufactured at will. Silencing rather than moving is the whole point; this pins the
-        constant so a later edit that quietly retunes it has to change a test that says why."""
+        """The rule was silenced rather than retuned when 11 actions put the correct population
+        below 1.3. On the full archive the cut read off the human labels was 1.321, so it ships at
+        the spec's 1.3 UNMOVED. This pins the constant so a later edit that quietly retunes it
+        has to change a test that says why."""
         self.assertEqual(LEG_ROM_MILD_RATIO, 1.3)
 
 
@@ -381,7 +477,7 @@ class SilentArmRuleTest(unittest.TestCase):
         self.assertGreater(overhead["hands_above_head_ratio"], 0.0)
         self.assertLess(short["hands_above_head_ratio"], 0.0)
 
-    def test_both_silent_rules_are_present_rather_than_absent(self) -> None:
+    def test_both_rules_are_present_rather_than_absent(self) -> None:
         self.assertEqual(
             JUMPING_JACKS_DETECTOR.rules, (rule_incomplete_leg_rom, rule_incomplete_arm_rom)
         )
@@ -435,13 +531,13 @@ class WithdrawnRulesTest(unittest.TestCase):
         for key in JUMPING_JACKS_METRIC_KEYS:
             self.assertNotIn("knee_angle", key)
 
-    def test_no_rule_produces_any_detection_at_all(self) -> None:
+    def test_only_the_live_rule_produces_a_detection(self) -> None:
         """The whole-detector consequence of the roster: a clip built to trip every parent-spec
-        rule produces nothing."""
+        rule produces exactly one fault, the live leg-ROM rule's."""
         frames = jack_clip(reps=3, frames_per_rep=20, open_stance_ratio=0.8, hands_at_open=-0.9)
         result = run_detector(JUMPING_JACKS_DETECTOR, frames, 30.0, "front", 0.8)
         self.assertTrue(result.analyzed, "non-vacuity: the clip must really have segmented")
-        self.assertEqual(result.detections, [])
+        self.assertEqual([d.fault_id for d in result.detections], ["jj_incomplete_leg_rom"])
 
 
 class PhaseFractionTest(unittest.TestCase):
@@ -489,22 +585,22 @@ class SegmentationTest(unittest.TestCase):
         self.assertIsNone(result.fallback)
 
 
-class NotRegisteredTest(unittest.TestCase):
-    """THE FIRST DETECTOR IN THE PROGRAMME THAT IS DELIBERATELY NOT REGISTERED."""
+class RegisteredTest(unittest.TestCase):
+    """REGISTERED 2026-09-26, after being the first detector in the programme left unregistered."""
 
-    def test_it_is_absent_from_the_registry(self) -> None:
-        """Registration is what makes a movement analyzable in the app. With every rule silent or
-        withdrawn, registering would offer an analysis that can never report a fault while wearing
-        the Beta tag that says faults are possible."""
-        self.assertNotIn("Jumping Jacks", [detector.name for detector in list_detectors()])
+    def test_it_is_in_the_registry_as_beta(self) -> None:
+        """Registration is what makes a movement analyzable in the app. It happened once
+        `rule_incomplete_leg_rom` went live; `validated` stays False, so the app shows Beta."""
+        from src.pose.movements.registry import get_detector
 
-    def test_the_detector_object_still_exists_and_is_complete(self) -> None:
-        """Not registered is not the same as not built: the metric layer, the phases and the
-        segmentation all work and are what a future threshold would be dropped into."""
+        self.assertIn("Jumping Jacks", [detector.name for detector in list_detectors()])
+        self.assertIs(get_detector("Jumping Jacks"), JUMPING_JACKS_DETECTOR)
+        self.assertFalse(JUMPING_JACKS_DETECTOR.validated)
+
+    def test_the_detector_object_is_complete(self) -> None:
         self.assertEqual(JUMPING_JACKS_DETECTOR.name, "Jumping Jacks")
         self.assertEqual(JUMPING_JACKS_DETECTOR.rep_signal, "stance_width_ratio")
         self.assertIn(JUMPING_JACKS_DETECTOR.rep_signal, JUMPING_JACKS_DETECTOR.metric_keys)
-        self.assertFalse(JUMPING_JACKS_DETECTOR.validated)
 
     def test_the_rep_signal_is_unipolar_unlike_torso_twists(self) -> None:
         """Torso Twist is the only user of `rep_rectify`; the feet in a jumping jack never cross,

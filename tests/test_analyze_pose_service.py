@@ -108,20 +108,19 @@ class AnalyzePosePayloadTests(unittest.TestCase):
         detect.assert_called_once()
 
     def test_unknown_movement_returns_coming_soon_without_detector(self) -> None:
-        # THIS EXAMPLE HAS TO BE ROTATED EVERY TIME A DETECTOR IS REGISTERED, and that is the
-        # point of the assertion below rather than a nuisance: the test needs a movement the
-        # frontend lists (frontend/src/lib/movements.ts) that has NO registered detector, so it
-        # necessarily goes stale as the 16-movement programme lands one movement at a time. It
-        # has already moved "Deadlift" -> "Row" -> "Band Pull Apart" -> "Bicep Curl" -> "Arm
-        # Abduction" -> "Arm VW" -> "Sit-up" -> "Shoulder Bridge" -> "Leg Abduction" -> "Torso
-        # Twist" -> "Jumping Jacks"; only "High Knee" is left after this one. NOTE that Jumping
-        # Jacks stays valid here even though its module now EXISTS: every one of its rules is
-        # silent or withdrawn, so `src/pose/movements/jumping_jacks.py` deliberately does not
-        # register, and this branch is exactly the behaviour that decision buys -- the app tells a
-        # Jumping Jacks user "coming soon" rather than running an analysis that can never report a
-        # fault. The `assertNotIn` is what turns staleness into a loud failure instead of a
-        # silently vacuous test.
-        self.assertNotIn("Jumping Jacks", [d.name for d in registry.list_detectors()])
+        # Since 2026-09-26 every catalog movement has a registered detector (Jumping Jacks and High
+        # Knee were the last two), so this branch is reached only by a movement whose detector is
+        # absent from the registry. The example rotated "Deadlift" -> ... -> "Torso Twist" ->
+        # "Jumping Jacks" while the programme landed; with nothing left to rotate to, the registry
+        # entry is removed for the duration of the test instead. The branch still matters: a
+        # catalog movement designed ahead of its detector takes it, and it is what keeps a
+        # no-detector clip from writing pose JSON.
+        with mock.patch.dict(registry._REGISTRY):
+            del registry._REGISTRY["jumping jacks"]
+            self.assertNotIn("Jumping Jacks", [d.name for d in registry.list_detectors()])
+            self._assert_coming_soon()
+
+    def _assert_coming_soon(self) -> None:
         payload = {"metadata": {"fps": 30, "width": 1, "height": 1, "total_frames": 0}, "frames": []}
         pose_json_path = self._pose_json_path()
         result = svc.analyze_pose_payload(

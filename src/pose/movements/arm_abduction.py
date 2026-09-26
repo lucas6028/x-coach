@@ -23,18 +23,25 @@
 # Ex1 can and cannot decide. Design spec section 2.
 #
 # ---------------------------------------------------------------------------------------
-# TWO RULES SHIP, ONE IS PERMANENTLY SILENT, ONE IS ABSENT. THE THREE ARE NOT THE SAME THING.
+# TWO RULES SHIP AND TWO ARE PERMANENTLY SILENT. THE TREATMENTS ARE NOT THE SAME THING.
 # ---------------------------------------------------------------------------------------
 #   rule_shoulder_shrug              REGISTERED, PERMANENTLY SILENT -- real fault, cited
 #                                    mechanism, MEASURED sensing failure (its docstring)
-#   excessive_elevation_impingement  WITHDRAWN from the parent spec -- no function here at all
+#   rule_raised_above_shoulder_height REGISTERED, PERMANENTLY SILENT -- the 2026-09-25 REWRITE of
+#                                    the parent spec's withdrawn impingement-arc rule: now cited
+#                                    (Kolber 2014), and the elevation MAGNITUDE it needs is a
+#                                    MEASURED sensing failure that errs toward firing (its docstring)
 #   rule_contralateral_trunk_lean    ships
 #   rule_lr_asymmetry                ships
 #
 # Registered-but-silent (pushup.rule_scapular_winging, band_pull_apart
 # .rule_loss_of_scapular_retraction) says "real, well-cited fault, the sensor cannot see it".
 # Withdrawn (OHP bar-path 2026-07-25, deadlift bar-drift 2026-08-01, curl wrist-flexion
-# 2026-08-09) says "no citation supports the rule as written". Design spec sections 3 and 4.
+# 2026-08-09) says "no citation supports the rule as written". The impingement ARC as the parent
+# spec wrote it is still withdrawn -- its source describes a diagnostic sign, not a fault -- and
+# the literature re-search of 2026-09-25 replaced it with the rule Kolber does support, which then
+# moved from the second treatment to the first. Design spec sections 3 and 4;
+# docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 2.2.
 #
 # ---------------------------------------------------------------------------------------
 # THE FIRST DETECTOR WHOSE SPEC-RATED `high` VIEWS ARE REACHABLE, AND THEREFORE THE FIRST
@@ -317,6 +324,15 @@ def arm_abduction_assign_phases(raw: list[dict]) -> list[str]:
 ARM_ABD_SHRUG_KG_QUERY = "Shoulder Shrug"
 ARM_ABD_TRUNK_LEAN_KG_QUERY = "Trunk Lean Compensation"
 ARM_ABD_ASYMMETRY_KG_QUERY = "Muscle Imbalance"
+# Recorded for `rule_raised_above_shoulder_height`, which is silent and therefore never emits it.
+# Resolved 2026-09-25 with `retrieve_graph_context(q, movement="Arm Abduction")`: "Excessive
+# Elevation", "Raised Too High", "Arm Raised Above Shoulder" and "Shoulder Impingement" match ZERO
+# nodes; "Subacromial Impingement" matches the SHARED Risk node of that name (evidence edges from
+# `Push-up:Shoulders Raised` and `Overhead Press:Scapular Movement Changes`), not an Arm Abduction
+# fault node. So a card would carry the injury risk and no movement-scoped cause or correction --
+# thin, not inverted. `Arm Abduction:Incomplete Elevation` is NOT used: it means the opposite
+# fault, the inverted-seed case `situp_excessive_rom` refused.
+ARM_ABD_ABOVE_SHOULDER_KG_QUERY = "Subacromial Impingement"
 
 # Imported rather than re-typed, so a change to the shared constant cannot silently skip this
 # module.
@@ -400,7 +416,8 @@ def rule_shoulder_shrug(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
 
     SILENT, NOT WITHDRAWN, AND THE DISTINCTION IS LOAD-BEARING. Mun genuinely backs the fault, so
     this is a sensing failure, not a citation failure. The parent spec carries a NOTE, not a
-    WITHDRAWN blockquote. Contrast the arc rule, which is ABSENT from this module entirely.
+    WITHDRAWN blockquote. Contrast the arc rule as the parent spec wrote it, which stays ABSENT;
+    its cited rewrite is `rule_raised_above_shoulder_height`, silent for the same kind of reason.
 
     NOT SUBSTITUTED, DELIBERATELY, AND ITS METRIC IS NOT EVEN EMITTED. Shipping a different
     quantity under this fault_id would attach Mun's citation to something Mun says nothing about.
@@ -420,6 +437,65 @@ def rule_shoulder_shrug(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRul
     THE KG IS NOT THE GAP: `Shoulder Shrug` resolves to `Arm Abduction:Compensatory Shoulder
     Shrug` with a non-empty `quality_impacts` bucket (`Shoulder Depression`). The metric is the
     gap.
+    """
+    return []
+
+
+def rule_raised_above_shoulder_height(
+    core: list[CoreFrame], ctx: RuleContext
+) -> list[PoseRuleDetection]:
+    """Registered but PERMANENTLY SILENT -- always returns [].
+
+    THIS IS THE CITED REWRITE OF THE PARENT SPEC'S WITHDRAWN `excessive_elevation_impingement_arc`
+    (literature re-search 2026-09-25). The arc rule as written stays withdrawn: StatPearls
+    NBK554518 describes the 70-120 deg painful arc as a DIAGNOSTIC SIGN of existing subacromial
+    pathology, never as a fault to avoid, and its "target + 15 deg" disjunct has no target to add
+    to. The re-search found the rule the literature DOES state:
+
+      Kolber MJ, Cheatham SW, Salamh PA, Hanney WJ. Characteristics of shoulder impingement in the
+      recreational weight-training population. J Strength Cond Res 2014;28(4):1081-1089.
+      DOI 10.1519/JSC.0000000000000250, PMID 24077379. Abstract, verified on the Europe PMC
+      record: "A significant association existed between clinical characteristics of SIS
+      (p <= 0.004) and both lateral deltoid raises and upright rows above 90 deg. ... Avoiding
+      performance of lateral deltoid raises and upright rows beyond an angle of 90 deg ... may
+      serve as a useful means to mitigate characteristics associated with SIS."
+
+    A number stated in the source's own primary text, for this exercise, as a thing to avoid --
+    the three things the arc citation lacked. Its limits, stated at the site rather than left to
+    be found: the design is CROSS-SECTIONAL and the "above 90 deg" is SELF-REPORTED by
+    questionnaire, so it is an association, not a measured cause; the population is young male
+    recreational weight-trainers doing WEIGHTED raises; and the paper's practical applications
+    pair the risk with internal rotation above 90 deg, which a pose landmark cannot see. The
+    parent spec's 70-120 deg arc, shrug conjunct and target + 15 deg are all dropped -- none of
+    them appears in Kolber.
+
+    WHY SILENT: THE ELEVATION MAGNITUDE IS A MEASURED SENSING FAILURE, AND IT ERRS TOWARD FIRING.
+    This rule would read `left/right_arm_elevation_deg` against an absolute 90 deg. Measured on
+    REHAB24-6 Ex1 cam17 (design spec section 2.4), MediaPipe's arm elevation against the markers is
+    off by a mean 20.6 deg per rep (p90 43.8 deg), and it reads HIGH: median peak 157.4 deg against
+    the markers' 130.1 deg. An over-reading metric against an upper bound fires on reps that stayed
+    below it. That was the `front` camera, the best case -- and `estimate_view_for_pose(allow_front
+    =False)` never emits `front` in production, so no view gate recovers it. This is why the
+    module comment in `arm_abduction_compute_raw` records that NO rule here reads an elevation
+    MAGNITUDE; `rule_lr_asymmetry` survives the same error only because it reads a DIFFERENCE of
+    two like-measured quantities, where the common-mode error cancels. A difference cannot express
+    "above 90 deg".
+
+    AND THE 3-D TRUTH SAYS THE CUT WOULD BE BUSY EVEN WITH A PERFECT SENSOR. Fit3D
+    `side_lateral_raise` (the bilateral variant this app models) peaks at a median 97.1 deg on
+    mocap, so a > 90 deg cut fires on more than half of those repetitions. That follows from the
+    median and was not separately counted. Read with Kolber, that is not obviously wrong -- the
+    source's point is that people routinely raise past shoulder height -- but it means a live rule
+    would be one of the most frequent findings in the app, on a correlational source.
+
+    SILENT, NOT WITHDRAWN: the citation now holds for the fault, so the second treatment no longer
+    applies. What would license firing is ONE measurement, not an argument: MediaPipe peak
+    elevation against Fit3D `joints3d_25` peak elevation on `side_lateral_raise`, rep by rep, at
+    the 90 deg cut. `data/fit3d/derived/preds/mediapipe` holds no `side_lateral_raise` predictions
+    as of 2026-09-25. See docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md
+    section 2.2.
+
+    THE KG IS THIN, NOT INVERTED -- see ARM_ABD_ABOVE_SHOULDER_KG_QUERY.
     """
     return []
 
@@ -686,18 +762,22 @@ def rule_lr_asymmetry(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleD
     return detections
 
 
-# ALL FOUR of the parent spec's Arm Abduction rules are accounted for, and the three treatments
-# are deliberately different. `rule_shoulder_shrug` is listed and permanently silent so the spec
-# and the code stay in 1:1 correspondence -- registering it costs one no-op call per clip and
-# buys an auditor the answer "yes, it is accounted for, and here is why it says nothing", the
-# same trade `pushup.rule_scapular_winging` and `band_pull_apart.rule_loss_of_scapular_retraction`
-# make. `excessive_elevation_impingement_arc` is ABSENT rather than silent because its problem is
-# the citation and the arithmetic, not the sensor: StatPearls describes the 70-120 degree painful
-# arc as a DIAGNOSTIC SIGN of existing subacromial pathology and never says raising through it is
-# a fault, all 178 REHAB24-6 Ex1 reps enter that band (so its first disjunct is vacuous and
-# reduces to "the silent rule fired"), and its second disjunct needs a prescribed target that
-# exists nowhere in this pipeline. A silent stub would assert that elevation is a real fault the
-# sensor cannot see; the sensor sees elevation angles perfectly well. Design spec section 4.
+# ALL FOUR of the parent spec's Arm Abduction rules are accounted for. `rule_shoulder_shrug` is
+# listed and permanently silent so the spec and the code stay in 1:1 correspondence -- registering
+# it costs one no-op call per clip and buys an auditor the answer "yes, it is accounted for, and
+# here is why it says nothing", the same trade `pushup.rule_scapular_winging` and
+# `band_pull_apart.rule_loss_of_scapular_retraction` make.
+#
+# The fourth slot changed treatment on 2026-09-25. `excessive_elevation_impingement_arc` AS
+# WRITTEN stays absent: StatPearls describes the 70-120 degree painful arc as a DIAGNOSTIC SIGN
+# of existing subacromial pathology and never says raising through it is a fault, all 178
+# REHAB24-6 Ex1 reps enter that band (so its first disjunct is vacuous), and its second disjunct
+# needs a prescribed target that exists nowhere in this pipeline (design spec section 4). The
+# literature re-search replaced it with the fault Kolber 2014 does state -- lateral raises above
+# 90 degrees -- and that rewrite is registered SILENT, because with the citation repaired what
+# remains is the sensor: MediaPipe over-reads elevation magnitude by a mean 20.6 degrees, toward
+# firing. `rule_raised_above_shoulder_height`'s docstring has the evidence and the one
+# measurement that would license it to fire.
 #
 # `ARM_ABDUCTION_METRIC_KEYS` must stay a two-way match with what `arm_abduction_compute_raw`
 # emits (pinned by `test_metric_keys_match_the_emitted_metrics_exactly`): a key the tuple omits
@@ -710,6 +790,7 @@ ARM_ABDUCTION_DETECTOR = MovementDetector(
     arm_abduction_assign_phases,
     (
         rule_shoulder_shrug,
+        rule_raised_above_shoulder_height,
         rule_contralateral_trunk_lean,
         rule_lr_asymmetry,
     ),

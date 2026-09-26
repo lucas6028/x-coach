@@ -683,6 +683,8 @@ def rule_hips_shoot_up(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRule
 # bar-path withdrawal already ruled out. Unlike push-up's `rule_scapular_winging`, it is not
 # registered-but-silent: a silent rule says "real fault, unmeasurable", whereas this one says
 # "no citation supports the rule as written", which is a spec problem, not a sensing problem.
+# Re-search 2026-09-25: still withdrawn -- no forward-drift threshold exists, and Edington 2018
+# (PMC6162543) measured no lumbar-load difference between bar positions. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 1.2.
 #
 # `DEADLIFT_METRIC_KEYS` must stay a two-way match with what `deadlift_compute_raw` emits --
 # pinned by `test_metric_keys_match_the_emitted_metrics`.

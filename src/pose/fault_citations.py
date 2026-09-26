@@ -84,10 +84,29 @@ def module_citations(source: str, label: str = "<source>") -> dict[str, str]:
     return out
 
 
+def registered_modules(movements_dir: Path = MOVEMENTS_DIR) -> set[str]:
+    """The detector modules ``registry.py`` imports, read from its AST.
+
+    Registration is what puts a movement on the common-mistakes page, so it is also what decides
+    whose citations are exported. An unregistered module can hold a live rule -- Jumping Jacks
+    has one since 2026-09-26 -- with no card to attach its citation to.
+    """
+    tree = ast.parse((movements_dir / "registry.py").read_text(encoding="utf-8"))
+    return {
+        alias.name
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module == "src.pose.movements"
+        for alias in node.names
+    }
+
+
 def all_citations(movements_dir: Path = MOVEMENTS_DIR) -> dict[str, str]:
-    """Every movement module's citations, merged and sorted by ``fault_id``."""
+    """Every REGISTERED movement module's citations, merged and sorted by ``fault_id``."""
+    registered = registered_modules(movements_dir)
     merged: dict[str, str] = {}
     for path in sorted(movements_dir.glob("*.py")):
+        if path.stem not in registered:
+            continue
         merged.update(module_citations(path.read_text(encoding="utf-8"), path.name))
     return dict(sorted(merged.items()))
 

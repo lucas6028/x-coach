@@ -5,17 +5,17 @@
 # in a `rule_*` function.
 #
 # ---------------------------------------------------------------------------------------
-# NO RULE SHIPS LIVE. ONE IS PERMANENTLY SILENT, FOUR ARE WITHDRAWN, AND THE DETECTOR IS
-# DELIBERATELY NOT REGISTERED. THIS IS THE SIXTEENTH AND LAST MOVEMENT.
+# ONE RULE IS LIVE, FOUR ARE WITHDRAWN, AND THE DETECTOR IS REGISTERED -- BOTH SINCE 2026-09-26,
+# BY THE USER'S DECISION. THIS IS THE SIXTEENTH AND LAST MOVEMENT.
 # ---------------------------------------------------------------------------------------
-#   rule_insufficient_knee_lift   PERMANENTLY SILENT -- the fault is real (15 of 68 judged actions
-#                                 carry a free-text complaint about leg height), the metric is
-#                                 clean and roll-invariant, and this rule owns the movement's only
-#                                 scoped KG node. What fails is the number, twice over: the parent
-#                                 spec CITES the A-skip's 45 deg target and IMPLEMENTS the
-#                                 B-skip's 90 deg one, and the implemented cut fires on 100% OF
-#                                 EVERY REPETITION OF EVERY ACTION, including the two humans
-#                                 judged faultless.
+#   rule_insufficient_knee_lift   LIVE at 65.6 deg of hip flexion, a cut READ OFF DATA by the
+#                                 user's decision -- neither of the spec's two numbers (it CITES
+#                                 the A-skip's 45 deg and IMPLEMENTS the B-skip's 90 deg; on the
+#                                 full archive 90 deg cards 89% of clips without a complaint and
+#                                 45 deg misses 59% of those with one). The metric ranks the
+#                                 comment labels at held-out AUC 0.730 [0.586, 0.864]; the cut
+#                                 still cards 40% of side-camera clips without a complaint. See
+#                                 its docstring.
 #   hk_trunk_lean_back            WITHDRAWN, absent -- ITS REFERENCE AXIS IS AS BIG AS THE FAULT.
 #                                 A trunk lean is an angle from the VERTICAL, and this drill has
 #                                 no vertical: the support limb, which Leg Abduction established
@@ -36,11 +36,17 @@
 #                                 withdrawal above just refuted), and "consistently across reps"
 #                                 is cross-rep state this architecture does not have.
 #
-# THIS IS THE SECOND DETECTOR IN THE PROGRAMME THAT IS NOT REGISTERED, after Jumping Jacks. See
-# the block above `HIGH_KNEE_DETECTOR`.
+# IT WAS THE SECOND DETECTOR LEFT UNREGISTERED, after Jumping Jacks, until 2026-09-26. See the
+# block below `HIGH_KNEE_DETECTOR`.
 #
 # Design spec `docs/superpowers/specs/2026-08-10-high-knee-detector-design.md`. Measurements:
-# `notes/high-knee-rule-validation.md`, harness `src/egoexo/high_knee_validation.py`.
+# `notes/high-knee-rule-validation.md` (6 actions, 2026-08) and
+# `notes/egoexo-silent-rules-full-archive.md` (all 68, 2026-09-26), harness
+# `src/egoexo/high_knee_validation.py`.
+# Re-search 2026-09-25: all four withdrawals stand (three are measured refutations). Alberton 2015
+# (PMC4723158) instructs 90 deg hip/knee flexion for running in place -- a protocol TARGET with no
+# tolerance. It is now the live knee-lift rule's citation for the target; the cut is data-derived.
+# docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 5.
 #
 # ---------------------------------------------------------------------------------------
 # THE CORPUS JUDGES THIS EXERCISE RICHLY AND JUDGES DIFFERENT FAULTS. THAT IS JUMPING JACKS'
@@ -121,9 +127,11 @@ from src.pose.geometry import (
     LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, midpoint, distance, mean_visibility,
+    severity_from_range,
 )
 from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
-from src.pose.pose_rule_detector import PoseRuleDetection
+from src.pose.movements import registry
+from src.pose.pose_rule_detector import PoseRuleDetection, build_detection
 
 # The generic "lower body" set every movement module uses for the framework-level
 # `lower_body_visibility` quality field. This module's own rules never read it.
@@ -383,75 +391,174 @@ HIGH_KNEE_KNEE_LIFT_KG_QUERY = "Insufficient Knee Lift"
 # parallel to the ground, which is the knee at hip height; 45 degrees is HALFWAY THERE, a
 # `thigh_elevation` of -cos(45 deg) = -0.7071.
 #
-# BOTH ARE KEPT HERE, NEITHER IS MOVED, AND THE RULE IS SILENCED INSTEAD. Fitting a cut between
-# them to the observed distribution would be trivial and is exactly what this programme forbids.
+# NEITHER SHIPS, AND BOTH ARE KEPT: the validation harness replays them as the spec's two readings.
 KNEE_LIFT_CITED_A_SKIP = -math.cos(math.radians(45.0))  # -0.7071, the number the spec CITES
 KNEE_LIFT_IMPLEMENTED_B_SKIP = 0.0                      # the number the spec's heuristic USES
 
+# THE SHIPPED CUT, AND ITS PROVENANCE IS DATA, NOT A PAPER -- THE USER'S DECISION, 2026-09-26.
+# 65.6 deg of hip flexion is the cut that best separates the EgoExo-Fitness High Knee actions whose
+# annotator comments complain about leg height from those whose comments do not (Youden's J on the
+# 59 held-out actions, gated side cameras). Refit without each participant in turn it lands at
+# 64.5-65.8 deg (23 of 25 folds at 65.6), so it does not hinge on one person; with 12 positives,
+# read it as "about 65", not as a precise value. It sits between the spec's two sourced grades
+# (45 and 90 deg), where real performers are: flagged actions peak at a median 50.6 deg, unflagged
+# at 77.7. No paper states it. `notes/egoexo-silent-rules-full-archive.md`.
+KNEE_LIFT_HIP_FLEXION_DEG = 65.6
+KNEE_LIFT_THRESHOLD = -math.cos(math.radians(KNEE_LIFT_HIP_FLEXION_DEG))  # -0.4131
+
+# SEVERITY RAMP 65.6 -> 45 deg: A RULE-LEVEL CHOICE. 45 deg is the A-skip grade, the EASIER of the
+# spec source's two targets, so a thigh that falls short even of that reads at full severity. It
+# shapes how strongly a firing rep is worded; it does not decide whether the rule fires.
+KNEE_LIFT_SEVERE_HIP_FLEXION_DEG = 45.0
+KNEE_LIFT_SEVERE_THRESHOLD = -math.cos(math.radians(KNEE_LIFT_SEVERE_HIP_FLEXION_DEG))
+
+# THE VIEW GATE'S NUMBER, AND IT IS ALSO READ OFF DATA. A frontal camera cannot see thigh elevation
+# (the thigh swings toward the lens), and on EgoExo's frontal `exo_m` the metric reads nonsense in
+# both directions. `anterior_axis_length` is this module's own measure of how much fore-aft
+# direction a camera sees. 0.170 is the LARGEST per-clip median it takes on the frontal camera
+# over all 68 judged actions, so every frontal clip observed falls at or below it; 17 of the 130
+# side-camera clips do too and are silenced with them. With this gate applied the held-out
+# separation is AUC 0.754 [0.620, 0.869] (exploratory; the pre-registered primary gated by camera
+# name). At n=6 the two cameras separated with no overlap (side 0.156-0.318, frontal 0.027-0.044);
+# at 68 actions they overlap (side 0.066-0.441, frontal 0.019-0.170), which is why the gate sits at
+# the frontal maximum rather than in a gap that no longer exists.
+#
+# CHECKED PER REPETITION, WHICH IS WHAT THE RULE GATES ON (the 0.170 is a per-clip maximum): of
+# 177 analysed frontal reps on the 59 held-out actions, 3 pass the gate, and no frontal clip is
+# carded. With the gate removed the rule would card 28 of 47 no-complaint and 11 of 12 complaint
+# frontal clips -- so the gate, not the metric, is what keeps the frontal camera silent. On the side
+# cameras it silences 3 clips the ungated analysis would card (2 no-complaint, 1 complaint).
+KNEE_LIFT_VIEW_GATE = 0.170
+
+
+def _hip_flexion_deg(thigh_elevation: float) -> float:
+    """`thigh_elevation` is -cos(hip flexion): -1 hanging, 0 at hip height. Degrees for the card."""
+    return math.degrees(math.acos(max(-1.0, min(1.0, -thigh_elevation))))
+
 
 def rule_insufficient_knee_lift(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
-    """PERMANENTLY SILENT -- always returns [].
+    """Flag a knee drive whose thigh never reaches 65.6 deg of hip flexion.
 
-    WHAT IT HAS, WHICH IS MORE THAN ANY OTHER RULE THIS MOVEMENT WAS GIVEN:
-      THE ONLY SCOPED KG NODE. `High Knee:Insufficient Knee Lift`, and it is the only one of this
-      movement's four nodes that corresponds to a parent-spec rule at all.
-      A HUMAN-JUDGED POSITIVE CLASS, ALBEIT A SECONDARY ONE. EgoExo's checklist has no knee-height
-      criterion, but its free-text comments do: under a rule fixed BEFORE the comments were read,
-      15 of 68 actions carry a leg-height complaint ("the leg raising range is too small, should
-      be lifted higher"), 12 of them in the 62 actions held out from the rule's own construction.
+    LIVE SINCE 2026-09-26, AT A DATA-DERIVED CUT THE USER CHOSE OVER BOTH OF THE SPEC'S NUMBERS.
+    It was permanently silent because the spec cites 45 deg and implements 90 deg, and on 6 actions
+    the one fired on everything while the other appeared to sort the labels backwards. On the full
+    EgoExo-Fitness archive the metric ranks the comment labels (pre-registered primary: held-out
+    AUC 0.730 [0.586, 0.864]), and the user decided to ship the cut read off those labels. The
+    pre-registered plan had fixed that a comment label cannot license a number; this is the user's
+    explicit override of that, recorded as such.
+
+    WHAT IT HAS:
+      THE ONLY SCOPED KG NODE. `High Knee:Insufficient Knee Lift` -- DANGLING (only
+      `related_actions`), so the card it seeds is thin, and its stated grounding figure measures
+      a different criterion (module header).
+      A TARGET FROM A SOURCE THAT STUDIES THIS EXERCISE. Alberton et al. 2015 instruct dry-land
+      running in place as "the right hip and knee flexion to 90 deg starting the swing phase".
+      That is the target the user falls short of. It is not the tolerance.
+      A HUMAN SIGNAL THE METRIC RANKS. 15 of 68 actions carry a free-text leg-height complaint
+      ("the leg raising range is too small, should be lifted higher") under a rule fixed before the
+      comments were read; 12 of them are in the 59 held-out actions the primary used.
       A CLEAN METRIC. `thigh_elevation` is a cosine between two body vectors: roll-, mirror- and
       scale-invariant, which on a corpus whose side cameras are rolled 90 degrees is what makes it
-      measurable at all.
-      A VIEW GATE THAT DOES NOT TRUST THE VIEW ESTIMATOR. `anterior_axis_length` separates the
-      cameras cleanly and by itself: 0.156-0.318 on the two side cameras, 0.027-0.044 on the
-      frontal one, with no overlap.
+      measurable at all. Trunk-relative on purpose (`_thigh_elevation`).
 
-    WHAT FAILS IS THE NUMBER, AND THE SPEC SUPPLIES TWO THAT DISAGREE. The rationale cites the
-    A-skip's 45 deg; the detection heuristic implements the knee at hip height, which is the
-    B-skip's 90 deg. Replayed over the six judged actions recoverable from the truncated EgoExo
-    archive -- 18 (action, camera) pairs, 146 SCORED repetitions (150 segmented; `select_reps`
-    drops partial windows) -- on the two cameras that can see a sagittal quantity:
+    WHAT IT COSTS, THIS RULE AS SHIPPED (gate included), THROUGH `run_detector`, SIDE CAMERAS OF
+    THE 59 ACTIONS HELD OUT FROM BUILDING THE COMMENT RULE -- NOT FROM FITTING THE CUT:
+      A card appears on 36 of 90 clips whose comments did not complain (40.0%) and on 19 of 22
+      that did (86.4%). These rates are IN-SAMPLE: the cut was fitted on the same actions, which
+      biases the false-card rate DOWN, while "no complaint" is not a judgement that the lift was
+      high enough, which biases it UP. The two run in opposite directions, so neither is a bound.
+      The out-of-sample figure is the cut refit without each participant: sensitivity 0.833
+      (10/12), specificity 0.660 (31/47). Fold cuts of 64.5-65.8 deg suggest the fitting bias is
+      small.
+      THE LABEL IS SECONDARY: free text, 12 positives from 9 people, and any-annotator (a
+      multi-annotated action gets more chances to be flagged; both strata point the same way).
 
-        the IMPLEMENTED cut (90 deg, knee at hip height)   fires on 100.0% of repetitions
-        the CITED cut      (45 deg)                        fires on 0.0-71.1%, by action
+    ALBERTON'S +/-5 DEG IS NOT A TOLERANCE, AND IT IS NOT USED. The paper kept for analysis only
+    repetitions "within a range of +/-5 deg from the target angle (90 deg)", "considered to be an
+    adequate amplitude of motion" -- a rep-SELECTION window for a laboratory protocol. Applied as a
+    fault cut it would fire on the median EgoExo performer judged fine (77.7 deg).
 
-    THE IMPLEMENTED CUT FIRES ON EVERY REPETITION OF EVERY ACTION, including both actions in which
-    every annotator marked every criterion true. Observed peak thigh elevation runs -0.43 to
-    -0.77, i.e. 40-65 deg of hip flexion: real performers of this drill land BETWEEN the source's
-    two targets, and the spec picked the far one.
+    SCOPE: the whole repetition, one knee drive (`high_knee_assign_phases`), reading the MAXIMUM of
+    the two thighs' elevation -- the driving leg is whichever is higher -- which is the quantity the
+    validation measured (`src/egoexo/high_knee_validation.py::evaluate_view`). `min_frames` is
+    tested against the whole repetition's usable frames.
 
-    THE CITED CUT IS NOT THE ANSWER EITHER, AND ITS FAILURE IS THE MORE INTERESTING ONE: IT SORTS
-    THIS CORPUS BACKWARDS. It fires on 0.0% of all three actions whose free-text comments complain
-    about leg height, and on 7.1-71.1% of the three whose comments do not (two `unattributable`,
-    one negative) -- the one human signal
-    available about this fault is ANTI-correlated with it. At six actions, with a secondary label,
-    that is not by itself a refutation; what it does is remove the only argument that could have
-    justified shipping the number, namely that it happened to sort the corpus sensibly.
-    What remains is a provenance four transfers deep, every step of it stated in the paper:
-    Matijasevic scores the A-SKIP (a skipping drill, not this one), performed TRAVELLING ON A TRACK
-    (not in place), by participants explicitly EXCLUDED for athletics experience, and A-skip had
-    only "a trivial correlation" with the sprint outcome the battery was built to predict.
+    THE VIEW GATE: the median `anterior_axis_length` over the repetition must exceed
+    `KNEE_LIFT_VIEW_GATE`, and a repetition with no finite gate reading (no heel or toe visible) is
+    silent, because nothing then says the camera can see the lift. A frontal camera is silent BY
+    DESIGN, not by accident: it cannot see this quantity. See the gate constant for its provenance.
 
-    A NINTH CITATION FAILURE MODE, AND IT IS NOT THE INVERTED PARAPHRASE. The spec's prose
-    ("thigh at least ~45 deg above horizontal") does put the source's number on the wrong side of
-    horizontal, which is Torso Twist's mode 7 recurring. The new mode is underneath it: THE SOURCE
-    STATES A GRADED FAMILY OF TARGETS AND THE SPEC CITES ONE GRADE WHILE IMPLEMENTING THE OTHER --
-    an unannounced upgrade to the harder variant's criterion, carrying the easier variant's
-    citation. Nothing is misquoted; the quote simply does not govern the code.
-
-    THE UPGRADE PATH IS CONCRETE. A corpus that judges knee HEIGHT would settle it, and the
-    comments show human judges care about it even though the checklist does not ask. Failing that,
-    `frames_open`'s missing `.ac` part would raise the reachable set from 6 actions to most of 68,
-    which would at least let the comment-derived labels be tested at usable n. That is a download
-    and a label pass, not a research programme.
-
-    SCOPE, RECORDED FOR WHOEVER WAKES IT UP: the `peak` phase, reading the MAXIMUM of the two
-    `thigh_elevation` metrics over the repetition (the driving leg is whichever is larger), gated
-    on `anterior_axis_length`, with `min_frames` tested against the WHOLE repetition rather than
-    the phase -- the Bicep Curl phase-fraction trap, which at this movement's cadence would
-    otherwise silence the rule structurally.
+    INHERITED, NOT INTRODUCED HERE: like every "not enough travel" rule, a clip of someone standing
+    still can segment into reps and fire (`situp.rule_incomplete_rom` documents the mechanism).
     """
-    return []
+    segment = [
+        frame
+        for frame in core
+        if frame.valid
+        and (
+            np.isfinite(frame.m("thigh_elevation_left"))
+            or np.isfinite(frame.m("thigh_elevation_right"))
+        )
+    ]
+    if len(segment) < ctx.min_frames:
+        return []
+
+    gate = [frame.m("anterior_axis_length") for frame in segment]
+    gate = [value for value in gate if np.isfinite(value)]
+    if not gate or not float(np.median(gate)) > KNEE_LIFT_VIEW_GATE:
+        return []
+
+    values = [
+        float(np.nanmax([frame.m("thigh_elevation_left"), frame.m("thigh_elevation_right")]))
+        for frame in segment
+    ]
+    peak = float(np.max(values))
+    if not peak < KNEE_LIFT_THRESHOLD:
+        return []
+
+    severity = severity_from_range(
+        peak, KNEE_LIFT_THRESHOLD, KNEE_LIFT_SEVERE_THRESHOLD, lower_is_worse=True
+    )
+    peak_deg = _hip_flexion_deg(peak)
+    return [
+        build_detection(
+            fault_id="hk_insufficient_knee_lift",
+            fault_name="Insufficient Knee Lift",
+            kg_query=HIGH_KNEE_KNEE_LIFT_KG_QUERY,
+            retrieval_mode="kg",
+            segment_metrics=segment,
+            # The peak is the HIGHEST thigh of the drive, still short of the cut. Unclipped.
+            score_values=values,
+            severity=severity,
+            confidence=severity,
+            observability="medium",
+            evidence={
+                "peak_hip_flexion_deg": round(peak_deg, 1),
+                "threshold_hip_flexion_deg": KNEE_LIFT_HIP_FLEXION_DEG,
+                "anterior_axis_length_median": round(float(np.median(gate)), 3),
+                "primary_label": "peak hip flexion of the driving leg (deg)",
+                "primary_value": round(peak_deg, 1),
+                "primary_threshold": KNEE_LIFT_HIP_FLEXION_DEG,
+            },
+            citation=(
+                "Alberton CL, Pinto SS, da Silva Azenha NA, Cadore EL, Tartaruga MP, Brasil B, "
+                "Kruel LF. Kinesiological Analysis of Stationary Running Performed in Aquatic and "
+                "Dry Land Environments. J Hum Kinet (2015) 49:5-14, PMC4723158, "
+                "DOI 10.1515/hukin-2015-0103."
+            ),
+            citation_support=(
+                "Alberton gives the TARGET for running in place: \"the right hip and knee flexion "
+                "to 90° starting the swing phase\". It states no fault tolerance. The 65.6 "
+                "degree cut is not from any paper: this project derived it from annotators' "
+                "free-text comments in the EgoExo-Fitness dataset (Li YM et al., ECCV 2024) -- the "
+                "cut that best separates actions whose comments complain about leg height, "
+                "held-out AUC 0.730 [0.586, 0.864] (notes/egoexo-silent-rules-full-archive.md). "
+                "It still carries a card on 40% of side-camera clips without such a complaint, "
+                "so one card is "
+                "a prompt to check, not a verdict."
+            ),
+        )
+    ]
 
 
 # FOUR of the parent spec's five High Knee rules are ABSENT rather than silent, and the
@@ -595,28 +702,25 @@ HIGH_KNEE_DETECTOR = MovementDetector(
 )
 
 # ---------------------------------------------------------------------------------------
-# THE DETECTOR IS DELIBERATELY NOT REGISTERED, THE SECOND TIME IN THE PROGRAMME.
+# REGISTERED 2026-09-26, THE SIXTEENTH AND LAST MOVEMENT.
 # ---------------------------------------------------------------------------------------
-# There is no `registry.register(HIGH_KNEE_DETECTOR)` call here, and its absence is the considered
-# outcome rather than an oversight.
+# While its one rule was silent and four withdrawn the movement stayed "coming soon", because an
+# analysis that can never report a fault should not wear the Beta tag. Once
+# `rule_insufficient_knee_lift` went live at the data-derived 65.6 deg the user decided to register
+# it, knowing its costs on the side cameras of the 59 held-out EgoExo actions:
+#   - per rep (server-side segmentation): 40.0% of clips without a leg-height complaint carded,
+#     86.4% of those with one;
+#   - on the BROWSER path (`segmentation_disabled`, whole clip scored as one window): 23.3% and
+#     50.0%. A frontal camera is silent on both paths, by the view gate.
+# `validated` stays False, so the app shows it as Beta.
 #
-# Registration is what makes a movement ANALYZABLE in the web app: `registry.list_detectors()`
-# backs GET /api/movements, and `analyze_pose_payload` routes to a detector when one exists and
-# returns `analysis_pending` ("coming soon") when one does not. With one rule silent and four
-# withdrawn, registering would offer users an analysis that CANNOT EVER REPORT A FAULT while
-# wearing the Beta tag that says faults are possible. "Coming soon" is the truthful state of this
-# movement, so that is what the app says.
-#
-# WHAT WORKS AND IS KEPT, because none of it is what failed:
+# WHAT WORKS AND IS KEPT from the unregistered period:
 #   - the metric layer: cosines and ratios between body vectors, roll-, mirror- and
 #     scale-invariant, which is the only reason a corpus of 90-degree-rolled frames produced
 #     numbers at all;
-#   - the view gate, which separates this corpus's cameras with no overlap and no call to a view
-#     estimator this programme has twice measured wrong;
 #   - the phase assignment and the rectified per-drive repetition definition;
 #   - `min_rep_seconds=0.15`, the first use of a framework knob reserved fifteen movements ago,
 #     measured to recover 65% of this movement's repetitions.
-# All of it is exercised by `tests/test_high_knee.py` and by the validation harness.
 #
 # AND THE MOST PROMISING RULE THIS MOVEMENT COULD HAVE IS ONE THE PARENT SPEC NEVER WROTE. The
 # corpus's largest fault by a wide margin is CADENCE -- 30 of 68 actions judged too slow -- the KG
@@ -624,4 +728,5 @@ HIGH_KNEE_DETECTOR = MovementDetector(
 # cadence is the one quantity here that is fully roll-, view- and scale-invariant, since it is
 # counted in time rather than measured in space. It is not built, because this programme
 # implements the parent spec's roster and does not author new rules; it is recorded because it is
-# the obvious next thing and because the evidence for it is already in this file.
+# the obvious next rule. Design spec section 7.4.
+registry.register(HIGH_KNEE_DETECTOR)

@@ -34,6 +34,8 @@
 # fault, the sensor cannot see it". Withdrawn (OHP bar-path, deadlift bar-drift, curl
 # wrist-flexion, arm-abduction impingement arc) says "no citation supports the rule as written".
 # Design spec sections 4, 5 and 6.
+# Re-search 2026-09-25: the W disjunct stays withdrawn; the nearest source (Nakamura 2016, PMC4852525)
+# puts its W at 20 deg of abduction, against any floor. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 2.3.
 #
 # ---------------------------------------------------------------------------------------
 # ALL FOUR CITED SOURCES STUDY A DIFFERENT EXERCISE THAN THIS ONE, AND ALL FOUR ARE EMG.

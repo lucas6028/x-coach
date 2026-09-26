@@ -18,6 +18,8 @@
 # The parent spec's wrist-strain mechanism and its 30-degree threshold appear nowhere in the
 # source. That is a citation failure, so the rule is ABSENT -- adding a silent stub here would
 # assert the opposite diagnosis. Design spec section 3.
+# Re-search 2026-09-25: still withdrawn -- no curl study states a wrist-flexion fault or number.
+# See docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 2.1.
 #
 # ---------------------------------------------------------------------------------------
 # EVERY CITATION IN THIS MODULE IS A PROTOCOL QUOTE, NOT A FAULT FINDING.

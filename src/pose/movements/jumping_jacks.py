@@ -5,17 +5,18 @@
 # that decides anything belongs in a `rule_*` function.
 #
 # ---------------------------------------------------------------------------------------
-# NO RULE SHIPS LIVE. TWO ARE PERMANENTLY SILENT, THREE ARE WITHDRAWN, AND THE DETECTOR IS
-# DELIBERATELY NOT REGISTERED. THE LABELED DATA DECIDED IT.
+# ONE RULE IS LIVE, ONE IS PERMANENTLY SILENT, THREE ARE WITHDRAWN, AND THE DETECTOR IS
+# REGISTERED -- BOTH SINCE 2026-09-26, BY THE USER'S DECISION ON THE FULL-ARCHIVE RESULT.
 # ---------------------------------------------------------------------------------------
-#   rule_incomplete_leg_rom       PERMANENTLY SILENT -- the fault is real and HUMAN-JUDGED (the
-#                                 most-failed of EgoExo-Fitness's eight criteria, 9.9% of 121
-#                                 actions), the metric is the movement's own definition of a
-#                                 repetition, and the KG node is the only one this movement has
-#                                 that is grounded in this exercise. What fails is the number:
-#                                 the parent spec's 1.3 cut FIRES ON 79% OF THE REPETITIONS
-#                                 HUMANS JUDGED CORRECT. That is `abd_insufficient_rom`'s
-#                                 situation exactly.
+#   rule_incomplete_leg_rom       LIVE -- the fault is real and HUMAN-JUDGED (the most-failed of
+#                                 EgoExo-Fitness's eight criteria, 9.9% of 121 actions), the
+#                                 metric is the movement's own definition of a repetition, and on
+#                                 the full archive it ranks the 12 flagged actions at AUC 0.730
+#                                 [0.591, 0.879]; the cut read off the labels is 1.321, the spec's
+#                                 1.3. It was silent while only 11 actions were reachable (79% of
+#                                 their reps fired -- a sampling artefact; 37.1% corpus-wide). It
+#                                 still carries a card on 51.4% of correctly judged clips; see its
+#                                 docstring for the costs the user accepted.
 #   rule_incomplete_arm_rom       PERMANENTLY SILENT -- needs NO threshold at all (its criterion
 #                                 is a landmark comparison, not a number) and its metric is
 #                                 clean; silent because the only source that states its target
@@ -35,11 +36,15 @@
 #                                 that would put an arm, a foot or a knee behind one fault_id,
 #                                 and cross-rep state this architecture has never had
 #
-# THIS IS THE FIRST DETECTOR IN THE PROGRAMME THAT IS NOT REGISTERED. See the block above
-# `JUMPING_JACKS_DETECTOR` for why, and for what does work and is kept.
+# IT WAS THE FIRST DETECTOR IN THE PROGRAMME LEFT UNREGISTERED (2026-08 to 2026-09-26). See the
+# block below `JUMPING_JACKS_DETECTOR` for what registering it means.
 #
 # Design spec `docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md`. Measurements:
-# `notes/jumping-jacks-rule-validation.md`, harness `src/egoexo/jumping_jacks_validation.py`.
+# `notes/jumping-jacks-rule-validation.md` (11 actions, 2026-08) and
+# `notes/egoexo-silent-rules-full-archive.md` (all 121, 2026-09-26), harness
+# `src/egoexo/jumping_jacks_validation.py`.
+# Re-search 2026-09-25: all three stay withdrawn; every jumping-jack valgus/landing hit is a warm-up
+# before a drop jump, and no cadence source states a fault. docs/superpowers/specs/2026-09-25-withdrawn-rules-literature-research.md section 5.
 #
 # ---------------------------------------------------------------------------------------
 # THE VARIANT MATCHES, THE LABELS ARE THE RICHEST IN THE PROGRAMME, AND THEY ARE ABOUT
@@ -94,7 +99,7 @@
 # split 10%" is this exercise alone. Torso Twist established that a KG node can be actively
 # misleading because it faithfully describes a different movement; this is the milder cousin -- a
 # node seeded from a BLEND, of which one component is correct, and the correct component
-# (`Jumping Jacks:Incomplete Foot Split`) is the one the silent ROM rule would seed from.
+# (`Jumping Jacks:Incomplete Foot Split`) is the one the live ROM rule seeds from.
 #
 # ---------------------------------------------------------------------------------------
 # NINE LANDMARKS ARE READ AND ONLY EIGHT ARE REQUIRED, WHICH NO EARLIER MODULE HAS DONE.
@@ -119,9 +124,11 @@ from src.pose.geometry import (
     LEFT_HIP, RIGHT_HIP, LEFT_KNEE, RIGHT_KNEE,
     LEFT_ANKLE, RIGHT_ANKLE, LEFT_HEEL, RIGHT_HEEL, LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX,
     landmarks_to_array, visible_point, midpoint, distance, mean_visibility,
+    severity_from_range,
 )
 from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
-from src.pose.pose_rule_detector import PoseRuleDetection
+from src.pose.movements import registry
+from src.pose.pose_rule_detector import PoseRuleDetection, build_detection
 
 # `src/pose/geometry.py` exports the landmark indices the SQUAT pipeline needed and no others;
 # every module since Band Pull Apart has defined the extra ones locally rather than widening that
@@ -138,8 +145,8 @@ LOWER_BODY_LANDMARKS = (
 )
 
 JUMPING_JACKS_METRIC_KEYS: tuple[str, ...] = (
-    # How far apart the feet are, in shoulder widths. THE REP SIGNAL, and the quantity the silent
-    # leg-ROM rule would read.
+    # How far apart the feet are, in shoulder widths. THE REP SIGNAL, and the quantity the live
+    # leg-ROM rule reads.
     "stance_width_ratio",
     # How far the hands are above the head ALONG THE TRUNK AXIS, in shoulder widths. Signed;
     # positive means overhead. NaN whenever a wrist or the nose is missing -- see the module
@@ -351,19 +358,28 @@ JUMPING_JACKS_ARM_KG_QUERY = "Insufficient Arm Tension"
 # (Wikipedia, "Jumping jack", CC BY-SA) states the TARGET -- "jumping to a position with the legs
 # spread wide" -- and a target in words is not a tolerance in shoulder widths.
 #
-# IT IS KEPT AT 1.3 AND THE RULE IS SILENCED INSTEAD, WHICH IS THE WHOLE POINT. On the 11
-# reachable judged actions the widest stance of a repetition has a median of about 1.15, so a cut
-# anywhere near the observed distribution could be manufactured -- and manufacturing one is
-# exactly what this programme forbids. `abd_insufficient_rom` was silenced rather than moved for
-# the same reason. See `rule_incomplete_leg_rom`.
+# IT WAS KEPT AT 1.3 WHILE THE RULE WAS SILENT, AND IT SHIPS AT 1.3 UNMOVED. The silence rested on
+# 11 reachable actions whose widest stance had a median of about 1.16, so any cut near that
+# distribution could have been manufactured. On the full archive (2026-09-26) the cut that best
+# separates the 12 human-flagged actions from the 109 judged correct, READ OFF THE LABELS rather
+# than authored, is 1.321 -- the spec's own number to within 0.02. So the constant never moved:
+# the labels landed on it. `notes/egoexo-silent-rules-full-archive.md`.
 LEG_ROM_MILD_RATIO = 1.3
+
+# SEVERITY RAMP 1.3 -> 1.0: A RULE-LEVEL CHOICE, NOT A SOURCED NUMBER. 1.0 is the ankles exactly
+# one shoulder width apart -- a zero-parameter anatomical anchor, not fitted to anything. It shapes
+# how strongly a firing rep is worded; it does not decide whether the rule fires.
+LEG_ROM_SEVERE_RATIO = 1.0
 
 
 def rule_incomplete_leg_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
-    """PERMANENTLY SILENT -- always returns [].
+    """Flag a repetition whose feet never spread past 1.3 shoulder widths -- a narrow, shuffled jack.
 
-    THIS RULE HAD MORE GOING FOR IT THAN ANY OTHER IN THE SECTION AND THE DATA STILL SILENCED IT,
-    which is why the reasoning is worth reading in full.
+    LIVE SINCE 2026-09-26, BY THE USER'S DECISION ON A PRE-REGISTERED PROPOSAL. It was permanently
+    silent because its number looked wrong on 11 actions; the full EgoExo-Fitness archive settled
+    the question the silence had left open. The analysis, fixed before the archive was decoded, is
+    `docs/superpowers/specs/2026-09-26-egoexo-silent-rule-separability-prereg.md`; the result is
+    `notes/egoexo-silent-rules-full-archive.md`.
 
     WHAT IT HAS:
       A PRIMARY SENTENCE NAMING THIS EXERCISE. The RAG doc defines the movement as "jumping to a
@@ -372,55 +388,107 @@ def rule_incomplete_leg_rom(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
       A KNOWLEDGE-GRAPH NODE GROUNDED IN THIS EXERCISE. `Jumping Jacks:Incomplete Foot Split`,
       and the seeding script's own grounding figure ("foot split 10%") reproduces from the labels
       as 9.9% (12/121) -- the only one of this movement's three nodes not contaminated by the
-      Clap Jacks blend (module header).
-      HUMAN CORROBORATION THAT THE FAULT IS REAL. It is the MOST-FAILED of EgoExo-Fitness's eight
-      criteria for this exercise.
+      Clap Jacks blend (module header). The node is DANGLING (only `related_actions`), so the card
+      it seeds is thin.
+      A HUMAN-JUDGED POSITIVE CLASS THAT THE METRIC RANKS. Per action, the median over cameras of
+      the median over reps of each rep's widest `stance_width_ratio` ranks the 12 actions judged
+      FALSE on "Perform the jump by opening and closing your feet" below the 109 judged TRUE at
+      AUC 0.730, 95% CI [0.591, 0.879] by participant-clustered bootstrap. It holds with the
+      front-back scissor jumps dropped (0.723 [0.526, 0.905]) and within single-annotator actions
+      (0.752 [0.579, 0.917]).
       A CLEAN METRIC. `stance_width_ratio` is a ratio of two frontal-plane distances: roll-,
       mirror- and scale-invariant, and first-order invariant to azimuthal obliquity because both
       terms foreshorten together (`jumping_jacks_compute_raw`).
 
-    WHAT FAILS IS THE NUMBER, AND IT FAILS MEASURABLY. Replayed through the real `run_detector`
-    over the 11 judged actions recoverable from the truncated EgoExo archive -- 31 (action,
-    camera) pairs and 91 scored repetitions, three simultaneous exo cameras each -- the parent
-    spec's 1.3 cut fires on 79.1% OF SCORED REPETITIONS (90.3% of pairs). Every one of those
-    repetitions belongs to an action a human judged TRUE on "Perform the jump by opening and
-    closing your feet", so every firing is a false positive by the only judgement available. The
-    median widest stance of a repetition is 1.163 shoulder widths, i.e. THE CORRECT POPULATION
-    SITS BELOW THE CUT.
-    `notes/jumping-jacks-rule-validation.md` carries the exact figures and the harness that
-    produced them.
+    WHAT IT COSTS -- KNOWN WHEN THE USER DECIDED:
+      IT FIRES OFTEN ON CORRECT JACKS. Per rep, 1.3 fires on 37.1% of 941 reps in actions judged
+      correct (71.3% of 101 in flagged ones). Per (action, camera) clip, which is what a user sees
+      because `merge_by_fault` shows one card if any rep fires: 164 of 319 correct clips (51.4%)
+      against 28 of 35 flagged (80.0%). Held-out-by-participant specificity at the action level is
+      0.633.
+      THE LABEL IS BROADER THAN THE FAULT. Of the 12 flagged actions only 2 comments describe
+      insufficient width; 3 are front-back scissor jumps, which this frontal width ratio also
+      reads as narrow, and the width + direction-free subset (5 actions) is undetermined. On a
+      scissor jump the card's advice is half-right at best.
 
-    THE ALTERNATIVE READING IS STATED RATHER THAN DISMISSED: the criterion may simply be laxer
-    than the rule -- an annotator asked whether the feet opened and closed may be answering "did
-    they open at all", not "did they open wide enough". That would make the 79% a disagreement
-    about strictness rather than an error. It does not change the conclusion, because a rule that
-    fires on 79% of what the only available human judgement accepts cannot be shown to a user.
+    FOUND AFTER THE DECISION (exploratory, 2026-09-26) -- NO SINGLE CAMERA IS ESTABLISHED ON ITS
+    OWN. The pooled result uses three simultaneous cameras; production sees ONE. Per camera:
+    `exo_l` 0.803 [0.678, 0.936], frontal `exo_m` (the view the parent spec names) 0.654
+    [0.441, 0.853], `exo_r` 0.647 [0.416, 0.836]. All three point estimates are above 0.5 and
+    every interval is wide. `exo_l` and `exo_r` are the two mirror-image side cameras, so their
+    gap at 11-12 positives is not evidence of a view effect.
+    The earlier "79% of correct reps" figure was a sampling artefact of the 11 reachable actions:
+    the same 11 give 77.3% under the current pipeline, the whole corpus 37.1%.
 
-    THREE CONFOUNDS THAT DO NOT EXPLAIN IT, CHECKED RATHER THAN ASSUMED:
-      RESOLUTION. EgoExo ships preprocessed 456x256 frames, so landmark error in normalized units
-      is roughly 2.8x production's. That inflates VARIANCE; it does not move a median by 12%.
-      OBLIQUITY. Both terms of the ratio are frontal-plane widths and foreshorten together, so a
-      common-mode azimuth error cancels to first order -- which is exactly why this metric was
-      chosen over the spec's image-x form.
-      SEGMENTATION. Median validity 1.00, no action on the whole-clip fallback, and the cadence
-      measurement below shows repetitions were found cleanly.
+    SCOPE IS THE WHOLE REPETITION, NOT THE `open` PHASE -- A DELIBERATE DEPARTURE FROM THE SCOPE
+    THIS DOCSTRING USED TO RECORD. `open` is `stance_width_ratio >= the CLIP's 70th percentile`
+    (`jumping_jacks_assign_phases`), so in a clip mixing wide and narrow reps a narrow rep may hold
+    NO `open` frame at all, and an open-scoped rule would be silent on exactly the reps it exists
+    to flag. The maximum over the whole rep window equals the maximum over its `open` frames
+    whenever it has any, and it is the quantity the validation measured
+    (`src/egoexo/jumping_jacks_validation.py::evaluate_view`, `per_rep_widest`). `min_frames` is
+    tested against the whole rep's valid frames, which also sidesteps the Bicep Curl
+    phase-fraction trap `PhaseFractionTest` records.
 
-    THE UPGRADE PATH IS CONCRETE, AND THAT IS NEW FOR A SILENT RULE IN THIS PROGRAMME. Every
-    earlier silent rule needed either a paper nobody has written (`abd_insufficient_rom`,
-    `tt_insufficient_rotation_rom`) or a per-user baseline this architecture does not have. This
-    one needs neither: EgoExo-Fitness judges this exact criterion on 121 actions, 12 of them
-    FAILED, so a cut separating them could be READ OFF HUMAN JUDGEMENT rather than authored. What
-    blocks it is that the `frames_open` download is missing its `.ac` part, leaving 11 of the 121
-    reachable and all 11 judged correct -- so there is no positive class. That is a DOWNLOAD, not
-    a research programme.
+    NO VIEW GATE, because no camera-specific effect is established (above) and the view
+    estimator is unreliable on this footage. Observability is `medium`, not the spec's `high`,
+    because no single camera's separation is established.
 
-    SCOPE, RECORDED FOR WHOEVER WAKES IT UP: the `open` phase (the wide-stance plateau that
-    contains the landing), reading the MAXIMUM stance width over that window, with `min_frames`
-    tested against the WHOLE repetition rather than the phase -- the Bicep Curl phase-fraction
-    trap, which would otherwise silence this rule structurally on any jack faster than about
-    1.3 Hz (design spec section 4.4).
+    INHERITED, NOT INTRODUCED HERE: like every whole-rep "not enough travel" rule in the registry,
+    a motionless clip can segment into reps and fire this at full severity
+    (`situp.rule_incomplete_rom` documents the mechanism). The framework-level repairs recorded
+    there apply unchanged.
     """
-    return []
+    segment = [
+        frame for frame in core if frame.valid and np.isfinite(frame.m("stance_width_ratio"))
+    ]
+    if len(segment) < ctx.min_frames:
+        return []
+
+    values = [frame.m("stance_width_ratio") for frame in segment]
+    widest = float(np.nanmax(values))
+    if not widest < LEG_ROM_MILD_RATIO:
+        return []
+
+    severity = severity_from_range(
+        widest, LEG_ROM_MILD_RATIO, LEG_ROM_SEVERE_RATIO, lower_is_worse=True
+    )
+    return [
+        build_detection(
+            fault_id="jj_incomplete_leg_rom",
+            fault_name="Incomplete Leg Spread (Narrow Stance)",
+            kg_query=JUMPING_JACKS_LEG_ROM_KG_QUERY,
+            retrieval_mode="kg",
+            segment_metrics=segment,
+            # The peak is the WIDEST frame: the moment the stance got as wide as it would, still
+            # short of the cut. Unclipped, per the registry's `keyEvidence` convention.
+            score_values=values,
+            severity=severity,
+            confidence=severity,
+            observability="medium",
+            evidence={
+                "widest_stance_width_ratio": round(widest, 3),
+                "threshold_ratio": LEG_ROM_MILD_RATIO,
+                "primary_label": "widest foot spread (shoulder widths)",
+                "primary_value": round(widest, 3),
+                "primary_threshold": LEG_ROM_MILD_RATIO,
+            },
+            citation=(
+                "Wikipedia, \"Jumping jack\" (CC BY-SA), data/rag/docs/jumping_jacks_wiki.txt; "
+                "threshold checked against human judgement on EgoExo-Fitness "
+                "(notes/egoexo-silent-rules-full-archive.md)."
+            ),
+            citation_support=(
+                "The source defines the movement as \"jumping to a position with the legs spread "
+                "wide\" and back \"with the feet together\" -- descriptive support for the target, "
+                "no tolerance. The 1.3 shoulder-width cut is the parent spec's; on 121 "
+                "human-judged EgoExo-Fitness actions the cut that best separates the 12 judged "
+                "FALSE on \"Perform the jump by opening and closing your feet\" is 1.321, "
+                "action-level AUC 0.730 [0.591, 0.879]. It still fires on 51.4% of correctly "
+                "judged clips, so one card is a prompt to check, not a verdict."
+            ),
+        )
+    ]
 
 
 def rule_incomplete_arm_rom(core: list[CoreFrame], ctx: RuleContext) -> list[PoseRuleDetection]:
@@ -428,14 +496,14 @@ def rule_incomplete_arm_rom(core: list[CoreFrame], ctx: RuleContext) -> list[Pos
 
     AND THE REASON IS NOT THE USUAL ONE. Every other silent rule in this registry
     (`abd_insufficient_rom`, `tt_insufficient_rotation_rom`, `bridge_lumbar_hyperextension`, and
-    `rule_incomplete_leg_rom` above) is silent because a NUMBER or a SENSOR is missing. Neither is
-    missing here:
+    `rule_incomplete_leg_rom` above until the full archive woke it on 2026-09-26) is or was silent
+    because a NUMBER or a SENSOR is missing. Neither is missing here:
 
       THE CRITERION NEEDS NO NUMBER. The parent spec's own test is "both wrists fail to rise above
       the nose" -- a comparison between two body landmarks. `hands_above_head_ratio` is that
       comparison projected onto the trunk axis, so it fires at zero. There is no threshold to
-      lack, which makes this the only rule in the section immune to the failure that silenced the
-      leg rule.
+      lack, which makes this the only rule in the section immune to the failure that once
+      silenced the leg rule.
 
       THE SENSOR IS FINE. A dot product onto a body axis: roll-invariant, mirror-invariant,
       scale-free. Pinned by `InvarianceTest` and by
@@ -628,25 +696,17 @@ JUMPING_JACKS_DETECTOR = MovementDetector(
 )
 
 # ---------------------------------------------------------------------------------------
-# THE DETECTOR IS DELIBERATELY NOT REGISTERED, AND THIS IS THE FIRST TIME IN THE PROGRAMME.
+# REGISTERED 2026-09-26, AFTER BEING THE FIRST DETECTOR IN THE PROGRAMME LEFT UNREGISTERED.
 # ---------------------------------------------------------------------------------------
-# There is no `registry.register(JUMPING_JACKS_DETECTOR)` call here, and its absence is the
-# considered outcome rather than an oversight.
-#
 # Registration is what makes a movement ANALYZABLE in the web app: `registry.list_detectors()`
-# backs GET /api/movements, and `analyze_pose_payload` routes to a detector when one exists and
-# returns `analysis_pending` ("coming soon") when one does not. With every rule silent or
-# withdrawn, registering would offer users an analysis that CANNOT EVER REPORT A FAULT while
-# wearing the Beta tag that says faults are possible. "Coming soon" is the truthful state of this
-# movement, so that is what the app says.
-#
-# WHAT WORKS AND IS KEPT, because none of it is what failed:
-#   - the metric layer (roll-, mirror- and scale-invariant; obliquity-cancelling by construction),
-#   - the phase assignment and the `open` landing-window substitution,
-#   - the repetition segmentation, measured on real footage of this exercise: median validity
-#     1.00 over 31 (action, camera) pairs, not one on the whole-clip fallback, 255 repetitions
-#     found, and nothing lost to the duration floor.
-# All of it is exercised by `tests/test_jumping_jacks.py` and by the validation harness, so
-# whoever obtains the missing `.ac` archive part -- or any corpus with judged-FAULTY jumping jacks
-# -- can read a threshold off human judgement, wake `rule_incomplete_leg_rom`, add one line here
-# and ship. That is the concrete upgrade path this file exists to preserve.
+# backs GET /api/movements, and `analyze_pose_payload` routes to a detector when one exists. While
+# every rule was silent or withdrawn the movement stayed "coming soon", because an analysis that
+# can never report a fault should not wear the Beta tag that says faults are possible. Once
+# `rule_incomplete_leg_rom` went live the user decided to register it, knowing its costs:
+#   - per rep (server-side segmentation) it carded 51.7% of the correctly judged EgoExo clips
+#     against 80.0% of the flagged ones;
+#   - on the BROWSER path, which sends `segmentation_disabled` for every non-squat movement so the
+#     whole clip is scored as one window, it cards 18.7% against 57.1% -- fewer false cards, lower
+#     sensitivity. notes/egoexo-silent-rules-full-archive.md.
+# `validated` stays False, so the app shows it as Beta.
+registry.register(JUMPING_JACKS_DETECTOR)

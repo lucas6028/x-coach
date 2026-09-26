@@ -415,6 +415,10 @@ it would ship a metric with no source, no variant and no graph node behind it.
 Not said by either withdrawal: that these faults are fine. What is missing is a source observing
 them **in this exercise**, and — for valgus — a metric whose noise floor is below its own threshold.
 
+**Re-search 2026-09-25** (`2026-09-25-withdrawn-rules-literature-research.md` §4.1–4.2): both stay withdrawn. A pelvic number exists only for the single-leg bridge (Butowicz 2016,
+PMC4739044: test ended at a 10° transverse/sagittal change; Andrade 2012: MDC95 6.59°). No study
+measures valgus as a bridging fault.
+
 ---
 
 ## 8. Measured on the six real clip-views, through the real `run_detector`

@@ -53,6 +53,11 @@ from src.pose.rep_segmentation import segment_reps
 # disagreement on one action pure projection error rather than performance variation.
 EXO_VIEWS = ("exo_l", "exo_m", "exo_r")
 
+# The two cameras whose `anterior_axis_length` says they can see a sagittal quantity at all. Which
+# these are is DISCOVERED (the gate separates them with no overlap), not assumed from their names;
+# the runner prints both cameras' gate ranges so a run where they overlap is visible.
+GATED_VIEWS = ("exo_l", "exo_r")
+
 # The criterion with a real positive class, and the closest thing the corpus has to either trunk
 # rule. Its comments describe SWAY; both rules read a signed mean. Design spec section 6.3.
 STABILITY_CRITERION = "Maintain a stable upper body throughout the exercise."
@@ -307,8 +312,10 @@ def criterion_failure_rates(judgements: dict[str, dict[str, bool]]) -> list[tupl
 # criterion, so the checklist cannot label this fault at all. The free-text comment can. This is
 # SECONDARY evidence -- Sit-up logged secondary sourcing as a citation failure mode -- and is
 # reported as a strictly weaker tier than a checklist label. It establishes that the fault is real
-# and that human judges care about it; it CANNOT license a threshold, because a comment judges a
-# whole action rather than a repetition.
+# and that human judges care about it. It was held NOT to license a threshold, because a comment
+# judges a whole action rather than a repetition -- and on 2026-09-26 the user explicitly overrode
+# that and shipped the cut read off these labels (65.6 deg), with the caveat recorded at the rule
+# (`src/pose/movements/high_knee.py`) and in notes/egoexo-silent-rules-full-archive.md.
 KNEE_LIFT_COMMENT_DISCLOSED = frozenset({
     "xYkvB0_action_9", "xYkvB0_action_15", "yT4RK3_action_2",
     "yT4RK3_action_9", "yT4RK3_action_14", "zOfbr6_action_14",
@@ -422,7 +429,8 @@ def evaluate_view(frames: list[dict], fps: float, view_type: str) -> dict:
     result = run_detector(HIGH_KNEE_DETECTOR, frames, fps, view_type, 0.8, max_reps=None)
     core = result.core
 
-    # THE SILENT RULE'S QUANTITY: the peak thigh elevation of the DRIVING leg, per repetition.
+    # THE KNEE-LIFT RULE'S QUANTITY (live since 2026-09-26): the peak thigh elevation of the DRIVING
+    # leg, per repetition, ungated -- the harness gates by camera name instead.
     peaks: list[float] = []
     for rep in result.analyzed:
         window = core[rep.start : rep.end + 1]

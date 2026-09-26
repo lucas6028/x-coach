@@ -124,8 +124,9 @@ describe("studio — what the plan asks for next", () => {
   });
 
   it("prefers an analysable exercise, but offers an unanalysable one rather than nothing", async () => {
-    // Jumping Jacks has no detector, so the studio cannot grade it — it is still the next thing
-    // the plan asks for, and the plan page can tick it off by hand.
+    // Jumping Jacks is absent from this test's movements fixture (standing in for a movement with
+    // no detector), so the studio cannot grade it — it is still the next thing the plan asks for,
+    // and the plan page can tick it off by hand.
     vi.spyOn(api, "getPlan").mockResolvedValue(
       plan([
         item({ id: "i1", day_index: 3 }),

@@ -91,11 +91,9 @@ def _movement_catalog_lines() -> str:
         ("Lower body", LOWER_BODY),
         ("Upper body", UPPER_BODY),
         ("Core", CORE),
-        # Jumping Jacks / High Knee: catalog movements with a detector that exists but is
-        # permanently unregistered (see src/pose/movements/registry.py's closing block) — plannable,
-        # never analysable in the studio. Hardcoded here, not derived, for the same reason
-        # ``catalog.py`` itself hardcodes FULL_BODY rather than asking the registry.
-        ("Full body (not yet analysable in the studio)", FULL_BODY),
+        # Jumping Jacks / High Knee: registered 2026-09-26 (one Beta rule each), so every group
+        # here is analysable in the studio.
+        ("Full body", FULL_BODY),
     ]
     lines = []
     for label, names in groups:
@@ -213,8 +211,7 @@ def _system_prompt(*, lang: str, plan_scoped: bool, rehab: bool = False) -> str:
         "items one at a time.\n"
         "- Only one plan can be scoped to this conversation: a second create_plan call is refused — "
         "edit the existing plan instead.\n"
-        "- Prefer the movements marked analysable below. Jumping Jacks and High Knee can be planned "
-        "but cannot be analysed in the studio yet — say so if the user asks for them.\n"
+        "- Every movement below can be analysed in the studio.\n"
         "- sets: 1-20. reps: 1-200.\n"
         "- After a tool runs, confirm in 1-3 short lines exactly WHAT changed (day, movement, "
         "sets×reps) — never claim a change a tool did not confirm.\n"
