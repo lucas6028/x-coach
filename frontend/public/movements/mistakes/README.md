@@ -53,7 +53,7 @@ so dropping the files in changes what is inside the slot and reflows nothing aro
 Both halves must be genuinely different drawings. The one thing the page refuses to do is show a
 single picture captioned both ways, which is why nothing renders by default.
 
-## The 80 filenames, grouped by movement
+## The 84 filenames, grouped by movement
 
 Order matches each detector module's rule order, which is the order the cards are numbered in.
 
@@ -166,5 +166,13 @@ abd-pelvic-drop-trunk-lean-correct.webp
 tt-trunk-not-braced-wrong.webp
 tt-trunk-not-braced-correct.webp
 
-## 80 files total
+## Jumping Jacks
+jj-incomplete-leg-rom-wrong.webp
+jj-incomplete-leg-rom-correct.webp
+
+## High Knee
+hk-insufficient-knee-lift-wrong.webp
+hk-insufficient-knee-lift-correct.webp
+
+## 84 files total
 ```

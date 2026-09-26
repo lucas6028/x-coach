@@ -67,7 +67,7 @@ describe("the authored common mistakes", () => {
   });
 
   it("points every declared illustration at a file that exists", () => {
-    // Forty pairs, which is every fault the fourteen registered detectors report and every
+    // Forty-two pairs, which is every fault the sixteen registered detectors report and every
     // filename public/movements/mistakes/README.md lists — the set is complete, so from here
     // this guards against loss rather than against absence. A typo'd or re-exported pair fails
     // here rather than rendering as two broken images in the middle of the page, and because it

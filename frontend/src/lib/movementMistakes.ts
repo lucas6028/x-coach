@@ -1144,8 +1144,6 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
     ),
   ],
 
-  // No `art(...)` pair yet for the two movements registered 2026-09-26: the cards render without
-  // illustrations until one is drawn (public/movements/mistakes/README.md lists the set).
   "Jumping Jacks": [
     mistake(
       "jj_incomplete_leg_rom",
@@ -1169,7 +1167,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "往左右兩側跳開，不要前後交叉。",
           "放慢節奏，直到每一下都能跳到完整寬度。",
         ],
-      }
+      },
+      art("jj_incomplete_leg_rom")
     ),
   ],
 
@@ -1196,7 +1195,8 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
           "上身保持直立，向後仰不算抬高。",
           "如果速度讓高度掉下來，就先放慢。",
         ],
-      }
+      },
+      art("hk_insufficient_knee_lift")
     ),
   ],
 };

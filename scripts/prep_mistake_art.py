@@ -121,6 +121,8 @@ SHEETS: dict[str, str] = {
     "arm-VW-V-position-too-low.png": "vw-loss-of-elevation",
     "arm-VW-one-arm-lagging-behind.png": "vw-lr-asymmetry",
     "sit-up-shoulder-blades-never-leaving-the-mat.png": "situp-incomplete-rom",
+    "jumping-jacks-feet-not-jumping-wide-enough.png": "jj-incomplete-leg-rom",
+    "high-knee-knees-not-lifted-high-enough.png": "hk-insufficient-knee-lift",
 }
 
 # A gap narrower than this between the two figures is not something to split on.
