@@ -539,12 +539,13 @@ class RegistrationTest(unittest.TestCase):
         self.assertIn(TORSO_TWIST_DETECTOR.rep_signal, TORSO_TWIST_METRIC_KEYS)
 
     def test_it_is_the_first_user_of_the_rectified_rep_signal_hook(self) -> None:
-        """`base.py`'s `rep_rectify` was written with this movement named in its comment and has
-        had no user until now."""
+        """`base.py`'s `rep_rectify` was written with this movement named in its comment and had no
+        user before it. High Knee (registered 2026-09-26) is the second: its left-minus-right thigh
+        signal is bipolar for the same reason a twist is."""
         self.assertTrue(TORSO_TWIST_DETECTOR.rep_rectify)
         self.assertEqual(TORSO_TWIST_DETECTOR.rep_polarity, "max")
-        others = [d for d in list_detectors() if d.name != "Torso Twist" and d.rep_rectify]
-        self.assertEqual(others, [])
+        others = [d.name for d in list_detectors() if d.name != "Torso Twist" and d.rep_rectify]
+        self.assertEqual(others, ["High Knee"])
 
 
 class EndToEndSegmentationTest(unittest.TestCase):

@@ -556,24 +556,26 @@ class SegmentationTest(unittest.TestCase):
         self.assertLess(HIGH_KNEE_DETECTOR.min_rep_seconds, 1.0 / 3.0)
 
 
-class NotRegisteredTest(unittest.TestCase):
-    def test_it_is_absent_from_the_registry(self) -> None:
-        self.assertNotIn("High Knee", {detector.name for detector in list_detectors()})
+class RegisteredTest(unittest.TestCase):
+    """REGISTERED 2026-09-26, the sixteenth and last movement, once its knee-lift rule went live."""
 
-    def test_the_detector_object_still_exists_and_is_complete(self) -> None:
-        """Not registered is not "not built": everything that works is kept and testable, so
-        waking the movement is a threshold plus one line."""
+    def test_it_is_in_the_registry_as_beta(self) -> None:
+        from src.pose.movements.registry import get_detector
+
+        self.assertIn("High Knee", {detector.name for detector in list_detectors()})
+        self.assertIs(get_detector("High Knee"), HIGH_KNEE_DETECTOR)
+        self.assertFalse(HIGH_KNEE_DETECTOR.validated)
+
+    def test_the_detector_object_is_complete(self) -> None:
         self.assertEqual(HIGH_KNEE_DETECTOR.name, "High Knee")
         self.assertEqual(HIGH_KNEE_DETECTOR.metric_keys, HIGH_KNEE_METRIC_KEYS)
-        self.assertFalse(HIGH_KNEE_DETECTOR.validated)
         self.assertEqual(len(HIGH_KNEE_DETECTOR.rules), 1)
 
-    def test_the_module_is_not_imported_by_the_registry(self) -> None:
+    def test_the_module_is_imported_by_the_registry(self) -> None:
         source = (
             __import__("pathlib").Path("src/pose/movements/registry.py").read_text(encoding="utf-8")
         )
-        self.assertNotIn("import high_knee", source)
-        self.assertIn("high_knee", source)  # the reason is recorded there
+        self.assertIn("from src.pose.movements import high_knee", source)
 
 
 if __name__ == "__main__":

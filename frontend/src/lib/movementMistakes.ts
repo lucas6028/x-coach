@@ -1143,13 +1143,69 @@ export const MOVEMENT_MISTAKES: Record<string, readonly Mistake[]> = {
       art("tt_trunk_not_braced")
     ),
   ],
+
+  // No `art(...)` pair yet for the two movements registered 2026-09-26: the cards render without
+  // illustrations until one is drawn (public/movements/mistakes/README.md lists the set).
+  "Jumping Jacks": [
+    mistake(
+      "jj_incomplete_leg_rom",
+      "Incomplete Foot Split",
+      {
+        title: "Feet not jumping wide enough",
+        subtitle: "The feet land barely wider than the shoulders at the open position.",
+        why: "A jumping jack is defined by jumping the legs out wide and back together, so a narrow jump shortens the movement it is built on.",
+        fixes: [
+          "Land with the feet clearly wider than the shoulders.",
+          "Jump sideways, not front to back.",
+          "Slow the pace until every jump reaches full width.",
+        ],
+      },
+      {
+        title: "雙腳跳開不夠寬",
+        subtitle: "打開時雙腳落地只比肩膀寬一點點。",
+        why: "開合跳的定義就是把雙腳跳開到寬站距再併攏，跳得太窄等於縮短了這個動作本身。",
+        fixes: [
+          "落地時雙腳要明顯比肩膀寬。",
+          "往左右兩側跳開，不要前後交叉。",
+          "放慢節奏，直到每一下都能跳到完整寬度。",
+        ],
+      }
+    ),
+  ],
+
+  "High Knee": [
+    mistake(
+      "hk_insufficient_knee_lift",
+      "Insufficient Knee Lift",
+      {
+        title: "Knees not lifted high enough",
+        subtitle: "The driving thigh stops well short of hip height.",
+        why: "Running in place is taught with the hip and knee bent to 90° on each lift; a low knee drive turns it into a jog.",
+        fixes: [
+          "Drive each knee up toward hip height.",
+          "Keep the trunk upright — leaning back does not count as lift.",
+          "Slow down if speed is costing height.",
+        ],
+      },
+      {
+        title: "膝蓋抬得不夠高",
+        subtitle: "抬起的大腿離髖部高度還差很多。",
+        why: "原地高抬腿的標準是每次抬腿時髖關節與膝關節屈曲到 90°，抬得太低就變成原地小跑。",
+        fixes: [
+          "每次把膝蓋往髖部的高度抬。",
+          "上身保持直立，向後仰不算抬高。",
+          "如果速度讓高度掉下來，就先放慢。",
+        ],
+      }
+    ),
+  ],
 };
 
 /** The authored mistakes for a movement, or an empty list.
  *
- *  Empty is a real answer, not a gap: `Jumping Jacks` and `High Knee` are in the catalog but have
- *  no registered detector — every rule of theirs is permanently silent or withdrawn — so there is
- *  nothing this app can tell a user to watch for, and the page says so rather than borrowing
- *  another movement's faults. */
+ *  Empty is a real answer, not a gap: a movement with no registered rule has nothing this app can
+ *  tell a user to watch for, and the page says so rather than borrowing another movement's faults.
+ *  Since 2026-09-26 every catalog movement has at least one card (Jumping Jacks and High Knee were
+ *  the last), so today the empty path is taken only by a stale or unknown name. */
 export const movementMistakes = (movement: string): readonly Mistake[] =>
   MOVEMENT_MISTAKES[movement] ?? [];

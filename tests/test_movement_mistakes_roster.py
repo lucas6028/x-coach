@@ -46,6 +46,8 @@ REGISTERED: tuple[tuple[str, str], ...] = (
     ("Shoulder Bridge", "shoulder_bridge"),
     ("Leg Abduction", "leg_abduction"),
     ("Torso Twist", "torso_twist"),
+    ("Jumping Jacks", "jumping_jacks"),
+    ("High Knee", "high_knee"),
 )
 
 
@@ -140,7 +142,7 @@ class RosterParityTests(unittest.TestCase):
         # Guards the guard: a regex that matched nothing would make every assertion below vacuous.
         self.assertEqual(
             sorted(self.authored), sorted(name for name, _ in REGISTERED),
-            "movementMistakes.ts does not list exactly the fourteen registered movements",
+            "movementMistakes.ts does not list exactly the registered movements",
         )
 
     def test_ids_and_kg_queries_match_the_detectors(self) -> None:

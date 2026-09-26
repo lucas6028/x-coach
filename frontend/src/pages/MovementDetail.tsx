@@ -905,8 +905,8 @@ function MistakesTab({ movement }: { movement: string }) {
     [detailByFault, movement, open]
   );
 
-  // Catalog movements with no registered detector (Jumping Jacks, High Knee) land here, and this
-  // is the honest answer for them: nothing is authored because nothing can be detected.
+  // A movement with no registered rule lands here (none in the catalog since 2026-09-26), and
+  // this is the honest answer for it: nothing is authored because nothing can be detected.
   if (mistakes.length === 0) return <Empty text={t("detail.mistakesEmpty")} />;
 
   return (

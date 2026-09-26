@@ -24,7 +24,7 @@ class TestMovementsEndpoint(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist", "Jumping Jacks", "High Knee",
             ],
         )
 
@@ -88,6 +88,9 @@ class TestMovementsEndpoint(unittest.TestCase):
                 # lateral-flexion exercise. See src/pose/movements/torso_twist.py's registration
                 # comment.
                 "Torso Twist": False,
+                # Registered 2026-09-26 on EgoExo-Fitness action-level labels; both Beta.
+                "Jumping Jacks": False,
+                "High Knee": False,
             },
         )
 

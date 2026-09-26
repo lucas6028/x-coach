@@ -7,8 +7,9 @@ import type { PlanItem } from "../../api";
 interface Props {
   item: PlanItem;
   planId: string;
-  /** False when no detector is registered for this movement (Jumping Jacks, High Knee): the card
-   *  offers only the manual tick, and says why. */
+  /** False when no detector is registered for this movement (none in the catalog since
+   *  2026-09-26, but a movement can be planned before it is analysable): the card offers only the
+   *  manual tick, and says why. */
   analyzable: boolean;
   /** A write for this card is in flight — the controls lock rather than queueing a second one. */
   busy: boolean;

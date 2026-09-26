@@ -27,9 +27,8 @@ describe("the authored common mistakes", () => {
   });
 
   it("returns an empty list, not undefined, for a movement with no entry", () => {
-    // The two unregistered movements take this path, and so does a stale URL. The tab branches on
-    // `.length`, so an undefined here would throw rather than show the empty state.
-    expect(movementMistakes("Jumping Jacks")).toEqual([]);
+    // A stale URL or a movement designed ahead of its detector takes this path. The tab branches
+    // on `.length`, so an undefined here would throw rather than show the empty state.
     expect(movementMistakes("Burpee")).toEqual([]);
   });
 

@@ -585,22 +585,22 @@ class SegmentationTest(unittest.TestCase):
         self.assertIsNone(result.fallback)
 
 
-class NotRegisteredTest(unittest.TestCase):
-    """THE FIRST DETECTOR IN THE PROGRAMME THAT IS DELIBERATELY NOT REGISTERED."""
+class RegisteredTest(unittest.TestCase):
+    """REGISTERED 2026-09-26, after being the first detector in the programme left unregistered."""
 
-    def test_it_is_absent_from_the_registry(self) -> None:
-        """Registration is what makes a movement analyzable in the app. Since 2026-09-26 one rule
-        is live, and registering is still a separate decision: its only live rule carries a card
-        on 51.4% of correctly judged clips (the rule's docstring)."""
-        self.assertNotIn("Jumping Jacks", [detector.name for detector in list_detectors()])
+    def test_it_is_in_the_registry_as_beta(self) -> None:
+        """Registration is what makes a movement analyzable in the app. It happened once
+        `rule_incomplete_leg_rom` went live; `validated` stays False, so the app shows Beta."""
+        from src.pose.movements.registry import get_detector
 
-    def test_the_detector_object_still_exists_and_is_complete(self) -> None:
-        """Not registered is not the same as not built: the metric layer, the phases and the
-        segmentation all work and are what a future threshold would be dropped into."""
+        self.assertIn("Jumping Jacks", [detector.name for detector in list_detectors()])
+        self.assertIs(get_detector("Jumping Jacks"), JUMPING_JACKS_DETECTOR)
+        self.assertFalse(JUMPING_JACKS_DETECTOR.validated)
+
+    def test_the_detector_object_is_complete(self) -> None:
         self.assertEqual(JUMPING_JACKS_DETECTOR.name, "Jumping Jacks")
         self.assertEqual(JUMPING_JACKS_DETECTOR.rep_signal, "stance_width_ratio")
         self.assertIn(JUMPING_JACKS_DETECTOR.rep_signal, JUMPING_JACKS_DETECTOR.metric_keys)
-        self.assertFalse(JUMPING_JACKS_DETECTOR.validated)
 
     def test_the_rep_signal_is_unipolar_unlike_torso_twists(self) -> None:
         """Torso Twist is the only user of `rep_rectify`; the feet in a jumping jack never cross,

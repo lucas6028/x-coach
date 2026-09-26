@@ -1,17 +1,12 @@
 """The canonical movement catalog: every movement this project models, analysable or not.
 
-This is a DIFFERENT list from ``registry.list_detectors()`` and the difference is the point.
-The registry holds the fourteen movements a video can be analysed against; the catalog holds all
-sixteen the programme designed, including ``Jumping Jacks`` and ``High Knee``, whose detectors
-exist and are tested but are deliberately never registered (every rule of theirs is permanently
-silent or withdrawn -- see the closing block of ``registry.py``).
-
-Features that let a user NAME a movement without analysing one -- training plans being the first
--- need the sixteen. Features that run a detector need the fourteen. Asking the registry for the
-sixteen would mean importing the two unregistered modules, which is exactly the import edge
-``registry.py`` refuses: registering is a side effect of importing there, so a future edit that
-adds a ``registry.register(...)`` call inside ``jumping_jacks.py`` would silently make it
-analysable through this module's back door.
+This is a DIFFERENT list from ``registry.list_detectors()``. The catalog holds every movement
+the programme designed; the registry holds the ones a video can be analysed against. Since
+2026-09-26 the two contain the same sixteen names -- ``Jumping Jacks`` and ``High Knee`` were
+catalog-only until their first live rules shipped (notes/egoexo-silent-rules-full-archive.md) --
+but they stay separate lists: features that let a user NAME a movement (training plans) read this
+one, features that run a detector read the registry, and a future movement can again be designed
+before it is analysable.
 
 So the names are written out rather than derived, and ``tests/test_movement_catalog.py`` is what
 keeps the two lists honest: it asserts the catalog is exactly sixteen names and that every

@@ -30,7 +30,7 @@ class CatalogContentTests(unittest.TestCase):
 
 class CatalogVersusRegistryTests(unittest.TestCase):
     def test_every_registered_detector_is_in_the_catalog(self) -> None:
-        """The registry's fourteen are a SUBSET of the catalog's sixteen.
+        """The registry's detectors are a SUBSET of the catalog (all sixteen since 2026-09-26).
 
         This is the drift guard, and it catches more than an addition: renaming a detector without
         renaming its catalog entry fails here too, which no amount of derivation would have caught.
@@ -41,15 +41,14 @@ class CatalogVersusRegistryTests(unittest.TestCase):
             f"registered but not in the catalog: {sorted(registered - set(catalog.CATALOG))}",
         )
 
-    def test_the_two_unregistered_movements_are_catalog_only(self) -> None:
-        """Jumping Jacks and High Knee are plannable but not analysable.
-
-        Their detectors exist and are tested but are deliberately never registered (every rule is
-        permanently silent or withdrawn). If one of them ever IS registered, this test fails and
-        whoever did it gets to decide what that means for the plan UI's "manual tick only" state.
-        """
+    def test_every_catalog_movement_is_registered(self) -> None:
+        """Since 2026-09-26 the catalog and the registry hold the same sixteen: Jumping Jacks and
+        High Knee, catalog-only while every rule of theirs was silent or withdrawn, were registered
+        once one rule each went live. A future movement designed before its detector would make
+        this fail -- and whoever adds it decides what that means for the plan UI's "manual tick
+        only" state, which then has a user again."""
         registered = {d.name for d in registry.list_detectors()}
-        self.assertEqual(set(catalog.CATALOG) - registered, {"Jumping Jacks", "High Knee"})
+        self.assertEqual(set(catalog.CATALOG) - registered, set())
 
 
 class CanonicalMovementTests(unittest.TestCase):

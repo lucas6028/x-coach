@@ -5,8 +5,8 @@
 # that decides anything belongs in a `rule_*` function.
 #
 # ---------------------------------------------------------------------------------------
-# ONE RULE IS LIVE (SINCE 2026-09-26), ONE IS PERMANENTLY SILENT, THREE ARE WITHDRAWN, AND THE
-# DETECTOR IS STILL NOT REGISTERED. THE LABELED DATA DECIDED BOTH HALVES OF THAT.
+# ONE RULE IS LIVE, ONE IS PERMANENTLY SILENT, THREE ARE WITHDRAWN, AND THE DETECTOR IS
+# REGISTERED -- BOTH SINCE 2026-09-26, BY THE USER'S DECISION ON THE FULL-ARCHIVE RESULT.
 # ---------------------------------------------------------------------------------------
 #   rule_incomplete_leg_rom       LIVE -- the fault is real and HUMAN-JUDGED (the most-failed of
 #                                 EgoExo-Fitness's eight criteria, 9.9% of 121 actions), the
@@ -36,8 +36,8 @@
 #                                 that would put an arm, a foot or a knee behind one fault_id,
 #                                 and cross-rep state this architecture has never had
 #
-# THIS IS THE FIRST DETECTOR IN THE PROGRAMME THAT IS NOT REGISTERED. See the block above
-# `JUMPING_JACKS_DETECTOR` for why, and for what registering it now would mean.
+# IT WAS THE FIRST DETECTOR IN THE PROGRAMME LEFT UNREGISTERED (2026-08 to 2026-09-26). See the
+# block below `JUMPING_JACKS_DETECTOR` for what registering it means.
 #
 # Design spec `docs/superpowers/specs/2026-08-10-jumping-jacks-detector-design.md`. Measurements:
 # `notes/jumping-jacks-rule-validation.md` (11 actions, 2026-08) and
@@ -127,6 +127,7 @@ from src.pose.geometry import (
     severity_from_range,
 )
 from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
+from src.pose.movements import registry
 from src.pose.pose_rule_detector import PoseRuleDetection, build_detection
 
 # `src/pose/geometry.py` exports the landmark indices the SQUAT pipeline needed and no others;
@@ -695,32 +696,17 @@ JUMPING_JACKS_DETECTOR = MovementDetector(
 )
 
 # ---------------------------------------------------------------------------------------
-# THE DETECTOR IS DELIBERATELY NOT REGISTERED, AND THIS IS THE FIRST TIME IN THE PROGRAMME.
+# REGISTERED 2026-09-26, AFTER BEING THE FIRST DETECTOR IN THE PROGRAMME LEFT UNREGISTERED.
 # ---------------------------------------------------------------------------------------
-# There is no `registry.register(JUMPING_JACKS_DETECTOR)` call here, and its absence is the
-# considered outcome rather than an oversight.
-#
 # Registration is what makes a movement ANALYZABLE in the web app: `registry.list_detectors()`
-# backs GET /api/movements, and `analyze_pose_payload` routes to a detector when one exists and
-# returns `analysis_pending` ("coming soon") when one does not. While every rule was silent or
-# withdrawn, registering would have offered users an analysis that CANNOT EVER REPORT A FAULT
-# while wearing the Beta tag that says faults are possible.
-#
-# SINCE 2026-09-26 ONE RULE IS LIVE, AND REGISTRATION IS STILL NOT DONE HERE -- IT IS A SEPARATE
-# DECISION. The pre-registered plan that licensed waking `rule_incomplete_leg_rom` fixed that the
-# movement stays unregistered either way: registering would ship a movement whose ONLY live rule
-# shows a card on 51.4% of correctly judged clips (the rule's docstring). Registering is one line
-# below plus the test updates in `tests/test_jumping_jacks.py::NotRegisteredTest` and
-# `test_unknown_movement_returns_coming_soon_without_detector`, which needs a listed-but-
-# unregistered movement.
-#
-# WHAT WORKS AND IS KEPT, because none of it is what failed:
-#   - the metric layer (roll-, mirror- and scale-invariant; obliquity-cancelling by construction),
-#   - the phase assignment and the `open` landing-window substitution,
-#   - the repetition segmentation, measured on real footage of this exercise: on all 121 judged
-#     actions (356 action x camera pairs), median validity 1.00, 2 pairs on the whole-clip
-#     fallback, 2701 repetitions found and 27 lost to the duration floor.
-# All of it is exercised by `tests/test_jumping_jacks.py` and by the validation harness. The
-# upgrade path this block used to describe -- obtain the full archive, read a threshold off human
-# judgement, wake `rule_incomplete_leg_rom` -- was taken on 2026-09-26; the threshold read off the
-# labels was the spec's own 1.3.
+# backs GET /api/movements, and `analyze_pose_payload` routes to a detector when one exists. While
+# every rule was silent or withdrawn the movement stayed "coming soon", because an analysis that
+# can never report a fault should not wear the Beta tag that says faults are possible. Once
+# `rule_incomplete_leg_rom` went live the user decided to register it, knowing its costs:
+#   - per rep (server-side segmentation) it carded 51.7% of the correctly judged EgoExo clips
+#     against 80.0% of the flagged ones;
+#   - on the BROWSER path, which sends `segmentation_disabled` for every non-squat movement so the
+#     whole clip is scored as one window, it cards 18.7% against 57.1% -- fewer false cards, lower
+#     sensitivity. notes/egoexo-silent-rules-full-archive.md.
+# `validated` stays False, so the app shows it as Beta.
+registry.register(JUMPING_JACKS_DETECTOR)

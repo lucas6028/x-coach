@@ -332,7 +332,7 @@ class TestMovementRegistry(unittest.TestCase):
             [
                 "Squat", "Overhead Press", "Push-up", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist", "Jumping Jacks", "High Knee",
             ],
         )
 
@@ -405,6 +405,12 @@ class TestMovementRegistry(unittest.TestCase):
                 # survives projection -- that is camera geometry and transfers across variants;
                 # a threshold would not. See torso_twist.py's registration comment.
                 "Torso Twist": False,
+                # Jumping Jacks and High Knee (registered 2026-09-26) are Beta because their only
+                # live rules rest on EgoExo-Fitness labels that judge whole actions -- a checklist
+                # item for Jumping Jacks, free-text comments for High Knee -- and both still card
+                # a large share of correctly judged clips. notes/egoexo-silent-rules-full-archive.md.
+                "Jumping Jacks": False,
+                "High Knee": False,
             },
         )
 
@@ -425,7 +431,7 @@ class TestMovementRegistry(unittest.TestCase):
             {
                 "Squat", "Push-up", "Overhead Press", "Lunge", "Deadlift", "Row",
                 "Band Pull Apart", "Bicep Curl", "Arm Abduction", "Arm VW", "Sit-up",
-                "Shoulder Bridge", "Leg Abduction", "Torso Twist",
+                "Shoulder Bridge", "Leg Abduction", "Torso Twist", "Jumping Jacks", "High Knee",
             },
         )
 

@@ -68,8 +68,8 @@ class TemplateTests(unittest.TestCase):
     def test_every_template_movement_is_analysable(self) -> None:
         """Templates only ever seed movements a detector can actually run.
 
-        Jumping Jacks and High Knee are addable by hand but are deliberately not put in anyone's
-        default path, since a plan item pointing at them can only ever be ticked manually.
+        Jumping Jacks and High Knee (registered 2026-09-26) are addable by hand and are not yet in
+        any template; this still holds for every template movement.
         """
         from src.pose.movements import registry
 
@@ -242,8 +242,9 @@ class CreatePlanTests(_PlanApiTestCase):
         plan = self._create(items=[{"day_index": 1, "movement": "  push-UP "}])
         self.assertEqual(plan["items"][0]["movement"], "Push-up")
 
-    def test_accepts_a_catalog_movement_with_no_detector(self) -> None:
-        # All sixteen are plannable; only fourteen are analysable. This is the difference.
+    def test_accepts_a_full_body_catalog_movement(self) -> None:
+        # Plannable because it is in the catalog -- the check is against catalog.py, not the
+        # registry (the two hold the same sixteen since 2026-09-26, but need not).
         plan = self._create(items=[{"day_index": 1, "movement": "Jumping Jacks"}])
         self.assertEqual(plan["items"][0]["movement"], "Jumping Jacks")
 

@@ -45,12 +45,23 @@ class RegisteredScopeTests(unittest.TestCase):
         self.assertEqual(registered_modules(), {module for _, module in REGISTERED})
 
     def test_an_unregistered_live_rule_is_not_exported(self) -> None:
-        """Jumping Jacks has a live, cited rule since 2026-09-26 and no registration. The source
-        DOES carry the citation (the companion assertion), and the export must still omit it:
-        the page has no Jumping Jacks card to hang it on."""
-        source = (MOVEMENTS_DIR / "jumping_jacks.py").read_text(encoding="utf-8")
-        self.assertIn("jj_incomplete_leg_rom", module_citations(source))
-        self.assertNotIn("jj_incomplete_leg_rom", all_citations())
+        """A module holding a live, cited rule is still left out until registry.py imports it --
+        the page has no card to hang the citation on. (Jumping Jacks and High Knee were exactly
+        this until 2026-09-26; the case is now built synthetically.) The companion is the same
+        module, imported: its citation then appears."""
+        import tempfile
+        from pathlib import Path
+
+        rule = 'build_detection(fault_id="x_fault", citation="Paper (2020).")\n'
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "alpha.py").write_text(rule, encoding="utf-8")
+            (root / "registry.py").write_text("x = 1\n", encoding="utf-8")
+            self.assertNotIn("x_fault", all_citations(root))
+            (root / "registry.py").write_text(
+                "from src.pose.movements import alpha  # noqa\n", encoding="utf-8"
+            )
+            self.assertIn("x_fault", all_citations(root))
 
 
 class ModuleCitationsTests(unittest.TestCase):

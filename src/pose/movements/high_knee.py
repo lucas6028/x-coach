@@ -5,8 +5,8 @@
 # in a `rule_*` function.
 #
 # ---------------------------------------------------------------------------------------
-# ONE RULE IS LIVE (SINCE 2026-09-26), FOUR ARE WITHDRAWN, AND THE DETECTOR IS STILL NOT
-# REGISTERED. THIS IS THE SIXTEENTH AND LAST MOVEMENT.
+# ONE RULE IS LIVE, FOUR ARE WITHDRAWN, AND THE DETECTOR IS REGISTERED -- BOTH SINCE 2026-09-26,
+# BY THE USER'S DECISION. THIS IS THE SIXTEENTH AND LAST MOVEMENT.
 # ---------------------------------------------------------------------------------------
 #   rule_insufficient_knee_lift   LIVE at 65.6 deg of hip flexion, a cut READ OFF DATA by the
 #                                 user's decision -- neither of the spec's two numbers (it CITES
@@ -36,8 +36,8 @@
 #                                 withdrawal above just refuted), and "consistently across reps"
 #                                 is cross-rep state this architecture does not have.
 #
-# THIS IS THE SECOND DETECTOR IN THE PROGRAMME THAT IS NOT REGISTERED, after Jumping Jacks. See
-# the block above `HIGH_KNEE_DETECTOR`.
+# IT WAS THE SECOND DETECTOR LEFT UNREGISTERED, after Jumping Jacks, until 2026-09-26. See the
+# block below `HIGH_KNEE_DETECTOR`.
 #
 # Design spec `docs/superpowers/specs/2026-08-10-high-knee-detector-design.md`. Measurements:
 # `notes/high-knee-rule-validation.md` (6 actions, 2026-08) and
@@ -130,6 +130,7 @@ from src.pose.geometry import (
     severity_from_range,
 )
 from src.pose.movements.base import CoreFrame, MovementDetector, RuleContext
+from src.pose.movements import registry
 from src.pose.pose_rule_detector import PoseRuleDetection, build_detection
 
 # The generic "lower body" set every movement module uses for the framework-level
@@ -701,33 +702,25 @@ HIGH_KNEE_DETECTOR = MovementDetector(
 )
 
 # ---------------------------------------------------------------------------------------
-# THE DETECTOR IS DELIBERATELY NOT REGISTERED, THE SECOND TIME IN THE PROGRAMME.
+# REGISTERED 2026-09-26, THE SIXTEENTH AND LAST MOVEMENT.
 # ---------------------------------------------------------------------------------------
-# There is no `registry.register(HIGH_KNEE_DETECTOR)` call here, and its absence is the considered
-# outcome rather than an oversight.
+# While its one rule was silent and four withdrawn the movement stayed "coming soon", because an
+# analysis that can never report a fault should not wear the Beta tag. Once
+# `rule_insufficient_knee_lift` went live at the data-derived 65.6 deg the user decided to register
+# it, knowing its costs on the side cameras of the 59 held-out EgoExo actions:
+#   - per rep (server-side segmentation): 40.0% of clips without a leg-height complaint carded,
+#     86.4% of those with one;
+#   - on the BROWSER path (`segmentation_disabled`, whole clip scored as one window): 23.3% and
+#     50.0%. A frontal camera is silent on both paths, by the view gate.
+# `validated` stays False, so the app shows it as Beta.
 #
-# Registration is what makes a movement ANALYZABLE in the web app: `registry.list_detectors()`
-# backs GET /api/movements, and `analyze_pose_payload` routes to a detector when one exists and
-# returns `analysis_pending` ("coming soon") when one does not. While its one rule was silent and
-# four withdrawn, registering would have offered users an analysis that CANNOT EVER REPORT A FAULT
-# while wearing the Beta tag that says faults are possible.
-#
-# SINCE 2026-09-26 THE KNEE-LIFT RULE IS LIVE, AND REGISTRATION IS STILL A SEPARATE DECISION: the
-# movement's only live rule would card 40% of side-camera clips whose annotators did not complain. Registering
-# is one line below plus the test updates in `tests/test_high_knee.py` and the frontend's mistakes
-# roster; `src/pose/fault_citations.py` exports a module's citations only once it is registered.
-#
-# WHAT WORKS AND IS KEPT, because none of it is what failed:
+# WHAT WORKS AND IS KEPT from the unregistered period:
 #   - the metric layer: cosines and ratios between body vectors, roll-, mirror- and
 #     scale-invariant, which is the only reason a corpus of 90-degree-rolled frames produced
 #     numbers at all;
-#   - the view gate, which reads the camera's view from the subject's own feet rather than from a
-#     view estimator this programme has twice measured wrong (at full n the cameras overlap; the
-#     gate constant records where it sits and why);
 #   - the phase assignment and the rectified per-drive repetition definition;
 #   - `min_rep_seconds=0.15`, the first use of a framework knob reserved fifteen movements ago,
 #     measured to recover 65% of this movement's repetitions.
-# All of it is exercised by `tests/test_high_knee.py` and by the validation harness.
 #
 # AND THE MOST PROMISING RULE THIS MOVEMENT COULD HAVE IS ONE THE PARENT SPEC NEVER WROTE. The
 # corpus's largest fault by a wide margin is CADENCE -- 30 of 68 actions judged too slow -- the KG
@@ -735,4 +728,5 @@ HIGH_KNEE_DETECTOR = MovementDetector(
 # cadence is the one quantity here that is fully roll-, view- and scale-invariant, since it is
 # counted in time rather than measured in space. It is not built, because this programme
 # implements the parent spec's roster and does not author new rules; it is recorded because it is
-# the obvious next thing and because the evidence for it is already in this file.
+# the obvious next rule. Design spec section 7.4.
+registry.register(HIGH_KNEE_DETECTOR)

@@ -43,6 +43,22 @@ What each result licenses under the plan:
   - **The gate is what silences the frontal camera.** 3 of 177 analysed frontal reps pass it. With the gate removed, the rule would card 28 of 47 no-complaint and 11 of 12 complaint frontal clips.
 - **These card rates are in-sample.** The 59 actions are held out from building the comment rule, not from fitting the cut. The out-of-sample figure is the leave-one-participant-out sensitivity 0.833 and specificity 0.660.
 
+**Registered.** On 2026-09-26 the user also registered both movements, so both rules now run in
+the app as Beta. Neither fits the per-rep numbers above on the app's main path. The browser
+capture sends `segmentation_disabled` for every non-squat movement, so the backend scores the
+whole clip as one window. Measured on the same clips through that path:
+
+| rule | path | correct / unflagged clips carded | flagged clips carded |
+|---|---|---:|---:|
+| Jumping Jacks | per rep (server segmentation, validated above) | 166/321 (51.7%) | 28/35 (80.0%) |
+| Jumping Jacks | whole clip (browser path) | 60/321 (18.7%) | 20/35 (57.1%) |
+| High Knee, side cameras | per rep | 36/90 (40.0%) | 19/22 (86.4%) |
+| High Knee, side cameras | whole clip (browser path) | 21/90 (23.3%) | 11/22 (50.0%) |
+
+The whole-clip path fires only when the widest stance, or the highest knee, of the entire clip
+falls short. It therefore cards fewer correct clips and catches fewer flagged ones. These rates are
+in-sample, as above.
+
 **Caveat on reading it.**
 - **The labels are weak.**
   - The Jumping Jacks criterion has inter-annotator α 0.41, and 10 of its 12 flagged actions had
