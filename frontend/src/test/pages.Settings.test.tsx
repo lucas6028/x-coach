@@ -198,6 +198,21 @@ describe("Settings — coach model", () => {
     expect(localStorage.getItem("chat_model")).toBe("minimax/minimax-m3");
     expect(screen.getByRole("radio", { name: /MiniMax M3/i })).toBeChecked();
   });
+
+  // A pin can outlive its model: the provider retires it, the backend filters it out of
+  // chat_models, and the server correctly falls back to chat_default. The pane must display that
+  // fallback as selected too — and must NOT clear the stale pin, since the model may come back and
+  // the server already ignores an unknown pin.
+  it("shows the server default as selected when the stored pin is no longer offered", async () => {
+    localStorage.setItem("chat_model", "retired/old-model");
+    renderSettings();
+    await openPane(/^Coach model$/);
+    const deepseek = await screen.findByRole("radio", { name: /DeepSeek V4 Flash/i });
+    expect(deepseek).toBeChecked(); // chat_default, since the pin isn't in the offered list
+    expect(screen.getByRole("radio", { name: /MiniMax M3/i })).not.toBeChecked();
+    // The stale pin is left in place, not cleared.
+    expect(localStorage.getItem("chat_model")).toBe("retired/old-model");
+  });
 });
 
 describe("Settings — account", () => {

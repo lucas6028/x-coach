@@ -80,6 +80,29 @@ describe("api.getAdminSettings", () => {
   });
 });
 
+describe("api.getAdminLlmModels", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("GETs the plain models endpoint and returns the parsed payload", async () => {
+    const body = { base_url: "https://openrouter.ai/api/v1", catalog: { status: "ok" }, models: [] };
+    mockFetch(body);
+    const result = await api.getAdminLlmModels();
+    expect(result).toEqual(body);
+    expect(fetch).toHaveBeenCalledWith("/api/admin/llm/models");
+  });
+
+  it("appends refresh=true when a forced re-check is requested", async () => {
+    mockFetch({ base_url: "", catalog: { status: "ok" }, models: [] });
+    await api.getAdminLlmModels(true);
+    expect(fetch).toHaveBeenCalledWith("/api/admin/llm/models?refresh=true");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 403);
+    await expect(api.getAdminLlmModels()).rejects.toThrow("403");
+  });
+});
+
 describe("api.updateAdminSettings", () => {
   afterEach(() => vi.restoreAllMocks());
 

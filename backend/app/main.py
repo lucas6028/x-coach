@@ -33,7 +33,7 @@ from backend.app.routers import (
     plans,
     videos,
 )
-from backend.app.settings import chat_models, default_chat_model, get_settings
+from backend.app.settings import available_chat_models, default_chat_model, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -121,8 +121,11 @@ def health() -> dict:
         # production. Same ``getattr`` guard as above, for the same reason.
         "storage_configured": bool(getattr(settings, "storage_configured", False)),
         # The Settings picker is server-driven: the selectable models + which is the default both
-        # come from here (env-configurable), so the frontend never hard-codes the list.
-        "chat_models": chat_models(),
+        # come from here (env-configurable), so the frontend never hard-codes the list. Filtered by
+        # ``available_chat_models`` (services/model_catalog) so a model the provider has retired or
+        # just rejected mid-request is never offered — this call never blocks on the network, it
+        # only ever reads a cached snapshot (a stale/unknown catalog fails open to "available").
+        "chat_models": available_chat_models(),
         "chat_default": default_chat_model(),
         "stores": {
             "labeled_videos": config.VIDEOS_DIR.exists(),

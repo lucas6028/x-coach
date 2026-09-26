@@ -1245,3 +1245,45 @@ stays the plain `GET /api/plans/{id}` shape:
   each call. Muscle KEYS only (`"quads"`, no prose), to stay inside `_MAX_TOOL_RESULT_CHARS`
   alongside the plan itself. Error payloads never carry it; an empty plan gets the empty-safe shape
   (`primary`/`secondary`/`by_day` empty, `gaps` the full checklist), not an omitted key.
+
+## Model availability (2026-09-26)
+
+**Trigger.** The provider retired the configured `LLM_FOLLOWUP_MODEL` default
+(`openai/gpt-oss-120b` on NIM: HTTP 410 Gone) and every follow-up call — then every chat request
+that happened to resolve the same dead model as its default — failed until someone noticed. Two
+gaps: nothing checked a model was still served before offering it, and nothing recovered when the
+provider said so mid-request.
+
+**Design.** `backend/app/services/model_catalog.py` is the new module, mirroring
+`services/runtime_config.py`'s pattern (one patchable network seam, a process-wide TTL cache,
+every failure swallowed into a safe default):
+
+- **Before a request.** A background-refreshed, TTL-cached (10 min success / 2 min failure
+  backoff) snapshot of the provider's `GET /models` catalog. `settings.available_chat_models()`
+  filters `chat_models()` down to what the catalog says is actually usable, and
+  `default_chat_model()` / `resolve_chat_model()` / `followup_chat_model()` are all rebuilt on top
+  of it. **Every read is non-blocking** — a stale/unknown catalog just answers "available" for
+  everything (fail-open: withholding a model because *we* couldn't check it would be strictly
+  worse than not checking), and only a background thread ever calls the network. `GET
+  /api/health`'s `chat_models`/`chat_default` therefore never touch the network either.
+- **During a request.** `services/chat._stream_raw_chunks` marks a model dead
+  (`model_catalog.mark_unavailable`, 30 min TTL) the instant the provider itself confirms it's gone
+  — HTTP 410, or a 404 on a request carrying no `tools` (a 404 *with* `tools` is ambiguous: it can
+  just mean the model rejects tool-calling, which the existing tools-then-retry-without-tools path
+  already handles) — and retries the SAME request body against the next available candidate, bound
+  to `len(chat_models()) + 1` attempts. Safe only because `raise_for_status()` fires before the
+  first `yield` of any attempt, so a retry never follows a partially-streamed response. The `done`
+  frame's `model` field reports whichever model actually answered (`_effective_model`), byte-
+  identical to before when no substitution happened.
+- **Not all catalogs are trustworthy.** OpenRouter's `/models` is accurate; NVIDIA NIM's still
+  lists models that 404/410 on `/chat/completions` (verified 2026-09-26). So the catalog only ever
+  ADDS confidence (`available` / `not_listed`) — a dead-mark is the one signal a catalog refresh
+  can never clear.
+- **Admin visibility.** `GET /api/admin/llm/models` (admin-only) returns the catalog's own health
+  plus every RAW configured model's live status/roles (`default`/`option`/`followup`), never the
+  availability-filtered list — an admin editing `LLM_MODELS` needs to see a dead entry to fix it,
+  not have it silently vanish. `?refresh=true` runs a synchronous re-check (the one deliberate
+  blocking read in this whole feature, and only on an explicit admin click).
+- `settings._effective_settings()`'s `llm_followup_model` reads
+  `settings.configured_followup_model()` (the RAW pinned value), not `followup_chat_model()` (the
+  availability-filtered one) — so the admin edit form is never rewritten by live availability.

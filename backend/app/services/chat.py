@@ -26,20 +26,26 @@ corrupt the answer — and the answer stream stays the clean ``delta``/``done``/
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
 from backend.app import config
+from backend.app.services import model_catalog
 from backend.app.settings import (
+    available_chat_models,
     chat_base_url,
+    chat_models,
     chat_temperature,
     chat_timeout,
     followup_timeout,
     get_settings,
     kg_seeds_default,
 )
+
+logger = logging.getLogger(__name__)
 
 # Fallback LLM round-trip budgets (seconds). The effective values now come from the override-aware
 # getters ``chat_timeout()`` / ``followup_timeout()`` (which default to these), so an admin can retune
@@ -332,6 +338,26 @@ class _LLMError(RuntimeError):
         self.status = status
 
 
+def _effective_model(model: str) -> str:
+    """The model a request for ``model`` actually uses — ``model`` itself unless it is dead-marked
+    (see ``services.model_catalog.mark_unavailable``), in which case the first AVAILABLE candidate
+    other than ``model`` (``settings.available_chat_models()`` already excludes dead-marked ids, so
+    this is really "the first one that isn't ``model``"), or ``model`` unchanged if none exists.
+
+    Used both by ``_stream_raw_chunks`` (to pick what to actually send) and by ``_run_tool_loop``'s
+    ``done`` frame (to report what actually answered) — sharing this one function is what keeps the
+    two in sync without either side tracking per-request substitution state. When ``model`` isn't
+    dead-marked this is a pure passthrough, so the ``done`` frame stays byte-identical to before
+    this feature existed.
+    """
+    if not model_catalog.is_marked_unavailable(model):
+        return model
+    for candidate in available_chat_models():
+        if candidate != model:
+            return candidate
+    return model
+
+
 def _stream_raw_chunks(
     messages: list[dict[str, Any]],
     model: str,
@@ -350,6 +376,17 @@ def _stream_raw_chunks(
     a chunk with no ``content`` may still carry a ``tool_calls`` fragment, and swallowing it here
     would corrupt the caller's reassembly with no error raised anywhere. Shape tolerance is the
     caller's job.
+
+    DEAD-MODEL FALLBACK (2026-09-26). ``model`` is substituted up front via ``_effective_model`` if
+    it is already dead-marked from an earlier request. Then, if the provider itself says a model is
+    gone MID-REQUEST — HTTP 410, or a 404 on a request carrying no ``tools`` (a 404 WITH ``tools``
+    is ambiguous: it can just mean this model rejects tool-calling, which the caller's own
+    tools-then-retry-without-tools logic already handles) — it is dead-marked and the SAME request
+    body is retried against the next available candidate, bounded by ``len(chat_models()) + 1``
+    attempts. This is safe ONLY because ``raise_for_status()`` fires before the first ``yield`` of
+    any given attempt: once a chunk has been yielded, that attempt's ``with httpx.stream`` block
+    cannot raise ``HTTPStatusError`` any more (the status was already checked), so a retry can never
+    follow a partially-streamed response.
     """
     import httpx  # deferred: only needed on a live request, keeps router import light.
 
@@ -375,33 +412,70 @@ def _stream_raw_chunks(
         # (e.g. NVIDIA NIM) don't use them, so keep them off those requests.
         headers["HTTP-Referer"] = "https://x-coach.local"
         headers["X-Title"] = "x-coach"
-    try:
-        with httpx.stream(
-            "POST",
-            f"{base_url.rstrip('/')}/chat/completions",
-            headers=headers,
-            json=body,
-            timeout=timeout,
-        ) as resp:
-            resp.raise_for_status()
-            for line in resp.iter_lines():
-                if not line or not line.startswith("data:"):
-                    continue  # blank keep-alives and ``:`` comment lines carry no payload.
-                payload = line[len("data:") :].strip()
-                if payload == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(payload)
-                except (json.JSONDecodeError, ValueError):
-                    continue  # a partial/garbage frame — skip, don't abort the stream.
-                if isinstance(chunk, dict):
-                    yield chunk
-    except httpx.HTTPStatusError as exc:
-        raise _LLMError(
-            f"LLM request failed: {exc}", status=exc.response.status_code
-        ) from exc
-    except Exception as exc:  # noqa: BLE001 — anything else here is a transport problem.
-        raise _LLMError(f"LLM request failed: {exc}") from exc
+
+    current = _effective_model(model)
+    tried: set[str] = set()
+    max_attempts = len(chat_models()) + 1
+
+    for _attempt in range(max_attempts):
+        tried.add(current)
+        body["model"] = current
+        try:
+            with httpx.stream(
+                "POST",
+                f"{base_url.rstrip('/')}/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=timeout,
+            ) as resp:
+                resp.raise_for_status()
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue  # blank keep-alives and ``:`` comment lines carry no payload.
+                    payload = line[len("data:") :].strip()
+                    if payload == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(payload)
+                    except (json.JSONDecodeError, ValueError):
+                        continue  # a partial/garbage frame — skip, don't abort the stream.
+                    if isinstance(chunk, dict):
+                        yield chunk
+            return  # this attempt's raise_for_status passed and the stream ran to completion.
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            # A 404 carrying `tools` is ambiguous (see the docstring) -- only a 410, or a 404 with NO
+            # `tools` in the body, is an unambiguous "this model is gone" signal worth acting on.
+            dead = status == 410 or (status == 404 and "tools" not in body)
+            if dead:
+                model_catalog.mark_unavailable(current, f"HTTP {status}")
+                fallback = next(
+                    (m for m in available_chat_models() if m not in tried), None
+                )
+                if fallback is not None:
+                    logger.warning(
+                        "LLM model %r is unavailable (HTTP %s); falling back to %r.",
+                        current,
+                        status,
+                        fallback,
+                    )
+                    current = fallback
+                    continue
+                logger.warning(
+                    "LLM model %r is unavailable (HTTP %s); no fallback candidate left.",
+                    current,
+                    status,
+                )
+            raise _LLMError(
+                f"LLM request failed: {exc}", status=status
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 — anything else here is a transport problem.
+            raise _LLMError(f"LLM request failed: {exc}") from exc
+
+    # Unreachable in practice: every iteration above either `return`s or `raise`s. Kept as a
+    # defensive backstop (matching this module's "no dead branch without a name" convention) in case
+    # `max_attempts` is ever miscomputed as <= 0.
+    raise _LLMError("LLM request failed: no available model candidates.")
 
 
 def _stream_completion(
@@ -1283,10 +1357,15 @@ def _run_tool_loop(
         yield _sse("error", {"detail": "The LLM returned an empty message."})
         return
 
-    done_data: dict[str, Any] = {"model": model}
+    # ``_effective_model`` reports the model that actually answered when ``model`` was dead-marked
+    # (and produced this very answer via the in-request fallback in ``_stream_raw_chunks`) -- a pure
+    # passthrough otherwise, so this stays byte-identical to ``{"model": model}`` when no
+    # substitution ever happened.
+    done_data: dict[str, Any] = {"model": _effective_model(model)}
     if done_extra:
         # Called once, only on this successful exit -- never on an error return above. The plan
         # agent uses it to add `plan_id`; the answer path passes no `done_extra`, so `done_data`
-        # here is always exactly `{"model": model}`, byte-identical to before this parameter existed.
+        # here is always exactly `{"model": _effective_model(model)}`, byte-identical to before this
+        # parameter existed (modulo the fallback substitution added above).
         done_data.update(done_extra())
     yield _sse("done", done_data)

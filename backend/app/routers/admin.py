@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.app import config, settings
 from backend.app.auth import CurrentUser, get_admin_user, get_current_user
-from backend.app.services import line_admin, runtime_config, store
+from backend.app.services import line_admin, model_catalog, runtime_config, store
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -38,7 +38,10 @@ def _effective_settings() -> dict[str, Any]:
     return {
         "llm": {
             "llm_models": settings.chat_models(),
-            "llm_followup_model": settings.followup_chat_model(),
+            # RAW configured value, not availability-filtered (``followup_chat_model()``): the edit
+            # form must show what an admin configured even when the live catalog currently marks it
+            # unavailable, so a dead pin doesn't just silently disappear from the form.
+            "llm_followup_model": settings.configured_followup_model(),
             "llm_base_url": settings.chat_base_url(),
             "chat_temperature": settings.chat_temperature(),
             "chat_timeout": settings.chat_timeout(),
@@ -192,6 +195,65 @@ def put_admin_settings(
     store.upsert_app_settings(token=user.token, items=items)
     runtime_config.clear_cache()  # so the next getter read reflects the new overrides immediately.
     return _settings_payload()
+
+
+@router.get("/llm/models")
+def admin_llm_models(refresh: bool = False, user: CurrentUser = Depends(get_admin_user)) -> dict:
+    """Provider model catalog + live per-model availability, for the admin LLM status panel.
+
+    ``refresh=true`` runs ``model_catalog.refresh()`` SYNCHRONOUSLY before building the response --
+    a deliberate exception to every other read in this module (``catalog_ids()`` never blocks): an
+    admin clicking "recheck" wants the freshest answer this request, not the cached one. Safe as a
+    plain ``def`` endpoint because FastAPI runs sync path functions in a threadpool, so this doesn't
+    block the event loop.
+
+    ``models`` is built from the RAW configured lists (``chat_models()`` /
+    ``configured_followup_model()``), never the availability-filtered ones — an admin editing the
+    picker needs to see every configured id, including a dead one, or there would be no way to
+    notice (let alone fix) a pinned model going down. The first configured model is tagged
+    ``"default"``, the rest ``"option"``; the configured follow-up model gets ``"followup"`` merged
+    onto its existing entry if it's already in the list, or appended as its own entry otherwise. No
+    secret (the LLM API key) ever appears here.
+    """
+    if refresh:
+        model_catalog.refresh()
+
+    raw_models = settings.chat_models()
+    followup = settings.configured_followup_model()
+
+    order: list[str] = []
+    entries: dict[str, dict[str, Any]] = {}
+    for i, model_id in enumerate(raw_models):
+        st = model_catalog.model_status(model_id)
+        entries[model_id] = {
+            "id": model_id,
+            "roles": ["default"] if i == 0 else ["option"],
+            "status": st["status"],
+            "expires": st["expires"],
+            "detail": st["detail"],
+        }
+        order.append(model_id)
+
+    if followup in entries:
+        entries[followup]["roles"].append("followup")
+    else:
+        st = model_catalog.model_status(followup)
+        entries[followup] = {
+            "id": followup,
+            "roles": ["followup"],
+            "status": st["status"],
+            "expires": st["expires"],
+            "detail": st["detail"],
+        }
+        order.append(followup)
+
+    return {
+        "base_url": settings.chat_base_url(),
+        "catalog": model_catalog.catalog_state(),
+        "effective_default": settings.default_chat_model(),
+        "effective_followup": settings.followup_chat_model(),
+        "models": [entries[m] for m in order],
+    }
 
 
 # ---------------------------------------------------------------------------------------------------
