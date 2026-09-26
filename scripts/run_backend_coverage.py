@@ -26,6 +26,10 @@ _DEFAULT_TESTS = [
     "tests/test_backend.py",
     "tests/test_analyze_pose_endpoint.py",
     "tests/test_chat_endpoint.py",
+    # The model-availability catalog (backend/app/services/model_catalog.py) -- no other entry
+    # point in this list exercises its refresh/dead-mark/fallback logic, so leaving it out would
+    # measure it at import-only and sink the whole gate.
+    "tests/test_model_catalog.py",
     "tests/test_backend_line_auth.py",
     "tests/test_backend_line_webhook.py",
     "tests/test_backend_admin_line.py",

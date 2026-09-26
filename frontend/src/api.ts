@@ -589,6 +589,38 @@ export interface AdminSettingsUpdate {
   user_storage_quota_bytes?: number;
 }
 
+// Live per-model status against the provider catalog (admin-only; GET /api/admin/llm/models).
+// `refresh=true` forces a synchronous re-fetch of the catalog first (may take a few seconds).
+export interface AdminLlmCatalogStatus {
+  status: "ok" | "error" | "unknown";
+  checked_at: string | null;
+  model_count: number | null;
+  error: string | null;
+}
+// "default" = the configured list's first entry; "option" = the rest; "followup" = the configured
+// follow-up model. A model can carry more than one role (e.g. also being the follow-up model).
+export type AdminLlmModelRole = "default" | "option" | "followup";
+// available = in the provider catalog; not_listed = catalog loaded but the id is absent (won't be
+// offered to users); unavailable = a real request recently got HTTP 404/410 (auto-skipped for 30
+// min, `detail` says why); unknown = the catalog couldn't be fetched (fail-open: still offered).
+export type AdminLlmModelStatus = "available" | "not_listed" | "unavailable" | "unknown";
+export interface AdminLlmModelEntry {
+  id: string;
+  roles: AdminLlmModelRole[];
+  status: AdminLlmModelStatus;
+  expires: string | null; // "YYYY-MM-DD" when the provider announced a retirement date (early warning)
+  detail: string | null;
+}
+export interface AdminLlmModelsResponse {
+  base_url: string;
+  catalog: AdminLlmCatalogStatus;
+  // The models actually used right now after skipping unavailable ones — may differ from the
+  // configured default / follow-up model, which is worth flagging to the admin.
+  effective_default: string;
+  effective_followup: string;
+  models: AdminLlmModelEntry[];
+}
+
 // ---- Admin: user oversight + system overview (admin-only; P3) -----------------------------
 
 // One row of the admin users table: identity, activity counts, and whether they hold the admin role.
@@ -910,6 +942,12 @@ export const api = {
   // The effective runtime knobs + their defaults (admin-only; 403 for a non-admin). Auto-attaches
   // the bearer token via getJSON.
   getAdminSettings: () => getJSON<AdminSettingsResponse>("/api/admin/settings"),
+
+  // Live per-model status vs. the provider catalog (admin-only; 403 for a non-admin). `refresh`
+  // forces the server to re-fetch the catalog synchronously first, so it may take a few seconds.
+  // Auto-attaches the bearer token via getJSON.
+  getAdminLlmModels: (refresh = false) =>
+    getJSON<AdminLlmModelsResponse>(refresh ? "/api/admin/llm/models?refresh=true" : "/api/admin/llm/models"),
 
   // Persist a partial settings update (admin-only). Only the provided knobs are written; the backend
   // validates ranges (422 on a bad value) and returns the new effective state. Auth header auto-attached.

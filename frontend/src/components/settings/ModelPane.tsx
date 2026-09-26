@@ -37,8 +37,12 @@ export default function ModelPane() {
     setStoredModel(id);
     setModel(id);
   };
-  // What's shown as selected: the user's pin, or the server default when they haven't pinned one.
-  const selectedModel = model || chatDefault;
+  // What's shown as selected: the user's pin, or the server default when they haven't pinned one —
+  // or when the pin no longer names a model the server is offering (e.g. a provider retired it and
+  // the backend filtered it out of chat_models). The server already falls back to its own default
+  // for an unknown pin, and the pin may come back later, so this is a DISPLAY fallback only: the
+  // localStorage value itself is left untouched (no setStoredModel/setModel call here).
+  const selectedModel = model && models.includes(model) ? model : chatDefault;
 
   return (
     <section>

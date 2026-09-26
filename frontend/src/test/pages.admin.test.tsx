@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import {
   api,
+  type AdminLlmModelsResponse,
   type AdminOverview,
   type AdminSettingsResponse,
   type AdminUserRow,
@@ -141,6 +142,22 @@ function authValue(overrides: Record<string, unknown> = {}) {
   } as unknown as ReturnType<typeof useAuth>;
 }
 
+// Contract-shaped payload for GET /api/admin/llm/models — one model per status, an expiry warning,
+// and effective_default/effective_followup both differing from the configured values in
+// SAMPLE_SETTINGS ("a/model" / "fast/model") so the fallback notices have something to report.
+const SAMPLE_LLM_MODELS: AdminLlmModelsResponse = {
+  base_url: "https://openrouter.ai/api/v1",
+  catalog: { status: "ok", checked_at: "2026-09-26T08:00:00+00:00", model_count: 458, error: null },
+  effective_default: "b/model",
+  effective_followup: "backup/model",
+  models: [
+    { id: "a/model", roles: ["default"], status: "unavailable", expires: null, detail: "HTTP 410" },
+    { id: "b/model", roles: ["option"], status: "available", expires: "2026-09-28", detail: null },
+    { id: "fast/model", roles: ["followup"], status: "not_listed", expires: null, detail: null },
+    { id: "backup/model", roles: ["option"], status: "unknown", expires: null, detail: null },
+  ],
+};
+
 beforeEach(() => {
   mockUseAuth.mockReturnValue(authValue());
   vi.spyOn(api, "getAdminOverview").mockResolvedValue(SAMPLE_OVERVIEW);
@@ -150,6 +167,7 @@ beforeEach(() => {
   vi.spyOn(api, "testLineWebhook").mockResolvedValue({
     result: { success: true, status_code: 200, reason: "OK", detail: "200" }, error: null,
   });
+  vi.spyOn(api, "getAdminLlmModels").mockResolvedValue(SAMPLE_LLM_MODELS);
 });
 // unstubAllGlobals is not optional here: the clipboard tests replace `navigator` wholesale, and a
 // leaked stub would follow every later test in the file.
@@ -734,6 +752,82 @@ describe("AdminSettingsLlm", () => {
     vi.spyOn(api, "getAdminSettings").mockRejectedValue(new Error("500 boom"));
     renderAdmin("/admin/settings/llm");
     expect(await screen.findByText("Couldn't load the current settings.")).toBeInTheDocument();
+  });
+});
+
+describe("AdminSettingsLlm — model availability", () => {
+  it("renders the catalog summary and a status badge for every model", async () => {
+    renderAdmin("/admin/settings/llm");
+    expect(await screen.findByText(/Catalog loaded: 458 models/)).toBeInTheDocument();
+    // One badge per distinct status in the sample payload.
+    expect(await screen.findByText("Unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Available")).toBeInTheDocument();
+    expect(screen.getByText("Not listed")).toBeInTheDocument();
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+  });
+
+  it("shows the expiry warning and the unavailable detail", async () => {
+    renderAdmin("/admin/settings/llm");
+    expect(await screen.findByText(/retires 2026-09-28/i)).toBeInTheDocument();
+    expect(screen.getByText("HTTP 410")).toBeInTheDocument();
+  });
+
+  it("flags when the effective default and follow-up differ from the configured ones", async () => {
+    renderAdmin("/admin/settings/llm");
+    expect(
+      await screen.findByText(/Configured default model "a\/model" is unavailable/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/using "b\/model" instead/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Configured follow-up model "fast\/model" is unavailable/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/using "backup\/model" instead/)).toBeInTheDocument();
+  });
+
+  it("does not show a fallback notice when the effective models match the configured ones", async () => {
+    vi.spyOn(api, "getAdminLlmModels").mockResolvedValue({
+      ...SAMPLE_LLM_MODELS,
+      effective_default: "a/model",
+      effective_followup: "fast/model",
+    });
+    renderAdmin("/admin/settings/llm");
+    await screen.findByText(/Catalog loaded/);
+    expect(screen.queryByText(/is unavailable/)).not.toBeInTheDocument();
+  });
+
+  it("calls a forced refresh from Check now and disables the button while it runs", async () => {
+    let resolveRefresh!: (v: AdminLlmModelsResponse) => void;
+    const refreshed = new Promise<AdminLlmModelsResponse>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const getModels = vi
+      .spyOn(api, "getAdminLlmModels")
+      .mockResolvedValueOnce(SAMPLE_LLM_MODELS)
+      .mockReturnValueOnce(refreshed);
+    renderAdmin("/admin/settings/llm");
+    const button = await screen.findByRole("button", { name: "Check now" });
+    fireEvent.click(button);
+    expect(await screen.findByRole("button", { name: "Checking…" })).toBeDisabled();
+    expect(getModels).toHaveBeenCalledWith(true);
+    resolveRefresh({ ...SAMPLE_LLM_MODELS, catalog: { ...SAMPLE_LLM_MODELS.catalog, model_count: 500 } });
+    expect(await screen.findByText(/Catalog loaded: 500 models/)).toBeInTheDocument();
+  });
+
+  it("shows an inline error when the model-availability fetch fails, without crashing the page", async () => {
+    vi.spyOn(api, "getAdminLlmModels").mockRejectedValue(new Error("500 boom"));
+    renderAdmin("/admin/settings/llm");
+    // The rest of the page (loaded from the separate settings fetch) still renders.
+    expect(await screen.findByLabelText("Provider base URL")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load model availability.")).toBeInTheDocument();
+  });
+
+  it("shows the catalog error message when the catalog status is 'error'", async () => {
+    vi.spyOn(api, "getAdminLlmModels").mockResolvedValue({
+      ...SAMPLE_LLM_MODELS,
+      catalog: { status: "error", checked_at: null, model_count: null, error: "timeout" },
+    });
+    renderAdmin("/admin/settings/llm");
+    expect(await screen.findByText(/Couldn't load the provider catalog: timeout/)).toBeInTheDocument();
   });
 });
 

@@ -243,7 +243,11 @@ def _models_from(value: object) -> list[str]:
 
 
 def chat_models() -> list[str]:
-    """The selectable model ids (first = default): admin override ``llm_models`` first, else ``LLM_MODELS``.
+    """The RAW selectable model ids (first = default): admin override ``llm_models`` first, else
+    ``LLM_MODELS``. Deliberately UNFILTERED by availability (see ``available_chat_models``) — the
+    admin edit form reads this list to populate "current value", and filtering it here would make a
+    single admin Save silently rewrite the configured picker out from under them the moment a
+    model goes down.
 
     The override may be a comma-string or a JSON list. Order is preserved and ids are deduped; a
     blank/empty result falls back to a single built-in model so the picker is never empty. Display
@@ -255,18 +259,60 @@ def chat_models() -> list[str]:
     return models or [_FALLBACK_MODEL]
 
 
+def available_chat_models() -> list[str]:
+    """``chat_models()`` filtered to the ones the live provider catalog says are actually usable
+    right now (see ``services.model_catalog.is_available`` — fail-open when the catalog is unknown,
+    excludes anything dead-marked mid-request). NEVER EMPTY: if filtering would leave nothing (every
+    configured model somehow dead-marked at once), the raw list is returned unfiltered instead —
+    there is nothing better to offer a client than what was configured.
+    """
+    from backend.app.services import model_catalog
+
+    models = chat_models()
+    filtered = [m for m in models if model_catalog.is_available(m)]
+    return filtered or models
+
+
 def default_chat_model() -> str:
-    """The model used when the client sends none — the first entry of the effective model list."""
-    return chat_models()[0]
+    """The model used when the client sends none — the first AVAILABLE entry (see
+    ``available_chat_models``), so a delisted/dead-marked configured default is never handed to a
+    client just because it happens to be first in ``LLM_MODELS``."""
+    return available_chat_models()[0]
+
+
+def _pinned_followup_raw() -> str:
+    """The follow-up model override/env value, stripped — possibly blank. Shared by
+    ``configured_followup_model`` (which falls back to the raw first model) and
+    ``followup_chat_model`` (which falls back to the AVAILABLE default) so both read the same
+    underlying admin/env value and differ only in their fallback."""
+    override = _overrides().get("llm_followup_model")
+    if override is not None:
+        return str(override).strip()
+    return get_settings().llm_followup_model.strip()
+
+
+def configured_followup_model() -> str:
+    """The RAW pinned follow-up model, exactly as configured — admin override ``llm_followup_model``
+    first, else ``LLM_FOLLOWUP_MODEL``; a blank value falls back to the first RAW configured model
+    (``chat_models()[0]``, NOT the availability-filtered default). This is what the admin edit form
+    reads: it must show the configured value regardless of whether the provider currently serves
+    it, so a dead pinned model doesn't just vanish from the form with no way to see or fix it."""
+    return _pinned_followup_raw() or chat_models()[0]
 
 
 def followup_chat_model() -> str:
-    """The model for follow-up suggestions — a fast one pinned server-side, independent of the answer
-    model the user picked. Admin override ``llm_followup_model`` first, else ``LLM_FOLLOWUP_MODEL``;
-    a blank value falls back to the default answer model. Not client-selectable by design."""
-    override = _overrides().get("llm_followup_model")
-    pinned = str(override).strip() if override is not None else get_settings().llm_followup_model.strip()
-    return pinned or default_chat_model()
+    """The model actually used for follow-up suggestions — a fast one pinned server-side,
+    independent of the answer model the user picked. The configured pinned model
+    (``configured_followup_model``'s raw value) IF it is non-blank AND the live catalog says it's
+    available, else the availability-filtered ``default_chat_model()``. This is the fix for the
+    provider retiring a pinned follow-up model out from under every chat request: a dead pin now
+    falls through to a model actually being served, instead of failing every follow-up call."""
+    from backend.app.services import model_catalog
+
+    pinned = _pinned_followup_raw()
+    if pinned and model_catalog.is_available(pinned):
+        return pinned
+    return default_chat_model()
 
 
 def chat_base_url() -> str:
@@ -428,12 +474,14 @@ def _coerce_int(
 
 
 def resolve_chat_model(requested: str | None) -> str:
-    """Honour the client's ``requested`` model only if it's one of the offered models, else default.
+    """Honour the client's ``requested`` model only if it's one of the AVAILABLE models, else the
+    availability-filtered default.
 
     So the browser can't name an arbitrary (possibly far more expensive) model, while the operator
-    controls both the picker and the default via ``LLM_MODELS`` (first = default).
+    controls both the picker and the default via ``LLM_MODELS`` (first = default) — and a model the
+    live catalog says is gone is never selected, requested or not (see ``available_chat_models``).
     """
-    models = chat_models()
+    models = available_chat_models()
     if requested and requested in set(models):
         return requested
     return models[0]

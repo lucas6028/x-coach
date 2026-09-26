@@ -65,15 +65,30 @@ LLM_MODELS=deepseek/deepseek-v4-flash,xiaomi/mimo-v2.5,minimax/minimax-m3,tencen
 ```
 LLM_API_KEY=nvapi-...
 LLM_BASE_URL=https://integrate.api.nvidia.com/v1
-LLM_MODELS=deepseek-ai/deepseek-v3.2,meta/llama-3.3-70b-instruct,qwen/qwen3-235b-a22b,nvidia/llama-3.3-nemotron-super-49b-v1
-LLM_FOLLOWUP_MODEL=openai/gpt-oss-120b
+LLM_MODELS=nvidia/nemotron-3-super-120b-a12b,openai/gpt-oss-20b
+LLM_FOLLOWUP_MODEL=nvidia/nemotron-3-super-120b-a12b
 ```
+
+(verified serving 2026-09-26 — NIM's own model lineup churns; see the availability check below
+before assuming any specific slug still works.)
 
 NIM caveats: the free tier is a dev/trial tier (~40 req/min, credit-capped, no throughput SLA) —
 fine for a research prototype/demo, not open public traffic. Prefer **instruct** models — a
 reasoning model that emits its chain-of-thought in `reasoning_content` (not `delta.content`) reads
 as a long silence before the answer streams. If replies get truncated, NIM's default `max_tokens`
 can be low; there's no env for it yet, so add one if you hit it.
+
+**Model availability.** A provider can retire a model out from under a running deployment — this
+happened to the shipped `LLM_FOLLOWUP_MODEL` default on NIM (2026-09-26: 410 Gone). To keep a dead
+model from breaking every chat request, `backend/app/services/model_catalog.py` fetches the
+provider's `GET /models` catalog in the background (never on the request path — every read is
+non-blocking and TTL-cached) and filters the configured picker/default/follow-up model down to
+what's actually available; the filter FAILS OPEN when the catalog is unknown, so an unreachable
+catalog never becomes *more* restrictive than no check at all. Mid-request, an HTTP 410 or a
+tool-less 404 marks a model dead and the SAME request retries against the next available candidate
+— the fix for exactly the NIM incident above. `GET /api/admin/llm/models` (admin-only) shows the
+catalog's health and every configured model's live status; `?refresh=true` forces an immediate
+re-check.
 
 ## Endpoints
 
