@@ -5,6 +5,7 @@ import AppRoutes from "./AppRoutes";
 import { I18nProvider } from "./lib/i18n";
 import { AuthProvider } from "./lib/auth";
 import { LiffProvider } from "./lib/liffContext";
+import { AnalysisJobProvider } from "./lib/analysisJob";
 import { initLiff } from "./lib/liff";
 import "./index.css";
 
@@ -21,7 +22,12 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       <LiffProvider>
         <AuthProvider>
           <I18nProvider>
-            <AppRoutes />
+            {/* Mounted ABOVE <AppRoutes/> but still inside the Router, so one analysis job (and its
+                floating pill) survives navigating between routes instead of unmounting with
+                whichever page started it. See lib/analysisJob.tsx for why. */}
+            <AnalysisJobProvider>
+              <AppRoutes />
+            </AnalysisJobProvider>
           </I18nProvider>
         </AuthProvider>
       </LiffProvider>

@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { I18nProvider } from "../lib/i18n";
 import { AuthProvider } from "../lib/auth";
+import { AnalysisJobProvider } from "../lib/analysisJob";
 import App from "../App";
 import { api, UploadLimitError } from "../api";
 import { mockAnalysis } from "./fixtures";
@@ -28,10 +29,20 @@ vi.mock("../lib/thumbnail", () => ({ captureThumbnail: () => Promise.resolve(nul
 
 function renderApp() {
   return render(
-    <MemoryRouter>
+    // Explicitly at /app, matching where this component is actually mounted (AppRoutes) — needed
+    // now that AnalysisJobProvider also renders BackgroundAnalysisPill, which hides itself on /app
+    // and would otherwise show a floating duplicate of whatever DemoIntro already renders inline
+    // (an in-flight job's progress, or its error) when the bare default route ("/") doesn't match.
+    <MemoryRouter initialEntries={["/app"]}>
       <AuthProvider>
         <I18nProvider>
-          <App />
+          {/* Needed now that the upload path runs through the background job provider — without
+              it `useAnalysisJob()` reads the inert outside-the-provider default, whose `start`
+              is a no-op, and every upload test below would hang waiting for an analysis that
+              never runs. */}
+          <AnalysisJobProvider>
+            <App />
+          </AnalysisJobProvider>
         </I18nProvider>
       </AuthProvider>
     </MemoryRouter>
@@ -49,8 +60,10 @@ function renderAppWithLocation(entry = "/app") {
     <MemoryRouter initialEntries={[entry]}>
       <AuthProvider>
         <I18nProvider>
-          <App />
-          <LocationProbe />
+          <AnalysisJobProvider>
+            <App />
+            <LocationProbe />
+          </AnalysisJobProvider>
         </I18nProvider>
       </AuthProvider>
     </MemoryRouter>

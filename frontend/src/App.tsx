@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardText } from "@phosphor-icons/react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api, UploadLimitError, type Analysis, type PlanItem } from "./api";
+import { api, type Analysis, type PlanItem } from "./api";
 import AppLayout from "./components/AppLayout";
 import CheckinDialog from "./components/checkin/CheckinDialog";
 import VideoPanel from "./components/VideoPanel";
@@ -12,10 +12,8 @@ import StudioMobile from "./components/mobile/StudioMobile";
 import KeyMetricsCard from "./components/studio/KeyMetricsCard";
 import PreviousSessionsCard from "./components/studio/PreviousSessionsCard";
 import TipsCard from "./components/studio/TipsCard";
-import { createProgressTracker, type AnalysisProgress } from "./lib/analysisProgress";
-import { captureThumbnail } from "./lib/thumbnail";
+import { jobMatchesStudio, useAnalysisJob, type JobPlanSnapshot } from "./lib/analysisJob";
 import { loadAnalysisTier, saveAnalysisTier, type PoseTier } from "./lib/poseTier";
-import { DEFAULT_MAX_REPS } from "./lib/repSpans";
 import { movementLabel, useI18n } from "./lib/i18n";
 import { useIsMobile } from "./lib/useIsMobile";
 import { useLiffContext } from "./lib/liffContext";
@@ -29,13 +27,17 @@ export default function App() {
   const { isInClient } = useLiffContext();
   const phone = useIsMobile() || isInClient;
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  // `loading`/`statusMsg`/`error` here now cover only the history-REPLAY wait (loadStored) — the
+  // upload analysis itself runs in the background job (lib/analysisJob.tsx) and is read below via
+  // `job`, so this component survives being unmounted mid-analysis instead of losing it.
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string>("");
-  // Null outside an upload analysis — the history-replay wait has nothing to measure.
-  const [progress, setProgress] = useState<AnalysisProgress | null>(null);
   const [error, setError] = useState<string>("");
   const [currentTime, setCurrentTime] = useState(0);
   const [activeFaultId, setActiveFaultId] = useState<string | null>(null);
+
+  const job = useAnalysisJob();
+  const jobRunning = job.status === "running";
 
   // The extraction tier now lives in the page header (StudioTitleBar) rather than inside the
   // capture panel, so the studio owns it and forwards it down. Persisted, same as before.
@@ -181,97 +183,102 @@ export default function App() {
   const movementError =
     !movementsLoaded || known ? "" : t("studio.movementUnavailable", { movement });
 
-  // The server's 413 detail is English and structured; the message the user reads is neither.
-  const errorMessage = useCallback(
-    (e: unknown): string => {
-      if (e instanceof UploadLimitError) {
-        return e.code === "upload_too_large"
-          ? t("upload.tooLarge", { limit: e.limitMb })
-          : t("upload.quotaFull", { used: e.usedMb ?? 0, limit: e.limitMb });
-      }
-      return e instanceof Error ? e.message : String(e);
+  // Hoisted above the job-reveal effect below, which needs it to decide whether an explicit
+  // history/clinician link should win over an unviewed background job.
+  const storedId = searchParams.get("analysis");
+
+  // Whether the background job (if any) BELONGS to this exact studio visit — same plan item (or no
+  // plan item on both sides) and same requested movement, or an explicit ?analysis= that names its
+  // own result. A job for a DIFFERENT plan item or movement must stay invisible here: it shows only
+  // through the background pill, never by hijacking this page's loader, error, or adopted result.
+  // See lib/analysisJob.tsx's `jobMatchesStudio` for the shared rule (also used by the pill).
+  const studioMatchesJob = jobMatchesStudio(job, {
+    storedId,
+    planItemId,
+    requestedMovement,
+  });
+  const showJobLoader = jobRunning && studioMatchesJob;
+  const showJobError = job.status === "error" && studioMatchesJob;
+
+  // Client-side capture path: hands the blob to the background job (lib/analysisJob.tsx), which
+  // owns extraction, the upload, and the plan-item tick from here — this component only starts it
+  // and, below, adopts whatever it eventually produces. The plan snapshot is captured NOW, from the
+  // current URL, because the job itself must never read the URL again once it starts (see the HARD
+  // RULE in analysisJob.tsx: by the time it finishes, this exact App instance may be gone).
+  const onBlob = useCallback(
+    (blob: Blob, chosenTier: PoseTier) => {
+      const plan: JobPlanSnapshot | null =
+        planId && planItemId
+          ? { planId, planItemId, assignedBy: planCtx?.assignedBy ?? null }
+          : null;
+      const started = job.start({ blob, tier: chosenTier, movement: canonicalMovement, plan });
+      // `start` only refuses when a DIFFERENT job is already running (the dropzone this handler
+      // hangs off is never rendered while THIS studio's own job is in flight — see `showJobLoader`
+      // below). Silently dropping the clip here would look like the upload just did nothing.
+      //
+      // On a successful start, clear any STALE local error — a history-replay failure, or an
+      // earlier "another analysis is still running" message from a previous attempt — so it can't
+      // sit on screen and mask the new job's own progress/result/error underneath
+      // `error || (showJobError ? job.error : "")` below. The old `runPoseAnalysis` did this
+      // implicitly by owning `error` outright; `onBlob` only owns it on the busy/idle paths now.
+      setError(started ? "" : t("job.busy"));
     },
-    [t]
+    [job.start, canonicalMovement, planId, planItemId, planCtx, t]
   );
 
-  // Client-side capture path: extraction happens in-browser (extractPoseWithReps — the two-pass
-  // RS-SP2 extractor, which also plans which reps to analyze), then the pose JSON + rep plan +
-  // original video POST to /api/analyze/pose. Mirrors the old runUpload's state handling.
-  const runPoseAnalysis = useCallback(async (blob: Blob, chosenTier: PoseTier) => {
-    setLoading(true);
-    setError("");
-    setAnalysis(null);
-    setStatusMsg(t("app.analysing"));
-    setProgress({ phase: "extract", fraction: 0, remainingSec: null });
-    const tracker = createProgressTracker(setProgress);
-    try {
-      // MediaPipe is a cold path: defer its WASM graph until the user explicitly supplies video.
-      const { extractPoseWithReps } = await import("./lib/poseExtract");
-      const { pose, reps } = await extractPoseWithReps(
-        blob, chosenTier, canonicalMovement, DEFAULT_MAX_REPS, tracker.extract
+  // Adopts a DONE job's result once, the first time a MATCHING studio sees it — which covers both
+  // "the job finished while I was still looking at /app" and "I navigated back to /app (via the
+  // background pill, or a fresh visit) after it finished elsewhere". A job for a different plan item
+  // or movement (or an explicit ?analysis=<X> for a different analysis) is never adopted here — see
+  // `studioMatchesJob` above.
+  useEffect(() => {
+    if (job.status !== "done" || job.viewed) return;
+    if (!studioMatchesJob) return;
+    const jobAnalysisId = job.result?.analysis_id ?? null;
+
+    setAnalysis(job.result);
+    // Only reflect a signed-in result into the URL, and only when it isn't there already (the
+    // background pill's "View result" link already stamps ?analysis=<id> before this ever runs) —
+    // rewriting a URL that already says the same thing would needlessly re-arm skipReloadId.
+    if (jobAnalysisId && storedId !== jobAnalysisId) {
+      skipReloadId.current = jobAnalysisId;
+      setSearchParams(
+        job.plan
+          ? { analysis: jobAnalysisId, plan: job.plan.planId, plan_item: job.plan.planItemId }
+          : { analysis: jobAnalysisId },
+        { replace: true }
       );
-      // Captured from the same blob the browser just decoded for MediaPipe, so it costs one
-      // extra seek. Resolves to null on any failure — a missing thumbnail never blocks analysis.
-      const thumbnail = await captureThumbnail(blob);
-      // The user's selected movement, not a hardcoded "Squat". `analyzePose` has taken a movement
-      // since the client-capture path landed; this is the caller that finally supplies a real one.
-      const data = await api.analyzePose(
-        canonicalMovement, pose, blob, thumbnail, reps, tracker.upload
-      );
-      setAnalysis(data);
-      // Reflect a persisted upload in the URL so it's shareable and survives a refresh (which then
-      // restores the chat thread via the replay path). Only signed-in uploads get an analysis_id;
-      // an anonymous upload has nothing durable to link to, so the URL stays put. Guard the replay
-      // effect from re-fetching the analysis we already hold.
-      if (data.analysis_id) {
-        skipReloadId.current = data.analysis_id;
-        // The plan ids ride along, so the banner and its "back to plan" link survive the rewrite.
-        setSearchParams(
-          planId && planItemId
-            ? { analysis: data.analysis_id, plan: planId, plan_item: planItemId }
-            : { analysis: data.analysis_id },
-          { replace: true }
-        );
-        // Tick the plan item off and link this analysis to it. Guarded on `analysis_id`, which
-        // ONLY a signed-in upload has — an anonymous visitor who lands here with a ?plan_item= in
-        // the URL analyses their clip normally and this is simply skipped, rather than erroring on
-        // a write they could not have been allowed to make.
-        if (planId && planItemId) {
-          try {
-            await api.updatePlanItem(planId, planItemId, {
-              completed: true,
-              analysis_id: data.analysis_id,
-            });
-            setPlanLinked(true);
-            // Only a THERAPIST-ASSIGNED plan gets the automatic prompt — a self-made plan is the
-            // user's own business, and nudging them to report pain on it would be noise.
-            if (assignedByTherapist) {
-              setCheckinAnalysisId(data.analysis_id);
-              setCheckinOpen(true);
-            }
-          } catch {
-            // The analysis is saved either way. A failed tick is worth neither an error banner
-            // over a successful analysis nor losing the result the user just waited for.
-          }
-        }
-      }
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      tracker.stop();
-      setProgress(null);
-      setLoading(false);
-      setStatusMsg("");
     }
+    // The check-in prompt fires once, on the same "the user has now SEEN this result" moment as
+    // adopting it — not back when the job's tick first succeeded, which may have been on a page
+    // with no dialog to show it in.
+    if (job.checkinPending) {
+      setCheckinAnalysisId(jobAnalysisId);
+      setCheckinOpen(true);
+      job.consumeCheckin();
+    }
+    job.markViewed();
   }, [
-    t,
+    job.status,
+    job.viewed,
+    job.result,
+    job.plan,
+    job.checkinPending,
+    job.markViewed,
+    job.consumeCheckin,
+    studioMatchesJob,
+    storedId,
     setSearchParams,
-    canonicalMovement,
-    errorMessage,
-    planId,
-    planItemId,
-    assignedByTherapist,
   ]);
+
+  // Whether the CURRENT plan item (from the URL) is the one the background job just linked — the
+  // job's own `planLinked` only means something here when its OWN plan snapshot still names this
+  // exact item. Checked directly against `job.plan.planItemId` rather than reusing
+  // `studioMatchesJob`: that function's ?analysis= branch matches on the analysis id alone and
+  // never compares plan items at all, so it is NOT a substitute for this check (a job adopted via
+  // an explicit ?analysis= for a different plan item would otherwise wrongly read as "linked" here).
+  const jobPlanItemMatches = (job.plan?.planItemId ?? null) === planItemId;
+  const linked = planLinked || (jobPlanItemMatches && job.planLinked);
 
   // Replay a saved analysis when arriving from history via /app?analysis=<id>.
   const loadStored = useCallback(async (id: string) => {
@@ -298,16 +305,19 @@ export default function App() {
   }, [t]);
 
   // Reset the studio to a fresh upload state — clears the loaded analysis, any transient
-  // status/error, and the shareable ?analysis= param so the URL matches the empty view.
+  // status/error, and the shareable ?analysis= param so the URL matches the empty view. Also drops
+  // a finished (done/errored) background job so its stale result/error can't reappear the next time
+  // this effect's own reveal logic runs — but never a RUNNING one: `job.clear()` itself refuses that,
+  // since there would be nothing left to navigate away FROM without losing the analysis in flight.
   const newAnalysis = useCallback(() => {
     setAnalysis(null);
     setError("");
     setStatusMsg("");
     skipReloadId.current = null;
+    if (job.status === "done" || job.status === "error") job.clear();
     if (searchParams.get("analysis")) setSearchParams({}, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, job.status, job.clear]);
 
-  const storedId = searchParams.get("analysis");
   useEffect(() => {
     if (!storedId) return;
     // A just-uploaded analysis is already in state — skip the redundant re-fetch (consume the guard
@@ -316,8 +326,15 @@ export default function App() {
       skipReloadId.current = null;
       return;
     }
+    // The reveal effect above already adopts this exact result directly from the job in memory
+    // (typically the background pill's "View result" link, which stamps the URL with the job's own
+    // id) — fetching it again here would be a redundant round trip that could race ahead of, and
+    // overwrite, that in-memory copy with a second, later response.
+    if (job.status === "done" && !job.viewed && job.result?.analysis_id === storedId) return;
     void loadStored(storedId);
-    // Re-run only when the requested id changes (not on unrelated re-renders).
+    // Re-run only when the requested id changes (not on unrelated re-renders, and deliberately not
+    // when the job above later transitions to viewed — the guard's OWN verdict for a given
+    // `storedId` should not flip mid-mount just because that job has now been shown).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedId]);
 
@@ -393,10 +410,10 @@ export default function App() {
           <span className="font-medium text-content">
             {t("plans.studioBanner", { plan: planCtx.name, day: planCtx.day })}
           </span>
-          {planLinked && <span className="text-secondary">{t("plans.studioLinked")}</span>}
+          {linked && <span className="text-secondary">{t("plans.studioLinked")}</span>}
           {/* Only once this item is done: before that, the next exercise is a distraction from
               the one the user came here to record. */}
-          {planLinked &&
+          {linked &&
             (nextItem ? (
               <Link
                 to={`/app?movement=${encodeURIComponent(nextItem.movement)}&plan=${encodeURIComponent(
@@ -405,14 +422,16 @@ export default function App() {
                 // This is the studio's only link from /app to /app, so React Router re-renders
                 // rather than remounting: `movement` and the plan context follow the URL on their
                 // own, but the RESULT does not — without this the next exercise opens under the
-                // report for the one just finished. `planLinked` is cleared with it so the banner
-                // does not keep claiming a tick that belongs to the previous item while the new
-                // plan fetch is in flight.
+                // report for the one just finished. `planLinked` is cleared with it (and the
+                // background job, if it is the one that produced this "linked" state and has since
+                // settled) so the banner does not keep claiming a tick that belongs to the previous
+                // item while the new plan fetch is in flight.
                 onClick={() => {
                   setAnalysis(null);
                   setError("");
                   setStatusMsg("");
                   setPlanLinked(false);
+                  if (job.status === "done" || job.status === "error") job.clear();
                   skipReloadId.current = null;
                 }}
                 className="font-semibold text-primary underline-offset-2 hover:underline"
@@ -465,13 +484,19 @@ export default function App() {
         </>
       ) : !hasResult ? (
         <DemoIntro
-          onBlob={runPoseAnalysis}
+          onBlob={onBlob}
           onError={setError}
-          loading={loading}
-          statusMsg={statusMsg}
-          progress={progress}
-          error={error}
-          movement={canonicalMovement}
+          // `loading` covers the history-replay wait; a MATCHING running background job covers the
+          // upload wait — either one occupies this same loader. A job for a different plan item or
+          // movement stays invisible here (it only shows via the background pill) — see
+          // `showJobLoader`/`studioMatchesJob` above.
+          loading={loading || showJobLoader}
+          // While a MATCHING job runs, its OWN movement/caption/progress take over — not the URL's,
+          // which may have moved on to a different selection since the upload started (see onBlob).
+          statusMsg={showJobLoader ? job.statusMsg : statusMsg}
+          progress={showJobLoader ? job.progress : null}
+          error={error || (showJobError ? job.error : "")}
+          movement={showJobLoader ? job.movement : canonicalMovement}
           movementError={movementError}
           movementsLoaded={movementsLoaded}
           tier={tier}
