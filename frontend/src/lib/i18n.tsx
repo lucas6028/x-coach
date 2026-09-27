@@ -242,6 +242,20 @@ const en: Dict = {
   "tab.coaching": "Coaching",
   "tab.graph": "Knowledge Graph",
 
+  // Background analysis pill — shown on every page but /app while a job started there keeps
+  // running (or has finished) after the user has navigated away.
+  "job.running": "Analysing {movement}…",
+  "job.ready": "Analysis ready",
+  "job.view": "View result",
+  "job.dismiss": "Dismiss",
+  "job.failed": "Analysis failed",
+  "job.backToStudio": "Back to studio",
+  // Shown in DemoIntro itself (not the pill) when the user supplies a clip while a DIFFERENT job —
+  // a different plan item or movement — is still running in the background. There is no cancel, so
+  // this is a wait, not a retry.
+  "job.busy":
+    "Another analysis is still running. Wait for it to finish (see the progress card at the top).",
+
   // Upload dropzone
   "upload.analysing": "Analysing…",
   "upload.prompt": "Drop a {movement} video or tap to upload",
@@ -1607,6 +1621,15 @@ const zhHant: Dict = {
   "app.progress.eta": "約剩 {sec} 秒",
   "tab.coaching": "教練回饋",
   "tab.graph": "知識圖譜",
+
+  // Background analysis pill
+  "job.running": "正在分析{movement}…",
+  "job.ready": "分析已完成",
+  "job.view": "查看結果",
+  "job.dismiss": "關閉",
+  "job.failed": "分析失敗",
+  "job.backToStudio": "回到工作室",
+  "job.busy": "另一項分析仍在進行中，請等待它完成（可在畫面頂端的進度卡片查看）。",
 
   // Upload dropzone
   "upload.analysing": "分析中…",
