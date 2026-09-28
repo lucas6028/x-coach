@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { fmtTime, titleCase } from "../lib/format";
+import { fmtStorage, fmtTime, titleCase } from "../lib/format";
 
 describe("fmtTime", () => {
   it("formats zero as 0:00", () => {
@@ -61,5 +61,35 @@ describe("titleCase", () => {
 
   it("returns empty string unchanged", () => {
     expect(titleCase("")).toBe("");
+  });
+});
+
+describe("fmtStorage", () => {
+  const MB = 1024 * 1024;
+
+  it("uses binary megabytes, so a 500 MiB quota reads 500 MB like the upload error", () => {
+    expect(fmtStorage(500 * MB)).toBe("500 MB");
+  });
+
+  it("keeps one decimal below 10 and drops it from 10 up", () => {
+    expect(fmtStorage(4.25 * MB)).toBe("4.3 MB");
+    expect(fmtStorage(37.4 * MB)).toBe("37 MB");
+  });
+
+  it("formats zero as 0 MB", () => {
+    expect(fmtStorage(0)).toBe("0 MB");
+  });
+
+  it("switches to GB at 1024 MB", () => {
+    expect(fmtStorage(1023 * MB)).toBe("1023 MB");
+    expect(fmtStorage(1024 * MB)).toBe("1 GB");
+    expect(fmtStorage(1536 * MB)).toBe("1.5 GB");
+    expect(fmtStorage(100 * 1024 * MB)).toBe("100 GB");
+  });
+
+  it("clamps negative and non-finite values to 0 MB", () => {
+    expect(fmtStorage(-1)).toBe("0 MB");
+    expect(fmtStorage(NaN)).toBe("0 MB");
+    expect(fmtStorage(Infinity)).toBe("0 MB");
   });
 });
