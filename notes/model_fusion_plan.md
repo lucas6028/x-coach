@@ -12,6 +12,12 @@ RTMPose / MediaPipe / HRNet）各自的優點結合，降低關節誤差，進�
 > §2 列為存活的 H（2D×3D 混合骨架）被更上游的結果取消，
 > §6 的甲/乙選擇判定為**乙（第四次否證）**。
 > 本文件保留作為推理紀錄；§0 的張力分析與 §4 的 parity 債務仍然有效。
+>
+> **Premise no longer valid (2026-09-26):** the valgus figures below ("2D better, 3D worse,
+> verdict-flip 31% vs 15%") compare NLF with the mocap projection, a 2D arm with zero detector
+> error. Against RTMPose, NLF is not worse on valgus (−0.057, 6/8 subjects, p = 0.195,
+> undetermined); see `notes/fit3d_detector_parity_significance.md`. The R1 routing rule and H's
+> "2D already wins valgus" rest on the superseded comparison.
 
 ---
 

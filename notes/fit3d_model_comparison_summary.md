@@ -74,10 +74,14 @@ crop-rotation term that the rotation-invariant knee/hip angles and pa_mpjpe do n
    256 crop, not the full image), which rotates some depth into the error — a handicap NLF (and
    the pending full-frame Multi-HMR) do not share.
 
-3. **The needs-3D map is model-independent.** Both models recover knee/hip flexion (needs 3D),
-   and both are *worse* than calibrated-2D on valgus / tie on torso-lean — same split experiment 3
-   found. So "route by fault type — 3D for depth/flexion, calibrated 2D for frontal-plane" holds
-   regardless of which direct-3D model you pick.
+3. **The depth/flexion half of the needs-3D map is model-independent.** Both models recover
+   knee/hip flexion (needs 3D). Both are *worse* than calibrated-2D on valgus and tie on
+   torso-lean — the same split experiment 3 found — but that 2D arm is the mocap projection, a
+   detector with zero error. Against a real detector (RTMPose) on the same frames, NLF is not
+   worse on valgus or torso lean; both differences are undetermined (−0.057, p = 0.195 and
+   −0.053, p = 0.141; `fit3d_detector_parity_significance.md`). HMR2.0 has not been compared
+   with RTMPose, so the frontal-plane half is untested for it. Routing frontal-plane faults to
+   calibrated 2D is not supported for either model.
 
 4. **Why raw MPJPE is not the metric (honest note).** HMR2.0's MPJPE (100–103 mm) exceeds NLF's
    (71–81 mm), but its *cue-relevant angles* are within ~1°; the gap is body-shape (~11% small,
@@ -136,7 +140,9 @@ Depth axis ez/exy: squat 1.16 / 1.57 / 1.50; deadlift 1.17 / 1.66 / 1.50; thrust
    which argues the preprocessing did not broadly wreck its pose — but we can't call it neutral.
 
 The practical takeaway is robust across three models: **use direct image->3D for the depth/flexion
-verdicts (NLF is the strongest here), keep calibrated 2D for frontal-plane faults.**
+verdicts (NLF is the strongest here).** For frontal-plane faults, NLF is not worse than a real 2D
+detector (valgus and torso lean undetermined, `fit3d_detector_parity_significance.md`); only NLF
+was compared with RTMPose.
 
 Reproduce: `python scripts/fit3d/run_model_comparison.py --action squat \
 --model NLF=data/Fit3D/derived/preds/nlf --model HMR2=data/Fit3D/derived/preds/hmr2 \

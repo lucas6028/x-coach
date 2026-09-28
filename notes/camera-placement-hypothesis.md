@@ -164,8 +164,7 @@ Not supported as stated. Three separate reasons:
    *oblique* reads squat depth, which reads against H1 rather than for it.
 2. The oblique's win is an artefact of a **weighting choice** (both planes served by one
    camera) and disappears under either single-plane weighting. Since the codebase already
-   gates faults on view and `notes/fit3d_decision_fidelity_summary.md` already recommends
-   routing by fault type, the weighting that produces H1 is the one the system does not
+   gates faults on view, the weighting that produces H1 is the one the system does not
    use.
 3. "For the 16 movements" is unevidenced for ~6 of them (no mocap GT anywhere), and the
    one upper-body correctness signal that exists points the other way — REHAB24 Ex1 arm
@@ -180,23 +179,26 @@ must serve both sagittal and frontal faults, and the penalty for that choice is 
 
 Holds, inside two scope conditions that are both already measured.
 
-**By cue family** — direct image→3D wins on sagittal cues and *loses* on frontal ones
-(`notes/fit3d_decision_fidelity_summary.md`, debiased swept flip, 2D → NLF):
+**By cue family** — direct image→3D wins on sagittal cues. Against experiment 3's 2D arm,
+which is the mocap projection with zero detector error, it loses on valgus; against a real
+detector it does not (below). `notes/fit3d_decision_fidelity_summary.md`, debiased swept
+flip, zero-error 2D → NLF:
 
 | cue | squat | deadlift | thruster |
 |---|---|---|---|
 | knee (depth) | 21 → **11** | 17 → **10** | 22 → **9** |
 | hip flexion | 12 → **6** | 18 → 13 | 14 → **4** |
 | torso lean | 11 / 19 | 9 / 10 | 17 / 14 (tie) |
-| knee width (valgus) | 15 / **31** | 9 / **17** | 9 / **20** (2D better) |
+| knee width (valgus) | 15 / **31** | 9 / **17** | 9 / **20** (zero-error 2D better) |
 
 #### How much does the valgus row actually support? (audited 2026-08-01)
 
 That row is quoted often enough — including in the H2 verdict below — to be worth
-separating into the part that replicates and the part that rests on two people.
+checking what it supports.
 
-**Strong: no 3D model beats 2D on valgus, in any cell.** Pulling `knee_width_ratio`
-debiased flip out of the model-comparison JSONs, against the projected-2D baseline:
+**No 3D model beats the zero-error 2D arm on valgus, in any cell.** Pulling
+`knee_width_ratio` debiased flip out of the model-comparison JSONs, against the
+projected-2D baseline:
 
 | action | 2D | NLF | HMR2 | MultiHMR | MeTRAbs | MediaPipe |
 |---|---|---|---|---|---|---|
@@ -204,20 +206,23 @@ debiased flip out of the model-comparison JSONs, against the projected-2D baseli
 | deadlift | **0.089** | 0.174 | 0.182 | 0.251 | 0.218 | 0.305 |
 | thruster | **0.087** | 0.200 | 0.220 | 0.303 | 0.257 | 0.369 |
 
-**15/15 model × action cells are worse than 2D**, across five architectures including a
-sparse metric regressor (MeTRAbs) and a pseudo-3D one (MediaPipe). This is not an NLF
-quirk, and it is mechanistically consistent with `notes/fit3d_2d_vs_3d_summary.md`:
-valgus is *detector*-limited, not projection-limited (perfect mocap-2D 0.04 vs real 2D
-0.07), so 3D has nothing to fix there and contributes its own lateral-localisation noise.
+**15/15 model × action cells are worse than the zero-error arm**, across five
+architectures including a sparse metric regressor (MeTRAbs) and a pseudo-3D one
+(MediaPipe). That arm has no detector error, and valgus is *detector*-limited, not
+projection-limited (perfect mocap-2D 0.04 vs real 2D 0.07, `notes/fit3d_2d_vs_3d_summary.md`).
+So the 15/15 measures every 3D model against an arm no deployed pipeline has.
 
-**Weak, and it bounds how the row may be stated:**
+**What bounds the row even as a comparison with the zero-error arm:**
 
-1. **98% of the pooled gap comes from 2 of 8 subjects.** Summing (3D − 2D) per-subject
-   flip over the three actions: s05 **+2.26**, s03 **+1.50**, then +0.40, +0.21, 0, 0,
-   −0.15, −0.40 — total +3.82, of which s05 + s03 are +3.76. Per subject × action cell
-   the split is **2D better 10, 3D better 4, tie 10** (n=24). So the honest reading is
-   "3D fails catastrophically on two people and is a wash on the rest", not "3D is worse
-   for everyone".
+1. **The gap concentrates in 2 of 8 subjects.** At the single median threshold
+   (`decision_eval`'s per-subject flip), summing (3D − 2D) per-subject flip over the three
+   actions: s05 **+2.26**, s03 **+1.50**, then +0.40, +0.21, 0, 0, −0.15, −0.40 — total
+   +3.82, of which s05 + s03 are +3.76. Per subject × action cell the split is **2D better
+   10, 3D better 4, tie 10** (n=24). On the swept flip with pooled thresholds, which
+   decomposes the pooled figure exactly, all 8 subjects go the same way (total +2.91, s03 +
+   s05 = +2.09) and the combined sign-flip test gives p = 2/256
+   (`notes/fit3d_detector_parity_significance.md`). The gap against the zero-error arm is
+   therefore determined, and still dominated by s03 and s05.
 2. **The valgus threshold is not a coaching cut.** `threshold_is_canonical=False`; it is
    a median split sitting **0.07 sd** from the GT mean on squat (0.19 / 0.31 on
    deadlift / thruster), against `knee_angle`'s canonical 90° at **1.61 sd**. A cut
@@ -226,8 +231,8 @@ valgus is *detector*-limited, not projection-limited (perfect mocap-2D 0.04 vs r
    variant sweeps the *central* GT range and inherits the same property. So this row
    measures noise sensitivity at a synthetic split, not fault-catching at a citable
    threshold — which is [[paper-scope-angle-a]]'s thesis applied to itself.
-3. **n is 40 reps × 4 non-independent cameras**, all-competent population (real valgus
-   faults are near-absent), no significance test — as exp 3's own caveats state.
+3. **n is 40 reps × 4 non-independent cameras, 8 subjects**, all-competent population
+   (real valgus faults are near-absent). The subject is the unit for the test above.
 4. **It is contradicted on other data.** Fitness-AQA consolidated squat — in the wild,
    rear/rear-oblique, *learned* classifier — is the one place a depth channel helped:
    `knees_inward` **ΔAUC +0.080**, with coefficients confirming `knee_width_ratio` is
@@ -254,12 +259,15 @@ masked to RTMPose's every-15th-frame grid so the per-rep extreme is sampled iden
 | GT, depth axis dropped (control) | 0.020 / 0.92 / 0.138 | 0.025 / 0.93 / 0.090 | 0.022 / 0.96 / 0.087 |
 
 **M1 — detector parity: this is the whole effect.** Against a *real* 2D detector, NLF
-ties on squat (0.294 vs 0.299) and **wins on deadlift (0.174 vs 0.255) and thruster
-(0.192 vs 0.278)**, and beats it on MAE and ranking r in all three (0.033/0.84 vs
-0.065/0.76, etc.). Per-subject the direction survives: NLF better in **6/8, 4/8, 4/8**
-against real-2D's 1/8, 1/8, 2/8 (14 vs 4 cells, 6 ties). The replication that looked
-strongest — 15/15 model × action cells beating 2D — was 15 real models measured against
-one impossible one.
+ties on squat (0.294 vs 0.299) and has lower flip on deadlift (0.174 vs 0.255) and
+thruster (0.192 vs 0.278). It beats RTMPose on MAE and ranking r in all three (0.033/0.84
+vs 0.065/0.76, etc.). At the single median threshold, NLF is better per subject in
+**6/8, 4/8, 4/8** against real-2D's 1/8, 1/8, 2/8 (14 vs 4 cells, 6 ties). The
+subject-level test on the swept flip (`notes/fit3d_detector_parity_significance.md`)
+leaves every valgus difference undetermined: squat −0.005 (p = 0.969), deadlift −0.081
+(7/8 subjects, p = 0.117), thruster −0.086 (6/8, p = 0.086), combined −0.057 (6/8,
+p = 0.195). The replication that looked strongest — 15/15 model × action cells beating
+2D — was 15 real models measured against one impossible one.
 
 **M2 — depth-axis contamination: refuted.** `knee_width_ratio` takes its horizontal span
 over the (x, y) ground plane in 3D, which includes the depth axis, but over image-x alone
@@ -275,15 +283,14 @@ better only because they absorb between-subject anatomy, the same person-offset 
 `notes/lunge-rule-validation.md` found on `knee_forward_ratio`. (b) RTMPose is COCO
 convention mapped into H36M slots and NLF is SMPL-24 mapped the same way, so **both real
 arms carry mapping error while the perfect-2D arm is convention-exact** — a third way that
-arm is privileged. (c) n = 40–44 reps × 4 non-independent cameras, all-competent
-population, no significance test.
+arm is privileged. (c) n = 40–44 reps × 4 non-independent cameras, 8 subjects,
+all-competent population. (d) NLF's valgus reading uses the ground-truth camera rotation
+to define the ground plane; how much that helps was not measured.
 
-**This contradicts the routing recommendation in two committed notes** —
-`fit3d_decision_fidelity_summary.md` ("keep calibrated 2D for **valgus**") and
-`fit3d_2d_vs_3d_summary.md` ("3D is **not** the answer" for valgus). Experiment 4's own
-finding that valgus is detector-dominated is what predicts this: a cue whose error is
-dominated by the detector cannot be evaluated with an arm that has no detector. Left for
-the user to decide how to fold back into those notes rather than edited in unilaterally.
+Experiment 4's finding that valgus is detector-dominated predicts this result: a cue whose
+error is dominated by the detector cannot be evaluated with an arm that has no detector.
+Routing valgus to calibrated 2D is therefore not supported
+(`fit3d_decision_fidelity_summary.md` and `fit3d_2d_vs_3d_summary.md` state the same).
 
 #### Detector parity across every cue — and how far it generalises over angle
 
@@ -296,15 +303,31 @@ swept flip) on **all five cues**, not just valgus:
 | deadlift | 0.191 / **0.101** | 0.219 / **0.110** | 0.134 / **0.100** | 0.246 / **0.124** | 0.255 / **0.174** |
 | thruster | 0.241 / **0.089** | 0.171 / **0.043** | 0.202 / **0.131** | 0.166 / **0.094** | 0.278 / **0.192** |
 
-(2D / 3D; lower is better.) **14 wins for 3D, 1 tie, 0 wins for 2D.** MAE and ranking r
-tell the same story — e.g. squat knee 37.90→12.84 and r 0.60→0.94. Note that
-**torso lean also flips**: exp 3 called it a tie, but that was against the perfect-2D
-arm; against a real detector 3D wins all three actions and cuts MAE ~4× (30.76→7.09).
-So under detector parity **the "route by fault type" recommendation loses its 2D branch
-entirely** — there is no cue left where a real 2D pipeline is the better choice.
+(2D / 3D; lower is better.) **3D is lower in 14 cells and ties in 1; 2D is lower in
+none.** MAE and ranking r tell the same story — e.g. squat knee 37.90→12.84 and r
+0.60→0.94. Torso lean also changes: exp 3 called it a tie against the perfect-2D arm;
+against a real detector 3D has lower flip in all three actions and cuts MAE ~4×
+(30.76→7.09).
+
+Tested with the subject as the unit (`notes/fit3d_detector_parity_significance.md`,
+exact sign-flip over 8 subjects, combined over the three actions, Holm over five cues):
+
+| cue | Δ flip, 3D − 2D | subjects 3D better | p | 3D reading uses GT rotation |
+|---|---|---|---|---|
+| knee | −0.109 | 8/8 | 2/256 | no |
+| hip | −0.128 | 8/8 | 2/256 | no |
+| depth ratio | −0.085 | 8/8 | 2/256 | yes, vertical |
+| torso lean | −0.053 | 7/8 | 0.141, undetermined | yes, vertical |
+| valgus | −0.057 | 6/8 | 0.195, undetermined | yes, ground plane |
+
+So under detector parity, pooled over cameras, there is no cue on which a real 2D detector
+is measured better (3 of 60 per-camera cells favour RTMPose, descriptive only).
+The 3D advantage is determined for knee and hip angle, which are oracle-free, and for
+depth ratio, which uses the ground-truth vertical. For torso lean and valgus it is
+undetermined.
 
 **Split by rig azimuth** (the only angle contrast the data supports — front-oblique
-~20–25° vs rear-oblique ~153–157°): 3D wins or ties in essentially every cell of both
+~20–25° vs rear-oblique ~153–157°): 3D is lower or equal in essentially every cell of both
 groups; the single exception is squat valgus at front-oblique (0.33 vs 0.35, inside
 noise). So within the oblique band the conclusion is angle-stable.
 
@@ -323,10 +346,11 @@ that extrapolation is exactly the one nobody has measured: **self-occlusion, whi
 precisely as you approach the sagittal view.** Until that is measured, the honest scope is
 "3D ≥ 2D throughout the oblique band", not "at every angle".
 
-**Supportable claim:** *3D is not worse than 2D on valgus. Under detector parity it ties
-or wins on all three actions and on MAE/r in all three; the published "2D better" is an
-artifact of pairing a real 3D model against a perfect 2D detector on the one cue that is
-detector-limited. Neither arm resolves valgus within a subject.* The Fitness-AQA result
+**Supportable claim:** *3D is not worse than 2D on valgus. Under detector parity its flip
+is lower or equal on all three actions, undetermined at the subject level (combined
+−0.057, p = 0.195), and its MAE and r are better in all three. The published "2D better"
+is an artifact of pairing a real 3D model against a perfect 2D detector on the one cue
+that is detector-limited. Neither arm resolves valgus within a subject.* The Fitness-AQA result
 (`knees_inward` ΔAUC **+0.080** for `nlf_3d`, [[fitness-aqa-depth-finding]]) stops being
 an anomaly under this reading and becomes the corroborating case.
 
@@ -365,11 +389,11 @@ project's explainability-constrained regime, and the depth advantage collapses t
 when the judgment rule is a learned classifier.
 
 The **cue-family** scope condition, however, does **not** survive the audit in §4: under
-detector parity 3D ties or beats a real 2D detector on valgus too, so "3D wins on
-sagittal cues and loses on frontal ones" should be restated as "3D's *measured* margin is
-largest on sagittal cues, and its apparent frontal-plane deficit was an artifact of the
-2D arm's perfect detector." The **judgment-rule** scope condition is the one that still
-bounds H2.
+detector parity 3D is not worse than a real 2D detector on valgus (combined −0.057,
+p = 0.195, undetermined). "3D wins on sagittal cues and loses on frontal ones" becomes
+"3D's advantage is determined on knee and hip angle (8/8 subjects, p = 2/256 each), and
+its apparent frontal-plane deficit was an artifact of the 2D arm's perfect detector." The
+**judgment-rule** scope condition is the one that still bounds H2.
 
 ## 5. What would settle what is still open
 

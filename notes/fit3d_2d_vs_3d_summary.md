@@ -50,24 +50,29 @@ RTMPose keypoint MAE vs GT-projected: 55–59 px on ~900 px images (the raw dete
    mocap-GT proof of "depth is the bottleneck, not 2D accuracy"** — what HRNet-vs-RTMPose on REHAB24
    could only hint at indirectly. No 2D-detector improvement can help the depth cue; change modality.
 
-2. **Valgus is the mirror image — detector-dominated, so a better 2D detector is exactly the fix.**
-   The perfect detector reads valgus well (mocap-2D 0.04) and the *real* detector adds the error
-   (real-2D 0.07–0.08; detector +0.03–0.04). So here 2D is the right tool and the lever is detector
-   quality — and 3D is **not** the answer (experiment 3 showed 3D is *worse* on valgus). This is the
-   clean converse of the depth cue.
+2. **Valgus is the mirror image — detector-dominated.** The perfect detector reads valgus well
+   (mocap-2D 0.04) and the *real* detector adds the error (real-2D 0.07–0.08; detector
+   +0.03–0.04). Within 2D, detector quality is the lever. This does not make 2D better than 3D on
+   valgus. On RTMPose's frames, rep-extreme valgus MAE is RTMPose 0.065 / 0.081 / 0.081 vs NLF
+   0.033 / 0.063 / 0.043 (squat / deadlift / thruster, `camera-placement-hypothesis.md`). The
+   verdict-flip difference is undetermined: NLF − RTMPose −0.057, 6/8 subjects, p = 0.195
+   (`fit3d_detector_parity_significance.md`). Experiment 3's "3D worse on valgus" compared NLF
+   with the zero-error mocap-2D arm, which lacks exactly the error term this row isolates.
 
-3. **The two components split exactly along the sagittal/frontal axis**, matching experiments 2–3:
-   sagittal depth/flexion → projection-limited → 3D; frontal-plane valgus → detector-limited → 2D.
-   The decomposition turns "route by fault type" into a *causal* statement about *why* — and about
-   which lever (better detector vs different modality) moves each cue.
+3. **The two error components split along the sagittal/frontal axis**, matching experiment 2:
+   sagittal depth/flexion → projection-limited; frontal-plane valgus → detector-limited. This
+   says which lever moves each cue *within* 2D. It does not route valgus to 2D: against the real
+   detector tested, NLF is not worse on valgus or torso lean.
 
 ## Caveats
 
 - **torso_lean reads "need-3D" here but that is a raw-MAE artefact of a *calibratable* offset.**
   Experiment 2 found torso view-*robust* (r=0.87) with a constant ~−22° projection offset; that
   offset inflates the raw MAE (mocap-2D 12–14°), so 3D "fixes" it in raw terms — but experiment 3
-  showed **calibrated** 2D handles torso as well as or better than 3D. So torso is "calibratable
-  projection", unlike the knee's non-calibratable projection *scatter*. The clean, load-bearing
+  showed **calibrated zero-error** 2D handles torso as well as or better than 3D. So torso is
+  "calibratable projection", unlike the knee's non-calibratable projection *scatter*. Against
+  calibrated RTMPose the torso flip difference is undetermined (NLF − RTMPose −0.053, 7/8
+  subjects, p = 0.141, `fit3d_detector_parity_significance.md`). The clean, load-bearing
   case is the **knee** (detector ~0, projection is scatter no calibration removes).
 - **hip on deadlift** has a large detector term (+7.41): RTMPose's hip is notably off on the
   hip-hinge; but mocap-2D is also large (17.75) so 3D is still the fix.
@@ -79,8 +84,9 @@ RTMPose keypoint MAE vs GT-projected: 55–59 px on ~900 px images (the raw dete
 ## Implications
 
 Completes the perception story: for the **sagittal depth/flexion** verdicts, a better 2D detector
-is a dead end (even a perfect one fails) — use direct image->3D; for **frontal-plane valgus**, keep
-2D and invest in the detector. Reproduce: `python scripts/fit3d/run_twod_vs_threed.py --action squat
+is a dead end (even a perfect one fails) — use direct image->3D. For **frontal-plane valgus**, a
+better detector is the lever within 2D, and NLF is not worse than the real detector tested (the
+difference is undetermined). Reproduce: `python scripts/fit3d/run_twod_vs_threed.py --action squat
 --rtmpose-root data/Fit3D/derived/preds/rtmpose --model NLF=... --model HMR2=... --model MultiHMR=...`
 (per-action JSON `data/Fit3D/derived/twod_vs_threed_<action>.json`; RTMPose npz under
 `data/Fit3D/derived/preds/rtmpose/`, extracted by `scripts/fit3d/run_rtmpose_fit3d.py`).
