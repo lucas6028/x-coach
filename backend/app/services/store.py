@@ -83,6 +83,25 @@ def is_clinician(*, token: str, user_id: str) -> bool:
     return bool(resp.data)
 
 
+def get_nlf_enabled(*, token: str, user_id: str) -> bool:
+    """Return whether ``user_id`` holds the 'nlf_user' role (queried as the user, RLS-scoped).
+
+    Same shape as ``is_admin``/``is_clinician``: the ``user_roles`` SELECT policy lets a caller
+    read their OWN row, so this answers "am I opted into the NLF 3D view?" without a service_role
+    key. A patchable seam — the unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("user_roles")
+        .select("user_id")
+        .eq("user_id", user_id)
+        .eq("role", "nlf_user")
+        .limit(1)
+        .execute()
+    )
+    return bool(resp.data)
+
+
 def count_admins(*, token: str) -> int:
     """Return how many users currently hold the 'admin' role.
 
@@ -177,6 +196,75 @@ def set_clinician_role(*, token: str, user_id: str, make_clinician: bool) -> Non
     ``_user_client``.
     """
     _set_role(token=token, user_id=user_id, role="clinician", grant=make_clinician)
+
+
+def set_nlf_access(*, token: str, user_id: str, enabled: bool) -> None:
+    """Grant or revoke the 'nlf_user' role for ``user_id``, written as the caller (RLS-scoped).
+
+    Same semantics as ``set_user_role``/``set_clinician_role``, for the NLF 3D-view opt-in — only
+    an admin's write lands (``is_admin`` is the only role ``user_roles`` INSERT/DELETE policy lets
+    write the table at all). A patchable seam — the unit tests replace ``_user_client``.
+    """
+    _set_role(token=token, user_id=user_id, role="nlf_user", grant=enabled)
+
+
+# ---------------------------------------------------------------------------------------------
+# NLF 3D view: a selected user requests a turntable render of an analysed video; a worker PC
+# (out of process, polling ``nlf_jobs`` with its own service_role key) fills the job in later.
+# Every function here runs with the CALLER'S OWN JWT — RLS scopes a row to its owner, and the
+# ``request_nlf_job``/``nlf_worker_last_seen`` RPCs are SECURITY DEFINER so the caller never
+# touches ``videos`` (to check ownership) or a worker-liveness signal directly.
+# ---------------------------------------------------------------------------------------------
+
+
+def request_nlf_job(*, token: str, video_id: str) -> dict[str, Any]:
+    """Call the ``request_nlf_job(p_video_id)`` RPC; return the (possibly pre-existing) job row.
+
+    Inserts a fresh ``queued`` row, re-queues a ``failed`` one, or returns the existing row
+    unchanged for any other status. The RPC raises SQLSTATE 42501 if the caller lacks the
+    'nlf_user' role, or P0002 if ``video_id`` is not the caller's — this function does NOT catch
+    or translate either; the router inspects ``getattr(exc, "code", None)`` and maps it to
+    403/404, the same pattern ``services/clinic.py`` uses for a 23505 collision. A patchable seam
+    — the unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = client.rpc("request_nlf_job", {"p_video_id": video_id}).execute()
+    data = resp.data
+    if isinstance(data, list):
+        return data[0] if data else {}
+    return data or {}
+
+
+def get_nlf_job(*, token: str, user_id: str, video_id: str) -> dict[str, Any] | None:
+    """Return the caller's ``nlf_jobs`` row for ``video_id``, or ``None`` if none exists yet.
+
+    RLS already scopes ``nlf_jobs`` SELECT to the owner; ``user_id`` is filtered explicitly too,
+    the same belt-and-braces pattern as ``list_analyses``. A patchable seam — the unit tests
+    replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = (
+        client.table("nlf_jobs")
+        .select("*")
+        .eq("user_id", user_id)
+        .eq("video_id", video_id)
+        .limit(1)
+        .execute()
+    )
+    rows = resp.data or []
+    return rows[0] if rows else None
+
+
+def nlf_worker_last_seen(*, token: str) -> str | None:
+    """Call the ``nlf_worker_last_seen()`` RPC; ``None`` when the worker has never checked in.
+
+    Used to compute ``NlfJob.worker_online`` (within the last 10 minutes) so a queued job's status
+    page can tell "waiting for the worker" from "the worker looks dead". A patchable seam — the
+    unit tests replace ``_user_client``.
+    """
+    client = _user_client(token)
+    resp = client.rpc("nlf_worker_last_seen").execute()
+    return resp.data or None
 
 
 def persist_analysis(

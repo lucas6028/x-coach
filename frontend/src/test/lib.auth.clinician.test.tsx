@@ -17,13 +17,15 @@ const { mockAuth } = vi.hoisted(() => ({
 }));
 vi.mock("../lib/supabase", () => ({ isSupabaseConfigured: true, supabase: { auth: mockAuth } }));
 
-const { clinicStatus, adminStatus } = vi.hoisted(() => ({
+const { clinicStatus, adminStatus, nlfStatus } = vi.hoisted(() => ({
   clinicStatus: vi.fn(),
-  // AuthProvider probes both roles on the same trigger — a partial mock without this would make
-  // `api.adminStatus()` a TypeError the moment a real session resolves, unrelated to this file.
+  // AuthProvider probes all three flags on the same trigger — a partial mock without these would
+  // make `api.adminStatus()` / `api.nlfStatus()` a TypeError the moment a real session resolves,
+  // unrelated to this file.
   adminStatus: vi.fn().mockResolvedValue({ is_admin: false }),
+  nlfStatus: vi.fn().mockResolvedValue({ enabled: false }),
 }));
-vi.mock("../api", () => ({ api: { clinicStatus, adminStatus } }));
+vi.mock("../api", () => ({ api: { clinicStatus, adminStatus, nlfStatus } }));
 
 import { AuthProvider, useAuth } from "../lib/auth";
 

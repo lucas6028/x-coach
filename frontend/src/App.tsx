@@ -12,6 +12,7 @@ import StudioMobile from "./components/mobile/StudioMobile";
 import KeyMetricsCard from "./components/studio/KeyMetricsCard";
 import PreviousSessionsCard from "./components/studio/PreviousSessionsCard";
 import TipsCard from "./components/studio/TipsCard";
+import Nlf3dPanel from "./components/nlf/Nlf3dPanel";
 import { jobMatchesStudio, useAnalysisJob, type JobPlanSnapshot } from "./lib/analysisJob";
 import { loadAnalysisTier, saveAnalysisTier, type PoseTier } from "./lib/poseTier";
 import { movementLabel, useI18n } from "./lib/i18n";
@@ -523,6 +524,10 @@ export default function App() {
                 <KeyMetricsCard analysis={analysis!} />
                 <TipsCard analysis={analysis!} />
               </div>
+
+              {/* Full-width, not a 4th grid card: the turntable viewer wants its own row. Renders
+                  nothing unless the signed-in user is NLF-enabled and this analysis has an id. */}
+              <Nlf3dPanel analysis={analysis!} onSeek={seek} />
             </div>
 
             {/* One unified "coach chat" column — the grounded fault-card analysis, the knowledge

@@ -90,6 +90,7 @@ const SAMPLE_USERS: AdminUserRow[] = [
     conversations_count: 2,
     is_admin: true,
     is_clinician: false,
+    has_nlf: false,
   },
   {
     id: "u2",
@@ -100,6 +101,7 @@ const SAMPLE_USERS: AdminUserRow[] = [
     conversations_count: 1,
     is_admin: false,
     is_clinician: true,
+    has_nlf: true,
   },
 ];
 
@@ -570,6 +572,45 @@ describe("AdminUsers", () => {
     fireEvent.click(makeClinician);
     await waitFor(() => expect(setClinician).toHaveBeenCalledWith("u1", true));
   });
+
+  it("renders the 3D-view toggle state from has_nlf", async () => {
+    renderAdmin("/admin/users");
+    // u1 (self) is not 3D-enabled yet; u2 already is.
+    expect(await screen.findByRole("button", { name: "Enable 3D view" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Disable 3D view" })).toBeInTheDocument();
+  });
+
+  it("enables 3D view on a user with {enable_nlf: true}", async () => {
+    const setNlf = vi.spyOn(api, "setUserNlf").mockResolvedValue({ ok: true });
+    renderAdmin("/admin/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Enable 3D view" }));
+    await waitFor(() => expect(setNlf).toHaveBeenCalledWith("u1", true));
+  });
+
+  it("disables 3D view on a user with {enable_nlf: false}", async () => {
+    const setNlf = vi.spyOn(api, "setUserNlf").mockResolvedValue({ ok: true });
+    renderAdmin("/admin/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Disable 3D view" }));
+    await waitFor(() => expect(setNlf).toHaveBeenCalledWith("u2", false));
+  });
+
+  it("surfaces an inline row error when the 3D-view toggle fails", async () => {
+    vi.spyOn(api, "setUserNlf").mockRejectedValue(new Error("nope"));
+    renderAdmin("/admin/users");
+    fireEvent.click(await screen.findByRole("button", { name: "Disable 3D view" }));
+    expect(await screen.findByText("Couldn't update this user's role.")).toBeInTheDocument();
+  });
+
+  // Unlike the admin toggle, the signed-in admin's own row is NOT self-guarded for 3D view: the
+  // button stays enabled and the click goes through.
+  it("allows the signed-in admin to toggle 3D view on their own row", async () => {
+    const setNlf = vi.spyOn(api, "setUserNlf").mockResolvedValue({ ok: true });
+    renderAdmin("/admin/users");
+    const enable3d = await screen.findByRole("button", { name: "Enable 3D view" });
+    expect(enable3d).not.toBeDisabled();
+    fireEvent.click(enable3d);
+    await waitFor(() => expect(setNlf).toHaveBeenCalledWith("u1", true));
+  });
 });
 
 describe("Admin settings pages", () => {
@@ -958,6 +999,7 @@ describe("AdminUsers error / empty / toggle-failure", () => {
         conversations_count: 0,
         is_admin: false,
         is_clinician: false,
+        has_nlf: false,
       },
     ];
     vi.spyOn(api, "listAdminUsers").mockResolvedValue({ users: edge });

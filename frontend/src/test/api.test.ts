@@ -210,6 +210,32 @@ describe("api.setUserClinician", () => {
   });
 });
 
+describe("api.setUserNlf", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("PUTs the enable_nlf flag to the per-user role endpoint", async () => {
+    const spy = mockFetch({ ok: true });
+    const result = await api.setUserNlf("u2", true);
+    expect(result).toEqual({ ok: true });
+    expect(spy.mock.calls[0][0]).toBe("/api/admin/users/u2/role");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(init.body as string)).toEqual({ enable_nlf: true });
+  });
+
+  it("can revoke, including on the caller's own row (no self-guard)", async () => {
+    const spy = mockFetch({ ok: true });
+    await api.setUserNlf("u1", false);
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({ enable_nlf: false });
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 500);
+    await expect(api.setUserNlf("u2", true)).rejects.toThrow("500");
+  });
+});
+
 describe("api.videoFileUrl", () => {
   it("returns the correct URL string", () => {
     expect(api.videoFileUrl("vid_001")).toBe("/api/video-file/vid_001");
@@ -278,6 +304,90 @@ describe("api.getStoredAnalysis", () => {
     mockFetch({ id: "a1", result: { video_id: "v1" } });
     await api.getStoredAnalysis("a1");
     expect(fetch).toHaveBeenCalledWith("/api/analyses/a1");
+  });
+});
+
+describe("api.nlfStatus", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("GETs the NLF status endpoint and returns the flag", async () => {
+    mockFetch({ enabled: true });
+    const result = await api.nlfStatus();
+    expect(result).toEqual({ enabled: true });
+    expect(fetch).toHaveBeenCalledWith("/api/nlf/status");
+  });
+
+  it("throws on non-ok responses", async () => {
+    mockFetch({}, false, 401);
+    await expect(api.nlfStatus()).rejects.toThrow("401");
+  });
+});
+
+describe("api.requestNlf", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const SAMPLE_JOB = {
+    status: "queued",
+    worker_online: false,
+    error: null,
+    created_at: "2026-09-28T00:00:00Z",
+    updated_at: "2026-09-28T00:00:00Z",
+    key_frames: [],
+    angles: 24,
+    tile_px: 256,
+    expires_in: 3600,
+  };
+
+  it("POSTs to the analysis's nlf endpoint and returns the job", async () => {
+    const spy = mockFetch(SAMPLE_JOB);
+    const result = await api.requestNlf("a1");
+    expect(result).toEqual(SAMPLE_JOB);
+    expect(spy.mock.calls[0][0]).toBe("/api/analyses/a1/nlf");
+    const init = spy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("POST");
+  });
+
+  it("throws the server detail on a 403 (not enabled)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
+      json: async () => ({ detail: "NLF 3D view is not enabled for this account." }),
+    } as Response);
+    await expect(api.requestNlf("a1")).rejects.toThrow("NLF 3D view is not enabled for this account.");
+  });
+});
+
+describe("api.getNlf", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("GETs the analysis's nlf endpoint and returns the job", async () => {
+    const body = {
+      status: "done",
+      worker_online: true,
+      error: null,
+      created_at: "2026-09-28T00:00:00Z",
+      updated_at: "2026-09-28T00:05:00Z",
+      key_frames: [],
+      angles: 24,
+      tile_px: 256,
+      expires_in: 3600,
+    };
+    mockFetch(body);
+    const result = await api.getNlf("a1");
+    expect(result).toEqual(body);
+    expect(fetch).toHaveBeenCalledWith("/api/analyses/a1/nlf");
+  });
+
+  it("returns null when no job exists yet (404)", async () => {
+    mockFetch({}, false, 404);
+    const result = await api.getNlf("a1");
+    expect(result).toBeNull();
+  });
+
+  it("throws on other non-ok responses", async () => {
+    mockFetch({}, false, 500);
+    await expect(api.getNlf("a1")).rejects.toThrow("500");
   });
 });
 
