@@ -40,6 +40,35 @@ do $$ begin
 end $$;
 
 -- ---------------------------------------------------------------------------------------------
+\echo '  admin grants and revokes ANOTHER user''s role the way PostgREST writes it'
+-- supabase-py upserts with ON CONFLICT DO UPDATE ... RETURNING, and deletes with a WHERE on
+-- user_id. Both need the target row to pass the SELECT policy, not just the write policies.
+:as_a1
+do $$
+declare n int;
+begin
+    with w as (
+        insert into public.user_roles (user_id, role)
+        values ('00000000-0000-0000-0000-0000000000d1', 'clinician')
+        on conflict (user_id, role) do update set role = excluded.role
+        returning 1
+    ) select count(*) into n from w;
+    assert n = 1, 'FAIL: admin could not grant another user a role';
+
+    with w as (
+        delete from public.user_roles
+        where user_id = '00000000-0000-0000-0000-0000000000d1' and role = 'clinician'
+        returning 1
+    ) select count(*) into n from w;
+    assert n = 1, 'FAIL: admin revoke of another user''s role deleted nothing';
+end $$;
+
+:as_d1
+do $$ begin
+    assert (select count(*) from public.user_roles) = 0, 'FAIL: non-admin reads other users'' role rows';
+end $$;
+
+-- ---------------------------------------------------------------------------------------------
 \echo '  patient writes own data; check-ins are append-only'
 :as_b1
 do $$

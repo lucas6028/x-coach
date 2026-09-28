@@ -60,6 +60,21 @@ class FoldConfig:
     threshold_objective: str = "balanced_accuracy"
 
 
+@dataclass(frozen=True)
+class ValidationPredictions:
+    """The validation subject's scores from the checkpoint ``train_one_fold`` keeps.
+
+    Late fusion calibrates each branch on exactly these (see
+    ``notes/rehab24_nlf_videomae_late_fusion_validation_plan.md``). ``sample_ids`` is
+    the order the probabilities were scored in, so a consumer aligns by id, never by
+    position.
+    """
+
+    sample_ids: list[str]
+    probabilities: np.ndarray
+    labels: np.ndarray
+
+
 def subjects_to_samples(manifest_path: Path) -> dict[str, list[str]]:
     grouped: dict[str, list[str]] = defaultdict(list)
     for row in load_manifest(manifest_path):
@@ -87,8 +102,16 @@ def train_one_fold(
     config: FoldConfig,
     device: torch.device,
     seed: int,
-) -> tuple[float, np.ndarray, np.ndarray]:
-    """Train one fold; return (selected_threshold, test_probabilities, test_labels)."""
+    return_validation: bool = False,
+) -> tuple[float, np.ndarray, np.ndarray] | tuple[float, np.ndarray, np.ndarray, ValidationPredictions]:
+    """Train one fold; return (selected_threshold, test_probabilities, test_labels).
+
+    With ``return_validation`` a fourth element carries the validation subject's
+    probabilities from the *kept* checkpoint. They are stashed at the epoch whose state
+    is saved, because the array left over after the loop belongs to the last epoch
+    trained, which early stopping has by then moved past. Stashing draws no random
+    number and scores nothing extra, so the test probabilities are the same either way.
+    """
     set_seed(seed)
     train_samples = build_samples(feature_dir, train_ids, labels)
     val_samples = build_samples(feature_dir, val_ids, labels)
@@ -112,6 +135,7 @@ def train_one_fold(
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
     best_state = None
+    best_validation: ValidationPredictions | None = None
     best_val_score = -1.0
     best_threshold = 0.5
     epochs_without_improvement = 0
@@ -126,13 +150,14 @@ def train_one_fold(
             loss.backward()
             optimizer.step()
 
-        _, val_prob, val_labels = collect_sample_predictions(model, val_samples, config.batch_size, device, normalization=normalization)
+        val_sample_ids, val_prob, val_labels = collect_sample_predictions(model, val_samples, config.batch_size, device, normalization=normalization)
         val_threshold, val_metrics = find_best_threshold(val_prob, val_labels, objective=config.threshold_objective)
 
         if val_metrics[config.threshold_objective] > best_val_score:
             best_val_score = val_metrics[config.threshold_objective]
             best_threshold = float(val_threshold)
             best_state = copy.deepcopy(model.state_dict())
+            best_validation = ValidationPredictions(list(val_sample_ids), val_prob.copy(), val_labels.copy())
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
@@ -142,7 +167,12 @@ def train_one_fold(
     if best_state is not None:
         model.load_state_dict(best_state)
     _, test_prob, test_labels = collect_sample_predictions(model, test_samples, config.batch_size, device, normalization=normalization)
-    return best_threshold, test_prob, test_labels
+    if not return_validation:
+        return best_threshold, test_prob, test_labels
+    if best_validation is None:  # zero epochs: no checkpoint was ever kept, so score the model as it stands
+        val_sample_ids, val_prob, val_labels = collect_sample_predictions(model, val_samples, config.batch_size, device, normalization=normalization)
+        best_validation = ValidationPredictions(list(val_sample_ids), val_prob, val_labels)
+    return best_threshold, test_prob, test_labels, best_validation
 
 
 def summarize(values: list[float]) -> dict[str, float]:
