@@ -838,6 +838,16 @@ async function sendJSON<T>(url: string, method: string, body?: unknown): Promise
   return (await res.json()) as T;
 }
 
+/**
+ * The signed-in caller's upload storage: what they use against the quota the analyze route
+ * enforces. Raw bytes, unclamped — an admin can lower the quota below existing usage, so
+ * `used_bytes > quota_bytes` is a real state the UI must render.
+ */
+export interface StorageUsage {
+  used_bytes: number;
+  quota_bytes: number;
+}
+
 export type UploadLimitCode = "upload_too_large" | "storage_quota_exceeded";
 
 /**
@@ -1072,6 +1082,9 @@ export const api = {
 
   // One saved analysis row, including the full `result` for replay (requires a session).
   getStoredAnalysis: (id: string) => getJSON<StoredAnalysis>(`/api/analyses/${id}`),
+
+  // The caller's storage usage vs. their quota (requires a session). Auth header auto-attached.
+  getStorageUsage: () => getJSON<StorageUsage>("/api/storage/usage"),
 
   // Delete all of the caller's saved analyses (requires a session). Returns the count removed.
   async deleteAnalyses(): Promise<{ deleted: number }> {

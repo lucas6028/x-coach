@@ -10,6 +10,7 @@ import { useAuth } from "../lib/auth";
 import Settings from "../pages/Settings";
 
 const mockUseAuth = vi.mocked(useAuth);
+const MB = 1024 * 1024;
 
 function renderSettings() {
   return render(
@@ -40,6 +41,9 @@ beforeEach(() => {
     chat_models: ["deepseek/deepseek-v4-flash", "minimax/minimax-m3"],
     chat_default: "deepseek/deepseek-v4-flash",
   });
+  // The Account pane fetches storage usage on mount; without a default every test that opens it
+  // would reach for a real fetch.
+  vi.spyOn(api, "getStorageUsage").mockResolvedValue({ used_bytes: 0, quota_bytes: 500 * MB });
   mockUseAuth.mockReturnValue({
     user: {
       email: "ada@x.com",
@@ -247,5 +251,95 @@ describe("Settings — account", () => {
     await userEvent.click(screen.getByRole("button", { name: /clear all/i }));
     await userEvent.click(screen.getByRole("button", { name: /yes, delete everything/i }));
     expect(await screen.findByText(/Couldn't clear your analyses/i)).toBeInTheDocument();
+  });
+});
+
+describe("Settings — storage usage", () => {
+  const openAccountWith = async (used: number, quota: number) => {
+    vi.spyOn(api, "getStorageUsage").mockResolvedValue({ used_bytes: used, quota_bytes: quota });
+    renderSettings();
+    await openPane(/^Account$/);
+  };
+  const barFill = () => screen.getByRole("progressbar", { name: "Storage" }).firstElementChild!;
+
+  it("shows used, quota and free space, with a bar at the used share", async () => {
+    await openAccountWith(125 * MB, 500 * MB);
+    expect(await screen.findByText("125 MB of 500 MB used · 375 MB free")).toBeInTheDocument();
+    const bar = screen.getByRole("progressbar", { name: "Storage" });
+    expect(bar).toHaveAttribute("aria-valuenow", "25");
+    expect(barFill()).toHaveClass("bg-primary");
+    expect(screen.queryByText(/used all your storage/i)).not.toBeInTheDocument();
+  });
+
+  it("turns the bar red when nearly full, before the quota is actually reached", async () => {
+    await openAccountWith(460 * MB, 500 * MB);
+    await screen.findByText("460 MB of 500 MB used · 40 MB free");
+    expect(barFill()).toHaveClass("bg-danger");
+    expect(screen.queryByText(/used all your storage/i)).not.toBeInTheDocument();
+  });
+
+  // ON the boundary: the analyze route refuses any non-empty upload once used == quota, so the
+  // page must already call it full there — `>` in place of `>=` would miss exactly this case.
+  it("says the storage is full when usage exactly meets the quota", async () => {
+    await openAccountWith(500 * MB, 500 * MB);
+    expect(await screen.findByText(/used all your storage/i)).toBeInTheDocument();
+  });
+
+  // An admin can lower the quota below what a user already stores. The page reports the real
+  // usage but clamps the bar and never shows negative free space.
+  it("clamps the bar and free space when usage is over a lowered quota", async () => {
+    await openAccountWith(600 * MB, 500 * MB);
+    expect(await screen.findByText("600 MB of 500 MB used · 0 MB free")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "Storage" })).toHaveAttribute("aria-valuenow", "100");
+    expect(barFill()).toHaveStyle({ width: "100%" });
+    expect(screen.getByText(/used all your storage/i)).toBeInTheDocument();
+  });
+
+  it("shows a loading line until the usage arrives", async () => {
+    vi.spyOn(api, "getStorageUsage").mockReturnValue(new Promise(() => {}));
+    renderSettings();
+    await openPane(/^Account$/);
+    expect(screen.getByText("Checking your storage…")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: "Storage" })).not.toBeInTheDocument();
+  });
+
+  it("says so when the usage cannot be loaded", async () => {
+    vi.spyOn(api, "getStorageUsage").mockRejectedValue(new Error("503 Service Unavailable"));
+    renderSettings();
+    await openPane(/^Account$/);
+    expect(await screen.findByText("Couldn't load your storage usage.")).toBeInTheDocument();
+    expect(screen.queryByRole("progressbar", { name: "Storage" })).not.toBeInTheDocument();
+  });
+
+  it("refreshes the usage after clearing analyses frees space", async () => {
+    const usage = vi
+      .spyOn(api, "getStorageUsage")
+      .mockResolvedValueOnce({ used_bytes: 300 * MB, quota_bytes: 500 * MB })
+      .mockResolvedValueOnce({ used_bytes: 0, quota_bytes: 500 * MB });
+    vi.spyOn(api, "deleteAnalyses").mockResolvedValue({ deleted: 2 });
+    renderSettings();
+    await openPane(/^Account$/);
+    await screen.findByText("300 MB of 500 MB used · 200 MB free");
+
+    await userEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    await userEvent.click(screen.getByRole("button", { name: /yes, delete everything/i }));
+
+    expect(await screen.findByText("0 MB of 500 MB used · 500 MB free")).toBeInTheDocument();
+    expect(usage).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refetch when the clear fails", async () => {
+    const usage = vi
+      .spyOn(api, "getStorageUsage")
+      .mockResolvedValue({ used_bytes: 300 * MB, quota_bytes: 500 * MB });
+    vi.spyOn(api, "deleteAnalyses").mockRejectedValue(new Error("500 boom"));
+    renderSettings();
+    await openPane(/^Account$/);
+    await screen.findByText("300 MB of 500 MB used · 200 MB free");
+
+    await userEvent.click(screen.getByRole("button", { name: /clear all/i }));
+    await userEvent.click(screen.getByRole("button", { name: /yes, delete everything/i }));
+    await screen.findByText(/Couldn't clear your analyses/i);
+    expect(usage).toHaveBeenCalledOnce();
   });
 });

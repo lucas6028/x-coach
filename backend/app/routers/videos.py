@@ -1,13 +1,18 @@
-"""Library listing, precomputed analysis, pose overlay, and video URL endpoints."""
+"""Library listing, precomputed analysis, pose overlay, video URL, and storage-usage endpoints."""
 
 from __future__ import annotations
+
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
+from backend.app import settings
 from backend.app.auth import CurrentUser, get_current_user
 from backend.app.services import analysis, library, storage, store
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["videos"])
 
@@ -120,6 +125,28 @@ def get_upload_urls_batch(
     except storage.StorageError as exc:
         raise HTTPException(status_code=503, detail="Storage is unavailable.") from exc
     return {"items": items, "expires_in": storage.DEFAULT_URL_TTL}
+
+
+@router.get("/storage/usage")
+def get_storage_usage(user: CurrentUser = Depends(get_current_user)) -> dict:
+    """How much of the upload storage quota the CALLER has used, for the settings page.
+
+    Both figures are the ones the analyze route enforces, so what the page shows is what the next
+    upload is checked against: ``used_bytes`` is the sum of the caller's ``videos.size_bytes``
+    (read with their own JWT, so RLS scopes it), not a listing of the bucket. That means rows
+    predating the column count as 0, and anonymous uploads count against no one.
+
+    A failed usage read is a 503, never a 0: reporting "nothing used" to a user who is at quota
+    would promise space the next upload will then be refused — the same fail-open direction the
+    quota check in ``analyze`` refuses.
+    """
+    quota = settings.user_storage_quota_bytes()
+    try:
+        used = store.get_storage_used(token=user.token, user_id=user.id)
+    except Exception as exc:  # noqa: BLE001 — any failure means "unknown", never "zero"
+        logger.exception("Failed to read storage usage for %s", user.id)
+        raise HTTPException(status_code=503, detail="Storage usage is unavailable.") from exc
+    return {"used_bytes": used, "quota_bytes": quota}
 
 
 @router.get("/local-object/{key:path}")

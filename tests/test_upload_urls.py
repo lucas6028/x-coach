@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.main import app
 from backend.app.routers import videos as videos_router
-from backend.app.services import storage, store
+from backend.app.services import runtime_config, storage, store
 
 
 class _User:
@@ -100,6 +100,42 @@ class UploadUrlBatchTests(unittest.TestCase):
         self.assertEqual(body["items"], {})
 
 
+class StorageUsageTests(unittest.TestCase):
+    """``GET /api/storage/usage`` reports the same two numbers the analyze route's quota check uses."""
+
+    def setUp(self) -> None:
+        # KEEP OFFLINE: the quota getter reads the admin overrides, and get_overrides() does a REAL
+        # Supabase round trip whenever auth is configured. A NON-default quota, so a handler that
+        # hardcoded 500 MB instead of reading the setting would fail here.
+        self.quota = 64 * 1024 * 1024
+        patcher = mock.patch.object(
+            runtime_config, "get_overrides", return_value={"user_storage_quota_bytes": self.quota}
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_reports_the_callers_usage_against_the_effective_quota(self) -> None:
+        with mock.patch.object(store, "get_storage_used", return_value=12345) as used:
+            body = videos_router.get_storage_usage(user=_User())
+        self.assertEqual(body, {"used_bytes": 12345, "quota_bytes": self.quota})
+        # Scoped to the caller: their own JWT (RLS) and their own id (the belt-and-braces filter).
+        used.assert_called_once_with(token="tok", user_id="u1")
+
+    def test_usage_over_a_lowered_quota_is_reported_as_is(self) -> None:
+        """An admin can lower the quota below what a user already stores. The endpoint reports the
+        raw figures; clamping the bar is the page's job, and hiding the overage would misstate it."""
+        with mock.patch.object(store, "get_storage_used", return_value=self.quota + 1):
+            body = videos_router.get_storage_usage(user=_User())
+        self.assertEqual(body["used_bytes"], self.quota + 1)
+
+    def test_a_failing_usage_read_is_a_503_not_zero(self) -> None:
+        """Reporting 0 on a failed read would tell a user at quota they have room to upload."""
+        with mock.patch.object(store, "get_storage_used", side_effect=RuntimeError("db down")):
+            with self.assertRaises(HTTPException) as ctx:
+                videos_router.get_storage_usage(user=_User())
+        self.assertEqual(ctx.exception.status_code, 503)
+
+
 class UploadUrlAuthTests(unittest.TestCase):
     """These two endpoints REPLACE the IDOR this branch closes, so their auth is the whole
     security thesis -- and every other test in this file calls the handlers as plain Python
@@ -126,6 +162,12 @@ class UploadUrlAuthTests(unittest.TestCase):
         # stand in for the 401 this test exists to pin, depending on validation order.
         resp = self.client.post("/api/uploads/urls", json={"video_ids": ["upload_a"]})
         self.assertEqual(resp.status_code, 401, resp.text)
+
+    def test_storage_usage_requires_auth(self) -> None:
+        with mock.patch.object(store, "get_storage_used") as used:
+            resp = self.client.get("/api/storage/usage")
+        self.assertEqual(resp.status_code, 401, resp.text)
+        used.assert_not_called()
 
     def test_neither_endpoint_reaches_the_database_without_auth(self) -> None:
         """401 must come from the dependency, before any storage-key lookup runs -- otherwise the
