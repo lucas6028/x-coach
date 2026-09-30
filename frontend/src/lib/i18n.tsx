@@ -1265,7 +1265,8 @@ const en: Dict = {
 
   // Admin panel P3 — user oversight
   "admin.users.title": "Users",
-  "admin.users.desc": "Read-only activity overview. Assign or revoke admin and clinician access per user.",
+  "admin.users.desc":
+    "Read-only activity overview. Assign or revoke admin, clinician, and 3D-view access per user.",
   "admin.users.loading": "Loading users…",
   "admin.users.loadError": "Couldn't load the users list.",
   "admin.users.empty": "No users yet.",
@@ -1279,6 +1280,8 @@ const en: Dict = {
   "admin.users.revokeAdmin": "Revoke admin",
   "admin.users.makeClinician": "Make clinician",
   "admin.users.revokeClinician": "Revoke clinician",
+  "admin.users.enable3d": "Enable 3D view",
+  "admin.users.disable3d": "Disable 3D view",
   "admin.users.you": "You",
   "admin.users.never": "Never",
   "admin.users.updateError": "Couldn't update this user's role.",
@@ -1391,6 +1394,28 @@ const en: Dict = {
   "web.over.replay": "Play again",
   "web.board.title": "Top web slingers",
   "web.board.empty": "No scores yet. Be the first hero on the board.",
+
+  // NLF "3D view" panel — a pre-rendered turntable of the analysed clip, produced later by a home
+  // GPU worker (see components/nlf/).
+  "nlf.title": "3D view",
+  "nlf.loading": "Loading 3D view…",
+  "nlf.get": "Get 3D view",
+  "nlf.privacy": "Your clip is sent to the research team's processing PC; the copy there is deleted after processing.",
+  "nlf.queued": "Waiting for the processing PC",
+  "nlf.workerOffline": "The processing PC is offline — this will start when it comes back on.",
+  "nlf.claimed": "Processing…",
+  "nlf.failedGeneric": "The 3D render failed.",
+  "nlf.tryAgain": "Try again",
+  "nlf.refresh": "Refresh",
+  "nlf.apiError": "Couldn't reach the 3D view service ({detail}).",
+  "nlf.sideView": "Side view",
+  "nlf.frontView": "Front view",
+  "nlf.viewerAlt": "3D turntable view — drag, or use the left/right arrow keys, to rotate",
+  "nlf.caption": "The two faint lines mark the hip and knee joint-centre heights.",
+  "nlf.keyframe.repBottom": "Rep {n} · lowest point",
+  "nlf.keyframe.repBottomUnknown": "Lowest point",
+  "nlf.keyframe.faultPeak": "{fault} · peak",
+  "nlf.keyframe.faultUnknown": "Fault peak",
 };
 
 const zhHant: Dict = {
@@ -2587,7 +2612,7 @@ const zhHant: Dict = {
 
   // 後台管理 P3 — 使用者監看
   "admin.users.title": "使用者",
-  "admin.users.desc": "唯讀活動總覽。可逐一指派或取消管理員與治療師權限。",
+  "admin.users.desc": "唯讀活動總覽。可逐一指派或取消管理員、治療師與 3D 檢視權限。",
   "admin.users.loading": "載入使用者中…",
   "admin.users.loadError": "無法載入使用者清單。",
   "admin.users.empty": "尚無使用者。",
@@ -2601,6 +2626,8 @@ const zhHant: Dict = {
   "admin.users.revokeAdmin": "取消管理員",
   "admin.users.makeClinician": "設為治療師",
   "admin.users.revokeClinician": "取消治療師",
+  "admin.users.enable3d": "啟用 3D 檢視",
+  "admin.users.disable3d": "停用 3D 檢視",
   "admin.users.you": "你",
   "admin.users.never": "從未",
   "admin.users.updateError": "無法更新這位使用者的角色。",
@@ -2683,6 +2710,27 @@ const zhHant: Dict = {
   "ninja.board.title": "切水果排行榜",
   "ninja.board.empty": "還沒有紀錄——搶第一個吧！",
   "ninja.board.you": "你",
+
+  // NLF「3D 檢視」面板
+  "nlf.title": "3D 檢視",
+  "nlf.loading": "3D 檢視載入中…",
+  "nlf.get": "取得 3D 檢視",
+  "nlf.privacy": "影片會傳送到研究團隊的處理電腦，處理完成後即刪除該電腦上的副本。",
+  "nlf.queued": "正在等待處理用電腦",
+  "nlf.workerOffline": "處理用電腦目前離線——電腦重新上線後才會開始處理。",
+  "nlf.claimed": "處理中…",
+  "nlf.failedGeneric": "3D 渲染失敗。",
+  "nlf.tryAgain": "重試",
+  "nlf.refresh": "重新整理",
+  "nlf.apiError": "無法連線到 3D 檢視服務（{detail}）。",
+  "nlf.sideView": "側面",
+  "nlf.frontView": "正面",
+  "nlf.viewerAlt": "3D 旋轉檢視——可拖曳，或按左右方向鍵旋轉",
+  "nlf.caption": "圖中兩條淡線分別標示髖關節與膝關節中心的高度。",
+  "nlf.keyframe.repBottom": "第 {n} 次 · 最低點",
+  "nlf.keyframe.repBottomUnknown": "最低點",
+  "nlf.keyframe.faultPeak": "{fault} · 高峰時刻",
+  "nlf.keyframe.faultUnknown": "錯誤高峰時刻",
 };
 
 // Exported so the suite can enforce key-set PARITY between the locales. Both dicts are typed

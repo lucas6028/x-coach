@@ -269,18 +269,22 @@ def list_admin_users(user: CurrentUser = Depends(get_admin_user)) -> dict:
 
 class RoleUpdate(BaseModel):
     """Body for the role toggle. ``make_admin`` True/False grants/revokes admin; ``make_clinician``
-    does the same for the clinician role (the clinic migration's second role). Both are optional so
+    does the same for the clinician role (the clinic migration's second role); ``enable_nlf`` does
+    the same for the 'nlf_user' role (opts a user into the NLF 3D view). All three are optional so
     the ORIGINAL ``{make_admin}``-only request shape keeps working unmodified, but at least one must
     be given -- an empty body changes nothing and is a client bug, not a silent no-op.
     """
 
     make_admin: bool | None = None
     make_clinician: bool | None = None
+    enable_nlf: bool | None = None
 
     @model_validator(mode="after")
     def _at_least_one_role(self) -> "RoleUpdate":
-        if self.make_admin is None and self.make_clinician is None:
-            raise ValueError("At least one of make_admin or make_clinician is required.")
+        if self.make_admin is None and self.make_clinician is None and self.enable_nlf is None:
+            raise ValueError(
+                "At least one of make_admin, make_clinician or enable_nlf is required."
+            )
         return self
 
 
@@ -321,6 +325,8 @@ def set_admin_role(
         store.set_clinician_role(
             token=user.token, user_id=user_id, make_clinician=body.make_clinician
         )
+    if body.enable_nlf is not None:
+        store.set_nlf_access(token=user.token, user_id=user_id, enabled=body.enable_nlf)
     return {"ok": True}
 
 

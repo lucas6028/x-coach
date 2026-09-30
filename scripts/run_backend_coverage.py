@@ -74,6 +74,9 @@ _DEFAULT_TESTS = [
     # other entry point in this list.
     "tests/test_line_push.py",
     "tests/test_jobs_daily.py",
+    # NLF 3D view (feat/nlf-3d-view): routers/nlf.py and its store.py seams have no other entry
+    # point in this list -- leaving it out drops routers/nlf.py to 0% and sinks the gate.
+    "tests/test_nlf_api.py",
 ]
 # Package(s) to measure coverage for.
 _SOURCE = ["backend.app"]

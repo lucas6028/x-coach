@@ -22,9 +22,9 @@ export default function AdminUsers() {
   const [rows, setRows] = useState<AdminUserRow[] | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<{ id: string; kind: "admin" | "clinician"; message: string } | null>(
-    null
-  );
+  const [rowError, setRowError] = useState<
+    { id: string; kind: "admin" | "clinician" | "nlf"; message: string } | null
+  >(null);
 
   const load = () => {
     setStatus("loading");
@@ -64,6 +64,21 @@ export default function AdminUsers() {
       setRows(res.users);
     } catch (e) {
       setRowError({ id: row.id, kind: "clinician", message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setPendingId(null);
+    }
+  };
+
+  // Same shape as onToggleClinician: no self-guard, opt-in per-user feature flag rather than a role.
+  const onToggleNlf = async (row: AdminUserRow) => {
+    setPendingId(row.id);
+    setRowError(null);
+    try {
+      await api.setUserNlf(row.id, !row.has_nlf);
+      const res = await api.listAdminUsers();
+      setRows(res.users);
+    } catch (e) {
+      setRowError({ id: row.id, kind: "nlf", message: e instanceof Error ? e.message : String(e) });
     } finally {
       setPendingId(null);
     }
@@ -152,11 +167,28 @@ export default function AdminUsers() {
                           {row.is_clinician ? <CheckCircle size={14} weight="fill" /> : <XCircle size={14} />}
                           {row.is_clinician ? t("admin.users.revokeClinician") : t("admin.users.makeClinician")}
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => void onToggleNlf(row)}
+                          disabled={pending}
+                          aria-label={row.has_nlf ? t("admin.users.disable3d") : t("admin.users.enable3d")}
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                            row.has_nlf
+                              ? "border-secondary/40 bg-secondary/10 text-secondary hover:bg-secondary/20"
+                              : "border-border-dark bg-content/[0.02] text-faint hover:bg-content/[0.05]"
+                          }`}
+                        >
+                          {row.has_nlf ? <CheckCircle size={14} weight="fill" /> : <XCircle size={14} />}
+                          {row.has_nlf ? t("admin.users.disable3d") : t("admin.users.enable3d")}
+                        </button>
                       </div>
                       {rowError?.id === row.id && rowError.kind === "admin" && (
                         <p className="mt-1 text-[11px] text-danger">{t("admin.users.updateError")}</p>
                       )}
                       {rowError?.id === row.id && rowError.kind === "clinician" && (
+                        <p className="mt-1 text-[11px] text-danger">{t("admin.users.updateError")}</p>
+                      )}
+                      {rowError?.id === row.id && rowError.kind === "nlf" && (
                         <p className="mt-1 text-[11px] text-danger">{t("admin.users.updateError")}</p>
                       )}
                     </td>

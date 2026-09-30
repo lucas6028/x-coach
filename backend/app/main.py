@@ -30,6 +30,7 @@ from backend.app.routers import (
     knowledge,
     line_webhook,
     movements,
+    nlf,
     plans,
     videos,
 )
@@ -101,6 +102,7 @@ app.include_router(clinic.router)
 app.include_router(care.router)
 app.include_router(checkins.router)
 app.include_router(jobs.router)
+app.include_router(nlf.router)
 
 
 @app.get("/api/health", tags=["meta"])
