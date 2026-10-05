@@ -48,6 +48,11 @@ interface AuthValue {
   clinicianState: "loading" | "ready" | "error";
   /** Re-run the clinician-role probe for the current user. No-op when logged out. */
   refreshClinician: () => void;
+  /** Whether the signed-in user is enabled for the NLF 3D view (false when logged out). Probed
+   *  once per session, mirroring `isAdmin`/`isClinician` — UX gating only, the server re-checks
+   *  on every NLF endpoint call. No loading state or manual refresh is exposed: nothing today
+   *  needs to retry a failed probe short of a full reload. */
+  canUse3d: boolean;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   /** Returns whether the account still needs email confirmation (no session yet). */
   signUpWithPassword: (email: string, password: string) => Promise<{ needsConfirmation: boolean }>;
@@ -163,6 +168,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshClinician();
   }, [refreshClinician]);
+
+  // Same probe shape as isAdmin/isClinician (monotonic probe id, reset on user change, false on
+  // error or logged-out) but with no exposed state/refresh — canUse3d is a plain UX gate today.
+  const [canUse3d, setCanUse3d] = useState(false);
+  const probeIdRefNlf = useRef(0);
+  useEffect(() => {
+    if (!userId) {
+      setCanUse3d(false);
+      return;
+    }
+    const probeId = ++probeIdRefNlf.current;
+    api
+      .nlfStatus()
+      .then((res) => {
+        if (probeId !== probeIdRefNlf.current) return;
+        setCanUse3d(res.enabled);
+      })
+      .catch(() => {
+        if (probeId !== probeIdRefNlf.current) return;
+        setCanUse3d(false);
+      });
+  }, [userId]);
 
   const signInWithPassword = useCallback(async (email: string, password: string) => {
     const { error } = await requireClient().auth.signInWithPassword({ email, password });
@@ -313,6 +340,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isClinician,
       clinicianState,
       refreshClinician,
+      canUse3d,
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,
@@ -329,6 +357,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isClinician,
       clinicianState,
       refreshClinician,
+      canUse3d,
       signInWithPassword,
       signUpWithPassword,
       signInWithGoogle,

@@ -18,6 +18,7 @@ import { validFrameStat, wasMeasured } from "../../lib/quality";
 import CoachTray from "../CoachTray";
 import PreviousSessionsCard from "../studio/PreviousSessionsCard";
 import { LumenAvatar } from "../LumenLoader";
+import Nlf3dPanel from "../nlf/Nlf3dPanel";
 import MobileVideoCard from "./MobileVideoCard";
 
 interface Props {
@@ -234,6 +235,11 @@ export default function StudioMobile({
           </div>
         )}
       </div>
+
+      {/* Own card, outside any Row: Row only renders its children while open (see above), which
+          would block the panel's own polling/visibility effects from ever mounting. Renders
+          nothing unless the signed-in user is NLF-enabled and this analysis has an id. */}
+      <Nlf3dPanel analysis={analysis} onSeek={onSeek} />
 
       {/* Four disclosure rows, expanding in place. */}
       <div className="glass-panel overflow-hidden rounded-[18px]">

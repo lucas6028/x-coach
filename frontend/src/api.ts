@@ -385,6 +385,34 @@ export interface StoredAnalysis {
   result: Analysis;
 }
 
+// ---- NLF 3D view (selected users only; enabled per user by an admin) ----------------------
+
+// One key frame from a finished NLF turntable render: a rep-bottom or fault-peak moment, with a
+// presigned URL to its rendered angle strip. Only ever populated for a `done` job (see NlfJob).
+export interface NlfKeyFrame {
+  t_s: number;
+  kind: "rep_bottom" | "fault_peak";
+  fault_ids: string[];
+  rep_index: number | null;
+  strip_url: string;
+}
+
+// The state of one analysis's NLF 3D-view render (GET/POST /api/analyses/{id}/nlf). `worker_online`
+// reflects whether the home-GPU worker has checked in recently, not whether THIS job is progressing
+// — a `queued` job with a dead worker is stuck, which a later result-panel UI can surface from this
+// flag. `key_frames` is only ever populated once `status` is "done".
+export interface NlfJob {
+  status: "queued" | "claimed" | "done" | "failed";
+  worker_online: boolean;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  key_frames: NlfKeyFrame[];
+  angles: number;
+  tile_px: number;
+  expires_in: number;
+}
+
 // ---- Conversational coaching (LLM chat, grounded in an analysis) --------------------------
 
 // One provenance entry under a tool call. `kind` is a corpus source_type for rag_search but the
@@ -633,6 +661,7 @@ export interface AdminUserRow {
   conversations_count: number;
   is_admin: boolean;
   is_clinician: boolean;
+  has_nlf: boolean;
 }
 export interface AdminUsersResponse {
   users: AdminUserRow[];
@@ -1016,6 +1045,18 @@ export const api = {
     return (await res.json()) as { ok: boolean };
   },
 
+  // Grant/revoke another user's NLF 3D-view access (admin-only). Like clinician, no self-guard.
+  async setUserNlf(userId: string, enabled: boolean): Promise<{ ok: boolean }> {
+    const url = `/api/admin/users/${encodeURIComponent(userId)}/role`;
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...(await authHeader()) },
+      body: JSON.stringify({ enable_nlf: enabled }),
+    });
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText} for ${url}`);
+    return (await res.json()) as { ok: boolean };
+  },
+
   // The movements the pipeline can actually analyse, derived server-side from the detector
   // registry. Backs the /movements cards and the studio selector.
   getMovements: () =>
@@ -1085,6 +1126,29 @@ export const api = {
 
   // The caller's storage usage vs. their quota (requires a session). Auth header auto-attached.
   getStorageUsage: () => getJSON<StorageUsage>("/api/storage/usage"),
+
+  // Whether the signed-in caller may request the NLF 3D view (UX gating; the server re-checks on
+  // every /api/analyses/{id}/nlf call). Any signed-in user may ask their own flag, same split as
+  // `adminStatus`/`clinicStatus`.
+  nlfStatus: () => getJSON<{ enabled: boolean }>("/api/nlf/status"),
+
+  // Request (or re-request) a 3D turntable render for one of the caller's own analyses. 403 if the
+  // caller isn't NLF-enabled; 404 if the analysis isn't theirs — both surface as a thrown Error
+  // carrying the server's `detail` text (via sendJSON), same as every other plan/care mutation.
+  requestNlf: (analysisId: string) =>
+    sendJSON<NlfJob>(`/api/analyses/${encodeURIComponent(analysisId)}/nlf`, "POST"),
+
+  // Poll the caller's NLF job for one analysis. 404 means "no job requested yet" — a normal,
+  // expected state (not an error) — so this returns `null` for it instead of throwing; any other
+  // non-ok status still throws via getJSON.
+  async getNlf(analysisId: string): Promise<NlfJob | null> {
+    try {
+      return await getJSON<NlfJob>(`/api/analyses/${encodeURIComponent(analysisId)}/nlf`);
+    } catch (e) {
+      if (e instanceof Error && e.message.startsWith("404")) return null;
+      throw e;
+    }
+  },
 
   // Delete all of the caller's saved analyses (requires a session). Returns the count removed.
   async deleteAnalyses(): Promise<{ deleted: number }> {
