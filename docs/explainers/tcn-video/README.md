@@ -6,8 +6,9 @@ library 3Blue1Brown uses). Narration appears as captions along the bottom of the
 frame, and as an ElevenLabs voice-over once the clips exist (see
 [Narration](#narration-elevenlabs)). Without the clips, the video renders silent.
 
-Output: `tcn-explained.mp4` (1920×1080, 30 fps, 11:16, about 33 MB). Git doesn't track
-the MP4 (see `.gitignore`); run `./render.sh` to build it.
+Output: `tcn-explained.mp4` (1920×1080, 30 fps; 12:21 and about 46 MB with the
+narration, 11:16 and about 33 MB without). Git doesn't track the MP4 (see
+`.gitignore`); run `./render.sh` to build it.
 
 ## Sources
 

@@ -43,6 +43,10 @@ has_audio() {
   [[ -n "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$1")" ]]
 }
 
+video_seconds() {
+  ffprobe -v error -select_streams v -show_entries stream=duration -of csv=p=0 "$1"
+}
+
 clips=()
 narrated=false
 for scene in "${SCENES[@]}"; do
@@ -58,12 +62,21 @@ done
 LIST="$MEDIA/concat.txt"
 : >"$LIST"
 for clip in "${clips[@]}"; do
-  # With narration, every clip needs an audio track or the joined audio drifts;
-  # a scene with no generated lines gets silence (Manim writes 48 kHz stereo AAC).
-  if $narrated && ! has_audio "$clip"; then
-    padded="${clip%.mp4}.silent-audio.mp4"
-    ffmpeg -y -loglevel error -i "$clip" -f lavfi -i anullsrc=r=48000:cl=stereo \
-      -shortest -c:v copy -c:a aac "$padded"
+  # With narration, every clip needs audio that spans its whole video, or the
+  # joined audio has holes that some players close up, pulling later lines
+  # early. Manim's track stops when the scene's last line does, so it gets
+  # padded with silence; a scene with no generated lines gets silence
+  # throughout (Manim writes 48 kHz stereo AAC).
+  if $narrated; then
+    padded="${clip%.mp4}.padded.mp4"
+    len=$(video_seconds "$clip")
+    if has_audio "$clip"; then
+      ffmpeg -y -loglevel error -i "$clip" -af "apad=whole_dur=$len" \
+        -t "$len" -c:v copy -c:a aac "$padded"
+    else
+      ffmpeg -y -loglevel error -i "$clip" -f lavfi -i anullsrc=r=48000:cl=stereo \
+        -t "$len" -c:v copy -c:a aac "$padded"
+    fi
     clip=$padded
   fi
   echo "file '$clip'" >>"$LIST"
