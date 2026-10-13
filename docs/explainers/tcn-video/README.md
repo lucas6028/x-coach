@@ -70,7 +70,9 @@ caption like `(k − 1)·d` is read aloud as "k minus one, times d".
 `narration/manifest.json`. It uses only the Python standard library, so any Python 3.9+
 works; on Windows, from the repo root, run
 `.venv\Scripts\python.exe docs\explainers\tcn-video\tts.py`. It reads
-`ELEVENLABS_API_KEY` from the environment. The voice defaults to
+`ELEVENLABS_API_KEY` from the environment. In a Claude Code cloud environment, a
+network secret for `api.elevenlabs.io` (header `xi-api-key`, no prefix) works
+instead and keeps the key out of the session. The voice defaults to
 `ynTHHllfDmGsZ3G8QJt9` and the model to `eleven_multilingual_v2`.
 
 ```bash

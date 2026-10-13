@@ -13,7 +13,9 @@ Commit the narration/ folder: regenerating it costs credits.
     python tts.py --generate             # everything still missing
     python tts.py --prune                # delete clips the script no longer uses
 
-Needs ELEVENLABS_API_KEY in the environment. Standard library only.
+Reads the API key from ELEVENLABS_API_KEY. In a Claude Code cloud environment,
+a network secret for api.elevenlabs.io (header xi-api-key) works instead.
+Standard library only.
 """
 
 from __future__ import annotations
@@ -97,12 +99,17 @@ def pending(lines: list[str], manifest: dict, voice: str, model: str) -> list[st
     ]
 
 
-def api(path: str, key: str, body: dict | None = None) -> bytes:
+def api(path: str, key: str | None, body: dict | None = None) -> bytes:
+    # With no key, send none: a proxy holding the key (e.g. a Claude Code
+    # network secret) adds it on the way out.
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["xi-api-key"] = key
     req = urllib.request.Request(
         f"{API}{path}",
         data=None if body is None else json.dumps(body).encode(),
         method="GET" if body is None else "POST",
-        headers={"xi-api-key": key, "Content-Type": "application/json"},
+        headers=headers,
     )
     for attempt in range(4):
         try:
@@ -115,10 +122,12 @@ def api(path: str, key: str, body: dict | None = None) -> bytes:
                 time.sleep(2 ** (attempt + 1))
                 continue
             raise RuntimeError(f"HTTP {e.code} from {path}: {detail}") from None
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"can't reach {API}: {e.reason}") from None
     raise AssertionError("unreachable")
 
 
-def credits_left(key: str) -> int | None:
+def credits_left(key: str | None) -> int | None:
     """Remaining character credits, or None if the key may not read the subscription."""
     try:
         sub = json.loads(api("/user/subscription", key))
@@ -129,14 +138,13 @@ def credits_left(key: str) -> int | None:
 
 
 def cost_per_char(key: str | None, model: str) -> float:
-    if key:
-        try:
-            for m in json.loads(api("/models", key)):
-                rate = (m.get("model_rates") or {}).get("character_cost_multiplier")
-                if m.get("model_id") == model and rate is not None:
-                    return float(rate)
-        except RuntimeError as e:
-            print(f"note: couldn't read the model list ({e})")
+    try:
+        for m in json.loads(api("/models", key)):
+            rate = (m.get("model_rates") or {}).get("character_cost_multiplier")
+            if m.get("model_id") == model and rate is not None:
+                return float(rate)
+    except RuntimeError as e:
+        print(f"note: couldn't read the model list ({e})")
     return FALLBACK_COST.get(model, 1.0)
 
 
@@ -173,13 +181,13 @@ def main() -> None:
         f"{len(lines)} narration lines; {len(todo)} to generate with {args.model}: "
         f"{chars} characters, about {cost} credits at {rate:g}/character"
     )
-    left = credits_left(key) if key else None
+    left = credits_left(key)
     if left is not None:
         print(f"{left} credits left on your plan")
     if not args.generate or not todo:
         return
-    if not key:
-        sys.exit("ELEVENLABS_API_KEY is not set")
+    if left is None and not key:
+        sys.exit("no API key: set ELEVENLABS_API_KEY, or add a network secret for api.elevenlabs.io")
 
     if left is not None:
         if cost > left:
