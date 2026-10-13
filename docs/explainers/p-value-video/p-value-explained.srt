@@ -1,0 +1,299 @@
+1
+00:00:00,050 --> 00:00:03,143
+A friend hands you a coin, and swears that it's fair.
+
+2
+00:00:03,533 --> 00:00:05,922
+To check, you flip it 100 times.
+
+3
+00:00:06,233 --> 00:00:08,473
+It lands heads 62 times.
+
+4
+00:00:09,633 --> 00:00:10,956
+Is that suspicious?
+
+5
+00:00:11,276 --> 00:00:13,793
+Or is it just the kind of luck you'd expect?
+
+6
+00:00:14,183 --> 00:00:18,002
+The tool statisticians reach for here is called a p-value.
+
+7
+00:00:18,322 --> 00:00:23,079
+It's one of the most used, and most misunderstood, numbers in all of science.
+
+8
+00:00:24,917 --> 00:00:26,069
+Here's the trick.
+
+9
+00:00:26,389 --> 00:00:30,720
+Instead of trying to prove the coin is biased, we play devil's advocate.
+
+10
+00:00:31,117 --> 00:00:38,114
+We assume the boring explanation: the coin really is fair, with exactly a 50% chance of heads.
+
+11
+00:00:38,500 --> 00:00:43,321
+This boring assumption has a name: the null hypothesis, written H₀.
+
+12
+00:00:43,967 --> 00:00:45,759
+Then we ask one question.
+
+13
+00:00:46,079 --> 00:00:50,474
+If the null hypothesis were true, how surprising would our data be?
+
+14
+00:00:52,317 --> 00:00:59,570
+To find out, imagine running the whole experiment again and again, in a world where the coin is perfectly fair.
+
+15
+00:00:59,817 --> 00:01:03,401
+Each run, we flip 100 times and count the heads.
+
+16
+00:01:03,550 --> 00:01:04,659
+53.
+
+17
+00:01:06,300 --> 00:01:07,388
+48.
+
+18
+00:01:09,033 --> 00:01:10,036
+51.
+
+19
+00:01:10,233 --> 00:01:13,646
+Stack up thousands of these runs, and a shape emerges.
+
+20
+00:01:18,133 --> 00:01:20,288
+Most runs land near 50 heads.
+
+21
+00:01:20,608 --> 00:01:23,616
+Results far from 50 get rarer and rarer.
+
+22
+00:01:24,000 --> 00:01:26,005
+This is the null distribution.
+
+23
+00:01:26,325 --> 00:01:29,034
+It's a picture of what pure chance looks like.
+
+24
+00:01:30,683 --> 00:01:32,902
+Now, where does our 62 fall?
+
+25
+00:01:33,049 --> 00:01:34,820
+Way out here, in the tail.
+
+26
+00:01:34,966 --> 00:01:41,899
+The p-value is the fraction of this fair-coin world that produces a result at least as extreme as ours.
+
+27
+00:01:42,283 --> 00:01:46,912
+62 or more heads happens only about 1% of the time.
+
+28
+00:01:47,299 --> 00:01:55,875
+But a coin biased toward tails would be just as suspicious, so we also count the mirror-image tail: 38 heads or fewer.
+
+29
+00:01:56,266 --> 00:01:58,186
+Together, that's about 2%.
+
+30
+00:01:58,506 --> 00:02:01,173
+Our p-value is 0.02.
+
+31
+00:02:03,017 --> 00:02:05,257
+So here's the definition, in full.
+
+32
+00:02:05,400 --> 00:02:13,869
+The p-value is the probability of seeing data at least as extreme as what you observed, assuming the null hypothesis is true.
+
+33
+00:02:14,267 --> 00:02:16,379
+Notice that little vertical bar.
+
+34
+00:02:16,699 --> 00:02:21,158
+It means everything is computed inside the world where H₀ holds.
+
+35
+00:02:21,478 --> 00:02:25,531
+Keep an eye on it, because it's the source of most of the confusion.
+
+36
+00:02:27,367 --> 00:02:33,063
+In practice, people choose a cutoff in advance, called alpha, usually 0.05.
+
+37
+00:02:33,450 --> 00:02:41,813
+If the p-value falls below alpha, the result is called statistically significant, and we reject the null hypothesis.
+
+38
+00:02:42,200 --> 00:02:45,315
+Watch what happens as we slide the number of heads.
+
+39
+00:02:47,600 --> 00:02:51,653
+At 60 heads, the p-value is about 0.057.
+
+40
+00:02:51,973 --> 00:02:53,317
+Not significant.
+
+41
+00:02:53,717 --> 00:02:56,746
+At 61, it drops to 0.035.
+
+42
+00:02:57,066 --> 00:02:58,218
+Significant.
+
+43
+00:02:58,617 --> 00:03:00,750
+One extra head flips the verdict.
+
+44
+00:03:01,070 --> 00:03:05,294
+The line at 0.05 is a convention, not a law of nature.
+
+45
+00:03:07,133 --> 00:03:08,477
+Now for the traps.
+
+46
+00:03:08,616 --> 00:03:09,917
+Trap number one.
+
+47
+00:03:10,237 --> 00:03:16,552
+A p-value of 0.02 does not mean there's a 2% chance the coin is fair.
+
+48
+00:03:16,949 --> 00:03:21,472
+The p-value is the probability of the data, given the hypothesis.
+
+49
+00:03:21,792 --> 00:03:25,376
+Not the probability of the hypothesis, given the data.
+
+50
+00:03:25,766 --> 00:03:29,009
+And flipping a conditional can change it enormously.
+
+51
+00:03:29,149 --> 00:03:34,674
+The chance that someone speaks English, given they're a U.S. president, is nearly 1.
+
+52
+00:03:35,066 --> 00:03:41,125
+But the chance that someone is a U.S. president, given they speak English, is almost zero.
+
+53
+00:03:42,967 --> 00:03:44,268
+Trap number two.
+
+54
+00:03:44,588 --> 00:03:47,511
+A small p-value does not mean a big effect.
+
+55
+00:03:47,900 --> 00:03:51,697
+Picture a coin that lands heads 51% of the time.
+
+56
+00:03:52,017 --> 00:03:58,012
+Flip it 100 times, get 51 heads, and the p-value is about 0.92.
+
+57
+00:03:58,332 --> 00:03:59,463
+Nothing to see.
+
+58
+00:03:59,850 --> 00:04:06,997
+But flip it 10,000 times, get 5,100 heads, and the p-value drops below 0.05.
+
+59
+00:04:07,233 --> 00:04:08,684
+Same tiny bias.
+
+60
+00:04:09,004 --> 00:04:15,767
+With more data, the null distribution gets narrower, so even a small deviation ends up in the tail.
+
+61
+00:04:17,600 --> 00:04:18,880
+Trap number three.
+
+62
+00:04:19,200 --> 00:04:23,040
+A large p-value does not prove the null hypothesis.
+
+63
+00:04:23,433 --> 00:04:26,569
+It only means the data aren't surprising under it.
+
+64
+00:04:26,716 --> 00:04:28,231
+Maybe the coin is fair.
+
+65
+00:04:28,551 --> 00:04:32,882
+Or maybe it's slightly biased, and we just didn't flip it enough to tell.
+
+66
+00:04:33,266 --> 00:04:35,847
+The honest conclusion is: undetermined.
+
+67
+00:04:37,883 --> 00:04:39,248
+Trap number four.
+
+68
+00:04:39,568 --> 00:04:47,803
+Even when every null hypothesis is true, p-values below 0.05 still show up, about one time in twenty.
+
+69
+00:04:48,199 --> 00:04:54,983
+Test 20 perfectly fair coins, and there's a 64% chance at least one of them looks significant.
+
+70
+00:04:55,383 --> 00:04:59,159
+Run enough tests, and chance alone will hand you a discovery.
+
+71
+00:05:01,400 --> 00:05:03,043
+So, what is a p-value?
+
+72
+00:05:03,183 --> 00:05:04,996
+It's a measure of surprise.
+
+73
+00:05:05,316 --> 00:05:10,223
+It tells you how strange your data would look if the boring explanation were true.
+
+74
+00:05:10,616 --> 00:05:14,413
+A small p-value means chance alone would rarely do this.
+
+75
+00:05:14,733 --> 00:05:18,104
+That's a reason to look closer, not a final verdict.

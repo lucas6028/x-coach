@@ -94,23 +94,27 @@ def main():
             sys.exit(f"failed scenes: {' '.join(failed)}")
 
     clips = [args.media_dir / s / "videos" / "pvalue_scenes" / FOLDER[args.quality] / f"{s}.mp4" for s in SCENE_ORDER]
-    listing = args.media_dir / "concat.txt"
-    listing.write_text("".join(f"file '{c.as_posix()}'\n" for c in clips))
-
-    offsets, t = [], 0.0
-    for clip in clips:
-        offsets.append(t)
-        t += duration(clip)
+    durations = [duration(c) for c in clips]
+    offsets = [sum(durations[:i]) for i in range(len(clips))]
+    t = sum(durations)
     srt_path = args.out.with_suffix(".srt")
     args.out.parent.mkdir(parents=True, exist_ok=True)
     srt_path.write_text(merge_srt([(c.with_suffix(".srt"), o) for c, o in zip(clips, offsets)]), encoding="utf-8")
 
+    # Manim's audio track stops at the last sound, short of the video; pad each scene's
+    # audio to its video length so the voice never drifts across scene boundaries.
+    pads = "".join(f"[{i}:a]apad=whole_dur={d:.3f},atrim=duration={d:.3f}[a{i}];" for i, d in enumerate(durations))
+    pairs = "".join(f"[{i}:v][a{i}]" for i in range(len(clips)))
+    graph = f"{pads}{pairs}concat=n={len(clips)}:v=1:a=1[v][cat];[cat]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[a]"
+    inputs = [arg for c in clips for arg in ("-i", str(c))]
+
     subprocess.run(
         [
             "ffmpeg", "-y", "-loglevel", "error",
-            "-f", "concat", "-safe", "0", "-i", str(listing),
+            *inputs,
             "-i", str(srt_path),
-            "-map", "0:v", "-map", "0:a", "-map", "1:s",
+            "-filter_complex", graph,
+            "-map", "[v]", "-map", "[a]", "-map", f"{len(clips)}:s",
             "-c:v", "libx264", "-crf", "22", "-preset", "slow", "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "160k",
             "-c:s", "mov_text", "-metadata:s:s:0", "language=eng",
