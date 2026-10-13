@@ -1,0 +1,4 @@
+# Regenerable build outputs: voice clips (build_audio.py) and Manim's render cache.
+audio/
+media/
+__pycache__/
