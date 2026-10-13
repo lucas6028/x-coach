@@ -2,8 +2,9 @@
 
 A 3Blue1Brown-style explainer video on TCNs, built with
 [Manim Community](https://www.manim.community/) (the open-source descendant of the
-library 3Blue1Brown uses). Narration appears as on-screen captions along the bottom
-of the frame, so the video plays without a voice track.
+library 3Blue1Brown uses). Narration appears as captions along the bottom of the
+frame, and as an ElevenLabs voice-over once the clips exist (see
+[Narration](#narration-elevenlabs)). Without the clips, the video renders silent.
 
 Output: `tcn-explained.mp4` (1920×1080, 30 fps, 11:16, about 33 MB). Git doesn't track
 the MP4 (see `.gitignore`); run `./render.sh` to build it.
@@ -54,6 +55,39 @@ To iterate on a single scene:
 manim render -ql tcn_video.py S04_Dilated
 ```
 
-Caption timing lives in `TCNScene.say()`. Each caption stays up for at least
-`words / 2.5` seconds, or for as long as the animations under it take, whichever
-is longer.
+Caption timing lives in `TCNScene.say()`. A line with a voice clip stays up for
+the clip's length plus a 0.5 s pause; without a clip, for `words / 2.5` seconds.
+Either way it also stays up while the animations under it run, so lines never
+overlap.
+
+## Narration (ElevenLabs)
+
+Each `self.say(caption, spoken=...)` call is one narration line. The voice reads
+`spoken` when it's given and the caption otherwise. `spoken` exists so that a
+caption like `(k − 1)·d` is read aloud as "k minus one, times d".
+
+`tts.py` turns these lines into MP3 clips in `narration/clips/` and lists them in
+`narration/manifest.json`. It uses only the Python standard library, so any Python 3.9+
+works; on Windows, from the repo root, run
+`.venv\Scripts\python.exe docs\explainers\tcn-video\tts.py`. It reads
+`ELEVENLABS_API_KEY` from the environment. The voice defaults to
+`ynTHHllfDmGsZ3G8QJt9` and the model to `eleven_multilingual_v2`.
+
+```bash
+python tts.py                        # dry run: lines still to generate, and their cost
+python tts.py --generate --limit 1   # one line; listen to it before paying for the rest
+python tts.py --generate             # everything still missing
+./render.sh                          # picks the clips up automatically
+```
+
+- **Cost.** The full script is about 8,500 characters. That is about 8,500 credits
+  with `eleven_multilingual_v2`, or about half that with `--model eleven_flash_v2_5`.
+  `tts.py` checks your remaining credits first and won't start a run it can't
+  finish; `--max-credits N` sets your own ceiling.
+- **Caching.** Clips are keyed by voice, model and text. A re-run only pays for lines
+  you added or edited. Commit `narration/`: regenerating it costs credits.
+- `python tts.py --prune` deletes clips the script no longer uses.
+- `TCN_NARRATION=0 ./render.sh` renders without the voice.
+- **Attribution.** When clips are present, the references card credits ElevenLabs,
+  as their free plan requires. The free plan also excludes commercial use; check
+  their current terms before publishing.

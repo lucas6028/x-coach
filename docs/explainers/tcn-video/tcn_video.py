@@ -8,13 +8,18 @@ Sources:
     per-task *_test.py / model.py files).
 
 Each scene is self-contained. render.sh renders them in order and
-concatenates the clips into one MP4; see README.md.
+concatenates the clips into one MP4; see README.md. Voice-over clips come
+from tts.py; without them the video renders silent, captions only.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import textwrap
+from pathlib import Path
 
+import av
 import numpy as np
 from manim import *
 
@@ -36,6 +41,29 @@ CAPTION_CHARS = 84
 CAPTION_MAX_WIDTH = 13.4
 CAPTION_LINE_PITCH = 0.38
 WORDS_PER_SECOND = 2.5
+VOICE_GAP = 0.5  # pause after each spoken line
+
+NARRATION_DIR = Path(os.environ.get("TCN_NARRATION_DIR", Path(__file__).resolve().parent / "narration"))
+
+
+def load_narration() -> dict[str, Path]:
+    """Map each spoken line to its clip, as listed in tts.py's manifest.
+
+    Empty (silent video) when the manifest is missing or TCN_NARRATION=0.
+    """
+    manifest = NARRATION_DIR / "manifest.json"
+    if os.environ.get("TCN_NARRATION") == "0" or not manifest.exists():
+        return {}
+    clips = json.loads(manifest.read_text(encoding="utf-8"))["clips"]
+    return {text: NARRATION_DIR / rel for text, rel in clips.items()}
+
+
+NARRATION = load_narration()
+
+
+def audio_seconds(path: Path) -> float:
+    with av.open(str(path)) as f:
+        return f.duration / av.time_base
 
 
 # --------------------------------------------------------------------------
@@ -131,24 +159,34 @@ def block_box(label: str, color, width: float = 2.5, height: float = 0.36, size:
 class TCNScene(Scene):
     """Scene with timed narration captions along the bottom edge.
 
-    say() swaps the caption and records how long it needs to stay readable;
-    the next say() (or finish()) waits out whatever reading time the
-    animations in between did not already use.
+    say() swaps the caption, starts its voice clip if one was generated, and
+    records how long the line needs: the clip's length, or a reading-time
+    estimate when there is no clip. The next say() (or finish()) waits out
+    whatever time the animations in between did not already use, so lines
+    never overlap.
     """
 
     def setup(self):
         self.cap: Mobject | None = None
         self.cap_until = 0.0
 
-    def say(self, text: str, extra: float = 0.0):
+    def say(self, text: str, extra: float = 0.0, spoken: str | None = None):
+        """Show caption `text`; the voice reads `spoken` (default: the caption)."""
         self.hold()
+        start = self.time
+        clip = NARRATION.get(spoken or text)
+        if clip is not None and clip.exists():
+            self.add_sound(str(clip))
         new = make_caption(text)
         if self.cap is None:
             self.play(FadeIn(new, shift=0.1 * UP), run_time=0.5)
         else:
             self.play(FadeOut(self.cap), FadeIn(new, shift=0.1 * UP), run_time=0.5)
         self.cap = new
-        self.cap_until = self.time + max(2.4, len(text.split()) / WORDS_PER_SECOND) + extra
+        if clip is not None and clip.exists():
+            self.cap_until = start + audio_seconds(clip) + VOICE_GAP + extra
+        else:
+            self.cap_until = self.time + max(2.4, len(text.split()) / WORDS_PER_SECOND) + extra
 
     def hold(self, extra: float = 0.0):
         remaining = self.cap_until - self.time + extra
@@ -273,7 +311,11 @@ class S01_Intro(TCNScene):
 
         self.say(
             "Step t cannot start until step t − 1 has finished. Long sequences mean long chains: "
-            "slow to train, and gradients that fade or explode on their way back."
+            "slow to train, and gradients that fade or explode on their way back.",
+            spoken=(
+                "Step t can't start until step t minus one has finished. Long sequences mean long chains: "
+                "slow to train, and gradients that fade or explode on their way back."
+            ),
         )
         arcs = backprop_arcs(cells)
         grad_lab = txt("gradient", 28, C_FUT).next_to(arcs[0], UP, buff=0.12)
@@ -326,7 +368,10 @@ class S02_Task(TCNScene):
         ).to_edge(UP, buff=0.45)
         eq[0].set_color(C_OUT)
 
-        self.say("Here's the problem. We're given an input sequence: x0, x1, and so on up to xT.")
+        self.say(
+            "Here's the problem. We're given an input sequence: x0, x1, and so on up to xT.",
+            spoken="Here's the problem. We're given an input sequence: x zero, x one, and so on, up to x T.",
+        )
         self.play(
             LaggedStart(*[GrowFromCenter(c) for c in ins], lag_ratio=0.08),
             LaggedStart(*[FadeIn(l) for l in xl], lag_ratio=0.08),
@@ -430,7 +475,13 @@ class S03_Causal(TCNScene):
         kernel = VGroup(ker, ker_l).move_to([-4.6, 2.55, 0])
         ker_cap = MathTex(r"\text{kernel},\ k = 3", font_size=30, color=C_KER).next_to(kernel, RIGHT, buff=0.3)
 
-        self.say("Start with an ordinary one-dimensional convolution: a kernel of k = 3 weights slides along the sequence.")
+        self.say(
+            "Start with an ordinary one-dimensional convolution: a kernel of k = 3 weights slides along the sequence.",
+            spoken=(
+                "Start with an ordinary one-dimensional convolution: a kernel of three weights slides along "
+                "the sequence."
+            ),
+        )
         self.play(LaggedStart(*[GrowFromCenter(c) for c in ins], lag_ratio=0.05), FadeIn(xl))
         self.play(FadeIn(kernel, shift=0.2 * DOWN), FadeIn(ker_cap))
 
@@ -451,7 +502,13 @@ class S03_Causal(TCNScene):
         self.play(Write(eq1))
         self.play(Transform(win, window([ins[4], ins[6]])), Transform(lines, taps(ins[4:7], outs[5])), run_time=0.8)
 
-        self.say("But look at the last term. x at t + 1 lies in the future: a centred kernel leaks information backwards in time.")
+        self.say(
+            "But look at the last term. x at t + 1 lies in the future: a centred kernel leaks information backwards in time.",
+            spoken=(
+                "But look at the last term. x at t plus one lies in the future: a centred kernel leaks "
+                "information backwards in time."
+            ),
+        )
         self.play(
             eq1[6].animate.set_color(C_FUT),
             lines[2].animate.set_color(C_FUT),
@@ -459,7 +516,13 @@ class S03_Causal(TCNScene):
         )
         self.play(Circumscribe(eq1[6], color=C_FUT), Wiggle(lines[2]), run_time=1.5)
 
-        self.say("The fix: shift the kernel so it only looks backwards. Now y at time t uses x at t − 2, t − 1 and t.")
+        self.say(
+            "The fix: shift the kernel so it only looks backwards. Now y at time t uses x at t − 2, t − 1 and t.",
+            spoken=(
+                "The fix: shift the kernel so it only looks backwards. Now y at time t uses x at t minus "
+                "two, t minus one, and t."
+            ),
+        )
         eq2 = MathTex(r"y_t", "=", r"w_0\,x_{t-2}", "+", r"w_1\,x_{t-1}", "+", r"w_2\,x_t", font_size=44).move_to(eq1)
         self.play(
             FadeOut(outs[1:9]),
@@ -474,7 +537,11 @@ class S03_Causal(TCNScene):
 
         self.say(
             "At the very start there's nothing to look back at, so we pad the left end with k − 1 = 2 zeros. "
-            "Now the output has exactly the same length as the input."
+            "Now the output has exactly the same length as the input.",
+            spoken=(
+                "At the very start there's nothing to look back at, so we pad the left end with k minus one "
+                "zeros: two of them. Now the output has exactly the same length as the input."
+            ),
         )
         self.play(FadeOut(outs[5]), FadeOut(yl[5]), FadeIn(pads), FadeIn(pad_l))
         allslots = [*pads, *ins]
@@ -537,7 +604,11 @@ class S03_Causal(TCNScene):
         f3 = MathTex(r"\Rightarrow\ R = 5", font_size=40, color=C_OUT).next_to(f2, DOWN, buff=0.3)
         self.say(
             "But it only grows linearly. With L layers of kernel size k, an output sees 1 + L times (k − 1) steps: "
-            "here, 5 inputs."
+            "here, 5 inputs.",
+            spoken=(
+                "But it only grows linearly. With L layers of kernel size k, an output sees one plus L "
+                "times k minus one steps: here, five inputs."
+            ),
         )
         self.play(Write(f1))
         self.play(FadeIn(f2), FadeIn(f3))
@@ -545,7 +616,11 @@ class S03_Causal(TCNScene):
 
         self.say(
             "To see 1,000 steps back with k = 2 you'd need about a thousand layers. "
-            "We need a much faster way to grow the receptive field."
+            "We need a much faster way to grow the receptive field.",
+            spoken=(
+                "To see a thousand steps back with a kernel of size two, you'd need about a thousand "
+                "layers. We need a much faster way to grow the receptive field."
+            ),
         )
         self.finish()
 
@@ -587,7 +662,11 @@ class S04_Dilated(TCNScene):
 
         self.say(
             "The paper defines it like this: f is a filter of size k, and d, the dilation, is the gap between taps. "
-            "With d = 1 it's an ordinary convolution."
+            "With d = 1 it's an ordinary convolution.",
+            spoken=(
+                "The paper defines it like this: f is a filter of size k, and d, the dilation, is the gap "
+                "between taps. With d equal to one, it's an ordinary convolution."
+            ),
         )
         self.play(Write(formula), run_time=2)
         self.play(Circumscribe(formula[5], color=C_KER), formula[5].animate.set_color(C_KER))
@@ -599,7 +678,11 @@ class S04_Dilated(TCNScene):
 
         self.say(
             "One such layer reaches (k − 1)·d steps into the past. "
-            "So let d grow exponentially with depth: 1, then 2, then 4, and so on."
+            "So let d grow exponentially with depth: 1, then 2, then 4, and so on.",
+            spoken=(
+                "One such layer reaches k minus one, times d, steps into the past. So let d grow "
+                "exponentially with depth: one, then two, then four, and so on."
+            ),
         )
         reach = MathTex(r"\text{history per layer} = (k-1)\,d", font_size=38).move_to([-3.6, -0.4, 0])
         self.play(FadeIn(reach))
@@ -607,7 +690,13 @@ class S04_Dilated(TCNScene):
 
         # Figure 1(a) of the paper: k = 3, d = 1, 2, 4.
         self.clear_stage(keep=(heading,))
-        self.say("This is Figure 1(a) from the paper: kernel size k = 3, with dilation factors 1, 2 and 4.")
+        self.say(
+            "This is Figure 1(a) from the paper: kernel size k = 3, with dilation factors 1, 2 and 4.",
+            spoken=(
+                "This is Figure 1 a from the paper: kernel size three, with dilation factors one, two and "
+                "four."
+            ),
+        )
         sp = 0.7
         xs = [0.6 + (j - 7.5) * sp for j in range(n)]
         ys = [-1.75, -0.6, 0.55, 1.7]
@@ -668,7 +757,11 @@ class S04_Dilated(TCNScene):
         rf[6].set_color(C_OUT)
         self.say(
             "In general, the receptive field is 1 plus (k − 1) times the sum of the dilations. "
-            "Here: 1 + 2·(1 + 2 + 4) = 15."
+            "Here: 1 + 2·(1 + 2 + 4) = 15.",
+            spoken=(
+                "In general, the receptive field is one, plus k minus one times the sum of the dilations. "
+                "Here, that's one plus two times seven: fifteen."
+            ),
         )
         self.play(Write(rf), run_time=2)
 
@@ -700,7 +793,13 @@ class S04_Dilated(TCNScene):
             txt("dilated, k = 2, d = 1, 2, 4, …", 24, C_OUT),
         ).arrange(DOWN, aligned_edge=LEFT, buff=0.15).move_to(axes.c2p(2.8, 850))
 
-        self.say("With kernel size 2, ten plain causal layers see 11 steps. Ten dilated layers see 1,024.")
+        self.say(
+            "With kernel size 2, ten plain causal layers see 11 steps. Ten dilated layers see 1,024.",
+            spoken=(
+                "With kernel size two, ten plain causal layers see eleven steps. Ten dilated layers see one "
+                "thousand and twenty-four."
+            ),
+        )
         self.play(Create(axes), FadeIn(x_lab), FadeIn(y_lab))
         self.play(Create(lin), FadeIn(leg[0]), run_time=1.5)
         self.play(FadeIn(lin_lab))
@@ -759,7 +858,13 @@ class S05_Chomp(TCNScene):
         right_pads = VGroup(slot[-2], slot[-1], zeros[2], zeros[3])
 
         self.play(LaggedStart(*[GrowFromCenter(slot[p + i]) for i in range(n)], lag_ratio=0.06), FadeIn(xl))
-        self.say("nn.Conv1d with padding p = (k − 1)·d adds p zeros to both ends of the sequence. Here k = 3 and d = 1, so p = 2.")
+        self.say(
+            "nn.Conv1d with padding p = (k − 1)·d adds p zeros to both ends of the sequence. Here k = 3 and d = 1, so p = 2.",
+            spoken=(
+                "PyTorch's conv-one-D layer, with padding p equal to k minus one times d, adds p zeros to "
+                "both ends of the sequence. Here k is three and d is one, so p is two."
+            ),
+        )
         self.play(FadeIn(left_pads, shift=0.3 * RIGHT), FadeIn(right_pads, shift=0.3 * LEFT))
         p_l = Brace(VGroup(slot[0], slot[1]), DOWN, buff=0.12, color=GREY_B)
         p_r = Brace(VGroup(slot[-2], slot[-1]), DOWN, buff=0.12, color=GREY_B)
@@ -767,7 +872,13 @@ class S05_Chomp(TCNScene):
         p_rt = MathTex("p", font_size=30).next_to(p_r, DOWN, buff=0.06)
         self.play(GrowFromCenter(p_l), GrowFromCenter(p_r), FadeIn(p_lt), FadeIn(p_rt))
 
-        self.say("Slide the kernel across and you get L + p outputs, p more than the L inputs we started with.")
+        self.say(
+            "Slide the kernel across and you get L + p outputs, p more than the L inputs we started with.",
+            spoken=(
+                "Slide the kernel across and you get L plus p outputs: p more than the L inputs we started "
+                "with."
+            ),
+        )
         outs = VGroup(*[node(xs[s + 2], y_out, C_OUT, 0.2, 0.25, 3) for s in range(n + p)])
         win = window(slot[0:3])
         lines = taps(slot[0:3], outs[0])
@@ -784,7 +895,11 @@ class S05_Chomp(TCNScene):
 
         self.say(
             "Each output sits above the newest input it touches, so output s sees x from s − p up to s. "
-            "The left padding is exactly what causality needs."
+            "The left padding is exactly what causality needs.",
+            spoken=(
+                "Each output sits above the newest input it touches, so output s sees x from s minus p up "
+                "to s. The left padding is exactly what causality needs."
+            ),
         )
         self.play(Transform(win, window(slot[4:7])), Transform(lines, taps(slot[4:7], outs[4])))
         self.play(Indicate(outs[4], color=C_OUT))
@@ -792,7 +907,11 @@ class S05_Chomp(TCNScene):
 
         self.say(
             "The last p outputs hang past the end of the sequence; they only exist because of the right-hand padding. "
-            "Chomp1d chops them off."
+            "Chomp1d chops them off.",
+            spoken=(
+                "The last p outputs hang past the end of the sequence; they only exist because of the "
+                "right-hand padding. Chomp-one-D chops them off."
+            ),
         )
         self.play(FadeOut(win), FadeOut(lines), FadeOut(count))
         self.play(*[outs[s].animate.set_stroke(C_FUT).set_fill(C_FUT, 0.5) for s in (n, n + 1)])
@@ -908,7 +1027,11 @@ class S06_Residual(TCNScene):
 
         self.say(
             "Instead of transforming its input from scratch, each block learns a correction F(x) "
-            "and adds it back onto x. The paper writes o = Activation(x + F(x))."
+            "and adds it back onto x. The paper writes o = Activation(x + F(x)).",
+            spoken=(
+                "Instead of transforming its input from scratch, each block learns a correction, F of x, "
+                "and adds it back onto x. The paper writes: o equals the activation of x plus F of x."
+            ),
         )
         self.play(Write(formula), run_time=2)
         self.play(ShowPassingFlash(skip_line.copy().set_stroke(YELLOW_C, width=7), time_width=0.6), run_time=1.5)
@@ -916,7 +1039,11 @@ class S06_Residual(TCNScene):
 
         self.say(
             "Inside F there are two identical stages: a dilated causal convolution, "
-            "weight normalisation, a ReLU, and dropout."
+            "weight normalisation, a ReLU, and dropout.",
+            spoken=(
+                "Inside F there are two identical stages: a dilated causal convolution, weight "
+                "normalisation, a relu, and dropout."
+            ),
         )
         self.play(FadeOut(big_f))
         self.play(LaggedStart(*[FadeIn(b, shift=0.15 * UP) for b in st1], lag_ratio=0.25), run_time=1.4)
@@ -933,12 +1060,19 @@ class S06_Residual(TCNScene):
 
         self.say(
             "If a block changes the number of channels, x and F(x) no longer have the same shape. "
-            "An optional 1×1 convolution on the skip path fixes that."
+            "An optional 1×1 convolution on the skip path fixes that.",
+            spoken=(
+                "If a block changes the number of channels, x and F of x no longer have the same shape. An "
+                "optional one-by-one convolution on the skip path fixes that."
+            ),
         )
         self.play(FadeIn(bg_1x1), FadeIn(one_by_one))
         self.play(Circumscribe(one_by_one, color=C_RES))
 
-        self.say("And here's the same block in the official code, lightly abridged from tcn.py.")
+        self.say(
+            "And here's the same block in the official code, lightly abridged from tcn.py.",
+            spoken="And here's the same block in the official code, lightly abridged.",
+        )
         code = code_block(BLOCK_SRC)
         code.scale_to_fit_height(5.5)
         if code.width > 8.6:
@@ -948,14 +1082,24 @@ class S06_Residual(TCNScene):
 
         self.say(
             "self.net is the residual function F: conv, chomp, ReLU, dropout, twice over. "
-            "downsample is the 1×1 convolution, used only when the channel counts differ."
+            "downsample is the 1×1 convolution, used only when the channel counts differ.",
+            spoken=(
+                "self dot net is the residual function F: conv, chomp, relu, dropout, twice over. The "
+                "downsample layer is the one-by-one convolution, used only when the channel counts differ."
+            ),
         )
         box = line_box(code, 11, 13)
         self.play(Create(box), Indicate(VGroup(st1, st2), scale_factor=1.03, color=YELLOW_C))
         box2 = line_box(code, 14, 15, C_RES)
         self.play(ReplacementTransform(box, box2), Indicate(one_by_one, color=C_RES))
 
-        self.say("And forward() is the formula itself: the net's output plus the skip path, through a final ReLU.")
+        self.say(
+            "And forward() is the formula itself: the net's output plus the skip path, through a final ReLU.",
+            spoken=(
+                "And forward is the formula itself: the net's output plus the skip path, through a final "
+                "relu."
+            ),
+        )
         box3 = line_box(code, 18, 21)
         self.play(ReplacementTransform(box2, box3), Indicate(formula), Indicate(VGroup(plus, relu)))
         self.finish()
@@ -1035,7 +1179,11 @@ class S07_FullTCN(TCNScene):
 
         self.say(
             "That's the entire TemporalConvNet class. Level i gets dilation 2 to the i, "
-            "and padding (k − 1) times that dilation, which Chomp1d then trims."
+            "and padding (k − 1) times that dilation, which Chomp1d then trims.",
+            spoken=(
+                "That's the entire Temporal Conv Net class. Level i gets dilation two to the i, and padding "
+                "k minus one times that dilation, which Chomp-one-D then trims."
+            ),
         )
         code = code_block(NET_SRC, width=8.4).move_to([2.6, -0.05, 0])
         self.play(FadeIn(code, shift=0.2 * LEFT))
@@ -1058,7 +1206,11 @@ class S07_FullTCN(TCNScene):
 
         self.say(
             "Plug in the defaults from the repository's experiment scripts, and compare R "
-            "with the length of each task's sequences."
+            "with the length of each task's sequences.",
+            spoken=(
+                "Plug in the defaults from the repository's experiment scripts, and compare the receptive "
+                "field with the length of each task's sequences."
+            ),
         )
         rows = [
             ("Adding problem", "7", "8", "3061", "200 – 600"),
@@ -1168,7 +1320,11 @@ class S08_Compare(TCNScene):
 
         self.say(
             "An RNN must finish step t − 1 before it can start step t. A TCN computes an entire layer, "
-            "across all time steps, at once. Watch them run on the same clock."
+            "across all time steps, at once. Watch them run on the same clock.",
+            spoken=(
+                "An RNN must finish step t minus one before it can start step t. A TCN computes an entire "
+                "layer, across all time steps, at once. Watch them run on the same clock."
+            ),
         )
         clock = Integer(0, font_size=36, color=GREY_B)
         clock_lab = txt("tick", 26, GREY_B).next_to(clock, LEFT, buff=0.15)
@@ -1201,7 +1357,11 @@ class S08_Compare(TCNScene):
 
         self.say(
             "In a TCN, backpropagation runs through the layers, not along time, "
-            "so the path is only as long as the network is deep: about log T."
+            "so the path is only as long as the network is deep: about log T.",
+            spoken=(
+                "In a TCN, backpropagation runs through the layers, not along time, so the path is only as "
+                "long as the network is deep: about log T."
+            ),
         )
         path = [(3, 7), (2, 3), (1, 1), (0, 0)]
         segs = VGroup(*[Line(t_rows[a][i].get_center(), t_rows[b][j].get_center(), color=C_FUT, stroke_width=7)
@@ -1319,7 +1479,11 @@ class S09_Results(TCNScene):
 
         self.say(
             "Look at the copy-memory task: recall ten digits after a gap of a thousand steps. "
-            "The recurrent nets sit at about 0.02, which is the loss of random guessing."
+            "The recurrent nets sit at about 0.02, which is the loss of random guessing.",
+            spoken=(
+                "Look at the copy-memory task: recall ten digits after a gap of a thousand steps. The "
+                "recurrent nets sit at about zero point zero two, which is the loss of random guessing."
+            ),
         )
         guess = MathTex(r"\text{guessing: } \frac{10\,\ln 8}{T + 20} \approx 0.0204", font_size=36).move_to(heading)
         self.play(FadeOut(heading), FadeIn(guess), Circumscribe(rows[3], color=C_OUT, run_time=1.5))
@@ -1330,7 +1494,11 @@ class S09_Results(TCNScene):
         self.hold()
         self.clear_stage()
         self.say(
-            "Sequential MNIST makes it vivid: classify a handwritten digit after reading its 784 pixels one at a time."
+            "Sequential MNIST makes it vivid: classify a handwritten digit after reading its 784 pixels one at a time.",
+            spoken=(
+                "Sequential MNIST makes it vivid: classify a handwritten digit after reading its seven "
+                "hundred and eighty-four pixels, one at a time."
+            ),
         )
         groups = [("Sequential MNIST", [87.2, 96.2, 21.5, 99.0]), ("Permuted MNIST", [85.7, 87.3, 25.3, 97.2])]
         models = ["LSTM", "GRU", "RNN", "TCN"]
@@ -1363,7 +1531,12 @@ class S09_Results(TCNScene):
 
         self.say(
             "Permuted MNIST shuffles the pixel order, so long-range dependencies matter even more. "
-            "The TCN's lead widens: 97.2% against 87.3% for the best recurrent net."
+            "The TCN's lead widens: 97.2% against 87.3% for the best recurrent net.",
+            spoken=(
+                "Permuted MNIST shuffles the pixel order, so long-range dependencies matter even more. The "
+                "TCN's lead widens: ninety-seven point two percent, against eighty-seven point three for "
+                "the best recurrent net."
+            ),
         )
         bars, g_lab = bars_all[1]
         self.play(LaggedStart(*[GrowFromEdge(b[0], DOWN) for b in bars], lag_ratio=0.2), run_time=1.8)
@@ -1446,7 +1619,13 @@ class S10_Outro(TCNScene):
         self.play(FadeIn(attribution))
         self.hold(2.5)
 
-        self.say("The whole model file, tcn.py, is 63 lines of PyTorch. Next time you reach for an LSTM, try a TCN first.")
+        self.say(
+            "The whole model file, tcn.py, is 63 lines of PyTorch. Next time you reach for an LSTM, try a TCN first.",
+            spoken=(
+                "The whole model file is sixty-three lines of PyTorch. Next time you reach for an LSTM, try "
+                "a TCN first."
+            ),
+        )
         self.clear_stage(hold=False)
         refs = VGroup(
             txt("References", 34),
@@ -1454,7 +1633,10 @@ class S10_Outro(TCNScene):
             txt("and Recurrent Networks for Sequence Modeling. arXiv:1803.01271, 2018.", 24, GREY_A),
             txt("Code: github.com/locuslab/TCN  (TCN/tcn.py)", 24, C_IN),
             txt("Dilated causal convolutions: A. van den Oord et al., WaveNet, 2016.", 24, GREY_A),
-        ).arrange(DOWN, aligned_edge=LEFT, buff=0.22).move_to([0, 0.9, 0])
+        )
+        if NARRATION:
+            refs.add(txt("Narration voice: ElevenLabs text-to-speech (elevenlabs.io)", 24, GREY_A))
+        refs.arrange(DOWN, aligned_edge=LEFT, buff=0.22).move_to([0, 0.9, 0])
         refs[0].shift(0.1 * UP)
         self.play(FadeIn(refs, lag_ratio=0.15), run_time=2)
         self.finish()

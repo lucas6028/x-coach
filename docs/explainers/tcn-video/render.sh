@@ -39,13 +39,32 @@ for scene in "${SCENES[@]}"; do
 done
 wait || true
 
-LIST="$MEDIA/concat.txt"
-: >"$LIST"
+has_audio() {
+  [[ -n "$(ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 "$1")" ]]
+}
+
+clips=()
+narrated=false
 for scene in "${SCENES[@]}"; do
   clip="$MEDIA/$scene/videos/tcn_video/$SUBDIR/$scene.mp4"
   if [[ ! -f "$clip" ]]; then
     echo "missing $clip; see $MEDIA/logs/$scene.log" >&2
     exit 1
+  fi
+  clips+=("$clip")
+  if has_audio "$clip"; then narrated=true; fi
+done
+
+LIST="$MEDIA/concat.txt"
+: >"$LIST"
+for clip in "${clips[@]}"; do
+  # With narration, every clip needs an audio track or the joined audio drifts;
+  # a scene with no generated lines gets silence (Manim writes 48 kHz stereo AAC).
+  if $narrated && ! has_audio "$clip"; then
+    padded="${clip%.mp4}.silent-audio.mp4"
+    ffmpeg -y -loglevel error -i "$clip" -f lavfi -i anullsrc=r=48000:cl=stereo \
+      -shortest -c:v copy -c:a aac "$padded"
+    clip=$padded
   fi
   echo "file '$clip'" >>"$LIST"
 done
