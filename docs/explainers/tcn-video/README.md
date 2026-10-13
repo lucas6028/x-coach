@@ -73,7 +73,9 @@ works; on Windows, from the repo root, run
 `ELEVENLABS_API_KEY` from the environment. In a Claude Code cloud environment, a
 network secret for `api.elevenlabs.io` (header `xi-api-key`, no prefix) works
 instead and keeps the key out of the session. The voice defaults to
-`ynTHHllfDmGsZ3G8QJt9` and the model to `eleven_multilingual_v2`.
+`onwK4e9ZLuTAKqWW03F9` ("Daniel - Steady Broadcaster") and the model to
+`eleven_multilingual_v2`. On the free plan, the API only accepts ElevenLabs'
+premade voices. Voice Library voices need a paid plan.
 
 ```bash
 python tts.py                        # dry run: lines still to generate, and their cost

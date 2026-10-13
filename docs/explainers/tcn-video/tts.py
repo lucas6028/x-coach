@@ -38,7 +38,7 @@ OUT_DIR = Path(os.environ.get("TCN_NARRATION_DIR", HERE / "narration"))
 MANIFEST = OUT_DIR / "manifest.json"
 
 API = os.environ.get("ELEVENLABS_API_BASE", "https://api.elevenlabs.io/v1")
-DEFAULT_VOICE = "ynTHHllfDmGsZ3G8QJt9"
+DEFAULT_VOICE = "onwK4e9ZLuTAKqWW03F9"  # "Daniel - Steady Broadcaster", a premade voice
 DEFAULT_MODEL = "eleven_multilingual_v2"
 OUTPUT_FORMAT = "mp3_44100_128"
 SEED = 1  # same text, same take (best effort on ElevenLabs' side)
