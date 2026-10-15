@@ -226,6 +226,17 @@ describe("planReps", () => {
     expect(spans).toEqual([{ start: 0, end: LAST }]);
   });
 
+  it.each(["Push-up", "Lunge", "Row", "Bicep Curl", "Sit-up"])(
+    "segments %s exactly as it segments Squat (same knobs, no per-movement path)",
+    (movement) => {
+      const squat = planReps(coarseRepSignal(5, 30), 3, LAST, "Squat");
+      const { plan, spans } = planReps(coarseRepSignal(5, 30), 3, LAST, movement);
+      expect(plan.fallback).toBeNull();
+      expect(plan).toEqual(squat.plan);
+      expect(spans).toEqual(squat.spans);
+    }
+  );
+
   it("falls back when every rep is partial", () => {
     // A clip that STARTS at the bottom and only rises: the single window has no crossing to climb
     // from on its left, so it is partial. Verified against Python — segment_reps returns exactly
