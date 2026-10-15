@@ -1,7 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   avgKneeAngle,
+  bicepCurlAvgElbowAngle,
   centeredMedian,
+  lungeMinKneeAngle,
+  pushUpMinElbowAngle,
+  rowMinElbowAngle,
+  sitUpHipAngle,
   TS_REP_SIGNALS,
   type SignalLandmark,
 } from "../lib/repSignal";
@@ -112,9 +117,102 @@ describe("centeredMedian", () => {
   });
 });
 
+// Left arm straight (shoulder 11 -> elbow 13 -> wrist 15 in a line => 180), right arm bent at a
+// right angle (12 -> 14 -> 16 => 90). Min and mean differ, so a swapped reducer cannot pass.
+const ARMS = skeleton({
+  11: [0, 0, 0], 13: [0, 1, 0], 15: [0, 2, 0],
+  12: [1, 0, 0], 14: [1, 1, 0], 16: [2, 1, 0],
+});
+// Left leg straight (180), right knee bent (90) -- `mixed` from avgKneeAngle's tests.
+const LEGS = skeleton({
+  23: [0, 0, 0], 25: [0, 1, 0], 27: [0, 2, 0],
+  24: [1, 0, 0], 26: [1, 1, 0], 28: [2, 1, 0],
+});
+// Left trunk/thigh in a line (shoulder 11 -> hip 23 -> knee 25 => 180), right hip flexed to 90.
+const TRUNK = skeleton({
+  11: [0, 0, 0], 23: [0, 1, 0], 25: [0, 2, 0],
+  12: [1, 0, 0], 24: [1, 1, 0], 26: [2, 1, 0],
+});
+
+function hide(lms: SignalLandmark[], index: number): SignalLandmark[] {
+  const copy = lms.map((lm) => ({ ...lm }));
+  copy[index] = { ...copy[index], visibility: 0.49 };
+  return copy;
+}
+
+describe("elbow-angle rep signals", () => {
+  it("Push-up and Row take the more-flexed arm, Bicep Curl the mean", () => {
+    expect(pushUpMinElbowAngle(ARMS)).toBeCloseTo(90, 4);
+    expect(rowMinElbowAngle(ARMS)).toBeCloseTo(90, 4);
+    expect(bicepCurlAvgElbowAngle(ARMS)).toBeCloseTo(135, 4);
+  });
+
+  it("gate on their own module's landmarks: only Push-up requires the ankles", () => {
+    const noAnkle = hide(ARMS, 27);
+    expect(Number.isNaN(pushUpMinElbowAngle(noAnkle))).toBe(true);
+    expect(rowMinElbowAngle(noAnkle)).toBeCloseTo(90, 4);
+    expect(bicepCurlAvgElbowAngle(noAnkle)).toBeCloseTo(135, 4);
+  });
+
+  it("all require the hips", () => {
+    const noHip = hide(ARMS, 24);
+    expect(Number.isNaN(pushUpMinElbowAngle(noHip))).toBe(true);
+    expect(Number.isNaN(rowMinElbowAngle(noHip))).toBe(true);
+    expect(Number.isNaN(bicepCurlAvgElbowAngle(noHip))).toBe(true);
+  });
+
+  it("fall back to the other arm when one wrist has a NaN z (valid frame, one NaN angle)", () => {
+    const bentZ = ARMS.map((lm) => ({ ...lm }));
+    bentZ[16] = { ...bentZ[16], z: NaN };
+    expect(pushUpMinElbowAngle(bentZ)).toBeCloseTo(180, 4);
+    expect(rowMinElbowAngle(bentZ)).toBeCloseTo(180, 4);
+    expect(bicepCurlAvgElbowAngle(bentZ)).toBeCloseTo(180, 4);
+  });
+});
+
+describe("lungeMinKneeAngle", () => {
+  it("takes the more-flexed knee", () => {
+    expect(lungeMinKneeAngle(LEGS)).toBeCloseTo(90, 4);
+  });
+
+  it("requires the toes, which Squat's signal does not", () => {
+    const noToe = hide(LEGS, 31);
+    expect(Number.isNaN(lungeMinKneeAngle(noToe))).toBe(true);
+    expect(avgKneeAngle(noToe)).toBeCloseTo(135, 4);
+  });
+
+  it("requires the shoulders", () => {
+    expect(Number.isNaN(lungeMinKneeAngle(hide(LEGS, 12)))).toBe(true);
+  });
+});
+
+describe("sitUpHipAngle", () => {
+  it("averages the two shoulder-hip-knee angles", () => {
+    expect(sitUpHipAngle(TRUNK)).toBeCloseTo(135, 4);
+  });
+
+  it("does not need the arms or the feet", () => {
+    expect(sitUpHipAngle(hide(hide(TRUNK, 15), 27))).toBeCloseTo(135, 4);
+  });
+
+  it("is NaN when a knee is hidden", () => {
+    expect(Number.isNaN(sitUpHipAngle(hide(TRUNK, 25)))).toBe(true);
+  });
+});
+
 describe("TS_REP_SIGNALS", () => {
-  it("covers Squat and nothing else in SP2", () => {
-    expect(Object.keys(TS_REP_SIGNALS)).toEqual(["Squat"]);
+  it("covers the movements ported so far, by registry name", () => {
+    expect(Object.keys(TS_REP_SIGNALS)).toEqual(
+      ["Squat", "Push-up", "Lunge", "Row", "Bicep Curl", "Sit-up"]
+    );
     expect(TS_REP_SIGNALS.Squat(STRAIGHT)).toBeCloseTo(180, 4);
+    expect(TS_REP_SIGNALS["Bicep Curl"](ARMS)).toBeCloseTo(135, 4);
+  });
+
+  it("is NaN for every movement on a missing or short landmark list", () => {
+    for (const signal of Object.values(TS_REP_SIGNALS)) {
+      expect(Number.isNaN(signal(null))).toBe(true);
+      expect(Number.isNaN(signal([]))).toBe(true);
+    }
   });
 });
